@@ -1,0 +1,94 @@
+name: Deploy static HTML to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Required for actions/deploy-pages to mint an OIDC token and publish.
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# One deploy at a time; don't cancel an in-flight publish.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Full history: `git log -1 -- <file>` prints nothing under a shallow
+          # clone, which would silently drop files from the generated index.
+          fetch-depth: 0
+
+      - name: Collect static assets into public/
+        run: |
+          mkdir -p public
+          find . \( -name '*.html' -o -name '*.pdf' -o -name '*.png' -o -name '*.jpg' \
+                    -o -name '*.jpeg' -o -name '*.gif' -o -name '*.svg' -o -name '*.css' \
+                    -o -name '*.js' -o -name '*.json' -o -name '*.csv' \) \
+            -not -path './public/*' -not -path './.git/*' -not -path './.github/*' \
+          | while read -r f; do
+              rel="${f#./}"
+              mkdir -p "public/$(dirname "$rel")"
+              cp "$f" "public/$rel"
+            done
+
+      - name: Generate index.html sorted by last commit date
+        run: |
+          cat > public/index.html <<'HEADER'
+          <!DOCTYPE html>
+          <html>
+          <head><meta charset="utf-8"><title>Pages</title>
+          <style>
+            body { font-family: sans-serif; max-width: 800px; margin: 40px auto; padding: 0 20px; }
+            a { text-decoration: none; color: #1a73e8; }
+            a:hover { text-decoration: underline; }
+            table { border-collapse: collapse; width: 100%; }
+            th, td { text-align: left; padding: 8px 12px; border-bottom: 1px solid #eee; }
+            th { border-bottom: 2px solid #ddd; color: #555; }
+            .path { color: #666; font-size: 0.9em; }
+            .date { color: #999; }
+            .type { font-size: 0.8em; color: #888; border: 1px solid #ddd; border-radius: 3px; padding: 1px 5px; }
+          </style>
+          </head>
+          <body><h1>Pages</h1>
+          <table><tr><th>File</th><th>Type</th><th>Last Modified</th></tr>
+          HEADER
+          find . \( -name '*.html' -o -name '*.pdf' \) \
+            -not -path './public/*' -not -path './.git/*' -not -path './.github/*' -print0 \
+            | xargs -0 -I{} git log -1 --format='%at {}' -- '{}' \
+            | sort -rn \
+            | while read -r ts f; do
+                rel="${f#./}"
+                name=$(basename "$rel")
+                dir=$(dirname "$rel")
+                ext="${name##*.}"
+                date=$(TZ='America/Los_Angeles' date -d "@$ts" '+%Y-%m-%d %H:%M %Z')
+                if [ "$dir" = "." ]; then
+                  label="$name"
+                else
+                  label="<span class=\"path\">${dir}/</span>${name}"
+                fi
+                echo "<tr><td><a href=\"$rel\">$label</a></td><td><span class=\"type\">${ext}</span></td><td class=\"date\">${date}</td></tr>"
+              done >> public/index.html
+          echo '</table></body></html>' >> public/index.html
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: public
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
