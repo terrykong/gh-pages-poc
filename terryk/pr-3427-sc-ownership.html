@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NeMo-RL SingleController — Ownership &amp; Call Model</title>
+<style>
+:root{
+  --bg:#0d1117; --panel:#161b22; --panel2:#1c2128; --border:#30363d;
+  --text:#e6edf3; --muted:#8b949e; --accent:#58a6ff; --green:#76b900;
+  --orange:#ffa657; --purple:#d2a8ff; --red:#ff7b72; --yellow:#e3b341;
+  --actor:#1f2a37; --actor-br:#58a6ff; --wg:#20262e; --wg-br:#76b900;
+  --plain:#22272e; --plain-br:#8b949e; --drv:#1d2430; --drv-br:#d2a8ff;
+}
+:root[data-theme="light"]{
+  --bg:#ffffff; --panel:#f6f8fa; --panel2:#eef1f5; --border:#d0d7de;
+  --text:#1f2328; --muted:#59636e; --accent:#0969da; --green:#4c8a00;
+  --orange:#bc4c00; --purple:#8250df; --red:#cf222e; --yellow:#9a6700;
+  --actor:#ddf4ff; --actor-br:#0969da; --wg:#eaf5d7; --wg-br:#4c8a00;
+  --plain:#f0f2f5; --plain-br:#8c959f; --drv:#f3eefc; --drv-br:#8250df;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;
+  padding:0 16px 80px}
+.wrap{max-width:1080px;margin:0 auto}
+header{padding:28px 0 12px;border-bottom:1px solid var(--border);margin-bottom:26px}
+h1{font-size:26px;margin:0 0 6px;letter-spacing:-.3px}
+h2{font-size:20px;margin:38px 0 12px;padding-bottom:7px;border-bottom:1px solid var(--border)}
+h3{font-size:16px;margin:26px 0 8px;color:var(--accent)}
+.sub{color:var(--muted);font-size:14px;margin:0}
+code{font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,monospace;font-size:.9em;
+  background:var(--panel2);padding:1.5px 5px;border-radius:5px}
+a{color:var(--accent)}
+.toggle{position:fixed;top:12px;right:12px;z-index:99;background:var(--panel);
+  color:var(--text);border:1px solid var(--border);border-radius:8px;padding:7px 12px;
+  cursor:pointer;font-size:13px}
+.legend{display:flex;flex-wrap:wrap;gap:14px;margin:18px 0 8px;font-size:13px}
+.legend div{display:flex;align-items:center;gap:7px}
+.sw{width:15px;height:15px;border-radius:4px;border:2px solid}
+.card{background:var(--panel);border:1px solid var(--border);border-radius:10px;
+  padding:14px 16px;margin:14px 0}
+.card-title{font-weight:650;margin-bottom:6px;color:var(--orange)}
+.hl{background:var(--panel);border-left:3px solid var(--accent);padding:12px 15px;
+  border-radius:0 8px 8px 0;margin:16px 0}
+table{border-collapse:collapse;width:100%;margin:14px 0;font-size:14px;display:block;overflow-x:auto}
+th,td{border:1px solid var(--border);padding:8px 11px;text-align:left;vertical-align:top}
+th{background:var(--panel2);font-weight:650}
+.k-actor{color:var(--accent);font-weight:600}
+.k-wg{color:var(--green);font-weight:600}
+.k-plain{color:var(--muted);font-weight:600}
+.k-drv{color:var(--purple);font-weight:600}
+svg{width:100%;height:auto;display:block;margin:6px 0 4px}
+svg text{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;fill:var(--text)}
+svg .ttl{font-weight:700;font-size:13px}
+svg .sm{font-size:10.5px;fill:var(--muted)}
+svg .box-actor{fill:var(--actor);stroke:var(--actor-br);stroke-width:2}
+svg .box-wg{fill:var(--wg);stroke:var(--wg-br);stroke-width:2}
+svg .box-plain{fill:var(--plain);stroke:var(--plain-br);stroke-width:1.5}
+svg .box-drv{fill:var(--drv);stroke:var(--drv-br);stroke-width:2}
+svg .grp{fill:none;stroke:var(--border);stroke-width:1.5;stroke-dasharray:5 4}
+svg .e-rpc{stroke:var(--orange);stroke-width:2;fill:none;stroke-dasharray:7 4}
+svg .e-dir{stroke:var(--green);stroke-width:2;fill:none}
+svg a text{text-decoration:underline;fill:var(--accent);font-size:10.5px}
+.foot{margin-top:44px;padding-top:14px;border-top:1px solid var(--border);
+  color:var(--muted);font-size:13px}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+  document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head><body>
+<button id="theme-toggle" class="toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<div class="wrap">
+<header>
+<h1>SingleController — ownership &amp; call model</h1>
+<p class="sub">A suggested figure for the <strong>Implementation Structure</strong> section of
+<code>docs/guides/single-controller.md</code> · NVIDIA-NeMo/RL
+<a href="https://github.com/NVIDIA-NeMo/RL/pull/3427">PR #3427</a> @ <code>db0aa28</code></p>
+</header>
+
+<div class="hl">
+<strong>What this figure adds over the current prose.</strong> The guide's “Core components” list reads as
+five peer classes. They are not peers — <em>one</em> of them is a Ray actor with its own process, three
+are plain Python objects living <em>inside</em> that actor, and the GPU-bearing pieces are worker groups
+reached over RPC. That distinction is what tells a reader which arrows cross a process boundary.
+</div>
+
+<div class="legend">
+<div><span class="sw" style="background:var(--drv);border-color:var(--drv-br)"></span>driver process</div>
+<div><span class="sw" style="background:var(--actor);border-color:var(--actor-br)"></span>Ray actor (own process)</div>
+<div><span class="sw" style="background:var(--wg);border-color:var(--wg-br)"></span>Ray worker group (N GPU rank actors)</div>
+<div><span class="sw" style="background:var(--plain);border-color:var(--plain-br)"></span>plain in-process object</div>
+<div><span style="color:var(--orange);font-weight:700">╌╌</span> RPC / cross-process</div>
+<div><span style="color:var(--green);font-weight:700">──</span> direct in-process call</div>
+</div>
+
+<svg viewBox="0 0 1000 690" role="img" aria-label="SingleController ownership diagram">
+  <!-- DRIVER -->
+  <rect class="box-drv" x="20" y="16" width="270" height="132" rx="9"/>
+  <text class="ttl" x="34" y="40">Driver process</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/db0aa2800b74261f3961c5b01ae961832401f9d8/examples/run_grpo_single_controller.py#L88" target="_blank" rel="noopener">
+    <text x="34" y="58">run_grpo_single_controller.py L88</text></a>
+  <text class="sm" x="34" y="80">builds EVERY heavy object, then</text>
+  <text class="sm" x="34" y="95">cloudpickles it into the actor —</text>
+  <text class="sm" x="34" y="110">actor __init__ constructs nothing</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/db0aa2800b74261f3961c5b01ae961832401f9d8/nemo_rl/algorithms/single_controller_utils/setup.py#L263" target="_blank" rel="noopener">
+    <text x="34" y="132">setup_single_controller L263</text></a>
+
+  <path class="e-rpc" d="M155 148 L155 196" marker-end="url(#ao)"/>
+  <text class="sm" x="163" y="176">.remote(args)</text>
+
+  <!-- SC ACTOR -->
+  <rect class="box-actor" x="20" y="200" width="470" height="330" rx="9"/>
+  <text class="ttl" x="34" y="226">SingleControllerActor</text>
+  <text class="sm" x="34" y="243">@ray.remote(num_cpus=1, num_gpus=0) — CPU only</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/db0aa2800b74261f3961c5b01ae961832401f9d8/nemo_rl/algorithms/single_controller.py#L73" target="_blank" rel="noopener">
+    <text x="34" y="260">single_controller.py L73</text></a>
+
+  <!-- pumps -->
+  <rect class="box-plain" x="36" y="276" width="200" height="72" rx="7"/>
+  <text class="ttl" x="48" y="297" style="font-size:12px">_rollout_pump</text>
+  <text class="sm" x="48" y="313">asyncio task</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/db0aa2800b74261f3961c5b01ae961832401f9d8/nemo_rl/algorithms/single_controller.py#L246" target="_blank" rel="noopener">
+    <text x="48" y="336">L246</text></a>
+
+  <rect class="box-plain" x="266" y="276" width="208" height="72" rx="7"/>
+  <text class="ttl" x="278" y="297" style="font-size:12px">_train_pump</text>
+  <text class="sm" x="278" y="313">asyncio task (concurrent)</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/db0aa2800b74261f3961c5b01ae961832401f9d8/nemo_rl/algorithms/single_controller.py#L349" target="_blank" rel="noopener">
+    <text x="278" y="336">L349</text></a>
+
+  <!-- owned plain objects -->
+  <rect class="grp" x="36" y="364" width="438" height="150" rx="8"/>
+  <text class="sm" x="46" y="382">owned in-process (cloudpickled in, no RPC to reach)</text>
+
+  <rect class="box-plain" x="48" y="392" width="126" height="60" rx="7"/>
+  <text class="ttl" x="58" y="412" style="font-size:11.5px">TQReplayBuffer</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/db0aa2800b74261f3961c5b01ae961832401f9d8/nemo_rl/algorithms/async_utils/replay_buffer.py#L638" target="_blank" rel="noopener">
+    <text x="58" y="432">replay_buffer L638</text></a>
+
+  <rect class="box-plain" x="186" y="392" width="126" height="60" rx="7"/>
+  <text class="ttl" x="196" y="412" style="font-size:11.5px">RolloutManager</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/db0aa2800b74261f3961c5b01ae961832401f9d8/nemo_rl/experience/rollout_manager.py#L696" target="_blank" rel="noopener">
+    <text x="196" y="432">generate_and_push L696</text></a>
+
+  <rect class="box-plain" x="324" y="392" width="138" height="60" rx="7"/>
+  <text class="ttl" x="334" y="412" style="font-size:11.5px">PromptGroupSampler</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/db0aa2800b74261f3961c5b01ae961832401f9d8/nemo_rl/algorithms/single_controller.py#L134" target="_blank" rel="noopener">
+    <text x="334" y="432">create_sampler L134</text></a>
+
+  <rect class="box-plain" x="48" y="462" width="414" height="42" rx="7"/>
+  <text class="sm" x="58" y="479">Logger + Timer — built HERE, not on the driver:</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/db0aa2800b74261f3961c5b01ae961832401f9d8/nemo_rl/algorithms/single_controller.py#L124" target="_blank" rel="noopener">
+    <text x="58" y="496">wandb/tb hold _thread.lock — uncloudpicklable L124</text></a>
+
+  <path class="e-dir" d="M136 348 L136 392" marker-end="url(#ag)"/>
+  <path class="e-dir" d="M300 348 L300 392" marker-end="url(#ag)"/>
+
+  <!-- RIGHT: remote things -->
+  <rect class="box-wg" x="540" y="200" width="440" height="86" rx="9"/>
+  <text class="ttl" x="554" y="224">Generation worker group</text>
+  <text class="sm" x="554" y="241">VllmGeneration / SGLangGeneration · inference cluster GPUs</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/db0aa2800b74261f3961c5b01ae961832401f9d8/nemo_rl/algorithms/single_controller_utils/setup.py#L171" target="_blank" rel="noopener">
+    <text x="554" y="268">_build_generation L171</text></a>
+
+  <rect class="box-wg" x="540" y="300" width="440" height="86" rx="9"/>
+  <text class="ttl" x="554" y="324">TQPolicy — train worker group</text>
+  <text class="sm" x="554" y="341">begin_train_step / train_microbatches_from_meta / finish</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/db0aa2800b74261f3961c5b01ae961832401f9d8/nemo_rl/algorithms/single_controller_utils/setup.py#L210" target="_blank" rel="noopener">
+    <text x="554" y="368">TQPolicy L210</text></a>
+
+  <rect class="box-actor" x="540" y="400" width="440" height="80" rx="9"/>
+  <text class="ttl" x="554" y="424">TransferQueue data plane</text>
+  <text class="sm" x="554" y="441">DataPlaneClient → TQ actors · holds the tensors</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/db0aa2800b74261f3961c5b01ae961832401f9d8/nemo_rl/algorithms/single_controller_utils/setup.py#L407" target="_blank" rel="noopener">
+    <text x="554" y="464">build_data_plane_client L407</text></a>
+
+  <rect class="box-actor" x="540" y="494" width="440" height="70" rx="9"/>
+  <text class="ttl" x="554" y="518">WeightSynchronizer</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/db0aa2800b74261f3961c5b01ae961832401f9d8/nemo_rl/algorithms/single_controller.py#L576" target="_blank" rel="noopener">
+    <text x="554" y="540">_sync_weights — inline after each step L576</text></a>
+
+  <!-- RPC edges -->
+  <path class="e-rpc" d="M236 300 C 400 300, 430 243, 540 243" marker-end="url(#ao)"/>
+  <text class="sm" x="352" y="286">generate</text>
+  <path class="e-rpc" d="M474 320 C 510 330, 512 340, 540 343" marker-end="url(#ao)"/>
+  <text class="sm" x="452" y="312">train</text>
+  <path class="e-rpc" d="M420 452 C 500 452, 500 440, 540 440" marker-end="url(#ao)"/>
+  <text class="sm" x="440" y="470">put / claim rows</text>
+  <path class="e-rpc" d="M474 500 C 505 512, 512 522, 540 526" marker-end="url(#ao)"/>
+
+  <!-- footnote -->
+  <rect class="box-plain" x="20" y="548" width="960" height="58" rx="8"/>
+  <text class="ttl" x="34" y="570" style="font-size:12px;fill:var(--red)">Ownership gotcha</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/db0aa2800b74261f3961c5b01ae961832401f9d8/nemo_rl/algorithms/single_controller.py#L120" target="_blank" rel="noopener">
+    <text x="34" y="590">Ray deserializes rollout_manager and tq_buffer separately → actor must rebind so writer and sampler share ONE buffer (L120-122)</text></a>
+
+  <text class="sm" x="20" y="640">Everything inside the blue box is one CPU-only process. Only the orange dashed edges cross a process boundary.</text>
+  <text class="sm" x="20" y="662">"All other actors are passive — they expose methods and wait to be called." — SingleControllerActor docstring</text>
+
+  <defs>
+    <marker id="ao" markerWidth="9" markerHeight="9" refX="8" refY="3.2" orient="auto">
+      <path d="M0,0 L0,6.4 L8.5,3.2 z" fill="var(--orange)"/></marker>
+    <marker id="ag" markerWidth="9" markerHeight="9" refX="8" refY="3.2" orient="auto">
+      <path d="M0,0 L0,6.4 L8.5,3.2 z" fill="var(--green)"/></marker>
+  </defs>
+</svg>
+
+<h2>Component kinds</h2>
+<table>
+<tr><th>Component</th><th>Kind</th><th>Where it runs</th><th>Reached by</th></tr>
+<tr><td><code>setup_single_controller</code></td><td class="k-drv">driver function</td><td>driver process</td><td>direct call</td></tr>
+<tr><td><code>SingleControllerActor</code></td><td class="k-actor">Ray actor</td><td>own CPU-only process (<code>num_gpus=0</code>)</td><td><code>.remote()</code></td></tr>
+<tr><td><code>_rollout_pump</code> / <code>_train_pump</code></td><td class="k-plain">asyncio tasks</td><td>inside the actor</td><td><code>asyncio.create_task</code></td></tr>
+<tr><td><code>TQReplayBuffer</code></td><td class="k-plain">plain object</td><td>inside the actor</td><td>direct call</td></tr>
+<tr><td><code>RolloutManager</code></td><td class="k-plain">plain object</td><td>inside the actor</td><td>direct call</td></tr>
+<tr><td><code>PromptGroupSampler</code></td><td class="k-plain">plain object</td><td>inside the actor</td><td>direct call</td></tr>
+<tr><td><code>VllmGeneration</code> / <code>SGLangGeneration</code></td><td class="k-wg">worker group</td><td>inference-cluster GPUs</td><td>RPC</td></tr>
+<tr><td><code>TQPolicy</code></td><td class="k-wg">worker group</td><td>train-cluster GPUs</td><td>RPC</td></tr>
+<tr><td>TransferQueue data plane</td><td class="k-actor">Ray actors</td><td>separate processes</td><td>RPC via <code>DataPlaneClient</code></td></tr>
+</table>
+
+<h2>Three “why” questions the prose leaves open</h2>
+
+<div class="card"><div class="card-title">Why does the driver build everything instead of the actor?</div>
+<code>SingleControllerActorArgs</code> is a dataclass of fully-constructed objects that the driver
+cloudpickles in, so the actor's <code>__init__</code> does no construction work. Per the guide, running
+setup inside a nested Ray actor breaks <code>runtime_env</code> resolution.
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/db0aa2800b74261f3961c5b01ae961832401f9d8/nemo_rl/algorithms/single_controller_utils/setup.py#L68">setup.py L68</a></div>
+
+<div class="card"><div class="card-title">…then why is <code>Logger</code> the one exception?</div>
+Because it <em>can't</em> be cloudpickled — wandb/tensorboard backends hold a <code>_thread.lock</code>.
+It is the only heavy object constructed inside the actor.
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/db0aa2800b74261f3961c5b01ae961832401f9d8/nemo_rl/algorithms/single_controller.py#L124">single_controller.py L124</a></div>
+
+<div class="card"><div class="card-title">Why rebind <code>_rollout_manager._tq_buffer</code>?</div>
+<code>rollout_manager</code> and <code>tq_buffer</code> are separate fields of the args dataclass, so Ray
+deserializes them as <em>two different</em> buffer objects. Without the rebind the writer and the sampler
+would each hold their own copy and the sampler would never see committed groups.
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/db0aa2800b74261f3961c5b01ae961832401f9d8/nemo_rl/algorithms/single_controller.py#L120">single_controller.py L120-122</a></div>
+
+<div class="foot">Generated by Claude Code for PR #3427 review. All line references are permalinks pinned to
+<code>db0aa2800b74261f3961c5b01ae961832401f9d8</code>. Offered as a starting point — copy, redraw, or ignore.</div>
+</div>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+  function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'\u2600 light':'\ud83c\udf19 dark';}
+  function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
+    b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
+      else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+  document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+</body></html>
