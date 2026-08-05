@@ -1,24 +1,25 @@
 <!DOCTYPE html>
 <html lang="en"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>NeMo-RL SingleController — how a sampler picks groups</title>
+<title>NeMo-RL SC samplers — which groups does each mode pick?</title>
 <style>
 :root{--bg:#0d1117;--panel:#161b22;--panel2:#1c2128;--border:#30363d;--text:#e6edf3;
  --muted:#8b949e;--accent:#58a6ff;--green:#76b900;--orange:#ffa657;--purple:#d2a8ff;
- --red:#ff7b72;--yellow:#e3b341;--sel:#1c3a1c;--sel-br:#76b900;--ev:#3d1d1d;--ev-br:#ff7b72;
- --keep:#2a2a1a;--keep-br:#e3b341;--skip:#21262d;--skip-br:#8b949e;}
+ --red:#ff7b72;--yellow:#e3b341;
+ --ok:#1c3a1c;--ok-br:#76b900;--waste:#3d1d1d;--waste-br:#ff7b72;--hold:#2a2a1a;--hold-br:#e3b341;
+ --done:#21262d;--done-br:#8b949e;--run:#1a2b3d;--run-br:#58a6ff;}
 :root[data-theme="light"]{--bg:#fff;--panel:#f6f8fa;--panel2:#eef1f5;--border:#d0d7de;
  --text:#1f2328;--muted:#59636e;--accent:#0969da;--green:#4c8a00;--orange:#bc4c00;
- --purple:#8250df;--red:#cf222e;--yellow:#9a6700;--sel:#dafbe1;--sel-br:#4c8a00;
- --ev:#ffebe9;--ev-br:#cf222e;--keep:#fff8c5;--keep-br:#9a6700;--skip:#eef1f5;--skip-br:#8c959f;}
+ --purple:#8250df;--red:#cf222e;--yellow:#9a6700;
+ --ok:#dafbe1;--ok-br:#4c8a00;--waste:#ffebe9;--waste-br:#cf222e;--hold:#fff8c5;--hold-br:#9a6700;
+ --done:#eef1f5;--done-br:#8c959f;--run:#ddf4ff;--run-br:#0969da;}
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--text);
  font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;padding:0 16px 80px}
 .wrap{max-width:1080px;margin:0 auto}
 header{padding:28px 0 12px;border-bottom:1px solid var(--border);margin-bottom:22px}
-h1{font-size:26px;margin:0 0 6px;letter-spacing:-.3px}
-h2{font-size:20px;margin:36px 0 10px;padding-bottom:7px;border-bottom:1px solid var(--border)}
-h3{font-size:15.5px;margin:22px 0 8px;color:var(--accent)}
+h1{font-size:25px;margin:0 0 6px;letter-spacing:-.3px}
+h2{font-size:20px;margin:34px 0 10px;padding-bottom:7px;border-bottom:1px solid var(--border)}
 .sub{color:var(--muted);font-size:14px;margin:0}
 code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.9em;
  background:var(--panel2);padding:1.5px 5px;border-radius:5px}
@@ -31,25 +32,40 @@ a{color:var(--accent)}
 .card{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:13px 16px;margin:13px 0}
 .card-title{font-weight:650;margin-bottom:5px;color:var(--orange)}
 table{border-collapse:collapse;width:100%;margin:13px 0;font-size:13.5px;display:block;overflow-x:auto}
-th,td{border:1px solid var(--border);padding:7px 10px;text-align:left;vertical-align:top}
+th,td{border:1px solid var(--border);padding:8px 10px;text-align:left;vertical-align:top}
 th{background:var(--panel2);font-weight:650}
-svg{width:100%;height:auto;display:block;margin:8px 0}
+svg{width:100%;height:auto;display:block;margin:6px 0}
 svg text{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;fill:var(--text);font-size:12px}
-svg .ttl{font-weight:700;font-size:13px}
+svg .ttl{font-weight:700;font-size:13.5px}
 svg .sm{font-size:10.5px;fill:var(--muted)}
-svg .hd{font-size:11.5px;font-weight:700;fill:var(--muted)}
+svg .band{fill:var(--panel);stroke:var(--border);stroke-width:1}
+svg .dec{stroke:var(--red);stroke-width:2.5}
 svg a text{text-decoration:underline;fill:var(--accent);font-size:10.5px}
-svg .g-sel{fill:var(--sel);stroke:var(--sel-br);stroke-width:2}
-svg .g-ev{fill:var(--ev);stroke:var(--ev-br);stroke-width:2}
-svg .g-keep{fill:var(--keep);stroke:var(--keep-br);stroke-width:2}
-svg .g-skip{fill:var(--skip);stroke:var(--skip-br);stroke-width:1.5;stroke-dasharray:4 3}
-svg .g-base{fill:var(--panel2);stroke:var(--border);stroke-width:1.5}
-svg .lane{fill:none;stroke:var(--border);stroke-width:1;stroke-dasharray:4 4}
-.legend{display:flex;flex-wrap:wrap;gap:14px;margin:14px 0;font-size:13px}
+/* fate states, applied by JS */
+svg .f-base{fill:var(--run);stroke:var(--run-br);stroke-width:2}
+svg .f-sel {fill:var(--ok);stroke:var(--ok-br);stroke-width:3}
+svg .f-hold{fill:var(--hold);stroke:var(--hold-br);stroke-width:2}
+svg .f-ev  {fill:var(--waste);stroke:var(--waste-br);stroke-width:3}
+svg .f-na  {fill:var(--run);stroke:var(--run-br);stroke-width:2;stroke-dasharray:5 3;opacity:.55}
+svg .cell{fill:none;stroke:var(--border);stroke-width:1.5}
+svg .f-no{fill:var(--panel2);stroke:var(--border);stroke-width:1.5}
+svg .v-no{fill:var(--muted);font-size:11px}
+svg .f-done{fill:var(--done);stroke:var(--done-br);stroke-width:2}
+svg .v-sel{fill:var(--green);font-weight:700;font-size:11px}
+svg .v-hold{fill:var(--yellow);font-size:11px}
+svg .v-ev{fill:var(--red);font-weight:700;font-size:11px}
+svg .v-na{fill:var(--muted);font-size:11px}
+.modes{display:flex;flex-wrap:wrap;gap:9px;margin:14px 0 4px}
+.modes button{background:var(--panel);color:var(--text);border:2px solid var(--border);
+ border-radius:9px;padding:9px 14px;cursor:pointer;font:13.5px/1.2 ui-monospace,monospace;font-weight:600}
+.modes button[aria-pressed="true"]{border-color:var(--green);background:var(--ok)}
+#why{margin:10px 0 4px;padding:11px 14px;background:var(--panel);border-left:3px solid var(--green);
+ border-radius:0 8px 8px 0;font-size:14px;min-height:52px}
+.legend{display:flex;flex-wrap:wrap;gap:14px;margin:12px 0;font-size:13px}
 .legend div{display:flex;align-items:center;gap:7px}
 .sw{width:15px;height:15px;border-radius:4px;border:2px solid}
-.key-sw{color:var(--purple);font-weight:650}
-.key-ts{color:var(--yellow);font-weight:650}
+.badge{display:inline-block;background:var(--purple);color:#fff;border-radius:5px;
+ padding:1px 8px;font-size:11.5px;font-weight:700;margin-left:6px}
 .foot{margin-top:40px;padding-top:14px;border-top:1px solid var(--border);color:var(--muted);font-size:13px}
 </style>
 <script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
@@ -58,197 +74,230 @@ svg .lane{fill:none;stroke:var(--border);stroke-width:1;stroke-dasharray:4 4}
 <button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
 <div class="wrap">
 <header>
-<h1>How a SingleController sampler picks groups</h1>
-<p class="sub">A suggested figure for the <strong>Sampler modes</strong> section of
-<code>docs/guides/single-controller.md</code> · NVIDIA-NeMo/RL
-<a href="https://github.com/NVIDIA-NeMo/RL/pull/3427">PR #3427</a> @ <code>db0aa28</code></p>
+<h1>Same buffer, four different training batches</h1>
+<p class="sub">One buffer, four different training batches ·
+<a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-3427-sc-samplers-alt.html">buffer-snapshot version</a> ·
+NVIDIA-NeMo/RL <a href="https://github.com/NVIDIA-NeMo/RL/pull/3427">PR #3427</a> @ <code>db0aa28</code></p>
 </header>
 
 <div class="hl">
-<strong>The thing the table can't show.</strong> The guide's sampler table has a "Train selection" column
-per mode, but the modes aren't three settings of one rule — they key on <em>different fields of the
-buffer</em>. Until you know which field, the rules read as interchangeable. They aren't: on the same
-buffer, a group that <code>windowed</code> trains on is one that <code>in_order</code> throws away.
+Rollouts for one step do <strong>not</strong> finish together — a long generation can outlive the weights it
+started from. Every sampler is one answer to <em>"what do I do with a group that finished at an awkward
+moment?"</em> Six groups, six finish times, one decision point.
+<code>num_prompts_per_step = 2</code>, <code>max_staleness/lookahead = 1</code>.
 </div>
 
-<h2>1. Every sampler makes three decisions</h2>
-<p>A sampler is <a href="https://github.com/NVIDIA-NeMo/RL/blob/db0aa2800b74261f3961c5b01ae961832401f9d8/nemo_rl/algorithms/async_utils/staleness_sampler.py#L64">three methods</a>, called at two different places in the loop:</p>
-<table>
-<tr><th>Method</th><th>Called by</th><th>Question it answers</th></tr>
-<tr><td><code>admit</code></td><td>rollout pump</td><td>May I dispatch another prompt batch <em>right now</em>, or must I wait for the trainer?</td></tr>
-<tr><td><code>select</code></td><td>train pump</td><td>Which buffered groups may this step train on?</td></tr>
-<tr><td><code>evict</code></td><td>train pump</td><td>Which groups can <em>never</em> be selected again → drop &amp; free their rows?</td></tr>
-</table>
-
-<h2>2. Two different keys — this is the crux</h2>
-<p>Each buffered group carries both of these. Which one the sampler reads is what separates the modes:</p>
-<table>
-<tr><th>Field</th><th>Set when</th><th>Means</th><th>Used by</th></tr>
-<tr><td class="key-sw">start_weight</td><td>at <code>commit</code>, by the producer</td><td>the policy version the rollout actually ran under</td><td><code>windowed</code>, <code>weight_fifo</code></td></tr>
-<tr><td class="key-ts">target_step</td><td>at <code>admit</code>, by the sampler</td><td>the step this batch was <em>reserved for</em>, before it ran</td><td><code>in_order</code> only</td></tr>
-</table>
-<p><code>windowed</code> and <code>weight_fifo</code> ask <em>"how stale is this data?"</em> — a backward-looking
-question about what already happened. <code>in_order</code> asks <em>"was this earmarked for me?"</em> — a
-question answered before the rollout even started. Same buffer, different question, different answer.</p>
-
-<h2>3. One buffer, three verdicts</h2>
-<p>Trainer is at <strong>version 5</strong>. <code>max_staleness_versions = max_lookahead_versions = 1</code>,
-so the weight window is <code>[4, 5]</code>. The trainer asks for at least 2 and at most 3 groups.
-Group <strong>F</strong> is reserved but not yet committed (<code>ready = false</code>).</p>
-
-<svg viewBox="0 0 1000 520" role="img" aria-label="One buffer, three sampler verdicts">
-  <text class="ttl" x="14" y="20">Buffer snapshot (train_weight = 5)</text>
-  <text class="hd" x="14" y="46">group</text>
-  <text class="hd" x="86" y="46">start_weight</text>
-  <text class="hd" x="196" y="46">target_step</text>
-  <text class="hd" x="292" y="46">ready</text>
-
-  <g>
-    <rect class="g-base" x="10" y="54" width="340" height="26" rx="5"/>
-    <text x="20" y="72">A</text><text x="110" y="72">3</text><text x="216" y="72">3</text><text x="300" y="72">✓</text>
-    <rect class="g-base" x="10" y="84" width="340" height="26" rx="5"/>
-    <text x="20" y="102">B</text><text x="110" y="102">4</text><text x="216" y="102">4</text><text x="300" y="102">✓</text>
-    <rect class="g-base" x="10" y="114" width="340" height="26" rx="5"/>
-    <text x="20" y="132">C</text><text x="110" y="132">4</text><text x="216" y="132">5</text><text x="300" y="132">✓</text>
-    <rect class="g-base" x="10" y="144" width="340" height="26" rx="5"/>
-    <text x="20" y="162">D</text><text x="110" y="162">5</text><text x="216" y="162">5</text><text x="300" y="162">✓</text>
-    <rect class="g-base" x="10" y="174" width="340" height="26" rx="5"/>
-    <text x="20" y="192">E</text><text x="110" y="192">5</text><text x="216" y="192">6</text><text x="300" y="192">✓</text>
-    <rect class="g-base" x="10" y="204" width="340" height="26" rx="5"/>
-    <text x="20" y="222">F</text><text x="110" y="222">5</text><text x="216" y="222">5</text><text x="300" y="222" style="fill:var(--red)">✗</text>
-  </g>
-  <text class="sm" x="14" y="252">F is reserved-but-uncommitted: every mode skips it, and evict skips it too</text>
-  <a href="https://github.com/NVIDIA-NeMo/RL/blob/db0aa2800b74261f3961c5b01ae961832401f9d8/nemo_rl/algorithms/async_utils/staleness_sampler.py#L138" target="_blank" rel="noopener">
-    <text x="14" y="270">(so eviction can't race a concurrent commit — BaseSampler.evict L138)</text></a>
-
-  <!-- three verdict columns -->
-  <text class="ttl" x="400" y="20" style="fill:var(--green)">windowed</text>
-  <text class="sm" x="400" y="36">key: start_weight in [4,5]</text>
-  <text class="ttl" x="620" y="20" style="fill:var(--green)">weight_fifo</text>
-  <text class="sm" x="620" y="36">key: min(start_weight) only</text>
-  <text class="ttl" x="820" y="20" style="fill:var(--green)">in_order</text>
-  <text class="sm" x="820" y="36">key: target_step == 5</text>
-
-  <!-- rows A..F for each -->
-  <g>
-    <!-- windowed -->
-    <rect class="g-ev"   x="396" y="54"  width="190" height="26" rx="5"/><text x="406" y="72">A · evict (w=3 &lt; 4)</text>
-    <rect class="g-sel"  x="396" y="84"  width="190" height="26" rx="5"/><text x="406" y="102">B · SELECT</text>
-    <rect class="g-sel"  x="396" y="114" width="190" height="26" rx="5"/><text x="406" y="132">C · SELECT</text>
-    <rect class="g-sel"  x="396" y="144" width="190" height="26" rx="5"/><text x="406" y="162">D · SELECT (cap 3)</text>
-    <rect class="g-keep" x="396" y="174" width="190" height="26" rx="5"/><text x="406" y="192">E · eligible, over cap</text>
-    <rect class="g-skip" x="396" y="204" width="190" height="26" rx="5"/><text x="406" y="222">F · not ready</text>
-    <!-- weight_fifo -->
-    <rect class="g-ev"   x="600" y="54"  width="190" height="26" rx="5"/><text x="610" y="72">A · evict</text>
-    <rect class="g-sel"  x="600" y="84"  width="190" height="26" rx="5"/><text x="610" y="102">B · SELECT (w=4)</text>
-    <rect class="g-sel"  x="600" y="114" width="190" height="26" rx="5"/><text x="610" y="132">C · SELECT (w=4)</text>
-    <rect class="g-keep" x="600" y="144" width="190" height="26" rx="5"/><text x="610" y="162">D · wait (w=5)</text>
-    <rect class="g-keep" x="600" y="174" width="190" height="26" rx="5"/><text x="610" y="192">E · wait (w=5)</text>
-    <rect class="g-skip" x="600" y="204" width="190" height="26" rx="5"/><text x="610" y="222">F · not ready</text>
-    <!-- in_order -->
-    <rect class="g-ev"   x="804" y="54"  width="186" height="26" rx="5"/><text x="814" y="72">A · evict (t=3 &lt; 5)</text>
-    <rect class="g-ev"   x="804" y="84"  width="186" height="26" rx="5"/><text x="814" y="102">B · EVICT (t=4 &lt; 5)</text>
-    <rect class="g-sel"  x="804" y="114" width="186" height="26" rx="5"/><text x="814" y="132">C · SELECT (t=5)</text>
-    <rect class="g-sel"  x="804" y="144" width="186" height="26" rx="5"/><text x="814" y="162">D · SELECT (t=5)</text>
-    <rect class="g-keep" x="804" y="174" width="186" height="26" rx="5"/><text x="814" y="192">E · hold for step 6</text>
-    <rect class="g-skip" x="804" y="204" width="186" height="26" rx="5"/><text x="814" y="222">F · not ready</text>
-  </g>
-
-  <!-- the punchline -->
-  <rect x="396" y="290" width="594" height="66" rx="8" style="fill:var(--panel);stroke:var(--red);stroke-width:2"/>
-  <text class="ttl" x="410" y="312" style="fill:var(--red)">Look at group B</text>
-  <text x="410" y="332" style="font-size:11.5px">windowed + weight_fifo TRAIN on it. in_order DELETES it —</text>
-  <text x="410" y="348" style="font-size:11.5px">its target_step 4 already passed, so it can never be selected.</text>
-
-  <text class="ttl" x="14" y="312">Selected this step</text>
-  <text x="14" y="334" style="font-size:11.5px"><tspan style="fill:var(--green)">windowed</tspan>   → B, C, D</text>
-  <text x="14" y="352" style="font-size:11.5px"><tspan style="fill:var(--green)">weight_fifo</tspan> → B, C</text>
-  <text x="14" y="370" style="font-size:11.5px"><tspan style="fill:var(--green)">in_order</tspan>    → C, D</text>
-  <text class="sm" x="14" y="392">Only C is chosen by all three.</text>
-
-  <a href="https://github.com/NVIDIA-NeMo/RL/blob/db0aa2800b74261f3961c5b01ae961832401f9d8/nemo_rl/algorithms/async_utils/staleness_sampler.py#L235" target="_blank" rel="noopener">
-    <text x="396" y="386">windowed.select L235</text></a>
-  <a href="https://github.com/NVIDIA-NeMo/RL/blob/db0aa2800b74261f3961c5b01ae961832401f9d8/nemo_rl/algorithms/async_utils/staleness_sampler.py#L315" target="_blank" rel="noopener">
-    <text x="600" y="386">weight_fifo.select L315</text></a>
-  <a href="https://github.com/NVIDIA-NeMo/RL/blob/db0aa2800b74261f3961c5b01ae961832401f9d8/nemo_rl/algorithms/async_utils/staleness_sampler.py#L359" target="_blank" rel="noopener">
-    <text x="804" y="386">in_order.select L359</text></a>
-  <a href="https://github.com/NVIDIA-NeMo/RL/blob/db0aa2800b74261f3961c5b01ae961832401f9d8/nemo_rl/algorithms/async_utils/staleness_sampler.py#L376" target="_blank" rel="noopener">
-    <text x="804" y="404">in_order.evict L376</text></a>
-
-  <text class="sm" x="14" y="440">All three then go through the same finalize: cap at max_prompt_groups, return None if fewer than min_prompt_groups,</text>
-  <text class="sm" x="14" y="456">never wait to fill the batch.</text>
-  <a href="https://github.com/NVIDIA-NeMo/RL/blob/db0aa2800b74261f3961c5b01ae961832401f9d8/nemo_rl/algorithms/async_utils/staleness_sampler.py#L179" target="_blank" rel="noopener">
-    <text x="14" y="476">BaseSampler._finalize_selection L179</text></a>
+<h2>All four modes at once</h2>
+<p>Trainer at <strong>weight 2</strong>. <code>num_prompts_per_step = 2</code>, <code>min_groups_for_streaming_train = 1</code>, <code>max_staleness_versions = max_lookahead_versions = 2</code> → window <code>[0, 2]</code>. <em>This is the figure to screenshot for the guide.</em></p>
+<svg viewBox="0 0 1000 776" role="img" aria-label="Four sampler modes select four different sets">
+  <text class="ttl" x="8" y="22">The setup — the batch promised to step 2 has not landed yet</text>
+  <rect class="band" x="120.0" y="36" width="310.0" height="194" rx="4" opacity="0.5"/>
+  <rect class="band" x="430.0" y="36" width="350.0" height="194" rx="4" opacity="0.25"/>
+  <text class="sm" x="216.0" y="31">trainer at weight v1</text>
+  <text class="sm" x="540.0" y="31">trainer at weight v2</text>
+  <text x="8" y="65">A (sw 1 / target 2)</text>
+  <rect class="f-na" x="150" y="50" width="680" height="20" rx="4"/>
+  <text class="sm" x="838" y="65">still generating →</text>
+  <text x="8" y="95">B (sw 1 / target 2)</text>
+  <rect class="f-na" x="168" y="80" width="662" height="20" rx="4"/>
+  <text class="sm" x="838" y="95">still generating →</text>
+  <text x="8" y="125">C (sw 1 / target 3)</text>
+  <rect class="f-base" x="200" y="110" width="320" height="20" rx="4"/>
+  <text class="sm" x="528" y="125">finished</text>
+  <text x="8" y="155">D (sw 2 / target 3)</text>
+  <rect class="f-base" x="450" y="140" width="160" height="20" rx="4"/>
+  <text class="sm" x="618" y="155">finished</text>
+  <text x="8" y="185">E (sw 2 / target 4)</text>
+  <rect class="f-base" x="500" y="170" width="200" height="20" rx="4"/>
+  <text class="sm" x="708" y="185">finished</text>
+  <text x="8" y="215">F (sw 2 / target 4)</text>
+  <rect class="f-base" x="520" y="200" width="240" height="20" rx="4"/>
+  <text class="sm" x="768" y="215">finished</text>
+  <line class="dec" x1="780.0" y1="36" x2="780.0" y2="230"/>
+  <text class="ttl" x="680.0" y="248" style="fill:var(--red)">step-2 select()</text>
+  <text class="sm" x="8" y="270">A, B were dispatched for step 2 but are still running. C, D, E, F all landed — and every one of them was generated for a LATER step.</text>
+  <text class="sm" x="8" y="286">start_weight is stamped at dispatch, so it only ever increases down the buffer; C straddles the v1→v2 bump, which is why its batch has two weights.</text>
+  <text class="ttl" x="8" y="310">Four modes, four different answers</text>
+  <rect class="cell" x="8" y="320" width="488" height="212" rx="9"/>
+  <text class="ttl" x="20" y="342" style="fill:var(--green)">in_order</text>
+  <rect x="89.2" y="330" width="60" height="16" rx="4" style="fill:var(--purple)"/>
+  <text x="95.2" y="342" style="font-size:10px;fill:#fff;font-weight:700">legacy</text>
+  <text class="sm" x="20" y="357">key: target_step == 2</text>
+  <rect class="band" x="104.0" y="364" width="162.4225352112676" height="142" rx="3" opacity="0.45"/>
+  <rect class="band" x="266.4225352112676" y="364" width="183.38028169014086" height="142" rx="3" opacity="0.22"/>
+  <text x="18" y="379" style="font-size:10.5px">A</text>
+  <text class="sm" x="38" y="379" style="font-size:9px">1/2</text>
+  <rect class="f-na" x="119.71830985915493" y="367" width="356.28169014084506" height="16" rx="3"/>
+  <text class="v-na" x="124.71830985915493" y="379" style="font-size:9px">not ready</text>
+  <text x="18" y="402" style="font-size:10.5px">B</text>
+  <text class="sm" x="38" y="402" style="font-size:9px">1/2</text>
+  <rect class="f-na" x="129.1492957746479" y="390" width="346.8507042253521" height="16" rx="3"/>
+  <text class="v-na" x="134.1492957746479" y="402" style="font-size:9px">not ready</text>
+  <text x="18" y="425" style="font-size:10.5px">C</text>
+  <text class="sm" x="38" y="425" style="font-size:9px">1/3</text>
+  <rect class="f-no" x="145.9154929577465" y="413" width="167.66197183098592" height="16" rx="3"/>
+  <text class="v-no" x="150.9154929577465" y="425" style="font-size:9px">target 3 ≠ 2</text>
+  <text x="18" y="448" style="font-size:10.5px">D</text>
+  <text class="sm" x="38" y="448" style="font-size:9px">2/3</text>
+  <rect class="f-no" x="276.90140845070425" y="436" width="83.83098591549293" height="16" rx="3"/>
+  <text class="v-no" x="281.90140845070425" y="448" style="font-size:9px">target 3 ≠ 2</text>
+  <text x="18" y="471" style="font-size:10.5px">E</text>
+  <text class="sm" x="38" y="471" style="font-size:9px">2/4</text>
+  <rect class="f-no" x="303.09859154929575" y="459" width="104.7887323943662" height="16" rx="3"/>
+  <text class="v-no" x="308.09859154929575" y="471" style="font-size:9px">target 4 ≠ 2</text>
+  <text x="18" y="494" style="font-size:10.5px">F</text>
+  <text class="sm" x="38" y="494" style="font-size:9px">2/4</text>
+  <rect class="f-no" x="313.5774647887324" y="482" width="125.74647887323943" height="16" rx="3"/>
+  <text class="v-no" x="318.5774647887324" y="494" style="font-size:9px">target 4 ≠ 2</text>
+  <line class="dec" x1="449.80281690140845" y1="364" x2="449.80281690140845" y2="506"/>
+  <text x="20" y="520" style="font-size:12px;font-weight:700;fill:var(--red)">→ STALLS — trains on nothing</text>
+  <rect class="cell" x="504" y="320" width="488" height="212" rx="9"/>
+  <text class="ttl" x="516" y="342" style="fill:var(--green)">weight_fifo</text>
+  <text class="sm" x="516" y="357">key: oldest in-window start_weight = 1</text>
+  <rect class="band" x="600.0" y="364" width="162.4225352112676" height="142" rx="3" opacity="0.45"/>
+  <rect class="band" x="762.4225352112676" y="364" width="183.38028169014092" height="142" rx="3" opacity="0.22"/>
+  <text x="514" y="379" style="font-size:10.5px">A</text>
+  <text class="sm" x="534" y="379" style="font-size:9px">1/2</text>
+  <rect class="f-na" x="615.7183098591549" y="367" width="356.28169014084506" height="16" rx="3"/>
+  <text class="v-na" x="620.7183098591549" y="379" style="font-size:9px">not ready</text>
+  <text x="514" y="402" style="font-size:10.5px">B</text>
+  <text class="sm" x="534" y="402" style="font-size:9px">1/2</text>
+  <rect class="f-na" x="625.1492957746478" y="390" width="346.85070422535216" height="16" rx="3"/>
+  <text class="v-na" x="630.1492957746478" y="402" style="font-size:9px">not ready</text>
+  <text x="514" y="425" style="font-size:10.5px">C</text>
+  <text class="sm" x="534" y="425" style="font-size:9px">1/3</text>
+  <rect class="f-sel" x="641.9154929577464" y="413" width="167.66197183098598" height="16" rx="3"/>
+  <text class="v-sel" x="646.9154929577464" y="425" style="font-size:9px">weight 1 ✓</text>
+  <text x="514" y="448" style="font-size:10.5px">D</text>
+  <text class="sm" x="534" y="448" style="font-size:9px">2/3</text>
+  <rect class="f-no" x="772.9014084507043" y="436" width="83.83098591549299" height="16" rx="3"/>
+  <text class="v-no" x="777.9014084507043" y="448" style="font-size:9px">weight 2, wait</text>
+  <text x="514" y="471" style="font-size:10.5px">E</text>
+  <text class="sm" x="534" y="471" style="font-size:9px">2/4</text>
+  <rect class="f-no" x="799.0985915492957" y="459" width="104.7887323943662" height="16" rx="3"/>
+  <text class="v-no" x="804.0985915492957" y="471" style="font-size:9px">weight 2, wait</text>
+  <text x="514" y="494" style="font-size:10.5px">F</text>
+  <text class="sm" x="534" y="494" style="font-size:9px">2/4</text>
+  <rect class="f-no" x="809.5774647887324" y="482" width="125.74647887323943" height="16" rx="3"/>
+  <text class="v-no" x="814.5774647887324" y="494" style="font-size:9px">weight 2, wait</text>
+  <line class="dec" x1="945.8028169014085" y1="364" x2="945.8028169014085" y2="506"/>
+  <text x="516" y="520" style="font-size:12px;font-weight:700;fill:var(--green)">→ trains on C only</text>
+  <rect class="cell" x="8" y="544" width="488" height="212" rx="9"/>
+  <text class="ttl" x="20" y="566" style="fill:var(--green)">windowed</text>
+  <text class="sm" x="20" y="581">key: start_weight ∈ [0,2], dispatch order</text>
+  <rect class="band" x="104.0" y="588" width="162.4225352112676" height="142" rx="3" opacity="0.45"/>
+  <rect class="band" x="266.4225352112676" y="588" width="183.38028169014086" height="142" rx="3" opacity="0.22"/>
+  <text x="18" y="603" style="font-size:10.5px">A</text>
+  <text class="sm" x="38" y="603" style="font-size:9px">1/2</text>
+  <rect class="f-na" x="119.71830985915493" y="591" width="356.28169014084506" height="16" rx="3"/>
+  <text class="v-na" x="124.71830985915493" y="603" style="font-size:9px">not ready</text>
+  <text x="18" y="626" style="font-size:10.5px">B</text>
+  <text class="sm" x="38" y="626" style="font-size:9px">1/2</text>
+  <rect class="f-na" x="129.1492957746479" y="614" width="346.8507042253521" height="16" rx="3"/>
+  <text class="v-na" x="134.1492957746479" y="626" style="font-size:9px">not ready</text>
+  <text x="18" y="649" style="font-size:10.5px">C</text>
+  <text class="sm" x="38" y="649" style="font-size:9px">1/3</text>
+  <rect class="f-sel" x="145.9154929577465" y="637" width="167.66197183098592" height="16" rx="3"/>
+  <text class="v-sel" x="150.9154929577465" y="649" style="font-size:9px">1st ready</text>
+  <text x="18" y="672" style="font-size:10.5px">D</text>
+  <text class="sm" x="38" y="672" style="font-size:9px">2/3</text>
+  <rect class="f-sel" x="276.90140845070425" y="660" width="83.83098591549293" height="16" rx="3"/>
+  <text class="v-sel" x="281.90140845070425" y="672" style="font-size:9px">2nd ready</text>
+  <text x="18" y="695" style="font-size:10.5px">E</text>
+  <text class="sm" x="38" y="695" style="font-size:9px">2/4</text>
+  <rect class="f-no" x="303.09859154929575" y="683" width="104.7887323943662" height="16" rx="3"/>
+  <text class="v-no" x="308.09859154929575" y="695" style="font-size:9px">cap reached</text>
+  <text x="18" y="718" style="font-size:10.5px">F</text>
+  <text class="sm" x="38" y="718" style="font-size:9px">2/4</text>
+  <rect class="f-no" x="313.5774647887324" y="706" width="125.74647887323943" height="16" rx="3"/>
+  <text class="v-no" x="318.5774647887324" y="718" style="font-size:9px">cap reached</text>
+  <line class="dec" x1="449.80281690140845" y1="588" x2="449.80281690140845" y2="730"/>
+  <text x="20" y="744" style="font-size:12px;font-weight:700;fill:var(--green)">→ trains on C + D</text>
+  <rect class="cell" x="504" y="544" width="488" height="212" rx="9"/>
+  <text class="ttl" x="516" y="566" style="fill:var(--green)">windowed + freshest-first</text>
+  <text class="sm" x="516" y="581">key: same window, sorted by lag</text>
+  <rect class="band" x="600.0" y="588" width="162.4225352112676" height="142" rx="3" opacity="0.45"/>
+  <rect class="band" x="762.4225352112676" y="588" width="183.38028169014092" height="142" rx="3" opacity="0.22"/>
+  <text x="514" y="603" style="font-size:10.5px">A</text>
+  <text class="sm" x="534" y="603" style="font-size:9px">1/2</text>
+  <rect class="f-na" x="615.7183098591549" y="591" width="356.28169014084506" height="16" rx="3"/>
+  <text class="v-na" x="620.7183098591549" y="603" style="font-size:9px">not ready</text>
+  <text x="514" y="626" style="font-size:10.5px">B</text>
+  <text class="sm" x="534" y="626" style="font-size:9px">1/2</text>
+  <rect class="f-na" x="625.1492957746478" y="614" width="346.85070422535216" height="16" rx="3"/>
+  <text class="v-na" x="630.1492957746478" y="626" style="font-size:9px">not ready</text>
+  <text x="514" y="649" style="font-size:10.5px">C</text>
+  <text class="sm" x="534" y="649" style="font-size:9px">1/3</text>
+  <rect class="f-ev" x="641.9154929577464" y="637" width="167.66197183098598" height="16" rx="3"/>
+  <text class="v-ev" x="646.9154929577464" y="649" style="font-size:9px">lag 1 → left over</text>
+  <text x="514" y="672" style="font-size:10.5px">D</text>
+  <text class="sm" x="534" y="672" style="font-size:9px">2/3</text>
+  <rect class="f-sel" x="772.9014084507043" y="660" width="83.83098591549299" height="16" rx="3"/>
+  <text class="v-sel" x="777.9014084507043" y="672" style="font-size:9px">lag 0</text>
+  <text x="514" y="695" style="font-size:10.5px">E</text>
+  <text class="sm" x="534" y="695" style="font-size:9px">2/4</text>
+  <rect class="f-sel" x="799.0985915492957" y="683" width="104.7887323943662" height="16" rx="3"/>
+  <text class="v-sel" x="804.0985915492957" y="695" style="font-size:9px">lag 0</text>
+  <text x="514" y="718" style="font-size:10.5px">F</text>
+  <text class="sm" x="534" y="718" style="font-size:9px">2/4</text>
+  <rect class="f-no" x="809.5774647887324" y="706" width="125.74647887323943" height="16" rx="3"/>
+  <text class="v-no" x="814.5774647887324" y="718" style="font-size:9px">lag 0, cap reached</text>
+  <line class="dec" x1="945.8028169014085" y1="588" x2="945.8028169014085" y2="730"/>
+  <text x="516" y="744" style="font-size:12px;font-weight:700;fill:var(--green)">→ trains on D + E</text>
 </svg>
-
 <div class="legend">
-<div><span class="sw" style="background:var(--sel);border-color:var(--sel-br)"></span>selected this step</div>
-<div><span class="sw" style="background:var(--keep);border-color:var(--keep-br)"></span>kept in buffer</div>
-<div><span class="sw" style="background:var(--ev);border-color:var(--ev-br)"></span>evicted (rows freed)</div>
-<div><span class="sw" style="background:var(--skip);border-color:var(--skip-br)"></span>skipped — not ready</div>
+<div><span class="sw" style="background:var(--ok);border-color:var(--ok-br)"></span>trained on this step</div>
+<div><span class="sw" style="background:var(--panel2);border-color:var(--border)"></span>eligible but not taken</div>
+<div><span class="sw" style="background:var(--waste);border-color:var(--waste-br)"></span>left over → ages out</div>
+<div><span class="sw" style="background:var(--run);border-color:var(--run-br);border-style:dashed"></span>still generating</div>
 </div>
 
-<h2>4. The <code>admit</code> gate: how far rollout may run ahead</h2>
-<svg viewBox="0 0 1000 250" role="img" aria-label="Admit gate comparison">
-  <text class="ttl" x="14" y="22" style="fill:var(--green)">windowed — ungated</text>
-  <rect x="14" y="34" width="960" height="34" rx="7" style="fill:var(--sel);stroke:var(--sel-br);stroke-width:2"/>
-  <text x="28" y="56" style="font-size:11.5px">admit() returns immediately, always. Dispatch is bounded only by max_buffered_rollouts back-pressure.</text>
-  <a href="https://github.com/NVIDIA-NeMo/RL/blob/db0aa2800b74261f3961c5b01ae961832401f9d8/nemo_rl/algorithms/async_utils/staleness_sampler.py#L231" target="_blank" rel="noopener">
-    <text x="28" y="88">WindowedSampler.admit L231 — “dispatch is bounded by buffer capacity, not by version”</text></a>
+<div class="card"><div class="card-title">Why they finally disagree</div>
+The batch earmarked for step 2 (A, B) is <strong>still running</strong>. Everything that has landed was generated for a later step — so each mode has to answer "do I train on data meant for someone else?" differently. <code>in_order</code> says no and stalls; <code>weight_fifo</code> takes only the oldest weight cohort; <code>windowed</code> takes the two oldest ready; freshest-first takes the two newest and strands C.</div>
 
-  <text class="ttl" x="14" y="122" style="fill:var(--orange)">weight_fifo / in_order — gated</text>
-  <rect x="14" y="134" width="960" height="34" rx="7" style="fill:var(--keep);stroke:var(--keep-br);stroke-width:2"/>
-  <text x="28" y="156" style="font-size:11.5px">while dispatch_index &gt;= trainer_version + gate_window: sleep(5ms)   →  at train=5, gate=1, blocks once dispatch_index hits 6</text>
-  <a href="https://github.com/NVIDIA-NeMo/RL/blob/db0aa2800b74261f3961c5b01ae961832401f9d8/nemo_rl/algorithms/async_utils/staleness_sampler.py#L294" target="_blank" rel="noopener">
-    <text x="28" y="188">_GatedSampler.admit L294</text></a>
-  <text class="sm" x="28" y="212">in_order additionally stamps target_step = dispatch_index here — that stamp is what its select/evict key on.</text>
-  <a href="https://github.com/NVIDIA-NeMo/RL/blob/db0aa2800b74261f3961c5b01ae961832401f9d8/nemo_rl/algorithms/async_utils/staleness_sampler.py#L356" target="_blank" rel="noopener">
-    <text x="28" y="232">InOrderSampler._stamp L356</text></a>
-</svg>
+<h2>The rule each mode is applying</h2>
+<table>
+<tr><th>Mode</th><th>Selection key</th><th>Picks here</th><th>Why the others are refused</th></tr>
+<tr><td><code>in_order</code> <span class="badge">legacy</span></td><td><code>target_step == 2</code></td><td><strong>nothing — stalls</strong></td><td>A, B are the only step-2 groups and neither has landed</td></tr>
+<tr><td><code>weight_fifo</code></td><td>oldest in-window <code>start_weight</code> (= 1)</td><td><strong>C</strong></td><td>D–F are weight 2; it will not touch them until weight 1 is drained</td></tr>
+<tr><td><code>windowed</code></td><td><code>start_weight ∈ [0,2]</code>, dispatch order</td><td><strong>C + D</strong></td><td>E, F are eligible but the batch is already full</td></tr>
+<tr><td><code>windowed</code> + freshest</td><td>same window, sorted by lag</td><td><strong>D + E</strong></td><td>C has lag 1 so it sorts last — and then ages out</td></tr>
+</table>
+<p>Four modes, four different training batches, from one identical buffer. The only input that changed between them is <em>which rule they consult</em>.</p>
 
-<p>With <code>in_order</code> and <code>max_lookahead_versions: 0</code> the gate blocks until
-<code>dispatch_index == trainer_version</code>, so batch <em>N</em> is dispatched only once the trainer
-reaches step <em>N</em>, and its <code>target_step</code> stamp guarantees only step <em>N</em> can consume it.
-That is exactly the on-policy/sync recipe — and it's why <code>is_on_policy</code> is
-<a href="https://github.com/NVIDIA-NeMo/RL/blob/db0aa2800b74261f3961c5b01ae961832401f9d8/nemo_rl/algorithms/async_utils/staleness_sampler.py#L165">derived from the eviction window being 0</a>
-rather than being its own flag.</p>
+<h2>Reading it back</h2>
 
-<h2>5. Three behaviours the table doesn't hint at</h2>
+<div class="card"><div class="card-title"><code>in_order</code> — “you get what was promised to you”</div>
+The stamp is assigned at dispatch, before the rollout runs, so a group's destiny never changes no matter
+when it finishes. C, D, E and F having landed buys them nothing — none was stamped for step 2, so the trainer waits rather than train on data meant for a later step.
+<strong>This is the legacy async-GRPO pattern</strong>: legacy <code>ReplayBuffer.sample()</code> filters to the age
+window, then narrows to <code>target_weight_versions[i] == current_weight_version</code>, stalling unless a
+full batch is intended for this step — "so no trajectory loses its last chance to be used for its
+intended training step."
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/db0aa2800b74261f3961c5b01ae961832401f9d8/nemo_rl/algorithms/async_utils/replay_buffer.py#L250">legacy replay_buffer.py L250-271</a> ·
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/db0aa2800b74261f3961c5b01ae961832401f9d8/nemo_rl/algorithms/async_utils/staleness_sampler.py#L359">InOrderSampler.select L359</a></div>
 
-<div class="card"><div class="card-title"><code>sample_freshest_first</code> changes <em>which</em> groups you train on, not just their order</div>
-On the buffer above, <code>windowed</code> with the default <code>false</code> takes buffer order → <strong>B, C, D</strong>.
-With <code>true</code> it sorts by lag and takes <strong>D, E, B</strong> — a different set, because the cap bites after the sort.
+<div class="card"><div class="card-title">Same answer ≠ same rule</div>
+Under a <em>gated</em> pump the modes usually <em>agree</em> — <code>start_weight</code> is stamped at dispatch, so it only increases down the buffer, and "oldest weight", "earliest dispatched" and "earmarked earliest" normally name the same groups. They come apart only when rollouts finish out of order, which is exactly the case drawn above. The example above is one where they all diverge.</div>
+
+<div class="card"><div class="card-title"><code>sample_freshest_first</code> changes the <em>set</em>, not the order</div>
+It sorts by lag before the <code>max_prompt_groups</code> cap bites, so D and E — groups generated for later steps — get pulled forward, and C is left to age out. Same buffer, same window, different training data.
 <a href="https://github.com/NVIDIA-NeMo/RL/blob/db0aa2800b74261f3961c5b01ae961832401f9d8/nemo_rl/algorithms/async_utils/staleness_sampler.py#L249">L249</a></div>
 
-<div class="card"><div class="card-title"><code>weight_fifo</code> can stall on a weight that has no ready groups</div>
-Its <code>in_window</code> scan does <em>not</em> filter on <code>ready</code>, so an uncommitted slot at weight 4 still
-sets <code>target_version = 4</code>; the ready-filtered pass then finds nothing and the step returns
-<code>(None, 0)</code>. That is the documented "waits for that weight's batch to fill" behaviour — worth
-saying out loud, since it looks like a deadlock in a log.
-<a href="https://github.com/NVIDIA-NeMo/RL/blob/db0aa2800b74261f3961c5b01ae961832401f9d8/nemo_rl/algorithms/async_utils/staleness_sampler.py#L320">L320-330</a></div>
+<div class="card"><div class="card-title">“Isn’t there a FIFO where everything is used and nothing is evicted?”</div>
+<strong>Yes — <code>in_order</code> with <code>min_groups_for_streaming_train = num_prompts_per_step</code>,</strong>
+which is what the sync recipe sets.
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/db0aa2800b74261f3961c5b01ae961832401f9d8/nemo_rl/algorithms/async_utils/staleness_sampler.py#L179"><code>_finalize_selection</code></a>
+returns <code>None</code> below <code>min_prompt_groups</code>, so the trainer waits at step <em>N</em> until the whole
+batch stamped <em>N</em> has landed, then takes all of it. Its <code>evict</code> only fires for a group that commits
+<em>after</em> its step has gone by — like A or B if they run past step 2. So the mode already exists; the guide
+just never says <code>in_order</code> is the zero-waste option and <code>windowed</code> the deliberately-lossy one.
+The cost is the mirror image: <code>in_order</code> idles the trainer on the slowest group in the batch, which
+is exactly what <code>windowed</code> exists to avoid.</div>
 
-<div class="card"><div class="card-title"><code>in_order</code> must override <code>evict</code>, or evict and select would disagree</div>
-The default <code>evict</code> drops by <code>start_weight</code>; <code>in_order</code> selects by <code>target_step</code>.
-If it inherited the default, a group whose target step is still <em>upcoming</em> (like E) could be
-evicted early for being weight-stale. It overrides evict to key on <code>target_step</code> so the two
-always agree.
-<a href="https://github.com/NVIDIA-NeMo/RL/blob/db0aa2800b74261f3961c5b01ae961832401f9d8/nemo_rl/algorithms/async_utils/staleness_sampler.py#L376">L376</a></div>
-
-<h2>Rule summary</h2>
-<table>
-<tr><th>Mode</th><th><code>admit</code></th><th><code>select</code></th><th><code>evict</code></th></tr>
-<tr><td><code>windowed</code></td><td>never gates</td><td>any ready group with <span class="key-sw">start_weight</span> ∈ <code>[train−S, train]</code>, optionally freshest-first</td><td><span class="key-sw">start_weight</span> &lt; <code>train−S</code></td></tr>
-<tr><td><code>weight_fifo</code></td><td>blocks at <code>train+S</code></td><td>only the <em>oldest</em> in-window <span class="key-sw">start_weight</span>; waits for that weight to fill</td><td><span class="key-sw">start_weight</span> &lt; <code>train−S</code></td></tr>
-<tr><td><code>in_order</code></td><td>blocks at <code>train+L</code>, stamps <span class="key-ts">target_step</span></td><td><span class="key-ts">target_step</span> == <code>train</code> exactly (window unused)</td><td><span class="key-ts">target_step</span> &lt; <code>train</code></td></tr>
-</table>
-
-<div class="foot">Generated by Claude Code for PR #3427 review. Every line reference is a permalink pinned to
-<code>db0aa2800b74261f3961c5b01ae961832401f9d8</code>. Offered as a starting point — copy, redraw or ignore.</div>
+<div class="foot">Generated by Claude Code for PR #3427 review. Line references are permalinks pinned to
+<code>db0aa2800b74261f3961c5b01ae961832401f9d8</code>. Offered as a starting point — copy, redraw or ignore.
 </div>
-<script>(function(){var r=document.documentElement,K='gh-pages-theme';
- function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
- function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
-  b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
-   else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
- document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+</div>
+
 </body></html>
