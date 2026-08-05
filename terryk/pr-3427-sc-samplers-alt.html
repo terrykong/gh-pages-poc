@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>NeMo-RL SC samplers — prompt groups finish at different times</title>
+<title>NeMo-RL SC samplers — which groups does each mode pick?</title>
 <style>
 :root{--bg:#0d1117;--panel:#161b22;--panel2:#1c2128;--border:#30363d;--text:#e6edf3;
  --muted:#8b949e;--accent:#58a6ff;--green:#76b900;--orange:#ffa657;--purple:#d2a8ff;
@@ -34,25 +34,35 @@ a{color:var(--accent)}
 table{border-collapse:collapse;width:100%;margin:13px 0;font-size:13.5px;display:block;overflow-x:auto}
 th,td{border:1px solid var(--border);padding:8px 10px;text-align:left;vertical-align:top}
 th{background:var(--panel2);font-weight:650}
-td.sel{background:var(--ok);border-color:var(--ok-br);font-weight:600}
-td.hold{background:var(--hold);border-color:var(--hold-br)}
-td.ev{background:var(--waste);border-color:var(--waste-br);font-weight:600}
-td.na{background:var(--done);color:var(--muted)}
-svg{width:100%;height:auto;display:block;margin:8px 0}
+svg{width:100%;height:auto;display:block;margin:6px 0}
 svg text{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;fill:var(--text);font-size:12px}
 svg .ttl{font-weight:700;font-size:13.5px}
 svg .sm{font-size:10.5px;fill:var(--muted)}
 svg .band{fill:var(--panel);stroke:var(--border);stroke-width:1}
-svg .b-done{fill:var(--done);stroke:var(--done-br);stroke-width:2}
-svg .b-rdy{fill:var(--run);stroke:var(--run-br);stroke-width:2}
-svg .b-open{fill:var(--run);stroke:var(--run-br);stroke-width:2;stroke-dasharray:5 3}
 svg .dec{stroke:var(--red);stroke-width:2.5}
 svg a text{text-decoration:underline;fill:var(--accent);font-size:10.5px}
-.badge{display:inline-block;background:var(--purple);color:#fff;border-radius:5px;
- padding:1px 8px;font-size:11.5px;font-weight:700;margin-left:6px}
-.legend{display:flex;flex-wrap:wrap;gap:14px;margin:14px 0;font-size:13px}
+/* fate states, applied by JS */
+svg .f-base{fill:var(--run);stroke:var(--run-br);stroke-width:2}
+svg .f-sel {fill:var(--ok);stroke:var(--ok-br);stroke-width:3}
+svg .f-hold{fill:var(--hold);stroke:var(--hold-br);stroke-width:2}
+svg .f-ev  {fill:var(--waste);stroke:var(--waste-br);stroke-width:3}
+svg .f-na  {fill:var(--run);stroke:var(--run-br);stroke-width:2;stroke-dasharray:5 3;opacity:.55}
+svg .f-done{fill:var(--done);stroke:var(--done-br);stroke-width:2}
+svg .v-sel{fill:var(--green);font-weight:700;font-size:11px}
+svg .v-hold{fill:var(--yellow);font-size:11px}
+svg .v-ev{fill:var(--red);font-weight:700;font-size:11px}
+svg .v-na{fill:var(--muted);font-size:11px}
+.modes{display:flex;flex-wrap:wrap;gap:9px;margin:14px 0 4px}
+.modes button{background:var(--panel);color:var(--text);border:2px solid var(--border);
+ border-radius:9px;padding:9px 14px;cursor:pointer;font:13.5px/1.2 ui-monospace,monospace;font-weight:600}
+.modes button[aria-pressed="true"]{border-color:var(--green);background:var(--ok)}
+#why{margin:10px 0 4px;padding:11px 14px;background:var(--panel);border-left:3px solid var(--green);
+ border-radius:0 8px 8px 0;font-size:14px;min-height:52px}
+.legend{display:flex;flex-wrap:wrap;gap:14px;margin:12px 0;font-size:13px}
 .legend div{display:flex;align-items:center;gap:7px}
 .sw{width:15px;height:15px;border-radius:4px;border:2px solid}
+.badge{display:inline-block;background:var(--purple);color:#fff;border-radius:5px;
+ padding:1px 8px;font-size:11.5px;font-weight:700;margin-left:6px}
 .foot{margin-top:40px;padding-top:14px;border-top:1px solid var(--border);color:var(--muted);font-size:13px}
 </style>
 <script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
@@ -61,175 +71,165 @@ svg a text{text-decoration:underline;fill:var(--accent);font-size:10.5px}
 <button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
 <div class="wrap">
 <header>
-<h1>Prompt groups finish at different times — that's what the sampler is for</h1>
-<p class="sub"><strong>Alternate</strong> to the
-<a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-3427-sc-samplers.html">buffer-snapshot figure</a> ·
+<h1>Which groups does each sampler pick?</h1>
+<p class="sub">Tap a mode — the bars it trains on light up ·
+<a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-3427-sc-samplers.html">buffer-snapshot version</a> ·
 NVIDIA-NeMo/RL <a href="https://github.com/NVIDIA-NeMo/RL/pull/3427">PR #3427</a> @ <code>db0aa28</code></p>
 </header>
 
 <div class="hl">
 Rollouts for one step do <strong>not</strong> finish together — a long generation can outlive the weights it
-started from. Every sampler is one answer to <em>"what do I do with a group that finished at an
-awkward time?"</em> Below, six groups finish at six different moments; the trainer reaches step&nbsp;1 and
-has to choose.
+started from. Every sampler is one answer to <em>"what do I do with a group that finished at an awkward
+moment?"</em> Six groups, six finish times, one decision point.
+<code>num_prompts_per_step = 2</code>, <code>max_staleness/lookahead = 1</code>.
 </div>
 
-<h2>The setup</h2>
-<p><code>num_prompts_per_step = 2</code> (two groups per step, kept small so it fits on screen),
-<code>max_staleness_versions = max_lookahead_versions = 1</code> — so the rollout pump may run one batch
-ahead of the trainer.</p>
+<div class="modes" role="group" aria-label="Sampler mode">
+  <button data-m="in_order"   aria-pressed="true">in_order &nbsp;(legacy)</button>
+  <button data-m="weight_fifo" aria-pressed="false">weight_fifo</button>
+  <button data-m="windowed"    aria-pressed="false">windowed</button>
+  <button data-m="windowed_f"  aria-pressed="false">windowed + freshest-first</button>
+</div>
+<div id="why"></div>
 
-<svg viewBox="0 0 1000 420" role="img" aria-label="Prompt group timeline">
-  <!-- version bands -->
-  <rect class="band" x="120" y="26" width="330" height="300" rx="4" opacity="0.55"/>
-  <rect class="band" x="450" y="26" width="330" height="300" rx="4" opacity="0.28"/>
-  <text class="sm" x="250" y="20">trainer at weight v0</text>
-  <text class="sm" x="580" y="20">trainer at weight v1</text>
-  <text class="sm" x="806" y="20">v2 →</text>
+<svg viewBox="0 0 1000 300" role="img" aria-label="Prompt group timeline with sampler selection">
+  <rect class="band" x="120" y="24" width="330" height="220" rx="4" opacity="0.55"/>
+  <rect class="band" x="450" y="24" width="330" height="220" rx="4" opacity="0.28"/>
+  <text class="sm" x="252" y="18">trainer at weight v0</text>
+  <text class="sm" x="582" y="18">trainer at weight v1</text>
+  <text class="sm" x="808" y="18">v2 →</text>
+  <line class="dec" x1="780" y1="24" x2="780" y2="252"/>
+  <text class="ttl" x="700" y="268" style="fill:var(--red)">step-1 select()</text>
+  <text class="sm" x="8" y="18">group (start_w / target)</text>
 
-  <!-- decision line -->
-  <line class="dec" x1="780" y1="26" x2="780" y2="352"/>
-  <text class="ttl" x="676" y="370" style="fill:var(--red)">step-1 select()</text>
+  <text x="8" y="46">g0 (0/0)</text>
+  <rect class="f-done" x="130" y="32" width="90" height="20" rx="4"/>
+  <text class="v-na" x="792" y="46">consumed at step 0</text>
 
-  <!-- rows -->
-  <text class="sm" x="8" y="46">group</text>
-  <text class="sm" x="828" y="46">start_w / target</text>
+  <text x="8" y="76">g1 (0/0)</text>
+  <rect class="f-done" x="130" y="62" width="180" height="20" rx="4"/>
+  <text class="v-na" x="792" y="76">consumed at step 0</text>
 
-  <text x="8" y="70">g0</text>
-  <rect class="b-done" x="130" y="56" width="90" height="20" rx="4"/>
-  <text class="sm" x="228" y="70">consumed at step 0</text>
-  <text class="sm" x="836" y="70">0 / 0</text>
+  <text x="8" y="106">g2 (0/1)</text>
+  <rect id="b-g2" class="f-base" x="330" y="92" width="150" height="20" rx="4"/>
+  <text id="v-g2" class="v-sel" x="792" y="106">—</text>
 
-  <text x="8" y="100">g1</text>
-  <rect class="b-done" x="130" y="86" width="180" height="20" rx="4"/>
-  <text class="sm" x="318" y="100">consumed at step 0</text>
-  <text class="sm" x="836" y="100">0 / 0</text>
+  <text x="8" y="136">g3 (0/1)</text>
+  <rect id="b-g3" class="f-base" x="330" y="122" width="270" height="20" rx="4"/>
+  <text id="v-g3" class="v-sel" x="792" y="136">—</text>
 
-  <text x="8" y="130">g2</text>
-  <rect class="b-rdy" x="330" y="116" width="150" height="20" rx="4"/>
-  <text class="sm" x="488" y="130">dispatched by lookahead, finishes early in v1</text>
-  <text class="sm" x="836" y="130" style="fill:var(--yellow)">0 / 1</text>
+  <text x="8" y="166">g4 (1/2)</text>
+  <rect id="b-g4" class="f-base" x="470" y="152" width="240" height="20" rx="4"/>
+  <text id="v-g4" class="v-hold" x="792" y="166">—</text>
 
-  <text x="8" y="160">g3</text>
-  <rect class="b-rdy" x="330" y="146" width="270" height="20" rx="4"/>
-  <text class="sm" x="608" y="160">same batch, slower</text>
-  <text class="sm" x="836" y="160" style="fill:var(--yellow)">0 / 1</text>
+  <text x="8" y="196">g5 (1/2)</text>
+  <rect id="b-g5" class="f-na" x="470" y="182" width="330" height="20" rx="4"/>
+  <text id="v-g5" class="v-na" x="792" y="196">—</text>
 
-  <text x="8" y="190">g4</text>
-  <rect class="b-rdy" x="470" y="176" width="240" height="20" rx="4"/>
-  <text class="sm" x="718" y="190">fast — done before the line</text>
-  <text class="sm" x="836" y="190" style="fill:var(--accent)">1 / 2</text>
-
-  <text x="8" y="220">g5</text>
-  <rect class="b-open" x="470" y="206" width="330" height="20" rx="4"/>
-  <text class="sm" x="808" y="220">still running</text>
-  <text class="sm" x="836" y="240">1 / 2</text>
-
-  <!-- annotations -->
-  <rect x="130" y="252" width="330" height="60" rx="7" style="fill:var(--panel);stroke:var(--yellow);stroke-width:2"/>
-  <text x="142" y="272" style="font-size:11.5px;fill:var(--yellow);font-weight:700">g2, g3: stale weights, but earmarked for step 1</text>
-  <text x="142" y="290" style="font-size:11px">started under v0 → start_weight = 0</text>
-  <text x="142" y="306" style="font-size:11px">dispatched as step 1's batch → target_step = 1</text>
-
-  <rect x="480" y="252" width="290" height="60" rx="7" style="fill:var(--panel);stroke:var(--accent);stroke-width:2"/>
-  <text x="492" y="272" style="font-size:11.5px;fill:var(--accent);font-weight:700">g4: fresh, but earmarked for step 2</text>
-  <text x="492" y="290" style="font-size:11px">finished early, so it is sitting there</text>
-  <text x="492" y="306" style="font-size:11px">ready and tempting at the step-1 line</text>
-
-  <text class="sm" x="8" y="398">These two facts — a stale group that was promised to this step, and a fresh group promised to the next —</text>
-  <text class="sm" x="8" y="414">are the entire reason the three modes disagree.</text>
+  <text class="sm" x="130" y="228">g2, g3 — dispatched early by lookahead: stale weights, but promised to step 1</text>
+  <text class="sm" x="130" y="244">g4 — finished fast: fresh, but promised to step 2   ·   g5 — still generating</text>
 </svg>
 
 <div class="legend">
-<div><span class="sw" style="background:var(--done);border-color:var(--done-br)"></span>already consumed</div>
-<div><span class="sw" style="background:var(--run);border-color:var(--run-br)"></span>committed, in buffer</div>
-<div><span class="sw" style="background:var(--run);border-color:var(--run-br);border-style:dashed"></span>still generating</div>
-</div>
-
-<h2>What each mode does at the line</h2>
-<p>Trainer weight = 1. Window = <code>[0, 1]</code>. It needs 2 groups.</p>
-<table>
-<tr><th>group</th><th>state</th>
-<th><code>in_order</code> <span class="badge">legacy</span><br><span style="font-weight:400;color:var(--muted)">key: target_step == 1</span></th>
-<th><code>weight_fifo</code><br><span style="font-weight:400;color:var(--muted)">key: oldest in-window start_weight</span></th>
-<th><code>windowed</code> + freshest-first<br><span style="font-weight:400;color:var(--muted)">key: start_weight ∈ [0,1]</span></th></tr>
-
-<tr><td><strong>g2</strong></td><td>ready · sw 0 · t 1</td>
-<td class="sel">TRAIN — earmarked for this step</td>
-<td class="sel">TRAIN — weight 0 is the oldest cohort</td>
-<td class="hold">skipped — lag 1, sorts last</td></tr>
-
-<tr><td><strong>g3</strong></td><td>ready · sw 0 · t 1</td>
-<td class="sel">TRAIN — earmarked for this step</td>
-<td class="sel">TRAIN — same cohort</td>
-<td class="hold">skipped — lag 1, sorts last</td></tr>
-
-<tr><td><strong>g4</strong></td><td>ready · sw 1 · t 2</td>
-<td class="hold">held for step 2 — its stamp says so</td>
-<td class="hold">held — weight 1 not reached yet</td>
-<td class="sel">TRAIN — lag 0, sorts first</td></tr>
-
-<tr><td><strong>g5</strong></td><td>still generating</td>
-<td class="na">skipped — not ready</td><td class="na">skipped — not ready</td><td class="na">skipped — not ready</td></tr>
-
-<tr><td colspan="2"><strong>trains on</strong></td>
-<td class="sel">g2 + g3</td><td class="sel">g2 + g3</td><td class="sel">g4 + <em>one of</em> g2/g3</td></tr>
-
-<tr><td colspan="2"><strong>and then?</strong></td>
-<td>g4 waits for step 2 — nothing wasted</td>
-<td>g4 waits for weight 1 — nothing wasted</td>
-<td class="ev">the leftover g2/g3 is now lag 2 → <strong>evicted at step 2</strong></td></tr>
-</table>
-
-<div class="legend">
-<div><span class="sw" style="background:var(--ok);border-color:var(--ok-br)"></span>trained on</div>
+<div><span class="sw" style="background:var(--ok);border-color:var(--ok-br)"></span>trained on this step</div>
 <div><span class="sw" style="background:var(--hold);border-color:var(--hold-br)"></span>held for later</div>
-<div><span class="sw" style="background:var(--waste);border-color:var(--waste-br)"></span>GPU time thrown away</div>
+<div><span class="sw" style="background:var(--waste);border-color:var(--waste-br)"></span>will be evicted — GPU time wasted</div>
+<div><span class="sw" style="background:var(--done);border-color:var(--done-br)"></span>already consumed</div>
 </div>
+
+<h2>The rule each mode is applying</h2>
+<table>
+<tr><th>Mode</th><th>Selection key</th><th>Picks here</th><th>Wastes anything?</th></tr>
+<tr><td><code>in_order</code> <span class="badge">legacy</span></td><td><code>target_step == train</code></td><td>g2 + g3</td><td>no — only late stragglers</td></tr>
+<tr><td><code>weight_fifo</code></td><td>oldest in-window <code>start_weight</code></td><td>g2 + g3 <em>(same set, different reason)</em></td><td>no — only late stragglers</td></tr>
+<tr><td><code>windowed</code></td><td><code>start_weight ∈ [train−S, train]</code>, buffer order</td><td>g2 + g3</td><td>not here — but unbounded in general</td></tr>
+<tr><td><code>windowed</code> + freshest</td><td>same, sorted by lag</td><td><strong>g4 + g2</strong></td><td><strong>yes — g3 ages out</strong></td></tr>
+</table>
 
 <h2>Reading it back</h2>
 
 <div class="card"><div class="card-title"><code>in_order</code> — “you get what was promised to you”</div>
 The stamp is assigned at dispatch, before the rollout runs, so a group's destiny never changes no matter
-when it finishes. g4 finishing early buys nothing; g2/g3 being weight-stale costs nothing. Steps are
-reproducible batches. <strong>This is the legacy async-GRPO pattern</strong>: legacy
-<code>ReplayBuffer.sample()</code> filters to the age window and then narrows to
-<code>target_weight_versions[i] == current_weight_version</code>, stalling unless a full batch is intended for
-this step — "so no trajectory loses its last chance to be used for its intended training step."
+when it finishes. g4 finishing early buys it nothing; g2/g3 being weight-stale costs them nothing.
+<strong>This is the legacy async-GRPO pattern</strong>: legacy <code>ReplayBuffer.sample()</code> filters to the age
+window, then narrows to <code>target_weight_versions[i] == current_weight_version</code>, stalling unless a
+full batch is intended for this step — "so no trajectory loses its last chance to be used for its
+intended training step."
 <a href="https://github.com/NVIDIA-NeMo/RL/blob/db0aa2800b74261f3961c5b01ae961832401f9d8/nemo_rl/algorithms/async_utils/replay_buffer.py#L250">legacy replay_buffer.py L250-271</a> ·
 <a href="https://github.com/NVIDIA-NeMo/RL/blob/db0aa2800b74261f3961c5b01ae961832401f9d8/nemo_rl/algorithms/async_utils/staleness_sampler.py#L359">InOrderSampler.select L359</a></div>
 
-<div class="card"><div class="card-title"><code>weight_fifo</code> — “oldest data first, always”</div>
-Same batch here, different reason: it drains the lowest in-window <code>start_weight</code> before touching
-any newer one. Deterministic consumption order without needing a stamp.
-<a href="https://github.com/NVIDIA-NeMo/RL/blob/db0aa2800b74261f3961c5b01ae961832401f9d8/nemo_rl/algorithms/async_utils/staleness_sampler.py#L315">L315</a></div>
+<div class="card"><div class="card-title">Same answer ≠ same rule</div>
+Three of the four modes pick g2 + g3 here. That is not a flaw in the example — it is the honest result,
+and it is worth showing: under a <em>gated</em> pump the modes usually agree, and they diverge only when
+something finishes out of order. Flip to <strong>windowed + freshest-first</strong> to see the one case where
+the picture changes.</div>
 
-<div class="card"><div class="card-title"><code>windowed</code> — “whatever is freshest, right now”</div>
-The only mode that will reach forward and eat g4, a group generated for a later step, because it looks
-solely at how stale the weights are. That keeps the trainer fed without stalling — and it is precisely
-why something gets left behind and aged out. <strong>The waste is the feature working, not a bug.</strong>
-Note <code>sample_freshest_first</code> changes the <em>set</em>, not just the order: with the default
-<code>false</code> this same buffer yields g2 + g3 instead.
-<a href="https://github.com/NVIDIA-NeMo/RL/blob/db0aa2800b74261f3961c5b01ae961832401f9d8/nemo_rl/algorithms/async_utils/staleness_sampler.py#L235">L235</a></div>
+<div class="card"><div class="card-title"><code>sample_freshest_first</code> changes the <em>set</em>, not the order</div>
+It sorts by lag before the <code>max_prompt_groups</code> cap bites, so g4 — a group generated for step 2 —
+gets pulled forward, and g3 is left to age out. Same buffer, same window, different training data.
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/db0aa2800b74261f3961c5b01ae961832401f9d8/nemo_rl/algorithms/async_utils/staleness_sampler.py#L249">L249</a></div>
 
 <div class="card"><div class="card-title">“Isn’t there a FIFO where everything is used and nothing is evicted?”</div>
 <strong>Yes — <code>in_order</code> with <code>min_groups_for_streaming_train = num_prompts_per_step</code>,</strong>
 which is what the sync recipe sets.
 <a href="https://github.com/NVIDIA-NeMo/RL/blob/db0aa2800b74261f3961c5b01ae961832401f9d8/nemo_rl/algorithms/async_utils/staleness_sampler.py#L179"><code>_finalize_selection</code></a>
 returns <code>None</code> below <code>min_prompt_groups</code>, so the trainer waits at step <em>N</em> until the whole
-batch stamped <em>N</em> has landed, then takes all of it. Its <code>evict</code> can only fire for a group that
-commits <em>after</em> its step has already gone by — like g5 if it ran two steps long. So the mode already
-exists; the guide just never says that <code>in_order</code> is the zero-waste option and <code>windowed</code>
-is the deliberately-lossy one. The cost is the mirror image: <code>in_order</code> makes the trainer idle on
-the slowest group in the batch, which is exactly what <code>windowed</code> exists to avoid.</div>
+batch stamped <em>N</em> has landed, then takes all of it. Its <code>evict</code> only fires for a group that commits
+<em>after</em> its step has gone by — like g5 if it ran two steps long. So the mode already exists; the guide
+just never says <code>in_order</code> is the zero-waste option and <code>windowed</code> the deliberately-lossy one.
+The cost is the mirror image: <code>in_order</code> idles the trainer on the slowest group in the batch, which
+is exactly what <code>windowed</code> exists to avoid.</div>
 
 <div class="foot">Generated by Claude Code for PR #3427 review. Line references are permalinks pinned to
-<code>db0aa2800b74261f3961c5b01ae961832401f9d8</code>. Offered as a starting point — copy, redraw or ignore.</div>
+<code>db0aa2800b74261f3961c5b01ae961832401f9d8</code>. Offered as a starting point — copy, redraw or ignore.
+For a static docs figure, render the four states side by side.</div>
 </div>
-<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+<script>
+(function(){var r=document.documentElement,K='gh-pages-theme';
  function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
  function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
   b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
    else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
- document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+ document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();
+
+(function(){
+ var MODES={
+  in_order:{
+   why:'<strong>in_order</strong> — keys on the <code>target_step</code> stamp assigned at dispatch. It takes exactly the batch promised to step 1, no matter when each group finished. g4 finished early but is stamped for step 2, so it waits.',
+   f:{g2:['sel','TRAIN — stamped for step 1'],g3:['sel','TRAIN — stamped for step 1'],
+      g4:['hold','held — stamped for step 2'],g5:['na','skipped — not ready']}},
+  weight_fifo:{
+   why:'<strong>weight_fifo</strong> — drains the oldest in-window <code>start_weight</code> first. Weight 0 (g2, g3) must be exhausted before any weight-1 group is touched. Same set as in_order here, reached by a different rule.',
+   f:{g2:['sel','TRAIN — oldest weight (0)'],g3:['sel','TRAIN — oldest weight (0)'],
+      g4:['hold','held — weight 1 not reached'],g5:['na','skipped — not ready']}},
+  windowed:{
+   why:'<strong>windowed</strong> — any ready group whose <code>start_weight</code> is in [0, 1], taken in buffer (commit) order. g2 and g3 committed first, so they fill the batch and g4 survives into step 2.',
+   f:{g2:['sel','TRAIN — in window, committed 1st'],g3:['sel','TRAIN — in window, committed 2nd'],
+      g4:['hold','held — batch already full'],g5:['na','skipped — not ready']}},
+  windowed_f:{
+   why:'<strong>windowed + freshest-first</strong> — the one case that diverges. Sorting by lag puts g4 (lag 0) ahead of g2/g3 (lag 1), and the cap bites <em>after</em> the sort — so a group generated for step 2 is pulled into step 1, and g3 is left behind to age out of the window.',
+   f:{g2:['sel','TRAIN — lag 1, fills the batch'],g3:['ev','LEFT OVER → evicted at step 2'],
+      g4:['sel','TRAIN — lag 0, sorts first'],g5:['na','skipped — not ready']}}
+ };
+ var VCLS={sel:'v-sel',hold:'v-hold',ev:'v-ev',na:'v-na'};
+ function apply(m){
+  var d=MODES[m];if(!d)return;
+  document.getElementById('why').innerHTML=d.why;
+  Object.keys(d.f).forEach(function(g){
+   var st=d.f[g][0],tx=d.f[g][1];
+   var bar=document.getElementById('b-'+g),v=document.getElementById('v-'+g);
+   if(bar)bar.setAttribute('class','f-'+st);
+   if(v){v.setAttribute('class',VCLS[st]);v.textContent=tx;}
+  });
+  Array.prototype.forEach.call(document.querySelectorAll('.modes button'),function(b){
+   b.setAttribute('aria-pressed',String(b.dataset.m===m));});
+ }
+ function init(){
+  Array.prototype.forEach.call(document.querySelectorAll('.modes button'),function(b){
+   b.addEventListener('click',function(){apply(b.dataset.m);});});
+  apply('in_order');
+ }
+ document.readyState!=='loading'?init():document.addEventListener('DOMContentLoaded',init);
+})();
+</script>
 </body></html>
