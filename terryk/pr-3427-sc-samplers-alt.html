@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NeMo-RL SC samplers — alternate framing (lifecycle)</title>
+<style>
+:root{--bg:#0d1117;--panel:#161b22;--panel2:#1c2128;--border:#30363d;--text:#e6edf3;
+ --muted:#8b949e;--accent:#58a6ff;--green:#76b900;--orange:#ffa657;--purple:#d2a8ff;
+ --red:#ff7b72;--yellow:#e3b341;
+ --ok:#1c3a1c;--ok-br:#76b900;--waste:#3d1d1d;--waste-br:#ff7b72;--hold:#2a2a1a;--hold-br:#e3b341;}
+:root[data-theme="light"]{--bg:#fff;--panel:#f6f8fa;--panel2:#eef1f5;--border:#d0d7de;
+ --text:#1f2328;--muted:#59636e;--accent:#0969da;--green:#4c8a00;--orange:#bc4c00;
+ --purple:#8250df;--red:#cf222e;--yellow:#9a6700;
+ --ok:#dafbe1;--ok-br:#4c8a00;--waste:#ffebe9;--waste-br:#cf222e;--hold:#fff8c5;--hold-br:#9a6700;}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+ font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;padding:0 16px 80px}
+.wrap{max-width:1080px;margin:0 auto}
+header{padding:28px 0 12px;border-bottom:1px solid var(--border);margin-bottom:22px}
+h1{font-size:26px;margin:0 0 6px;letter-spacing:-.3px}
+h2{font-size:20px;margin:34px 0 10px;padding-bottom:7px;border-bottom:1px solid var(--border)}
+.sub{color:var(--muted);font-size:14px;margin:0}
+code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.9em;
+ background:var(--panel2);padding:1.5px 5px;border-radius:5px}
+a{color:var(--accent)}
+#theme-toggle{position:fixed;top:12px;right:14px;z-index:200;background:var(--panel);
+ border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;
+ font:13px/1 ui-monospace,monospace;cursor:pointer}
+.hl{background:var(--panel);border-left:3px solid var(--accent);padding:12px 15px;
+ border-radius:0 8px 8px 0;margin:16px 0}
+.card{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:13px 16px;margin:13px 0}
+.card-title{font-weight:650;margin-bottom:5px;color:var(--orange)}
+table{border-collapse:collapse;width:100%;margin:13px 0;font-size:13.5px;display:block;overflow-x:auto}
+th,td{border:1px solid var(--border);padding:7px 10px;text-align:left;vertical-align:top}
+th{background:var(--panel2);font-weight:650}
+svg{width:100%;height:auto;display:block;margin:8px 0}
+svg text{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;fill:var(--text);font-size:12px}
+svg .ttl{font-weight:700;font-size:13.5px}
+svg .sm{font-size:10.5px;fill:var(--muted)}
+svg a text{text-decoration:underline;fill:var(--accent);font-size:10.5px}
+svg .b-ok{fill:var(--ok);stroke:var(--ok-br);stroke-width:2}
+svg .b-waste{fill:var(--waste);stroke:var(--waste-br);stroke-width:2}
+svg .b-hold{fill:var(--hold);stroke:var(--hold-br);stroke-width:2}
+svg .stepline{stroke:var(--border);stroke-width:1.5;stroke-dasharray:4 4}
+svg .flow{stroke:var(--green);stroke-width:2;fill:none}
+svg .flowx{stroke:var(--red);stroke-width:2;fill:none;stroke-dasharray:5 3}
+.badge{display:inline-block;background:var(--purple);color:#fff;border-radius:5px;
+ padding:1px 8px;font-size:11.5px;font-weight:700;vertical-align:middle;margin-left:7px}
+:root[data-theme="light"] .badge{color:#fff}
+.legend{display:flex;flex-wrap:wrap;gap:14px;margin:14px 0;font-size:13px}
+.legend div{display:flex;align-items:center;gap:7px}
+.sw{width:15px;height:15px;border-radius:4px;border:2px solid}
+.foot{margin-top:40px;padding-top:14px;border-top:1px solid var(--border);color:var(--muted);font-size:13px}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+ document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head><body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<div class="wrap">
+<header>
+<h1>Samplers, framed as a batch's lifecycle</h1>
+<p class="sub"><strong>Alternate</strong> to the "one buffer, three verdicts" figure ·
+<a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-3427-sc-samplers.html">see that version</a> ·
+NVIDIA-NeMo/RL <a href="https://github.com/NVIDIA-NeMo/RL/pull/3427">PR #3427</a> @ <code>db0aa28</code></p>
+</header>
+
+<div class="hl">
+<strong>Different question, same three modes.</strong> The other figure asks <em>"given a buffer right now,
+which rows get picked?"</em> — a snapshot. This one asks <em>"I dispatched a batch; what happens to it?"</em>
+— a lifecycle. The snapshot view is better for reading the <code>select</code> predicate; this view is
+better for the question people actually arrive with: <strong>does this mode waste rollouts, and how far
+can generation drift from training?</strong>
+</div>
+
+<h2>Follow one batch from dispatch to fate</h2>
+<p>Three trainer steps. <code>max_staleness_versions</code> / <code>max_lookahead_versions</code> = 1.
+Each box is one prompt batch; colour is its fate.</p>
+
+<svg viewBox="0 0 1000 610" role="img" aria-label="Batch lifecycle under three samplers">
+  <!-- step columns -->
+  <text class="sm" x="150" y="18">trainer at step 4</text>
+  <text class="sm" x="430" y="18">step 5</text>
+  <text class="sm" x="710" y="18">step 6</text>
+  <line class="stepline" x1="140" y1="26" x2="140" y2="580"/>
+  <line class="stepline" x1="420" y1="26" x2="420" y2="580"/>
+  <line class="stepline" x1="700" y1="26" x2="700" y2="580"/>
+  <line class="stepline" x1="960" y1="26" x2="960" y2="580"/>
+
+  <!-- LANE 1: in_order -->
+  <text class="ttl" x="14" y="60" style="fill:var(--green)">in_order</text>
+  <rect x="86" y="46" width="182" height="19" rx="4" style="fill:var(--purple)"/>
+  <text x="94" y="60" style="font-size:10.5px;fill:#fff;font-weight:700">= LEGACY async GRPO pattern</text>
+  <text class="sm" x="14" y="78">gated + stamped</text>
+
+  <rect class="b-ok" x="146" y="90" width="264" height="34" rx="6"/>
+  <text x="158" y="112" style="font-size:11.5px">batch stamped target_step=5 → consumed at step 5</text>
+  <rect class="b-ok" x="426" y="132" width="264" height="34" rx="6"/>
+  <text x="438" y="154" style="font-size:11.5px">target_step=6 → consumed at step 6</text>
+  <path class="flow" d="M410 107 L426 107 L426 132" marker-end="url(#ag)"/>
+  <rect class="b-waste" x="146" y="174" width="130" height="30" rx="6"/>
+  <text x="156" y="194" style="font-size:10.5px">straggler, commits late</text>
+  <path class="flowx" d="M276 189 L410 189" marker-end="url(#ar)"/>
+  <text class="sm" x="418" y="193">evicted at step 5 (target 4 &lt; 5)</text>
+  <text class="sm" x="14" y="222">1 batch dispatched per step. Nothing else is ever discarded.</text>
+
+  <!-- LANE 2: weight_fifo -->
+  <line x1="14" y1="240" x2="960" y2="240" style="stroke:var(--border)"/>
+  <text class="ttl" x="14" y="268" style="fill:var(--green)">weight_fifo</text>
+  <text class="sm" x="14" y="286">gated, drains oldest weight first</text>
+
+  <rect class="b-ok" x="146" y="298" width="180" height="34" rx="6"/>
+  <text x="156" y="320" style="font-size:11.5px">weight 4 batch</text>
+  <rect class="b-hold" x="330" y="298" width="180" height="34" rx="6"/>
+  <text x="340" y="320" style="font-size:11.5px">weight 5 · waits</text>
+  <path class="flow" d="M510 315 L560 315" marker-end="url(#ag)"/>
+  <rect class="b-ok" x="566" y="298" width="180" height="34" rx="6"/>
+  <text x="576" y="320" style="font-size:11.5px">drained next step</text>
+  <text class="sm" x="14" y="356">Consumption order is strict, so a batch may sit a step before it is drained —</text>
+  <text class="sm" x="14" y="372">but the gate means it is still eventually used, not discarded.</text>
+
+  <!-- LANE 3: windowed -->
+  <line x1="14" y1="392" x2="960" y2="392" style="stroke:var(--border)"/>
+  <text class="ttl" x="14" y="420" style="fill:var(--orange)">windowed</text>
+  <text class="sm" x="14" y="438">UNGATED — the only mode that plans to waste</text>
+
+  <rect class="b-ok"    x="146" y="450" width="120" height="28" rx="6"/><text x="156" y="469" style="font-size:10.5px">used</text>
+  <rect class="b-ok"    x="272" y="450" width="120" height="28" rx="6"/><text x="282" y="469" style="font-size:10.5px">used</text>
+  <rect class="b-ok"    x="426" y="450" width="120" height="28" rx="6"/><text x="436" y="469" style="font-size:10.5px">used</text>
+  <rect class="b-waste" x="552" y="450" width="120" height="28" rx="6"/><text x="562" y="469" style="font-size:10.5px">aged out ✗</text>
+  <rect class="b-ok"    x="706" y="450" width="120" height="28" rx="6"/><text x="716" y="469" style="font-size:10.5px">used</text>
+  <rect class="b-waste" x="832" y="450" width="120" height="28" rx="6"/><text x="842" y="469" style="font-size:10.5px">aged out ✗</text>
+  <text class="sm" x="14" y="500">Rollout never waits for the trainer, so it over-produces; whatever falls below</text>
+  <text class="sm" x="14" y="516">train − max_staleness_versions is evicted. That discarded GPU time is the</text>
+  <text class="sm" x="14" y="532">price you pay for never stalling generation.</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/db0aa2800b74261f3961c5b01ae961832401f9d8/nemo_rl/algorithms/async_utils/staleness_sampler.py#L231" target="_blank" rel="noopener">
+    <text x="14" y="554">WindowedSampler.admit L231 — returns immediately, always</text></a>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/db0aa2800b74261f3961c5b01ae961832401f9d8/nemo_rl/algorithms/async_utils/staleness_sampler.py#L294" target="_blank" rel="noopener">
+    <text x="500" y="554">_GatedSampler.admit L294 — blocks the other two</text></a>
+
+  <defs>
+    <marker id="ag" markerWidth="9" markerHeight="9" refX="8" refY="3.2" orient="auto">
+      <path d="M0,0 L0,6.4 L8.5,3.2 z" fill="var(--green)"/></marker>
+    <marker id="ar" markerWidth="9" markerHeight="9" refX="8" refY="3.2" orient="auto">
+      <path d="M0,0 L0,6.4 L8.5,3.2 z" fill="var(--red)"/></marker>
+  </defs>
+</svg>
+
+<div class="legend">
+<div><span class="sw" style="background:var(--ok);border-color:var(--ok-br)"></span>trained on</div>
+<div><span class="sw" style="background:var(--hold);border-color:var(--hold-br)"></span>held, used later</div>
+<div><span class="sw" style="background:var(--waste);border-color:var(--waste-br)"></span>evicted — GPU time thrown away</div>
+</div>
+
+<h2>Which one is the legacy path?</h2>
+<div class="card"><div class="card-title"><code>in_order</code> — and it is not a close call</div>
+Legacy <code>ReplayBuffer.sample()</code> does three things in order: evict outside the age window, filter
+to that window, then <strong>narrow to <code>target_weight_versions[i] == current_weight_version</code></strong> and
+<strong>return <code>None</code> unless a full <code>num_prompt_groups</code> are intended for this step</strong> —
+"so no trajectory loses its last chance to be used for its intended training step."
+That is exact target-step matching with all-or-nothing stalling, i.e. <code>in_order</code>. The age window
+is only a secondary guard.
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/db0aa2800b74261f3961c5b01ae961832401f9d8/nemo_rl/algorithms/async_utils/replay_buffer.py#L250">legacy replay_buffer.py L250-271</a></div>
+
+<div class="card"><div class="card-title">“Isn’t there a FIFO where everything gets used and nothing is evicted?”</div>
+<strong>Yes — that is <code>in_order</code> with <code>min_groups_for_streaming_train = num_prompts_per_step</code>.</strong>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/db0aa2800b74261f3961c5b01ae961832401f9d8/nemo_rl/algorithms/async_utils/staleness_sampler.py#L179">_finalize_selection</a>
+returns <code>None</code> below <code>min_prompt_groups</code>, so the trainer stalls at step <em>N</em> until the whole
+batch stamped <em>N</em> is ready, then consumes all of it. Its <code>evict</code> can only fire for a group that
+commits <em>after</em> its step already passed — a straggler, not routine waste. The sync recipe sets exactly
+this. So the mode you were reaching for already exists; the guide just never says that <code>in_order</code>
+is the zero-waste option and <code>windowed</code> is the deliberately-lossy one.</div>
+
+<h2>The trade-off, stated once</h2>
+<table>
+<tr><th>Mode</th><th>Generation may stall?</th><th>Rollouts discarded?</th><th>Buffer capacity needed</th></tr>
+<tr><td><code>in_order</code> <span class="badge">legacy</span></td><td>yes — gated at <code>train+L</code></td><td>only late stragglers</td><td><code>groups × (L+1)</code>, validated</td></tr>
+<tr><td><code>weight_fifo</code></td><td>yes — gated at <code>train+S</code></td><td>only late stragglers</td><td><code>groups × (S+1)</code>, validated</td></tr>
+<tr><td><code>windowed</code></td><td><strong>never</strong></td><td><strong>yes, by design</strong></td><td>unvalidated — you size it</td></tr>
+</table>
+<p>The capacity column is not incidental: <a href="https://github.com/NVIDIA-NeMo/RL/blob/db0aa2800b74261f3961c5b01ae961832401f9d8/nemo_rl/algorithms/async_utils/staleness_sampler.py#L436"><code>required_buffer_capacity_for_config</code></a>
+returns a number for the two gated modes and <code>None</code> for <code>windowed</code> — because with no gate there
+is no principled bound to check against.</p>
+
+<div class="foot">Generated by Claude Code for PR #3427 review. Line references are permalinks pinned to
+<code>db0aa2800b74261f3961c5b01ae961832401f9d8</code>. Offered as a starting point — copy, redraw or ignore.</div>
+</div>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+ function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+ function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
+  b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
+   else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+ document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+</body></html>
