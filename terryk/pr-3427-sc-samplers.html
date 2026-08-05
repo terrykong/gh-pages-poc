@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NeMo-RL SingleController — how a sampler picks groups</title>
+<style>
+:root{--bg:#0d1117;--panel:#161b22;--panel2:#1c2128;--border:#30363d;--text:#e6edf3;
+ --muted:#8b949e;--accent:#58a6ff;--green:#76b900;--orange:#ffa657;--purple:#d2a8ff;
+ --red:#ff7b72;--yellow:#e3b341;--sel:#1c3a1c;--sel-br:#76b900;--ev:#3d1d1d;--ev-br:#ff7b72;
+ --keep:#2a2a1a;--keep-br:#e3b341;--skip:#21262d;--skip-br:#8b949e;}
+:root[data-theme="light"]{--bg:#fff;--panel:#f6f8fa;--panel2:#eef1f5;--border:#d0d7de;
+ --text:#1f2328;--muted:#59636e;--accent:#0969da;--green:#4c8a00;--orange:#bc4c00;
+ --purple:#8250df;--red:#cf222e;--yellow:#9a6700;--sel:#dafbe1;--sel-br:#4c8a00;
+ --ev:#ffebe9;--ev-br:#cf222e;--keep:#fff8c5;--keep-br:#9a6700;--skip:#eef1f5;--skip-br:#8c959f;}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+ font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;padding:0 16px 80px}
+.wrap{max-width:1080px;margin:0 auto}
+header{padding:28px 0 12px;border-bottom:1px solid var(--border);margin-bottom:22px}
+h1{font-size:26px;margin:0 0 6px;letter-spacing:-.3px}
+h2{font-size:20px;margin:36px 0 10px;padding-bottom:7px;border-bottom:1px solid var(--border)}
+h3{font-size:15.5px;margin:22px 0 8px;color:var(--accent)}
+.sub{color:var(--muted);font-size:14px;margin:0}
+code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.9em;
+ background:var(--panel2);padding:1.5px 5px;border-radius:5px}
+a{color:var(--accent)}
+#theme-toggle{position:fixed;top:12px;right:14px;z-index:200;background:var(--panel);
+ border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;
+ font:13px/1 ui-monospace,monospace;cursor:pointer}
+.hl{background:var(--panel);border-left:3px solid var(--accent);padding:12px 15px;
+ border-radius:0 8px 8px 0;margin:16px 0}
+.card{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:13px 16px;margin:13px 0}
+.card-title{font-weight:650;margin-bottom:5px;color:var(--orange)}
+table{border-collapse:collapse;width:100%;margin:13px 0;font-size:13.5px;display:block;overflow-x:auto}
+th,td{border:1px solid var(--border);padding:7px 10px;text-align:left;vertical-align:top}
+th{background:var(--panel2);font-weight:650}
+svg{width:100%;height:auto;display:block;margin:8px 0}
+svg text{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;fill:var(--text);font-size:12px}
+svg .ttl{font-weight:700;font-size:13px}
+svg .sm{font-size:10.5px;fill:var(--muted)}
+svg .hd{font-size:11.5px;font-weight:700;fill:var(--muted)}
+svg a text{text-decoration:underline;fill:var(--accent);font-size:10.5px}
+svg .g-sel{fill:var(--sel);stroke:var(--sel-br);stroke-width:2}
+svg .g-ev{fill:var(--ev);stroke:var(--ev-br);stroke-width:2}
+svg .g-keep{fill:var(--keep);stroke:var(--keep-br);stroke-width:2}
+svg .g-skip{fill:var(--skip);stroke:var(--skip-br);stroke-width:1.5;stroke-dasharray:4 3}
+svg .g-base{fill:var(--panel2);stroke:var(--border);stroke-width:1.5}
+svg .lane{fill:none;stroke:var(--border);stroke-width:1;stroke-dasharray:4 4}
+.legend{display:flex;flex-wrap:wrap;gap:14px;margin:14px 0;font-size:13px}
+.legend div{display:flex;align-items:center;gap:7px}
+.sw{width:15px;height:15px;border-radius:4px;border:2px solid}
+.key-sw{color:var(--purple);font-weight:650}
+.key-ts{color:var(--yellow);font-weight:650}
+.foot{margin-top:40px;padding-top:14px;border-top:1px solid var(--border);color:var(--muted);font-size:13px}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+ document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head><body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<div class="wrap">
+<header>
+<h1>How a SingleController sampler picks groups</h1>
+<p class="sub">A suggested figure for the <strong>Sampler modes</strong> section of
+<code>docs/guides/single-controller.md</code> · NVIDIA-NeMo/RL
+<a href="https://github.com/NVIDIA-NeMo/RL/pull/3427">PR #3427</a> @ <code>db0aa28</code></p>
+</header>
+
+<div class="hl">
+<strong>The thing the table can't show.</strong> The guide's sampler table has a "Train selection" column
+per mode, but the modes aren't three settings of one rule — they key on <em>different fields of the
+buffer</em>. Until you know which field, the rules read as interchangeable. They aren't: on the same
+buffer, a group that <code>windowed</code> trains on is one that <code>in_order</code> throws away.
+</div>
+
+<h2>1. Every sampler makes three decisions</h2>
+<p>A sampler is <a href="https://github.com/NVIDIA-NeMo/RL/blob/db0aa2800b74261f3961c5b01ae961832401f9d8/nemo_rl/algorithms/async_utils/staleness_sampler.py#L64">three methods</a>, called at two different places in the loop:</p>
+<table>
+<tr><th>Method</th><th>Called by</th><th>Question it answers</th></tr>
+<tr><td><code>admit</code></td><td>rollout pump</td><td>May I dispatch another prompt batch <em>right now</em>, or must I wait for the trainer?</td></tr>
+<tr><td><code>select</code></td><td>train pump</td><td>Which buffered groups may this step train on?</td></tr>
+<tr><td><code>evict</code></td><td>train pump</td><td>Which groups can <em>never</em> be selected again → drop &amp; free their rows?</td></tr>
+</table>
+
+<h2>2. Two different keys — this is the crux</h2>
+<p>Each buffered group carries both of these. Which one the sampler reads is what separates the modes:</p>
+<table>
+<tr><th>Field</th><th>Set when</th><th>Means</th><th>Used by</th></tr>
+<tr><td class="key-sw">start_weight</td><td>at <code>commit</code>, by the producer</td><td>the policy version the rollout actually ran under</td><td><code>windowed</code>, <code>weight_fifo</code></td></tr>
+<tr><td class="key-ts">target_step</td><td>at <code>admit</code>, by the sampler</td><td>the step this batch was <em>reserved for</em>, before it ran</td><td><code>in_order</code> only</td></tr>
+</table>
+<p><code>windowed</code> and <code>weight_fifo</code> ask <em>"how stale is this data?"</em> — a backward-looking
+question about what already happened. <code>in_order</code> asks <em>"was this earmarked for me?"</em> — a
+question answered before the rollout even started. Same buffer, different question, different answer.</p>
+
+<h2>3. One buffer, three verdicts</h2>
+<p>Trainer is at <strong>version 5</strong>. <code>max_staleness_versions = max_lookahead_versions = 1</code>,
+so the weight window is <code>[4, 5]</code>. The trainer asks for at least 2 and at most 3 groups.
+Group <strong>F</strong> is reserved but not yet committed (<code>ready = false</code>).</p>
+
+<svg viewBox="0 0 1000 520" role="img" aria-label="One buffer, three sampler verdicts">
+  <text class="ttl" x="14" y="20">Buffer snapshot (train_weight = 5)</text>
+  <text class="hd" x="14" y="46">group</text>
+  <text class="hd" x="86" y="46">start_weight</text>
+  <text class="hd" x="196" y="46">target_step</text>
+  <text class="hd" x="292" y="46">ready</text>
+
+  <g>
+    <rect class="g-base" x="10" y="54" width="340" height="26" rx="5"/>
+    <text x="20" y="72">A</text><text x="110" y="72">3</text><text x="216" y="72">3</text><text x="300" y="72">✓</text>
+    <rect class="g-base" x="10" y="84" width="340" height="26" rx="5"/>
+    <text x="20" y="102">B</text><text x="110" y="102">4</text><text x="216" y="102">4</text><text x="300" y="102">✓</text>
+    <rect class="g-base" x="10" y="114" width="340" height="26" rx="5"/>
+    <text x="20" y="132">C</text><text x="110" y="132">4</text><text x="216" y="132">5</text><text x="300" y="132">✓</text>
+    <rect class="g-base" x="10" y="144" width="340" height="26" rx="5"/>
+    <text x="20" y="162">D</text><text x="110" y="162">5</text><text x="216" y="162">5</text><text x="300" y="162">✓</text>
+    <rect class="g-base" x="10" y="174" width="340" height="26" rx="5"/>
+    <text x="20" y="192">E</text><text x="110" y="192">5</text><text x="216" y="192">6</text><text x="300" y="192">✓</text>
+    <rect class="g-base" x="10" y="204" width="340" height="26" rx="5"/>
+    <text x="20" y="222">F</text><text x="110" y="222">5</text><text x="216" y="222">5</text><text x="300" y="222" style="fill:var(--red)">✗</text>
+  </g>
+  <text class="sm" x="14" y="252">F is reserved-but-uncommitted: every mode skips it, and evict skips it too</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/db0aa2800b74261f3961c5b01ae961832401f9d8/nemo_rl/algorithms/async_utils/staleness_sampler.py#L138" target="_blank" rel="noopener">
+    <text x="14" y="270">(so eviction can't race a concurrent commit — BaseSampler.evict L138)</text></a>
+
+  <!-- three verdict columns -->
+  <text class="ttl" x="400" y="20" style="fill:var(--green)">windowed</text>
+  <text class="sm" x="400" y="36">key: start_weight in [4,5]</text>
+  <text class="ttl" x="620" y="20" style="fill:var(--green)">weight_fifo</text>
+  <text class="sm" x="620" y="36">key: min(start_weight) only</text>
+  <text class="ttl" x="820" y="20" style="fill:var(--green)">in_order</text>
+  <text class="sm" x="820" y="36">key: target_step == 5</text>
+
+  <!-- rows A..F for each -->
+  <g>
+    <!-- windowed -->
+    <rect class="g-ev"   x="396" y="54"  width="190" height="26" rx="5"/><text x="406" y="72">A · evict (w=3 &lt; 4)</text>
+    <rect class="g-sel"  x="396" y="84"  width="190" height="26" rx="5"/><text x="406" y="102">B · SELECT</text>
+    <rect class="g-sel"  x="396" y="114" width="190" height="26" rx="5"/><text x="406" y="132">C · SELECT</text>
+    <rect class="g-sel"  x="396" y="144" width="190" height="26" rx="5"/><text x="406" y="162">D · SELECT (cap 3)</text>
+    <rect class="g-keep" x="396" y="174" width="190" height="26" rx="5"/><text x="406" y="192">E · eligible, over cap</text>
+    <rect class="g-skip" x="396" y="204" width="190" height="26" rx="5"/><text x="406" y="222">F · not ready</text>
+    <!-- weight_fifo -->
+    <rect class="g-ev"   x="600" y="54"  width="190" height="26" rx="5"/><text x="610" y="72">A · evict</text>
+    <rect class="g-sel"  x="600" y="84"  width="190" height="26" rx="5"/><text x="610" y="102">B · SELECT (w=4)</text>
+    <rect class="g-sel"  x="600" y="114" width="190" height="26" rx="5"/><text x="610" y="132">C · SELECT (w=4)</text>
+    <rect class="g-keep" x="600" y="144" width="190" height="26" rx="5"/><text x="610" y="162">D · wait (w=5)</text>
+    <rect class="g-keep" x="600" y="174" width="190" height="26" rx="5"/><text x="610" y="192">E · wait (w=5)</text>
+    <rect class="g-skip" x="600" y="204" width="190" height="26" rx="5"/><text x="610" y="222">F · not ready</text>
+    <!-- in_order -->
+    <rect class="g-ev"   x="804" y="54"  width="186" height="26" rx="5"/><text x="814" y="72">A · evict (t=3 &lt; 5)</text>
+    <rect class="g-ev"   x="804" y="84"  width="186" height="26" rx="5"/><text x="814" y="102">B · EVICT (t=4 &lt; 5)</text>
+    <rect class="g-sel"  x="804" y="114" width="186" height="26" rx="5"/><text x="814" y="132">C · SELECT (t=5)</text>
+    <rect class="g-sel"  x="804" y="144" width="186" height="26" rx="5"/><text x="814" y="162">D · SELECT (t=5)</text>
+    <rect class="g-keep" x="804" y="174" width="186" height="26" rx="5"/><text x="814" y="192">E · hold for step 6</text>
+    <rect class="g-skip" x="804" y="204" width="186" height="26" rx="5"/><text x="814" y="222">F · not ready</text>
+  </g>
+
+  <!-- the punchline -->
+  <rect x="396" y="290" width="594" height="66" rx="8" style="fill:var(--panel);stroke:var(--red);stroke-width:2"/>
+  <text class="ttl" x="410" y="312" style="fill:var(--red)">Look at group B</text>
+  <text x="410" y="332" style="font-size:11.5px">windowed + weight_fifo TRAIN on it. in_order DELETES it —</text>
+  <text x="410" y="348" style="font-size:11.5px">its target_step 4 already passed, so it can never be selected.</text>
+
+  <text class="ttl" x="14" y="312">Selected this step</text>
+  <text x="14" y="334" style="font-size:11.5px"><tspan style="fill:var(--green)">windowed</tspan>   → B, C, D</text>
+  <text x="14" y="352" style="font-size:11.5px"><tspan style="fill:var(--green)">weight_fifo</tspan> → B, C</text>
+  <text x="14" y="370" style="font-size:11.5px"><tspan style="fill:var(--green)">in_order</tspan>    → C, D</text>
+  <text class="sm" x="14" y="392">Only C is chosen by all three.</text>
+
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/db0aa2800b74261f3961c5b01ae961832401f9d8/nemo_rl/algorithms/async_utils/staleness_sampler.py#L235" target="_blank" rel="noopener">
+    <text x="396" y="386">windowed.select L235</text></a>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/db0aa2800b74261f3961c5b01ae961832401f9d8/nemo_rl/algorithms/async_utils/staleness_sampler.py#L315" target="_blank" rel="noopener">
+    <text x="600" y="386">weight_fifo.select L315</text></a>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/db0aa2800b74261f3961c5b01ae961832401f9d8/nemo_rl/algorithms/async_utils/staleness_sampler.py#L359" target="_blank" rel="noopener">
+    <text x="804" y="386">in_order.select L359</text></a>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/db0aa2800b74261f3961c5b01ae961832401f9d8/nemo_rl/algorithms/async_utils/staleness_sampler.py#L376" target="_blank" rel="noopener">
+    <text x="804" y="404">in_order.evict L376</text></a>
+
+  <text class="sm" x="14" y="440">All three then go through the same finalize: cap at max_prompt_groups, return None if fewer than min_prompt_groups,</text>
+  <text class="sm" x="14" y="456">never wait to fill the batch.</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/db0aa2800b74261f3961c5b01ae961832401f9d8/nemo_rl/algorithms/async_utils/staleness_sampler.py#L179" target="_blank" rel="noopener">
+    <text x="14" y="476">BaseSampler._finalize_selection L179</text></a>
+</svg>
+
+<div class="legend">
+<div><span class="sw" style="background:var(--sel);border-color:var(--sel-br)"></span>selected this step</div>
+<div><span class="sw" style="background:var(--keep);border-color:var(--keep-br)"></span>kept in buffer</div>
+<div><span class="sw" style="background:var(--ev);border-color:var(--ev-br)"></span>evicted (rows freed)</div>
+<div><span class="sw" style="background:var(--skip);border-color:var(--skip-br)"></span>skipped — not ready</div>
+</div>
+
+<h2>4. The <code>admit</code> gate: how far rollout may run ahead</h2>
+<svg viewBox="0 0 1000 250" role="img" aria-label="Admit gate comparison">
+  <text class="ttl" x="14" y="22" style="fill:var(--green)">windowed — ungated</text>
+  <rect x="14" y="34" width="960" height="34" rx="7" style="fill:var(--sel);stroke:var(--sel-br);stroke-width:2"/>
+  <text x="28" y="56" style="font-size:11.5px">admit() returns immediately, always. Dispatch is bounded only by max_buffered_rollouts back-pressure.</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/db0aa2800b74261f3961c5b01ae961832401f9d8/nemo_rl/algorithms/async_utils/staleness_sampler.py#L231" target="_blank" rel="noopener">
+    <text x="28" y="88">WindowedSampler.admit L231 — “dispatch is bounded by buffer capacity, not by version”</text></a>
+
+  <text class="ttl" x="14" y="122" style="fill:var(--orange)">weight_fifo / in_order — gated</text>
+  <rect x="14" y="134" width="960" height="34" rx="7" style="fill:var(--keep);stroke:var(--keep-br);stroke-width:2"/>
+  <text x="28" y="156" style="font-size:11.5px">while dispatch_index &gt;= trainer_version + gate_window: sleep(5ms)   →  at train=5, gate=1, blocks once dispatch_index hits 6</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/db0aa2800b74261f3961c5b01ae961832401f9d8/nemo_rl/algorithms/async_utils/staleness_sampler.py#L294" target="_blank" rel="noopener">
+    <text x="28" y="188">_GatedSampler.admit L294</text></a>
+  <text class="sm" x="28" y="212">in_order additionally stamps target_step = dispatch_index here — that stamp is what its select/evict key on.</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/db0aa2800b74261f3961c5b01ae961832401f9d8/nemo_rl/algorithms/async_utils/staleness_sampler.py#L356" target="_blank" rel="noopener">
+    <text x="28" y="232">InOrderSampler._stamp L356</text></a>
+</svg>
+
+<p>With <code>in_order</code> and <code>max_lookahead_versions: 0</code> the gate blocks until
+<code>dispatch_index == trainer_version</code>, so batch <em>N</em> is dispatched only once the trainer
+reaches step <em>N</em>, and its <code>target_step</code> stamp guarantees only step <em>N</em> can consume it.
+That is exactly the on-policy/sync recipe — and it's why <code>is_on_policy</code> is
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/db0aa2800b74261f3961c5b01ae961832401f9d8/nemo_rl/algorithms/async_utils/staleness_sampler.py#L165">derived from the eviction window being 0</a>
+rather than being its own flag.</p>
+
+<h2>5. Three behaviours the table doesn't hint at</h2>
+
+<div class="card"><div class="card-title"><code>sample_freshest_first</code> changes <em>which</em> groups you train on, not just their order</div>
+On the buffer above, <code>windowed</code> with the default <code>false</code> takes buffer order → <strong>B, C, D</strong>.
+With <code>true</code> it sorts by lag and takes <strong>D, E, B</strong> — a different set, because the cap bites after the sort.
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/db0aa2800b74261f3961c5b01ae961832401f9d8/nemo_rl/algorithms/async_utils/staleness_sampler.py#L249">L249</a></div>
+
+<div class="card"><div class="card-title"><code>weight_fifo</code> can stall on a weight that has no ready groups</div>
+Its <code>in_window</code> scan does <em>not</em> filter on <code>ready</code>, so an uncommitted slot at weight 4 still
+sets <code>target_version = 4</code>; the ready-filtered pass then finds nothing and the step returns
+<code>(None, 0)</code>. That is the documented "waits for that weight's batch to fill" behaviour — worth
+saying out loud, since it looks like a deadlock in a log.
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/db0aa2800b74261f3961c5b01ae961832401f9d8/nemo_rl/algorithms/async_utils/staleness_sampler.py#L320">L320-330</a></div>
+
+<div class="card"><div class="card-title"><code>in_order</code> must override <code>evict</code>, or evict and select would disagree</div>
+The default <code>evict</code> drops by <code>start_weight</code>; <code>in_order</code> selects by <code>target_step</code>.
+If it inherited the default, a group whose target step is still <em>upcoming</em> (like E) could be
+evicted early for being weight-stale. It overrides evict to key on <code>target_step</code> so the two
+always agree.
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/db0aa2800b74261f3961c5b01ae961832401f9d8/nemo_rl/algorithms/async_utils/staleness_sampler.py#L376">L376</a></div>
+
+<h2>Rule summary</h2>
+<table>
+<tr><th>Mode</th><th><code>admit</code></th><th><code>select</code></th><th><code>evict</code></th></tr>
+<tr><td><code>windowed</code></td><td>never gates</td><td>any ready group with <span class="key-sw">start_weight</span> ∈ <code>[train−S, train]</code>, optionally freshest-first</td><td><span class="key-sw">start_weight</span> &lt; <code>train−S</code></td></tr>
+<tr><td><code>weight_fifo</code></td><td>blocks at <code>train+S</code></td><td>only the <em>oldest</em> in-window <span class="key-sw">start_weight</span>; waits for that weight to fill</td><td><span class="key-sw">start_weight</span> &lt; <code>train−S</code></td></tr>
+<tr><td><code>in_order</code></td><td>blocks at <code>train+L</code>, stamps <span class="key-ts">target_step</span></td><td><span class="key-ts">target_step</span> == <code>train</code> exactly (window unused)</td><td><span class="key-ts">target_step</span> &lt; <code>train</code></td></tr>
+</table>
+
+<div class="foot">Generated by Claude Code for PR #3427 review. Every line reference is a permalink pinned to
+<code>db0aa2800b74261f3961c5b01ae961832401f9d8</code>. Offered as a starting point — copy, redraw or ignore.</div>
+</div>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+ function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+ function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
+  b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
+   else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+ document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+</body></html>
