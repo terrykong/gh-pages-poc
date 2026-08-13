@@ -48,6 +48,7 @@ svg .lbl-b{fill:var(--text);font:bold 12.5px -apple-system,sans-serif}
 svg .note{fill:var(--dim);font:11px -apple-system,sans-serif}
 svg .hdr{fill:var(--accent);font:bold 12.5px -apple-system,sans-serif}
 svg .arrow{stroke:var(--dim);stroke-width:1.6;fill:none;marker-end:url(#arr)}
+svg .ctrl{stroke:var(--accent);stroke-width:1.6;fill:none;stroke-dasharray:5 4;marker-end:url(#arr)}
 svg .s-ok{fill:var(--green);opacity:.5;stroke:var(--green)}
 svg .s-sus{fill:var(--orange);opacity:.5;stroke:var(--orange)}
 svg .s-dead{fill:var(--red);opacity:.5;stroke:var(--red)}
@@ -83,9 +84,11 @@ and the <strong>generate path</strong>, which reports failures it hits on real r
 Three things read it: the shard picker for the next request, the membership push to the NeMo-Gym router, and the watchdog.
 The <strong>watchdog</strong> is a different animal — it does not care about shards; it checks one number every 30 seconds
 (<em>how long since any rollout finished?</em>) and kills the run if the answer is "too long"
-(<a href="https://github.com/NVIDIA-NeMo/RL/blob/cff673ed3a69dacad42d2ffebe3bf318ab95593e/nemo_rl/algorithms/single_controller.py#L715">:715</a>).</p>
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/cff673ed3a69dacad42d2ffebe3bf318ab95593e/nemo_rl/algorithms/single_controller.py#L715">:715</a>).
+On the NeMo-Gym path there is one more piece: a <strong>router</strong> actor that all Gym requests flow through.
+The ledger's serving set is <em>pushed</em> into it — the router itself asks nothing and reports nothing back.</p>
 
-<svg viewBox="0 0 980 470" role="img" aria-label="Data flow: probe loop and generate path feed the fleet ledger; shard picker, router push, and watchdog read it; the driver pings the whole event loop from outside">
+<svg viewBox="0 0 980 660" role="img" aria-label="Data flow: probe loop and generate path feed the fleet ledger; shard picker, router push, and watchdog read it; the driver pings the whole event loop from outside; Gym requests flow through the router to serving shards">
 <defs><marker id="arr" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto">
 <path d="M0,0 L7,3 L0,6 z" fill="var(--dim)"/></marker></defs>
 
@@ -189,6 +192,32 @@ The <strong>watchdog</strong> is a different animal — it does not care about s
 <text x="276" y="448" class="note">_run_with_liveness_watch: ping() — is the event loop above frozen? :170</text></a>
 <path class="arrow" d="M474,410 L474,388"/>
 <text x="480" y="404" class="note">ping</text>
+
+<!-- request traffic lane: Gym -> router -> shards -->
+<text x="30" y="512" class="hdr">where requests actually flow (Gym path only)</text>
+<rect x="740" y="530" width="210" height="88" class="box"/>
+<text x="750" y="550" class="lbl-b">NeMo-Gym</text>
+<text x="750" y="566" class="note">holds ONE fixed URL for the</text>
+<text x="750" y="580" class="note">whole run; never re-resolves,</text>
+<text x="750" y="594" class="note">never fails over — that is why</text>
+<text x="750" y="608" class="note">the router exists</text>
+
+<rect x="380" y="530" width="300" height="88" class="box"/>
+<text x="392" y="550" class="lbl-b">router — a real HTTP proxy actor</text>
+<text x="392" y="566" class="note">every request and response streams through it;</text>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/cff673ed3a69dacad42d2ffebe3bf318ab95593e/nemo_rl/models/generation/policy_router.py#L115">
+<text x="392" y="584" class="note">picks the serving backend with fewest in flight :115</text></a>
+<text x="392" y="600" class="note">asks nothing, reports nothing back to the ledger</text>
+
+<path class="arrow" d="M740,574 L680,574"/>
+<text x="688" y="566" class="note">request</text>
+<path class="arrow" d="M380,574 L105,574 L105,196"/>
+<text x="120" y="566" class="note">forward to a serving shard only</text>
+
+<path class="ctrl" d="M840,192 L840,480 L530,480 L530,530"/>
+<text x="546" y="474" class="note">serving set — pushed one way; a dead shard's URL simply stops arriving</text>
+
+<text x="30" y="648" class="note">native GRPO path skips this lane: the picker (top right) chooses a shard and the SC calls it directly.</text>
 </svg>
 
 <h2>One dead engine, step by step</h2>
