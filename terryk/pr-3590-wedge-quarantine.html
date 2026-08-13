@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NVIDIA-NeMo/RL #3590 — how a wedged engine gets quarantined (review proposal)</title>
+<style>
+:root{
+  --bg:#0d1117; --surface:#161b22; --surface2:#1c2128; --border:#30363d;
+  --text:#e6edf3; --dim:#8b949e; --accent:#58a6ff; --green:#3fb950;
+  --orange:#d29922; --red:#f85149;
+}
+:root[data-theme="light"]{
+  --bg:#ffffff; --surface:#f6f8fa; --surface2:#eaeef2; --border:#d0d7de;
+  --text:#1f2328; --dim:#59636e; --accent:#0969da; --green:#1a7f37;
+  --orange:#9a6700; --red:#cf222e;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:28px 20px 70px}
+h1{font-size:22px;margin:0 0 8px;line-height:1.3}
+h2{font-size:18px;margin:32px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;
+  font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
+.sub{color:var(--dim);font-size:13.5px;margin:0 0 16px}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);
+  border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;
+  font:13px/1 ui-monospace,Menlo,monospace;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.18)}
+.warn{border-left:3px solid var(--red);background:var(--surface);
+  padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0}
+table{border-collapse:collapse;font-size:13.5px;margin:12px 0}
+th,td{border:1px solid var(--border);padding:5px 10px;text-align:left}
+th{background:var(--surface)}
+.ok{color:var(--green);font-weight:700}
+.sus{color:var(--orange);font-weight:700}
+.dead{color:var(--red);font-weight:700}
+svg{max-width:100%;height:auto;display:block;margin:16px 0}
+svg .lbl{fill:var(--text);font:12px ui-monospace,Menlo,monospace}
+svg .lbl-b{fill:var(--text);font:bold 13px -apple-system,sans-serif}
+svg .note{fill:var(--dim);font:11px -apple-system,sans-serif}
+svg .hdr{fill:var(--accent);font:bold 12.5px -apple-system,sans-serif}
+svg .axis{stroke:var(--border);stroke-width:1.2}
+svg .seg-in{fill:var(--orange);opacity:.55}
+svg .seg-out{fill:var(--dim);opacity:.22}
+svg .seg-dead{fill:var(--red);opacity:.3}
+svg .drop{stroke:var(--red);stroke-width:2.2}
+svg .push{stroke:var(--accent);stroke-width:2;marker-end:url(#arrb)}
+svg .sac{fill:var(--red)}
+svg .st{fill:var(--text);font:10.5px ui-monospace,Menlo,monospace}
+svg a text{text-decoration:underline;fill:var(--accent);font:11px ui-monospace,Menlo,monospace}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+  document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head>
+<body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+  function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+  function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
+    b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
+      else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+  document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+<div class="wrap">
+
+<h1>How a wedged engine gets quarantined — the fix proposed in review</h1>
+<p class="sub">Review proposal on <a href="https://github.com/NVIDIA-NeMo/RL/pull/3590">NVIDIA-NeMo/RL #3590</a>
+(not yet code in the PR). Companion to
+<a href="pr-3590-who-watches-what.html">who-watches-what</a>. Permalinks pin <code>8fec944</code>.</p>
+
+<p>A <strong>wedged</strong> engine is the worst failure: the worker process is alive, so the health probe
+passes forever — <a href="https://github.com/NVIDIA-NeMo/RL/blob/8fec9443c7ce32d657aced1f1ed64a4229a6d2c0/nemo_rl/models/generation/vllm/vllm_worker.py#L614-L616"><code>is_alive</code> is literally <code>return True</code></a> —
+but generation requests sent to it never come back. No probe can detect this.
+<strong>Only traffic can</strong>: a request that times out is the proof.
+The review proposes two layers on the router's error path. Layer 1, the <em>reflex</em>: on a failed
+forward, remove that backend from the router's local serving list at once. Layer 2, the <em>report</em>:
+count those failures per URL, let the 5-second control tick collect the counts, and feed them into the
+health ledger through <a href="https://github.com/NVIDIA-NeMo/RL/blob/8fec9443c7ce32d657aced1f1ed64a4229a6d2c0/nemo_rl/models/generation/fleet_health.py#L247"><code>report_failure</code></a> —
+the same call the non-Gym path already uses for failures a probe cannot see.</p>
+
+<svg viewBox="0 0 980 480" role="img" aria-label="Two timelines: with the reflex alone the wedged backend re-enters the serving list every 5 seconds forever; with pulled reports the ledger quarantines it at the first tick">
+<defs><marker id="arrb" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto">
+<path d="M0,0 L7,3 L0,6 z" fill="var(--accent)"/></marker></defs>
+
+<!-- time axis labels -->
+<text x="30" y="30" class="hdr">Layer 1 alone (reflex drop) — the cycle repeats forever</text>
+
+<!-- timeline 1 -->
+<line x1="60" y1="130" x2="920" y2="130" class="axis"/>
+<text x="55" y="148" class="note">0s</text>
+<text x="265" y="148" class="note">5s</text>
+<text x="475" y="148" class="note">10s</text>
+<text x="685" y="148" class="note">15s</text>
+<text x="895" y="148" class="note">20s</text>
+
+<!-- W in/out segments: in [0-2],[5-7],[10-12],[15-17] out otherwise; x = 60 + t*43 -->
+<rect x="60" y="100" width="86" height="30" class="seg-in"/>
+<rect x="146" y="100" width="129" height="30" class="seg-out"/>
+<rect x="275" y="100" width="86" height="30" class="seg-in"/>
+<rect x="361" y="100" width="129" height="30" class="seg-out"/>
+<rect x="490" y="100" width="86" height="30" class="seg-in"/>
+<rect x="576" y="100" width="129" height="30" class="seg-out"/>
+<rect x="705" y="100" width="86" height="30" class="seg-in"/>
+<rect x="791" y="100" width="129" height="30" class="seg-out"/>
+
+<!-- sacrificial request dots on in-segments -->
+<circle cx="80" cy="115" r="4" class="sac"/><circle cx="105" cy="115" r="4" class="sac"/><circle cx="130" cy="115" r="4" class="sac"/>
+<circle cx="295" cy="115" r="4" class="sac"/><circle cx="320" cy="115" r="4" class="sac"/><circle cx="345" cy="115" r="4" class="sac"/>
+<circle cx="510" cy="115" r="4" class="sac"/><circle cx="535" cy="115" r="4" class="sac"/><circle cx="560" cy="115" r="4" class="sac"/>
+<circle cx="725" cy="115" r="4" class="sac"/><circle cx="750" cy="115" r="4" class="sac"/><circle cx="775" cy="115" r="4" class="sac"/>
+
+<!-- drops -->
+<line x1="146" y1="95" x2="146" y2="135" class="drop"/>
+<line x1="361" y1="95" x2="361" y2="135" class="drop"/>
+<line x1="576" y1="95" x2="576" y2="135" class="drop"/>
+<line x1="791" y1="95" x2="791" y2="135" class="drop"/>
+<text x="150" y="92" class="note">reflex drop (first failure returns)</text>
+
+<!-- pushes -->
+<line x1="275" y1="170" x2="275" y2="135" class="push"/>
+<line x1="490" y1="170" x2="490" y2="135" class="push"/>
+<line x1="705" y1="170" x2="705" y2="135" class="push"/>
+<text x="230" y="185" class="note">membership push re-adds W every 5s — the ledger still thinks W is fine</text>
+<text x="925" y="120" class="lbl-b">∞</text>
+
+<text x="60" y="70" class="lbl">wedged backend W:</text>
+<rect x="205" y="58" width="14" height="14" class="seg-in"/><text x="224" y="70" class="note">in serving list (eating requests)</text>
+<rect x="450" y="58" width="14" height="14" class="seg-out"/><text x="469" y="70" class="note">dropped (quiet)</text>
+<circle cx="640" cy="65" r="4" class="sac"/><text x="650" y="70" class="note">sacrificed request (fails, then retried on a healthy shard)</text>
+
+<!-- Layer 2 -->
+<text x="30" y="245" class="hdr">Layers 1 + 2 (reflex + pulled reports) — over at the first tick</text>
+
+<line x1="60" y1="345" x2="920" y2="345" class="axis"/>
+<text x="55" y="363" class="note">0s</text>
+<text x="265" y="363" class="note">5s</text>
+<text x="475" y="363" class="note">10s</text>
+<text x="685" y="363" class="note">15s</text>
+<text x="895" y="363" class="note">20s</text>
+
+<rect x="60" y="315" width="86" height="30" class="seg-in"/>
+<rect x="146" y="315" width="129" height="30" class="seg-out"/>
+<rect x="275" y="315" width="645" height="30" class="seg-dead"/>
+
+<circle cx="80" cy="330" r="4" class="sac"/><circle cx="105" cy="330" r="4" class="sac"/><circle cx="130" cy="330" r="4" class="sac"/>
+<text x="70" y="308" class="note">3 failures counted</text>
+<line x1="146" y1="310" x2="146" y2="350" class="drop"/>
+
+<line x1="275" y1="385" x2="275" y2="350" class="push"/>
+<text x="180" y="400" class="note">5s tick: probe (ok) → drain {W: 3} → report_failure ×3 ≥ unhealthy_threshold → </text>
+<text x="620" y="400" class="lbl-b">W is DEAD in the ledger</text>
+<text x="290" y="335" class="st">quarantined — every future push excludes W; part 4's supervisor restarts it,</text>
+<text x="290" y="350" class="st">and it re-enters only after a completed weight sync (STALE → refit)</text>
+
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/8fec9443c7ce32d657aced1f1ed64a4229a6d2c0/nemo_rl/algorithms/single_controller.py#L718">
+<text x="60" y="440" class="note">tick = _fleet_probe_pump :718</text></a>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/8fec9443c7ce32d657aced1f1ed64a4229a6d2c0/nemo_rl/models/generation/fleet_health.py#L247">
+<text x="290" y="440" class="note">report_failure :247</text></a>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/8fec9443c7ce32d657aced1f1ed64a4229a6d2c0/nemo_rl/models/generation/fleet_health.py#L242-L243">
+<text x="470" y="440" class="note">threshold → DEAD :242</text></a>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/8fec9443c7ce32d657aced1f1ed64a4229a6d2c0/nemo_rl/models/generation/policy_router.py#L96">
+<text x="650" y="440" class="note">push = set_serving_backends :96</text></a>
+</svg>
+
+<h2>One wedge, tick by tick</h2>
+<p>Two shards: <strong>A</strong> healthy, <strong>W</strong> wedged. Read timeout a few seconds
+(the review also asks for `sock_read` instead of `total=600s` — without that, replace "2 s" with "600 s" below).
+Probe every 5 s, `unhealthy_threshold: 3`.</p>
+<table>
+<tr><th>t</th><th>event</th><th>W failures this window</th><th>W in router's list?</th><th>ledger says W is</th></tr>
+<tr><td>0–2 s</td><td>3 requests park on W (its in-flight count was lowest)</td><td>0</td><td class="sus">yes</td><td class="ok">HEALTHY</td></tr>
+<tr><td>~2 s</td><td>first one times out → 500 to Gym → <strong>reflex drop</strong>; all 3 retried by Gym, land on A, their rollouts keep going</td><td>3</td><td class="dead">no</td><td class="ok">HEALTHY</td></tr>
+<tr><td>5 s</td><td>tick: probe W → ok (process alive, streak resets) → <strong>drain {W: 3} → report_failure ×3</strong> → threshold hit</td><td>0</td><td class="dead">no</td><td class="dead">DEAD</td></tr>
+<tr><td>&gt;5 s</td><td>every push sends only A. Part 4's supervisor restarts W; it serves again only after the next weight sync.</td><td>—</td><td class="dead">no</td><td class="dead">DEAD → RESTARTING</td></tr>
+</table>
+<p><strong>The honest boundary:</strong> the probe's "ok" resets the failure streak
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/8fec9443c7ce32d657aced1f1ed64a4229a6d2c0/nemo_rl/models/generation/fleet_health.py#L229-L230">record_probe:229</a>),
+so quarantine needs ≥3 reported failures inside <em>one</em> 5-second window. Under real load that is the
+common case (the table above). Under a trickle — one request per window — W bounces between HEALTHY and
+SUSPECT and is never condemned; the reflex keeps the cost at one cheap sacrifice per push, but the tax
+never ends. A fix that survives trickle load would keep a separate streak for reported failures, one the
+probe's ok cannot reset.</p>
+
+<h2>Is any of this real?</h2>
+<table>
+<tr><th>piece</th><th>status</th></tr>
+<tr><td>reflex drop + deliberate 500</td><td>proposed in review, with a committable suggestion on the PR — not yet code</td></tr>
+<tr><td>pulled failure reports</td><td>proposed in review, sketch only</td></tr>
+<tr><td>the machinery the proposal reuses</td><td>already in the PR and tested: <code>report_failure</code> counting like probe failures (<code>test_reported_failures_count_the_same_as_probe_failures</code>), thresholds → DEAD, DEAD excluded from pushes</td></tr>
+<tr><td>restart + re-admission after DEAD</td><td>lands in parts 3–4 of the stack, with its own unit suite (dead shard restarted; restarted shard is STALE, not serving; a refit returns it)</td></tr>
+</table>
+<p>Nothing here was executed end to end; the timings are arithmetic from the config defaults.</p>
+
+<div class="warn">
+<strong>What to remember.</strong> A wedge is invisible to every probe — only a failed request proves it.
+The reflex drop turns the first failure into immediate local avoidance; the pulled report turns repeated
+failures into a real quarantine using the ledger's existing thresholds; part 4 then replaces the engine.
+Without the report layer, the membership push faithfully restores the wedged URL every 5 seconds and the
+sacrifice cycle runs for the rest of the job.
+</div>
+
+</div>
+</body>
+</html>
