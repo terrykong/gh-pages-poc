@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NVIDIA-NeMo/RL #3599 — how a checkpoint can lose prompts that never failed</title>
+<style>
+:root{
+  --bg:#0d1117; --surface:#161b22; --surface2:#1c2128; --border:#30363d;
+  --text:#e6edf3; --dim:#8b949e; --accent:#58a6ff; --green:#3fb950;
+  --orange:#d29922; --red:#f85149; --purple:#bc8cff;
+}
+:root[data-theme="light"]{
+  --bg:#ffffff; --surface:#f6f8fa; --surface2:#eaeef2; --border:#d0d7de;
+  --text:#1f2328; --dim:#59636e; --accent:#0969da; --green:#1a7f37;
+  --orange:#9a6700; --red:#cf222e; --purple:#8250df;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:28px 20px 70px}
+h1{font-size:22px;margin:0 0 8px;line-height:1.3}
+h2{font-size:18px;margin:30px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;
+  font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
+.sub{color:var(--dim);font-size:13.5px;margin:0 0 16px}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);
+  border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;
+  font:13px/1 ui-monospace,Menlo,monospace;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.18)}
+.mono{font:12.5px ui-monospace,SFMono-Regular,Menlo,monospace;
+  background:var(--surface);border:1px solid var(--border);border-radius:8px;
+  padding:13px;overflow-x:auto;white-space:pre}
+.warn{border-left:3px solid var(--red);background:var(--surface);
+  padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0}
+.cm{color:var(--dim)}
+.val{color:var(--orange);font-weight:600}
+.drop{color:var(--red);font-weight:700}
+.kept{color:var(--green);font-weight:700}
+.src{font-size:12.5px;color:var(--dim);margin:-6px 0 18px}
+.src a{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+table{border-collapse:collapse;width:100%;font-size:13.5px;margin:12px 0}
+th,td{border:1px solid var(--border);padding:7px 10px;text-align:left}
+th{background:var(--surface);font-weight:600}
+svg{max-width:100%;height:auto;display:block;margin:16px 0}
+svg .box{fill:var(--surface);stroke:var(--border);stroke-width:1.4}
+svg .lbl{fill:var(--text);font:12.5px ui-monospace,Menlo,monospace}
+svg .note{fill:var(--dim);font:11.5px -apple-system,sans-serif}
+svg .hdr{fill:var(--accent);font:bold 12.5px -apple-system,sans-serif}
+svg .c-tr{fill:var(--green);opacity:.5;stroke:var(--green)}
+svg .c-fly{fill:var(--purple);opacity:.5;stroke:var(--purple)}
+svg .c-fail{fill:var(--dim);opacity:.3;stroke:var(--dim);stroke-dasharray:3 2}
+svg .c-lost{fill:var(--red);opacity:.6;stroke:var(--red)}
+svg .c-re{fill:var(--orange);opacity:.55;stroke:var(--orange);stroke-dasharray:3 2}
+svg .c-und{fill:var(--dim);opacity:.22;stroke:var(--dim);stroke-dasharray:3 2}
+svg .c-txt{fill:var(--text);font:10px ui-monospace,Menlo,monospace}
+svg .cursor{stroke:var(--orange);stroke-width:2.2;fill:none}
+svg .cursor-lbl{fill:var(--orange);font:bold 11.5px -apple-system,sans-serif}
+svg .bad{fill:var(--red);font:bold 12.5px -apple-system,sans-serif}
+svg .tick{stroke:var(--dim);stroke-width:1}
+svg .t0{stroke:var(--green);stroke-width:2.5}
+svg .t1{stroke:var(--purple);stroke-width:2.5}
+svg a text{text-decoration:underline;fill:var(--accent);font:11.5px ui-monospace,Menlo,monospace}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+  document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head>
+<body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+  function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+  function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
+    b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
+      else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+  document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+<div class="wrap">
+
+<h1>How a checkpoint can still lose prompts that never failed</h1>
+<p class="sub">A gap found reviewing <a href="https://github.com/NVIDIA-NeMo/RL/pull/3599">NVIDIA-NeMo/RL #3599</a> ·
+the problem that PR fixes is drawn <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-3599-frontier-checkpoint.html">here</a> ·
+all permalinks pin the head <code>95844b6</code>.</p>
+
+<p>PR #3599 makes an async-GRPO checkpoint save the loader's place from <em>before</em> the oldest
+unfinished prompt, so a restart re-does them instead of skipping them. It rests on one rule: every
+prompt below that saved place is already trained. That rule breaks when a prompt group is allowed to
+fail. The run hands work to two training steps at once
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/95844b65824bd7d1366c1f17d6d34a41eab3b675/nemo_rl/algorithms/async_utils/trajectory_collector.py#L216">trajectory_collector.py:216-222</a>), and when one of them loses a group to a
+tolerated failure it is refilled from prompts much further down the stream
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/95844b65824bd7d1366c1f17d6d34a41eab3b675/nemo_rl/algorithms/async_utils/trajectory_collector.py#L666">:666</a>). Training that step then pushes the saved place <em>past</em> prompts
+that are still being answered for the other step — and those are in no buffer, so nothing brings them
+back.</p>
+
+<h2>Where the prompts go</h2>
+
+<svg viewBox="0 0 900 360" role="img" aria-label="24 prompts in 3 batches of 8. Step 0 is refilled from prompts 16-20 after a failure, so the frontier lands at 21 and the loader rewinds to 16, leaving prompts 8-15 — still generating for step 1 — behind the rewind point and lost.">
+  <text class="hdr" x="16" y="20">24 prompts, handed out 8 at a time. Two training steps are being filled at once.</text>
+
+  <text class="cursor-lbl" x="609" y="46" text-anchor="middle">loader rewinds to here</text>
+  <text class="cursor-lbl" x="770" y="66" text-anchor="middle">trained up to here</text>
+  <path class="cursor" d="M609 50 L609 116"/>
+  <path class="cursor" d="M769.5 70 L769.5 116"/>
+
+  <text class="hdr" x="16" y="80">① at the save</text>
+
+    <rect class="c-tr" x="100" y="86" width="27" height="24" rx="3"/>
+  <text class="c-txt" x="113.5" y="102" text-anchor="middle">0</text>
+  <rect class="c-tr" x="132" y="86" width="27" height="24" rx="3"/>
+  <text class="c-txt" x="145.5" y="102" text-anchor="middle">1</text>
+  <rect class="c-tr" x="164" y="86" width="27" height="24" rx="3"/>
+  <text class="c-txt" x="177.5" y="102" text-anchor="middle">2</text>
+  <rect class="c-fail" x="196" y="86" width="27" height="24" rx="3"/>
+  <text class="c-txt" x="209.5" y="102" text-anchor="middle">3</text>
+  <rect class="c-fail" x="228" y="86" width="27" height="24" rx="3"/>
+  <text class="c-txt" x="241.5" y="102" text-anchor="middle">4</text>
+  <rect class="c-fail" x="260" y="86" width="27" height="24" rx="3"/>
+  <text class="c-txt" x="273.5" y="102" text-anchor="middle">5</text>
+  <rect class="c-fail" x="292" y="86" width="27" height="24" rx="3"/>
+  <text class="c-txt" x="305.5" y="102" text-anchor="middle">6</text>
+  <rect class="c-fail" x="324" y="86" width="27" height="24" rx="3"/>
+  <text class="c-txt" x="337.5" y="102" text-anchor="middle">7</text>
+  <rect class="c-fly" x="356" y="86" width="27" height="24" rx="3"/>
+  <text class="c-txt" x="369.5" y="102" text-anchor="middle">8</text>
+  <rect class="c-fly" x="388" y="86" width="27" height="24" rx="3"/>
+  <text class="c-txt" x="401.5" y="102" text-anchor="middle">9</text>
+  <rect class="c-fly" x="420" y="86" width="27" height="24" rx="3"/>
+  <text class="c-txt" x="433.5" y="102" text-anchor="middle">10</text>
+  <rect class="c-fly" x="452" y="86" width="27" height="24" rx="3"/>
+  <text class="c-txt" x="465.5" y="102" text-anchor="middle">11</text>
+  <rect class="c-fly" x="484" y="86" width="27" height="24" rx="3"/>
+  <text class="c-txt" x="497.5" y="102" text-anchor="middle">12</text>
+  <rect class="c-fly" x="516" y="86" width="27" height="24" rx="3"/>
+  <text class="c-txt" x="529.5" y="102" text-anchor="middle">13</text>
+  <rect class="c-fly" x="548" y="86" width="27" height="24" rx="3"/>
+  <text class="c-txt" x="561.5" y="102" text-anchor="middle">14</text>
+  <rect class="c-fly" x="580" y="86" width="27" height="24" rx="3"/>
+  <text class="c-txt" x="593.5" y="102" text-anchor="middle">15</text>
+  <rect class="c-tr" x="612" y="86" width="27" height="24" rx="3"/>
+  <text class="c-txt" x="625.5" y="102" text-anchor="middle">16</text>
+  <rect class="c-tr" x="644" y="86" width="27" height="24" rx="3"/>
+  <text class="c-txt" x="657.5" y="102" text-anchor="middle">17</text>
+  <rect class="c-tr" x="676" y="86" width="27" height="24" rx="3"/>
+  <text class="c-txt" x="689.5" y="102" text-anchor="middle">18</text>
+  <rect class="c-tr" x="708" y="86" width="27" height="24" rx="3"/>
+  <text class="c-txt" x="721.5" y="102" text-anchor="middle">19</text>
+  <rect class="c-tr" x="740" y="86" width="27" height="24" rx="3"/>
+  <text class="c-txt" x="753.5" y="102" text-anchor="middle">20</text>
+  <rect class="c-und" x="772" y="86" width="27" height="24" rx="3"/>
+  <text class="c-txt" x="785.5" y="102" text-anchor="middle">21</text>
+  <rect class="c-und" x="804" y="86" width="27" height="24" rx="3"/>
+  <text class="c-txt" x="817.5" y="102" text-anchor="middle">22</text>
+  <rect class="c-und" x="836" y="86" width="27" height="24" rx="3"/>
+  <text class="c-txt" x="849.5" y="102" text-anchor="middle">23</text>
+
+  <path class="t0" d="M100 122 L191 122"/>
+  <path class="t1" d="M356 122 L607 122"/>
+  <path class="t0" d="M612 122 L767 122"/>
+  <text class="note" x="145" y="136" text-anchor="middle">step 0</text>
+  <text class="note" x="273" y="136" text-anchor="middle">lost to the failure</text>
+  <text class="note" x="481" y="136" text-anchor="middle">step 1 — still being answered</text>
+  <text class="note" x="689" y="136" text-anchor="middle">step 0, refilled</text>
+  <text class="note" x="820" y="136" text-anchor="middle">not handed out</text>
+
+  <text class="note" x="16" y="162">Step 0 is refilled from 16-20 because 3-7 were lost, so its prompts sit on BOTH sides of step 1's.</text>
+  <text class="note" x="16" y="178">Training step 0 therefore reports "trained up to 21" while 8-15 have not been answered yet.</text>
+
+  <text class="hdr" x="16" y="208">② after restarting from that checkpoint</text>
+
+    <rect class="c-tr" x="100" y="214" width="27" height="24" rx="3"/>
+  <text class="c-txt" x="113.5" y="230" text-anchor="middle">0</text>
+  <rect class="c-tr" x="132" y="214" width="27" height="24" rx="3"/>
+  <text class="c-txt" x="145.5" y="230" text-anchor="middle">1</text>
+  <rect class="c-tr" x="164" y="214" width="27" height="24" rx="3"/>
+  <text class="c-txt" x="177.5" y="230" text-anchor="middle">2</text>
+  <rect class="c-fail" x="196" y="214" width="27" height="24" rx="3"/>
+  <text class="c-txt" x="209.5" y="230" text-anchor="middle">3</text>
+  <rect class="c-fail" x="228" y="214" width="27" height="24" rx="3"/>
+  <text class="c-txt" x="241.5" y="230" text-anchor="middle">4</text>
+  <rect class="c-fail" x="260" y="214" width="27" height="24" rx="3"/>
+  <text class="c-txt" x="273.5" y="230" text-anchor="middle">5</text>
+  <rect class="c-fail" x="292" y="214" width="27" height="24" rx="3"/>
+  <text class="c-txt" x="305.5" y="230" text-anchor="middle">6</text>
+  <rect class="c-fail" x="324" y="214" width="27" height="24" rx="3"/>
+  <text class="c-txt" x="337.5" y="230" text-anchor="middle">7</text>
+  <rect class="c-lost" x="356" y="214" width="27" height="24" rx="3"/>
+  <text class="c-txt" x="369.5" y="230" text-anchor="middle">8</text>
+  <rect class="c-lost" x="388" y="214" width="27" height="24" rx="3"/>
+  <text class="c-txt" x="401.5" y="230" text-anchor="middle">9</text>
+  <rect class="c-lost" x="420" y="214" width="27" height="24" rx="3"/>
+  <text class="c-txt" x="433.5" y="230" text-anchor="middle">10</text>
+  <rect class="c-lost" x="452" y="214" width="27" height="24" rx="3"/>
+  <text class="c-txt" x="465.5" y="230" text-anchor="middle">11</text>
+  <rect class="c-lost" x="484" y="214" width="27" height="24" rx="3"/>
+  <text class="c-txt" x="497.5" y="230" text-anchor="middle">12</text>
+  <rect class="c-lost" x="516" y="214" width="27" height="24" rx="3"/>
+  <text class="c-txt" x="529.5" y="230" text-anchor="middle">13</text>
+  <rect class="c-lost" x="548" y="214" width="27" height="24" rx="3"/>
+  <text class="c-txt" x="561.5" y="230" text-anchor="middle">14</text>
+  <rect class="c-lost" x="580" y="214" width="27" height="24" rx="3"/>
+  <text class="c-txt" x="593.5" y="230" text-anchor="middle">15</text>
+  <rect class="c-tr" x="612" y="214" width="27" height="24" rx="3"/>
+  <text class="c-txt" x="625.5" y="230" text-anchor="middle">16</text>
+  <rect class="c-tr" x="644" y="214" width="27" height="24" rx="3"/>
+  <text class="c-txt" x="657.5" y="230" text-anchor="middle">17</text>
+  <rect class="c-tr" x="676" y="214" width="27" height="24" rx="3"/>
+  <text class="c-txt" x="689.5" y="230" text-anchor="middle">18</text>
+  <rect class="c-tr" x="708" y="214" width="27" height="24" rx="3"/>
+  <text class="c-txt" x="721.5" y="230" text-anchor="middle">19</text>
+  <rect class="c-tr" x="740" y="214" width="27" height="24" rx="3"/>
+  <text class="c-txt" x="753.5" y="230" text-anchor="middle">20</text>
+  <rect class="c-re" x="772" y="214" width="27" height="24" rx="3"/>
+  <text class="c-txt" x="785.5" y="230" text-anchor="middle">21</text>
+  <rect class="c-re" x="804" y="214" width="27" height="24" rx="3"/>
+  <text class="c-txt" x="817.5" y="230" text-anchor="middle">22</text>
+  <rect class="c-re" x="836" y="214" width="27" height="24" rx="3"/>
+  <text class="c-txt" x="849.5" y="230" text-anchor="middle">23</text>
+
+  <text class="bad" x="100" y="264">8 prompts gone. They never failed — they were mid-generation, and the loader restarted past them.</text>
+
+  <rect class="c-tr" x="100" y="284" width="14" height="12"/>
+  <text class="note" x="120" y="294">trained</text>
+  <rect class="c-fly" x="220" y="284" width="14" height="12"/>
+  <text class="note" x="240" y="294">still being answered at the save</text>
+  <rect class="c-fail" x="470" y="284" width="14" height="12"/>
+  <text class="note" x="490" y="294">lost to the tolerated failure (already documented)</text>
+
+  <rect class="c-lost" x="100" y="308" width="14" height="12"/>
+  <text class="note" x="120" y="318">lost silently — this is the gap</text>
+  <rect class="c-re" x="330" y="308" width="14" height="12"/>
+  <text class="note" x="350" y="318">answered again after the restart</text>
+  <rect class="c-und" x="600" y="308" width="14" height="12"/>
+  <text class="note" x="620" y="318">not handed out yet</text>
+
+  <text class="note" x="16" y="348">With 8 prompts per step this loses 8. The recipe that matches this config uses 1024 per step.</text>
+</svg>
+
+<h2>The same thing in code</h2>
+
+<div class="mono"><span class="cm"># two steps are filled at once — even with max_trajectory_age_steps: 1</span>
+_calculate_target_weights(w0)   <span class="cm"># range(w0, w0+1+1) → <span class="val">[step 0, step 1]</span></span>
+
+<span class="cm"># step 0's worker dies after 3 of 8 groups; 3 failures are tolerated, so the run goes on</span>
+_release_target(0)              <span class="cm"># step 0 is free again, still needs 5</span>
+
+<span class="cm"># the loop picks step 0 again (it is the earliest) and refills it from the CURRENT batch</span>
+num_prompts_to_generate = min(8, 5)      <span class="cm"># prompts <span class="val">16..20</span> → step 0</span>
+
+<span class="cm"># step 0 now holds {0,1,2} + {16..20} → it completes and trains</span>
+done_through = max(ordinals) + 1         <span class="cm"># <span class="val">21</span>  ← past step 1's prompts 8..15</span>
+
+<span class="cm"># the checkpoint rewinds to the newest remembered place at or before 21</span>
+base = newest place &lt;= 21                <span class="cm"># places are {0, 8, 16} → <span class="val">16</span></span>
+
+<span class="cm"># prompts 8..15 are below 16, so the restart never yields them again.</span>
+<span class="cm"># they are not in replay_buffer.pt either: only finished groups are stored.</span></div>
+<p class="src">→ two steps at once <a href="https://github.com/NVIDIA-NeMo/RL/blob/95844b65824bd7d1366c1f17d6d34a41eab3b675/nemo_rl/algorithms/async_utils/trajectory_collector.py#L216">trajectory_collector.py:216-222</a> ·
+refill sizing <a href="https://github.com/NVIDIA-NeMo/RL/blob/95844b65824bd7d1366c1f17d6d34a41eab3b675/nemo_rl/algorithms/async_utils/trajectory_collector.py#L666">:666</a> ·
+release on failure <a href="https://github.com/NVIDIA-NeMo/RL/blob/95844b65824bd7d1366c1f17d6d34a41eab3b675/nemo_rl/algorithms/async_utils/trajectory_collector.py#L1218">:1218</a> ·
+frontier <a href="https://github.com/NVIDIA-NeMo/RL/blob/95844b65824bd7d1366c1f17d6d34a41eab3b675/nemo_rl/algorithms/grpo.py#L4728">grpo.py:4728-4731</a> ·
+place picked <a href="https://github.com/NVIDIA-NeMo/RL/blob/95844b65824bd7d1366c1f17d6d34a41eab3b675/nemo_rl/algorithms/async_utils/trajectory_collector.py#L561">:561-575</a></p>
+
+<h2>Does it happen?</h2>
+
+<p><strong>Not observed in a run — this is static analysis.</strong> Nobody has reproduced it on
+hardware, and I could not run the suite on this host. What I can show is that every ingredient is
+present in one shipped recipe, and that the guard which would prevent it is switched off in exactly
+that configuration.</p>
+
+<table>
+<tr><th>Ingredient</th><th><a href="https://github.com/NVIDIA-NeMo/RL/blob/95844b65824bd7d1366c1f17d6d34a41eab3b675/examples/nemo_gym/nemotron-3-ultra/mopd.yaml">nemotron-3-ultra/mopd.yaml</a></th><th>Why it matters</th></tr>
+<tr><td><code>max_generation_failures</code></td><td><a href="https://github.com/NVIDIA-NeMo/RL/blob/95844b65824bd7d1366c1f17d6d34a41eab3b675/examples/nemo_gym/nemotron-3-ultra/mopd.yaml#L109">3</a></td><td>A lost group is tolerated, so a step gets refilled from later prompts.</td></tr>
+<tr><td><code>max_trajectory_age_steps</code></td><td><a href="https://github.com/NVIDIA-NeMo/RL/blob/95844b65824bd7d1366c1f17d6d34a41eab3b675/examples/nemo_gym/nemotron-3-ultra/mopd.yaml#L108">1</a></td><td>Two steps are still filled at once in the window after any start or restart.</td></tr>
+<tr><td><code>in_flight_weight_updates</code></td><td><a href="https://github.com/NVIDIA-NeMo/RL/blob/95844b65824bd7d1366c1f17d6d34a41eab3b675/examples/nemo_gym/nemotron-3-ultra/mopd.yaml#L110">true</a></td><td>The refit does <strong>not</strong> wait for running workers (<a href="https://github.com/NVIDIA-NeMo/RL/blob/95844b65824bd7d1366c1f17d6d34a41eab3b675/nemo_rl/algorithms/async_utils/trajectory_collector.py#L830">:830-845</a>), so one is still going at save time. This is the guard that would otherwise close the gap.</td></tr>
+<tr><td><code>ft_save_period</code></td><td><a href="https://github.com/NVIDIA-NeMo/RL/blob/95844b65824bd7d1366c1f17d6d34a41eab3b675/examples/nemo_gym/nemotron-3-ultra/mopd.yaml#L53">1</a></td><td>A checkpoint is written every step, so the one inside that window always gets written — and crash recovery restarts from the newest one.</td></tr>
+<tr><td><code>num_prompts_per_step</code></td><td><a href="https://github.com/NVIDIA-NeMo/RL/blob/95844b65824bd7d1366c1f17d6d34a41eab3b675/examples/nemo_gym/nemotron-3-ultra/mopd.yaml#L63">1024</a></td><td>Sets how much is lost: up to one full step of prompts.</td></tr>
+</table>
+
+<p>Six more recipes under <code>nemo_gym/nemotron-3-super/</code> and
+<code>nemo_gym/grpo_qwen3_30ba3b_thinking_swe*.yaml</code> carry the first three; they save less often,
+so they need the save to land in the window rather than getting one there every time.</p>
+
+<div class="warn">
+<strong>What to do about it.</strong> The collector already knows which prompts are out with a
+running worker. Before picking a place to save, take the lowest prompt number still being answered
+and use <code>min(that, trained_up_to)</code> as the cut-off. That keeps the rule the design needs —
+everything below the saved place is trained, failed, or kept in the buffer — and costs nothing at
+run time. The alternative, waiting for workers to finish before each save, is simpler but gives back
+the speed that <code>in_flight_weight_updates</code> exists to buy.
+</div>
+
+</div>
+</body>
+</html>
