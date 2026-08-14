@@ -40,6 +40,10 @@ th{background:var(--surface);font-weight:600}
 .kept{color:var(--green);font-weight:700}
 .drop{color:var(--red);font-weight:700}
 .regen{color:var(--orange);font-weight:700}
+.cm{color:var(--dim)}
+.val{color:var(--orange);font-weight:600}
+.src{font-size:12.5px;color:var(--dim);margin:-6px 0 18px}
+.src a{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
 svg{max-width:100%;height:auto;display:block;margin:16px 0}
 svg .box{fill:var(--surface);stroke:var(--border);stroke-width:1.4}
 svg .lbl{fill:var(--text);font:12.5px ui-monospace,Menlo,monospace}
@@ -246,36 +250,70 @@ and the rest is generated again.</p>
   <text class="note" x="16" y="486">Nothing is trained twice: a prompt is either below the frontier, in the restored buffer, or regenerated — never two of those.</text>
 </svg>
 
-<h2>What the three files hold at that save</h2>
+<h2>The fix, in code</h2>
 
-<div class="mono">train_dataloader.pt   snapshot from the ring, base ordinal 4  →  pos 1   <span class="regen">not the live pos 3</span>
-rollouts.pt           frontier_ordinal = 5,  resume_base_ordinal = 4
-replay_buffer.pt      finished groups 6, 7, 10
+<p><strong>1. Stamp and snapshot.</strong> The collection loop takes a picture of the dataloader
+<em>before</em> each pull, then writes each prompt's stream position onto its own row. The ring keeps
+the last 512 pictures, keyed by the first ordinal in the batch they precede.</p>
 
-On resume the loader yields 4 5 6 7 | 8 9 10 11 | 12 13 14 15
-  ordinal 4           <span class="drop">drop</span>  below the frontier (5) — already trained
-  ordinals 6,7,10     <span class="drop">drop</span>  retained_task_indices, from the restored buffer
-  ordinals 5,8,9,11   <span class="regen">keep</span>  generated again under the new weights
-  ordinals 12–15      <span class="kept">keep</span>  fresh, as normal — the filter switches off here</div>
+<div class="mono">pre_pull = dataloader.state_dict()      <span class="cm"># {"pos": 1}  — before the pull, not after</span>
+batch    = next(dataloader_iter)        <span class="cm"># prompts 4,5,6,7</span>
+first    = self._next_nemo_gym_task_index   <span class="cm"># <span class="val">4</span></span>
+stamp_task_indices(batch)               <span class="cm"># rows get _ng_task_index = 4,5,6,7</span>
+ring.append((first, pre_pull))          <span class="cm"># ring = (0,pos0) (<span class="val">4,pos1</span>) (8,pos2)</span></div>
+<p class="src">→ <a href="https://github.com/NVIDIA-NeMo/RL/blob/95844b65824bd7d1366c1f17d6d34a41eab3b675/nemo_rl/algorithms/async_utils/trajectory_collector.py#L404">trajectory_collector.py:404-415</a>,
+stamping at <a href="https://github.com/NVIDIA-NeMo/RL/blob/95844b65824bd7d1366c1f17d6d34a41eab3b675/nemo_rl/algorithms/async_utils/trajectory_collector.py#L448">:448</a>,
+ring at <a href="https://github.com/NVIDIA-NeMo/RL/blob/95844b65824bd7d1366c1f17d6d34a41eab3b675/nemo_rl/algorithms/async_utils/trajectory_collector.py#L176">:176</a></p>
+
+<p><strong>2. Save the picture that matches the trained work.</strong> The frontier comes from the
+ordinals of the groups training just used, not from a step counter — a counter drifts when a tolerated
+generation failure leaves a hole in the stream.</p>
+
+<div class="mono">trained_frontier = max(trained_frontier,
+                       max(g["_ng_task_index"] for g in sampled) + 1)   <span class="cm"># <span class="val">5</span></span>
+
+snap = collector.get_checkpoint_state(trained_frontier)   <span class="cm"># one actor call, one lock</span>
+  <span class="cm">└─ best = newest ring entry with base &lt;= 5  →  (<span class="val">4, pos 1</span>)   # not (8, pos 2)</span>
+
+save(snap["dataloader"]["dataloader_state"], "train_dataloader.pt")  <span class="cm"># pos <span class="val">1</span>, <span class="drop">not the live pos 3</span></span>
+rollouts["frontier_ordinal"]    = 5   <span class="cm"># everything below this is trained</span>
+rollouts["resume_base_ordinal"] = 4   <span class="cm"># the first ordinal this state re-yields</span></div>
+<p class="src">→ frontier at <a href="https://github.com/NVIDIA-NeMo/RL/blob/95844b65824bd7d1366c1f17d6d34a41eab3b675/nemo_rl/algorithms/grpo.py#L4728">grpo.py:4728</a>,
+save at <a href="https://github.com/NVIDIA-NeMo/RL/blob/95844b65824bd7d1366c1f17d6d34a41eab3b675/nemo_rl/algorithms/grpo.py#L5283">:5283-5305</a>,
+ring pick at <a href="https://github.com/NVIDIA-NeMo/RL/blob/95844b65824bd7d1366c1f17d6d34a41eab3b675/nemo_rl/algorithms/async_utils/trajectory_collector.py#L544">trajectory_collector.py:544</a></p>
+
+<p><strong>3. Replay the window, drop what is covered.</strong> The rewound loader re-yields prompts
+the run has already dealt with. Each one is dropped at yield, so only the gap reaches generation — and
+the filter turns itself off once the window is past.</p>
+
+<div class="mono">frontier = 5 ; retained = buffer_restore["retained_task_indices"]  <span class="cm"># <span class="val">[6, 7, 10]</span></span>
+skip_horizon = max(retained + [frontier - 1])                     <span class="cm"># <span class="val">10</span></span>
+
+<span class="cm"># loader restarts at pos 1 → re-yields 4,5,6,7 | 8,9,10,11 | 12,13,14,15</span>
+for batch in loader:
+    if min(ordinals) &gt; skip_horizon:      <span class="cm"># batch 12..15 → window is past</span>
+        frontier = None ; return batch    <span class="cm"># stop filtering for the rest of the run</span>
+    keep = [o for o in ordinals if o &gt;= frontier and o not in retained]
+    <span class="cm"># batch 4,5,6,7    → keep <span class="regen">[5]</span>       (4 trained, 6 and 7 sit in the buffer)</span>
+    <span class="cm"># batch 8,9,10,11  → keep <span class="regen">[8,9,11]</span>  (10 sits in the buffer)</span></div>
+<p class="src">→ <a href="https://github.com/NVIDIA-NeMo/RL/blob/95844b65824bd7d1366c1f17d6d34a41eab3b675/nemo_rl/algorithms/async_utils/trajectory_collector.py#L486">trajectory_collector.py:486-542</a>,
+resume wiring at <a href="https://github.com/NVIDIA-NeMo/RL/blob/95844b65824bd7d1366c1f17d6d34a41eab3b675/nemo_rl/algorithms/grpo.py#L4317">grpo.py:4317-4340</a></p>
 
 <p>Set <code>checkpointing.load_replay_buffer: false</code>
 (<a href="https://github.com/NVIDIA-NeMo/RL/blob/95844b65824bd7d1366c1f17d6d34a41eab3b675/examples/configs/grpo_math_1B.yaml#L124">grpo_math_1B.yaml:124</a>)
-and the retained set is simply empty: 6, 7 and 10 are regenerated too. Same code path, no prompt lost
-either way.</p>
+and <code>retained</code> is just empty — 6, 7 and 10 get regenerated too. Same code path either way.</p>
 
 <h2>Does it work?</h2>
 
-<table>
-<tr><th>Evidence</th><th>What it shows</th></tr>
-<tr><td><a href="https://github.com/NVIDIA-NeMo/RL/blob/95844b65824bd7d1366c1f17d6d34a41eab3b675/tests/unit/algorithms/test_async_utils.py#L1530"><code>test_legacy_resume_skips_prompts_that_frontier_resume_regenerates</code></a></td>
-<td>The figure above, as a test. Runs both resumes over the same 16-prompt save. Old path: skipped set is exactly <code>[5, 8, 9, 11]</code>. New path: skipped set empty, duplicate set empty.</td></tr>
-<tr><td><a href="https://github.com/NVIDIA-NeMo/RL/blob/95844b65824bd7d1366c1f17d6d34a41eab3b675/tests/unit/algorithms/test_async_utils.py#L1435">ring-pick + fallback tests</a></td>
-<td>Ring picks the right snapshot; an empty or too-new ring falls back to the live cursor; batches that cannot carry a stamp turn the feature off instead of crashing.</td></tr>
-<tr><td>CI at head <code>95844b6</code></td>
-<td>All 17 L0 unit-test jobs pass. One L1 PPO functional job and the docs build are red; both are outside the async-GRPO path touched here.</td></tr>
-<tr><td>The 675 / 736 number</td>
-<td>Comes from the author's run <em>before</em> the fix, and is what motivated it. No post-fix long run is linked on the PR — the guarantee rests on the unit tests.</td></tr>
-</table>
+<p><strong>Nobody has posted a run.</strong> There is no W&amp;B link, no reward curve, no
+before-and-after prompt-coverage count on the PR — so there is no evidence yet that a resumed run
+converges better, or that the ~30% skip rate on the long run that motivated this actually goes to
+zero. What exists is the measurement that started it (675 of 736 skipped prompts traced to these two
+mechanisms, <em>before</em> the fix) and an A/B test that replays the figure above in miniature:
+the old path skips exactly <code>[5, 8, 9, 11]</code>, the new path skips nothing and duplicates
+nothing
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/95844b65824bd7d1366c1f17d6d34a41eab3b675/tests/unit/algorithms/test_async_utils.py#L1530">test_async_utils.py:1530</a>).
+The right thing to ask for before merging is one resumed long run with the skip count reported.</p>
 
 <div class="warn">
 <strong>Two things to know before you resume.</strong> The prompts come back, but the trajectories do
