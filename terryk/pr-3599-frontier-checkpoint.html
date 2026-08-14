@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NVIDIA-NeMo/RL #3599 — how a checkpoint stops losing in-flight prompts</title>
+<style>
+:root{
+  --bg:#0d1117; --surface:#161b22; --surface2:#1c2128; --border:#30363d;
+  --text:#e6edf3; --dim:#8b949e; --accent:#58a6ff; --green:#3fb950;
+  --orange:#d29922; --red:#f85149;
+}
+:root[data-theme="light"]{
+  --bg:#ffffff; --surface:#f6f8fa; --surface2:#eaeef2; --border:#d0d7de;
+  --text:#1f2328; --dim:#59636e; --accent:#0969da; --green:#1a7f37;
+  --orange:#9a6700; --red:#cf222e;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:28px 20px 70px}
+h1{font-size:22px;margin:0 0 8px;line-height:1.3}
+h2{font-size:18px;margin:30px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;
+  font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
+.sub{color:var(--dim);font-size:13.5px;margin:0 0 16px}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);
+  border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;
+  font:13px/1 ui-monospace,Menlo,monospace;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.18)}
+.mono{font:12.5px ui-monospace,SFMono-Regular,Menlo,monospace;
+  background:var(--surface);border:1px solid var(--border);border-radius:8px;
+  padding:13px;overflow-x:auto;white-space:pre}
+.warn{border-left:3px solid var(--orange);background:var(--surface);
+  padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0}
+table{border-collapse:collapse;width:100%;font-size:13.5px;margin:12px 0}
+th,td{border:1px solid var(--border);padding:7px 10px;text-align:left;vertical-align:top}
+th{background:var(--surface);font-weight:600}
+.kept{color:var(--green);font-weight:700}
+.drop{color:var(--red);font-weight:700}
+.regen{color:var(--orange);font-weight:700}
+svg{max-width:100%;height:auto;display:block;margin:16px 0}
+svg .box{fill:var(--surface);stroke:var(--border);stroke-width:1.4}
+svg .lbl{fill:var(--text);font:12.5px ui-monospace,Menlo,monospace}
+svg .lbl-b{fill:var(--text);font:bold 13px -apple-system,sans-serif}
+svg .note{fill:var(--dim);font:11.5px -apple-system,sans-serif}
+svg .hdr{fill:var(--accent);font:bold 12.5px -apple-system,sans-serif}
+svg .c-tr{fill:var(--green);opacity:.5;stroke:var(--green)}
+svg .c-ret{fill:var(--accent);opacity:.5;stroke:var(--accent)}
+svg .c-fly{fill:var(--orange);opacity:.5;stroke:var(--orange)}
+svg .c-lost{fill:var(--red);opacity:.55;stroke:var(--red)}
+svg .c-re{fill:var(--orange);opacity:.55;stroke:var(--orange);stroke-dasharray:3 2}
+svg .c-und{fill:var(--dim);opacity:.25;stroke:var(--dim);stroke-dasharray:3 2}
+svg .c-txt{fill:var(--text);font:10.5px ui-monospace,Menlo,monospace}
+svg .cursor{stroke:var(--orange);stroke-width:2.2;fill:none}
+svg .cursor-lbl{fill:var(--orange);font:bold 11.5px -apple-system,sans-serif}
+svg .bad{fill:var(--red);font:bold 12px -apple-system,sans-serif}
+svg .good{fill:var(--green);font:bold 12px -apple-system,sans-serif}
+svg .tick{stroke:var(--dim);stroke-width:1}
+svg a text{text-decoration:underline;fill:var(--accent);font:11.5px ui-monospace,Menlo,monospace}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+  document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head>
+<body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+  function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+  function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
+    b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
+      else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+  document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+<div class="wrap">
+
+<h1>How a checkpoint stops losing the prompts that were still generating</h1>
+<p class="sub"><a href="https://github.com/NVIDIA-NeMo/RL/pull/3599">NVIDIA-NeMo/RL #3599</a> ·
+the loss it fixes is drawn <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr3429-cursor-advance.html">here</a> ·
+all permalinks pin the head <code>95844b6</code>.</p>
+
+<p>Async GRPO pulls prompts from a dataloader and generates answers in the background, while
+training takes finished groups out of a replay buffer. The dataloader cursor moves the moment a
+batch is yielded, but the buffer only holds groups whose generation <em>finished</em> — so the saved
+cursor sat ahead of the work the checkpoint actually kept, and everything in between was lost. On one
+long run, 675 of 736 skipped prompts came from this. The fix stamps every yielded prompt with its
+position in the stream
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/95844b65824bd7d1366c1f17d6d34a41eab3b675/nemo_rl/algorithms/async_utils/trajectory_collector.py#L448">trajectory_collector.py:448</a>)
+and keeps a ring of dataloader states taken just <em>before</em> each pull
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/95844b65824bd7d1366c1f17d6d34a41eab3b675/nemo_rl/algorithms/async_utils/trajectory_collector.py#L404">:404-414</a>);
+a checkpoint saves the state matching the trained frontier instead of the live cursor
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/95844b65824bd7d1366c1f17d6d34a41eab3b675/nemo_rl/algorithms/async_utils/trajectory_collector.py#L544">:544</a>).
+On resume the loader replays that window, the collector drops rows that were already trained or are
+still in the buffer
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/95844b65824bd7d1366c1f17d6d34a41eab3b675/nemo_rl/algorithms/async_utils/trajectory_collector.py#L486">:486</a>),
+and the rest is generated again.</p>
+
+<h2>Same save, two resumes</h2>
+
+<svg viewBox="0 0 900 505" role="img" aria-label="16 prompts in 4 batches: the old resume loses prompts 5, 8, 9 and 11; the new resume rewinds the dataloader and regenerates exactly those four">
+  <text class="hdr" x="16" y="22">16 prompts stream through in 4 batches of 4. A checkpoint lands mid-batch-3.</text>
+
+  <text class="hdr" x="16" y="52">① The moment the save fires</text>
+  <text class="cursor-lbl" x="325" y="76" text-anchor="middle">trained frontier = 5</text>
+  <text class="cursor-lbl" x="619" y="76" text-anchor="middle">live cursor</text>
+  <path class="cursor" d="M325 80 L325 118"/>
+  <path class="cursor" d="M619 80 L619 118"/>
+
+  <rect class="c-tr" x="118" y="86" width="36" height="26" rx="3"/>
+  <text class="c-txt" x="136" y="103" text-anchor="middle">0</text>
+  <rect class="c-tr" x="160" y="86" width="36" height="26" rx="3"/>
+  <text class="c-txt" x="178" y="103" text-anchor="middle">1</text>
+  <rect class="c-tr" x="202" y="86" width="36" height="26" rx="3"/>
+  <text class="c-txt" x="220" y="103" text-anchor="middle">2</text>
+  <rect class="c-tr" x="244" y="86" width="36" height="26" rx="3"/>
+  <text class="c-txt" x="262" y="103" text-anchor="middle">3</text>
+  <rect class="c-tr" x="286" y="86" width="36" height="26" rx="3"/>
+  <text class="c-txt" x="304" y="103" text-anchor="middle">4</text>
+  <rect class="c-fly" x="328" y="86" width="36" height="26" rx="3"/>
+  <text class="c-txt" x="346" y="103" text-anchor="middle">5</text>
+  <rect class="c-ret" x="370" y="86" width="36" height="26" rx="3"/>
+  <text class="c-txt" x="388" y="103" text-anchor="middle">6</text>
+  <rect class="c-ret" x="412" y="86" width="36" height="26" rx="3"/>
+  <text class="c-txt" x="430" y="103" text-anchor="middle">7</text>
+  <rect class="c-fly" x="454" y="86" width="36" height="26" rx="3"/>
+  <text class="c-txt" x="472" y="103" text-anchor="middle">8</text>
+  <rect class="c-fly" x="496" y="86" width="36" height="26" rx="3"/>
+  <text class="c-txt" x="514" y="103" text-anchor="middle">9</text>
+  <rect class="c-ret" x="538" y="86" width="36" height="26" rx="3"/>
+  <text class="c-txt" x="556" y="103" text-anchor="middle">10</text>
+  <rect class="c-fly" x="580" y="86" width="36" height="26" rx="3"/>
+  <text class="c-txt" x="598" y="103" text-anchor="middle">11</text>
+  <rect class="c-und" x="622" y="86" width="36" height="26" rx="3"/>
+  <text class="c-txt" x="640" y="103" text-anchor="middle">12</text>
+  <rect class="c-und" x="664" y="86" width="36" height="26" rx="3"/>
+  <text class="c-txt" x="682" y="103" text-anchor="middle">13</text>
+  <rect class="c-und" x="706" y="86" width="36" height="26" rx="3"/>
+  <text class="c-txt" x="724" y="103" text-anchor="middle">14</text>
+  <rect class="c-und" x="748" y="86" width="36" height="26" rx="3"/>
+  <text class="c-txt" x="766" y="103" text-anchor="middle">15</text>
+
+  <path class="tick" d="M118 120 L280 120 M286 120 L448 120 M454 120 L616 120 M622 120 L784 120"/>
+  <text class="note" x="199" y="134" text-anchor="middle">batch 0</text>
+  <text class="note" x="367" y="134" text-anchor="middle">batch 1</text>
+  <text class="note" x="535" y="134" text-anchor="middle">batch 2</text>
+  <text class="note" x="703" y="134" text-anchor="middle">batch 3 — not pulled yet</text>
+
+  <text class="hdr" x="16" y="160">② What the checkpoint writes down</text>
+  <rect class="box" x="118" y="168" width="666" height="56" rx="8"/>
+  <text class="note" x="132" y="188">snapshot ring — one dataloader state kept just before each pull:</text>
+  <text class="lbl" x="132" y="208">base 0 → pos 0     base 4 → pos 1     base 8 → pos 2</text>
+  <text class="note" x="470" y="208">pick the largest base ≤ frontier 5 →</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/95844b65824bd7d1366c1f17d6d34a41eab3b675/nemo_rl/algorithms/async_utils/trajectory_collector.py#L544" target="_blank" rel="noopener"><text x="714" y="208">base 4</text></a>
+
+  <text class="hdr" x="16" y="248">③ Old resume: start from the live cursor</text>
+  <text class="cursor-lbl" x="619" y="262" text-anchor="middle">loader restarts here</text>
+  <path class="cursor" d="M619 266 L619 300"/>
+
+  <rect class="c-tr" x="118" y="268" width="36" height="26" rx="3"/>
+  <text class="c-txt" x="136" y="285" text-anchor="middle">0</text>
+  <rect class="c-tr" x="160" y="268" width="36" height="26" rx="3"/>
+  <text class="c-txt" x="178" y="285" text-anchor="middle">1</text>
+  <rect class="c-tr" x="202" y="268" width="36" height="26" rx="3"/>
+  <text class="c-txt" x="220" y="285" text-anchor="middle">2</text>
+  <rect class="c-tr" x="244" y="268" width="36" height="26" rx="3"/>
+  <text class="c-txt" x="262" y="285" text-anchor="middle">3</text>
+  <rect class="c-tr" x="286" y="268" width="36" height="26" rx="3"/>
+  <text class="c-txt" x="304" y="285" text-anchor="middle">4</text>
+  <rect class="c-lost" x="328" y="268" width="36" height="26" rx="3"/>
+  <text class="c-txt" x="346" y="285" text-anchor="middle">5</text>
+  <rect class="c-ret" x="370" y="268" width="36" height="26" rx="3"/>
+  <text class="c-txt" x="388" y="285" text-anchor="middle">6</text>
+  <rect class="c-ret" x="412" y="268" width="36" height="26" rx="3"/>
+  <text class="c-txt" x="430" y="285" text-anchor="middle">7</text>
+  <rect class="c-lost" x="454" y="268" width="36" height="26" rx="3"/>
+  <text class="c-txt" x="472" y="285" text-anchor="middle">8</text>
+  <rect class="c-lost" x="496" y="268" width="36" height="26" rx="3"/>
+  <text class="c-txt" x="514" y="285" text-anchor="middle">9</text>
+  <rect class="c-ret" x="538" y="268" width="36" height="26" rx="3"/>
+  <text class="c-txt" x="556" y="285" text-anchor="middle">10</text>
+  <rect class="c-lost" x="580" y="268" width="36" height="26" rx="3"/>
+  <text class="c-txt" x="598" y="285" text-anchor="middle">11</text>
+  <rect class="c-tr" x="622" y="268" width="36" height="26" rx="3"/>
+  <text class="c-txt" x="640" y="285" text-anchor="middle">12</text>
+  <rect class="c-tr" x="664" y="268" width="36" height="26" rx="3"/>
+  <text class="c-txt" x="682" y="285" text-anchor="middle">13</text>
+  <rect class="c-tr" x="706" y="268" width="36" height="26" rx="3"/>
+  <text class="c-txt" x="724" y="285" text-anchor="middle">14</text>
+  <rect class="c-tr" x="748" y="268" width="36" height="26" rx="3"/>
+  <text class="c-txt" x="766" y="285" text-anchor="middle">15</text>
+
+  <text class="bad" x="118" y="318">4 of 16 prompts are gone — the model never sees 5, 8, 9, 11.</text>
+
+  <text class="hdr" x="16" y="342">④ New resume: rewind to the saved snapshot</text>
+  <text class="cursor-lbl" x="286" y="356" text-anchor="middle">loader rewinds here</text>
+  <path class="cursor" d="M286 360 L286 392"/>
+
+  <rect class="c-tr" x="118" y="360" width="36" height="26" rx="3"/>
+  <text class="c-txt" x="136" y="377" text-anchor="middle">0</text>
+  <rect class="c-tr" x="160" y="360" width="36" height="26" rx="3"/>
+  <text class="c-txt" x="178" y="377" text-anchor="middle">1</text>
+  <rect class="c-tr" x="202" y="360" width="36" height="26" rx="3"/>
+  <text class="c-txt" x="220" y="377" text-anchor="middle">2</text>
+  <rect class="c-tr" x="244" y="360" width="36" height="26" rx="3"/>
+  <text class="c-txt" x="262" y="377" text-anchor="middle">3</text>
+  <rect class="c-tr" x="286" y="360" width="36" height="26" rx="3"/>
+  <text class="c-txt" x="304" y="377" text-anchor="middle">4</text>
+  <rect class="c-re" x="328" y="360" width="36" height="26" rx="3"/>
+  <text class="c-txt" x="346" y="377" text-anchor="middle">5</text>
+  <rect class="c-ret" x="370" y="360" width="36" height="26" rx="3"/>
+  <text class="c-txt" x="388" y="377" text-anchor="middle">6</text>
+  <rect class="c-ret" x="412" y="360" width="36" height="26" rx="3"/>
+  <text class="c-txt" x="430" y="377" text-anchor="middle">7</text>
+  <rect class="c-re" x="454" y="360" width="36" height="26" rx="3"/>
+  <text class="c-txt" x="472" y="377" text-anchor="middle">8</text>
+  <rect class="c-re" x="496" y="360" width="36" height="26" rx="3"/>
+  <text class="c-txt" x="514" y="377" text-anchor="middle">9</text>
+  <rect class="c-ret" x="538" y="360" width="36" height="26" rx="3"/>
+  <text class="c-txt" x="556" y="377" text-anchor="middle">10</text>
+  <rect class="c-re" x="580" y="360" width="36" height="26" rx="3"/>
+  <text class="c-txt" x="598" y="377" text-anchor="middle">11</text>
+  <rect class="c-tr" x="622" y="360" width="36" height="26" rx="3"/>
+  <text class="c-txt" x="640" y="377" text-anchor="middle">12</text>
+  <rect class="c-tr" x="664" y="360" width="36" height="26" rx="3"/>
+  <text class="c-txt" x="682" y="377" text-anchor="middle">13</text>
+  <rect class="c-tr" x="706" y="360" width="36" height="26" rx="3"/>
+  <text class="c-txt" x="724" y="377" text-anchor="middle">14</text>
+  <rect class="c-tr" x="748" y="360" width="36" height="26" rx="3"/>
+  <text class="c-txt" x="766" y="377" text-anchor="middle">15</text>
+
+  <text class="good" x="118" y="410">Prompt 4 and groups 6, 7, 10 are re-yielded and dropped at once; 5, 8, 9, 11 are generated again.</text>
+
+  <rect class="c-tr" x="118" y="424" width="14" height="12"/>
+  <text class="note" x="138" y="434">trained already</text>
+  <rect class="c-ret" x="250" y="424" width="14" height="12"/>
+  <text class="note" x="270" y="434">kept in the buffer, reused as is</text>
+  <rect class="c-und" x="480" y="424" width="14" height="12"/>
+  <text class="note" x="500" y="434">not pulled yet</text>
+  <rect class="c-fly" x="620" y="424" width="14" height="12"/>
+  <text class="note" x="640" y="434">still generating at the save</text>
+
+  <rect class="c-lost" x="118" y="446" width="14" height="12"/>
+  <text class="note" x="138" y="456">lost for good</text>
+  <rect class="c-re" x="250" y="446" width="14" height="12"/>
+  <text class="note" x="270" y="456">generated again after the resume</text>
+
+  <text class="note" x="16" y="486">Nothing is trained twice: a prompt is either below the frontier, in the restored buffer, or regenerated — never two of those.</text>
+</svg>
+
+<h2>What the three files hold at that save</h2>
+
+<div class="mono">train_dataloader.pt   snapshot from the ring, base ordinal 4  →  pos 1   <span class="regen">not the live pos 3</span>
+rollouts.pt           frontier_ordinal = 5,  resume_base_ordinal = 4
+replay_buffer.pt      finished groups 6, 7, 10
+
+On resume the loader yields 4 5 6 7 | 8 9 10 11 | 12 13 14 15
+  ordinal 4           <span class="drop">drop</span>  below the frontier (5) — already trained
+  ordinals 6,7,10     <span class="drop">drop</span>  retained_task_indices, from the restored buffer
+  ordinals 5,8,9,11   <span class="regen">keep</span>  generated again under the new weights
+  ordinals 12–15      <span class="kept">keep</span>  fresh, as normal — the filter switches off here</div>
+
+<p>Set <code>checkpointing.load_replay_buffer: false</code>
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/95844b65824bd7d1366c1f17d6d34a41eab3b675/examples/configs/grpo_math_1B.yaml#L124">grpo_math_1B.yaml:124</a>)
+and the retained set is simply empty: 6, 7 and 10 are regenerated too. Same code path, no prompt lost
+either way.</p>
+
+<h2>Does it work?</h2>
+
+<table>
+<tr><th>Evidence</th><th>What it shows</th></tr>
+<tr><td><a href="https://github.com/NVIDIA-NeMo/RL/blob/95844b65824bd7d1366c1f17d6d34a41eab3b675/tests/unit/algorithms/test_async_utils.py#L1530"><code>test_legacy_resume_skips_prompts_that_frontier_resume_regenerates</code></a></td>
+<td>The figure above, as a test. Runs both resumes over the same 16-prompt save. Old path: skipped set is exactly <code>[5, 8, 9, 11]</code>. New path: skipped set empty, duplicate set empty.</td></tr>
+<tr><td><a href="https://github.com/NVIDIA-NeMo/RL/blob/95844b65824bd7d1366c1f17d6d34a41eab3b675/tests/unit/algorithms/test_async_utils.py#L1435">ring-pick + fallback tests</a></td>
+<td>Ring picks the right snapshot; an empty or too-new ring falls back to the live cursor; batches that cannot carry a stamp turn the feature off instead of crashing.</td></tr>
+<tr><td>CI at head <code>95844b6</code></td>
+<td>All 17 L0 unit-test jobs pass. One L1 PPO functional job and the docs build are red; both are outside the async-GRPO path touched here.</td></tr>
+<tr><td>The 675 / 736 number</td>
+<td>Comes from the author's run <em>before</em> the fix, and is what motivated it. No post-fix long run is linked on the PR — the guarantee rests on the unit tests.</td></tr>
+</table>
+
+<div class="warn">
+<strong>Two things to know before you resume.</strong> The prompts come back, but the trajectories do
+not: a regenerated prompt is a fresh sample under the post-resume weights, because in-flight vLLM
+state cannot be saved. You get the same prompts in the same order, not the same bytes. And if you
+resume from a checkpoint written <em>before</em> this PR, the run falls back to the old live-cursor
+behavior <em>permanently</em> — every checkpoint that run writes, and every run started from those,
+stays on the lossy path
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/95844b65824bd7d1366c1f17d6d34a41eab3b675/nemo_rl/algorithms/grpo.py#L4346">grpo.py:4346</a>
+logs a warning). Only runs started fresh after this PR are protected from their first save.
+</div>
+
+</div>
+</body>
+</html>
