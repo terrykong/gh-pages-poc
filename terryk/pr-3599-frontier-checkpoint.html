@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>NVIDIA-NeMo/RL #3599 — how a checkpoint stops losing in-flight prompts</title>
+<title>NVIDIA-NeMo/RL #3599 — how a checkpoint stops losing prompts that are still being answered</title>
 <style>
 :root{
   --bg:#0d1117; --surface:#161b22; --surface2:#1c2128; --border:#30363d;
@@ -82,30 +82,28 @@ svg a text{text-decoration:underline;fill:var(--accent);font:11.5px ui-monospace
 the loss it fixes is drawn <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr3429-cursor-advance.html">here</a> ·
 all permalinks pin the head <code>95844b6</code>.</p>
 
-<p>Async GRPO pulls prompts from a dataloader and generates answers in the background, while
-training takes finished groups out of a replay buffer. The dataloader cursor moves the moment a
-batch is yielded, but the buffer only holds groups whose generation <em>finished</em> — so the saved
-cursor sat ahead of the work the checkpoint actually kept, and everything in between was lost. On one
-long run, 675 of 736 skipped prompts came from this. The fix stamps every yielded prompt with its
-position in the stream
-(<a href="https://github.com/NVIDIA-NeMo/RL/blob/95844b65824bd7d1366c1f17d6d34a41eab3b675/nemo_rl/algorithms/async_utils/trajectory_collector.py#L448">trajectory_collector.py:448</a>)
-and keeps a ring of dataloader states taken just <em>before</em> each pull
-(<a href="https://github.com/NVIDIA-NeMo/RL/blob/95844b65824bd7d1366c1f17d6d34a41eab3b675/nemo_rl/algorithms/async_utils/trajectory_collector.py#L404">:404-414</a>);
-a checkpoint saves the state matching the trained frontier instead of the live cursor
+<p>In async GRPO a loader hands out prompts a few at a time, the model answers them in the
+background, and training picks the answers up later from a holding area (the replay buffer) that only
+keeps <em>finished</em> ones. A checkpoint saves the loader's place — but that place is already past
+prompts that are still being answered, and those prompts are in no buffer either. Restart, and they
+are gone: on one long run, 675 of 736 skipped prompts came from this. The fix numbers every prompt as
+the loader hands it out
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/95844b65824bd7d1366c1f17d6d34a41eab3b675/nemo_rl/algorithms/async_utils/trajectory_collector.py#L448">trajectory_collector.py:448</a>),
+and saves the loader's place from <em>before</em> the unfinished prompts instead of its place now
 (<a href="https://github.com/NVIDIA-NeMo/RL/blob/95844b65824bd7d1366c1f17d6d34a41eab3b675/nemo_rl/algorithms/async_utils/trajectory_collector.py#L544">:544</a>).
-On resume the loader replays that window, the collector drops rows that were already trained or are
-still in the buffer
-(<a href="https://github.com/NVIDIA-NeMo/RL/blob/95844b65824bd7d1366c1f17d6d34a41eab3b675/nemo_rl/algorithms/async_utils/trajectory_collector.py#L486">:486</a>),
-and the rest is generated again.</p>
+On restart the loader hands out that stretch again, and each prompt that is already trained or still
+sitting in the buffer is thrown away as it arrives
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/95844b65824bd7d1366c1f17d6d34a41eab3b675/nemo_rl/algorithms/async_utils/trajectory_collector.py#L486">:486</a>);
+the rest get answered again.</p>
 
-<h2>Same save, two resumes</h2>
+<h2>One checkpoint, two ways to restart</h2>
 
-<svg viewBox="0 0 900 505" role="img" aria-label="16 prompts in 4 batches: the old resume loses prompts 5, 8, 9 and 11; the new resume rewinds the dataloader and regenerates exactly those four">
-  <text class="hdr" x="16" y="22">16 prompts stream through in 4 batches of 4. A checkpoint lands mid-batch-3.</text>
+<svg viewBox="0 0 900 505" role="img" aria-label="16 prompts handed out 4 at a time: the old restart loses prompts 5, 8, 9 and 11; the new restart sends the loader back and answers exactly those four again">
+  <text class="hdr" x="16" y="22">16 prompts, handed out 4 at a time. The checkpoint is written part-way through.</text>
 
-  <text class="hdr" x="16" y="52">① The moment the save fires</text>
-  <text class="cursor-lbl" x="325" y="76" text-anchor="middle">trained frontier = 5</text>
-  <text class="cursor-lbl" x="619" y="76" text-anchor="middle">live cursor</text>
+  <text class="hdr" x="16" y="52">① When the checkpoint is written</text>
+  <text class="cursor-lbl" x="325" y="76" text-anchor="middle">trained up to here</text>
+  <text class="cursor-lbl" x="619" y="76" text-anchor="middle">loader has read this far</text>
   <path class="cursor" d="M325 80 L325 118"/>
   <path class="cursor" d="M619 80 L619 118"/>
 
@@ -143,19 +141,20 @@ and the rest is generated again.</p>
   <text class="c-txt" x="766" y="103" text-anchor="middle">15</text>
 
   <path class="tick" d="M118 120 L280 120 M286 120 L448 120 M454 120 L616 120 M622 120 L784 120"/>
-  <text class="note" x="199" y="134" text-anchor="middle">batch 0</text>
-  <text class="note" x="367" y="134" text-anchor="middle">batch 1</text>
-  <text class="note" x="535" y="134" text-anchor="middle">batch 2</text>
-  <text class="note" x="703" y="134" text-anchor="middle">batch 3 — not pulled yet</text>
+  <text class="note" x="199" y="134" text-anchor="middle">1st handout</text>
+  <text class="note" x="367" y="134" text-anchor="middle">2nd</text>
+  <text class="note" x="535" y="134" text-anchor="middle">3rd</text>
+  <text class="note" x="703" y="134" text-anchor="middle">4th — not handed out yet</text>
 
-  <text class="hdr" x="16" y="160">② What the checkpoint writes down</text>
+  <text class="hdr" x="16" y="160">② Which place the checkpoint saves</text>
   <rect class="box" x="118" y="168" width="666" height="56" rx="8"/>
-  <text class="note" x="132" y="188">snapshot ring — one dataloader state kept just before each pull:</text>
-  <text class="lbl" x="132" y="208">base 0 → pos 0     base 4 → pos 1     base 8 → pos 2</text>
-  <text class="note" x="470" y="208">pick the largest base ≤ frontier 5 →</text>
-  <a href="https://github.com/NVIDIA-NeMo/RL/blob/95844b65824bd7d1366c1f17d6d34a41eab3b675/nemo_rl/algorithms/async_utils/trajectory_collector.py#L544" target="_blank" rel="noopener"><text x="714" y="208">base 4</text></a>
+  <text class="note" x="132" y="188">the loader's place is written down before every handout — the last few are kept:</text>
+  <text class="lbl" x="132" y="208">before 0     before 4     before 8</text>
+  <text class="note" x="330" y="208">newest one still behind prompt 5 →</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/95844b65824bd7d1366c1f17d6d34a41eab3b675/nemo_rl/algorithms/async_utils/trajectory_collector.py#L544" target="_blank" rel="noopener"><text x="574" y="208">before 4</text></a>
+  <text class="note" x="640" y="208">— that one is saved</text>
 
-  <text class="hdr" x="16" y="248">③ Old resume: start from the live cursor</text>
+  <text class="hdr" x="16" y="248">③ Old way: restart where the loader had read to</text>
   <text class="cursor-lbl" x="619" y="262" text-anchor="middle">loader restarts here</text>
   <path class="cursor" d="M619 266 L619 300"/>
 
@@ -194,8 +193,8 @@ and the rest is generated again.</p>
 
   <text class="bad" x="118" y="318">4 of 16 prompts are gone — the model never sees 5, 8, 9, 11.</text>
 
-  <text class="hdr" x="16" y="342">④ New resume: rewind to the saved snapshot</text>
-  <text class="cursor-lbl" x="286" y="356" text-anchor="middle">loader rewinds here</text>
+  <text class="hdr" x="16" y="342">④ New way: go back to the saved place</text>
+  <text class="cursor-lbl" x="286" y="356" text-anchor="middle">loader goes back to here</text>
   <path class="cursor" d="M286 360 L286 392"/>
 
   <rect class="c-tr" x="118" y="360" width="36" height="26" rx="3"/>
@@ -231,97 +230,97 @@ and the rest is generated again.</p>
   <rect class="c-tr" x="748" y="360" width="36" height="26" rx="3"/>
   <text class="c-txt" x="766" y="377" text-anchor="middle">15</text>
 
-  <text class="good" x="118" y="410">Prompt 4 and groups 6, 7, 10 are re-yielded and dropped at once; 5, 8, 9, 11 are generated again.</text>
+  <text class="good" x="118" y="410">Prompts 4, 6, 7 and 10 come round again and are thrown away at once; 5, 8, 9 and 11 get answered again.</text>
 
   <rect class="c-tr" x="118" y="424" width="14" height="12"/>
   <text class="note" x="138" y="434">trained already</text>
   <rect class="c-ret" x="250" y="424" width="14" height="12"/>
   <text class="note" x="270" y="434">kept in the buffer, reused as is</text>
   <rect class="c-und" x="480" y="424" width="14" height="12"/>
-  <text class="note" x="500" y="434">not pulled yet</text>
+  <text class="note" x="500" y="434">not handed out yet</text>
   <rect class="c-fly" x="620" y="424" width="14" height="12"/>
-  <text class="note" x="640" y="434">still generating at the save</text>
+  <text class="note" x="640" y="434">still being answered when the checkpoint was written</text>
 
   <rect class="c-lost" x="118" y="446" width="14" height="12"/>
   <text class="note" x="138" y="456">lost for good</text>
   <rect class="c-re" x="250" y="446" width="14" height="12"/>
-  <text class="note" x="270" y="456">generated again after the resume</text>
+  <text class="note" x="270" y="456">answered again after the restart</text>
 
-  <text class="note" x="16" y="486">Nothing is trained twice: a prompt is either below the frontier, in the restored buffer, or regenerated — never two of those.</text>
+  <text class="note" x="16" y="486">No prompt is used twice: each one is either already trained, or still in the buffer, or answered again — never two of those.</text>
 </svg>
 
 <h2>The fix, in code</h2>
 
-<p><strong>1. Stamp and snapshot.</strong> The collection loop takes a picture of the dataloader
-<em>before</em> each pull, then writes each prompt's stream position onto its own row. The ring keeps
-the last 512 pictures, keyed by the first ordinal in the batch they precede.</p>
+<p><strong>1. Number each prompt, and write down where the loader was.</strong> Before every
+handout the code copies the loader's place, then writes a number on each prompt it hands out. The
+last 512 of those places are kept.</p>
 
-<div class="mono">pre_pull = dataloader.state_dict()      <span class="cm"># {"pos": 1}  — before the pull, not after</span>
-batch    = next(dataloader_iter)        <span class="cm"># prompts 4,5,6,7</span>
-first    = self._next_nemo_gym_task_index   <span class="cm"># <span class="val">4</span></span>
-stamp_task_indices(batch)               <span class="cm"># rows get _ng_task_index = 4,5,6,7</span>
-ring.append((first, pre_pull))          <span class="cm"># ring = (0,pos0) (<span class="val">4,pos1</span>) (8,pos2)</span></div>
+<div class="mono">place = dataloader.state_dict()   <span class="cm"># where the loader is: 1 handout done so far</span>
+batch = next(loader)              <span class="cm"># the next 4 prompts</span>
+n     = self._next_nemo_gym_task_index   <span class="cm"># <span class="val">4</span> — the number the first of them gets</span>
+stamp_task_indices(batch)         <span class="cm"># the 4 prompts become 4, 5, 6, 7</span>
+_dataloader_snapshots.append((n, place))   <span class="cm"># "<span class="val">before prompt 4</span>, the loader was here"</span></div>
 <p class="src">→ <a href="https://github.com/NVIDIA-NeMo/RL/blob/95844b65824bd7d1366c1f17d6d34a41eab3b675/nemo_rl/algorithms/async_utils/trajectory_collector.py#L404">trajectory_collector.py:404-415</a>,
-stamping at <a href="https://github.com/NVIDIA-NeMo/RL/blob/95844b65824bd7d1366c1f17d6d34a41eab3b675/nemo_rl/algorithms/async_utils/trajectory_collector.py#L448">:448</a>,
-ring at <a href="https://github.com/NVIDIA-NeMo/RL/blob/95844b65824bd7d1366c1f17d6d34a41eab3b675/nemo_rl/algorithms/async_utils/trajectory_collector.py#L176">:176</a></p>
+numbering at <a href="https://github.com/NVIDIA-NeMo/RL/blob/95844b65824bd7d1366c1f17d6d34a41eab3b675/nemo_rl/algorithms/async_utils/trajectory_collector.py#L448">:448</a>,
+the list of places at <a href="https://github.com/NVIDIA-NeMo/RL/blob/95844b65824bd7d1366c1f17d6d34a41eab3b675/nemo_rl/algorithms/async_utils/trajectory_collector.py#L176">:176</a></p>
 
-<p><strong>2. Save the picture that matches the trained work.</strong> The frontier comes from the
-ordinals of the groups training just used, not from a step counter — a counter drifts when a tolerated
-generation failure leaves a hole in the stream.</p>
+<p><strong>2. When saving, pick the place that matches what training has finished.</strong> How far
+training got is read off the numbers on the prompts it just used. A step counter would not do: when a
+prompt is allowed to fail, the counter and the real position drift apart.</p>
 
-<div class="mono">trained_frontier = max(trained_frontier,
-                       max(g["_ng_task_index"] for g in sampled) + 1)   <span class="cm"># <span class="val">5</span></span>
+<div class="mono">done_through = max(done_through,
+                   max(p["_ng_task_index"] for p in just_trained) + 1)   <span class="cm"># <span class="val">5</span></span>
 
-snap = collector.get_checkpoint_state(trained_frontier)   <span class="cm"># one actor call, one lock</span>
-  <span class="cm">└─ best = newest ring entry with base &lt;= 5  →  (<span class="val">4, pos 1</span>)   # not (8, pos 2)</span>
+saved = collector.get_checkpoint_state(done_through)   <span class="cm"># one call, so nothing moves in between</span>
+  <span class="cm">└─ newest remembered place still behind prompt 5  →  "<span class="val">before prompt 4</span>"</span>
 
-save(snap["dataloader"]["dataloader_state"], "train_dataloader.pt")  <span class="cm"># pos <span class="val">1</span>, <span class="drop">not the live pos 3</span></span>
-rollouts["frontier_ordinal"]    = 5   <span class="cm"># everything below this is trained</span>
-rollouts["resume_base_ordinal"] = 4   <span class="cm"># the first ordinal this state re-yields</span></div>
-<p class="src">→ frontier at <a href="https://github.com/NVIDIA-NeMo/RL/blob/95844b65824bd7d1366c1f17d6d34a41eab3b675/nemo_rl/algorithms/grpo.py#L4728">grpo.py:4728</a>,
+save(saved place, "train_dataloader.pt")   <span class="cm"># 1 handout done — <span class="drop">not the 3 it has really done</span></span>
+rollouts["frontier_ordinal"]    = 5   <span class="cm"># prompts under 5 are trained</span>
+rollouts["resume_base_ordinal"] = 4   <span class="cm"># this file starts handing out again at prompt 4</span></div>
+<p class="src">→ how-far-training-got at <a href="https://github.com/NVIDIA-NeMo/RL/blob/95844b65824bd7d1366c1f17d6d34a41eab3b675/nemo_rl/algorithms/grpo.py#L4728">grpo.py:4728</a>,
 save at <a href="https://github.com/NVIDIA-NeMo/RL/blob/95844b65824bd7d1366c1f17d6d34a41eab3b675/nemo_rl/algorithms/grpo.py#L5283">:5283-5305</a>,
-ring pick at <a href="https://github.com/NVIDIA-NeMo/RL/blob/95844b65824bd7d1366c1f17d6d34a41eab3b675/nemo_rl/algorithms/async_utils/trajectory_collector.py#L544">trajectory_collector.py:544</a></p>
+picking the place at <a href="https://github.com/NVIDIA-NeMo/RL/blob/95844b65824bd7d1366c1f17d6d34a41eab3b675/nemo_rl/algorithms/async_utils/trajectory_collector.py#L544">trajectory_collector.py:544</a></p>
 
-<p><strong>3. Replay the window, drop what is covered.</strong> The rewound loader re-yields prompts
-the run has already dealt with. Each one is dropped at yield, so only the gap reaches generation — and
-the filter turns itself off once the window is past.</p>
+<p><strong>3. On restart, hand that stretch out again and drop what you already have.</strong> The
+loader repeats prompts the run has already dealt with, so each one is thrown away the moment it
+arrives. Only the gap reaches the model — and once the repeated stretch is past, the checking stops.</p>
 
-<div class="mono">frontier = 5 ; retained = buffer_restore["retained_task_indices"]  <span class="cm"># <span class="val">[6, 7, 10]</span></span>
-skip_horizon = max(retained + [frontier - 1])                     <span class="cm"># <span class="val">10</span></span>
+<div class="mono">done_through    = 5
+still_in_buffer = [6, 7, 10]      <span class="cm"># groups that survived in replay_buffer.pt</span>
+last_to_check   = max(still_in_buffer + [done_through - 1])   <span class="cm"># <span class="val">10</span></span>
 
-<span class="cm"># loader restarts at pos 1 → re-yields 4,5,6,7 | 8,9,10,11 | 12,13,14,15</span>
+<span class="cm"># the loader starts at prompt 4 again: 4,5,6,7 | 8,9,10,11 | 12,13,14,15</span>
 for batch in loader:
-    if min(ordinals) &gt; skip_horizon:      <span class="cm"># batch 12..15 → window is past</span>
-        frontier = None ; return batch    <span class="cm"># stop filtering for the rest of the run</span>
-    keep = [o for o in ordinals if o &gt;= frontier and o not in retained]
-    <span class="cm"># batch 4,5,6,7    → keep <span class="regen">[5]</span>       (4 trained, 6 and 7 sit in the buffer)</span>
-    <span class="cm"># batch 8,9,10,11  → keep <span class="regen">[8,9,11]</span>  (10 sits in the buffer)</span></div>
+    if lowest number in batch &gt; 10:   <span class="cm"># 12,13,14,15 — past everything we know about</span>
+        stop checking; use the batch  <span class="cm"># normal from here to the end of the run</span>
+    keep = numbers that are &gt;= 5 and not in still_in_buffer
+    <span class="cm"># 4,5,6,7    → keep <span class="regen">[5]</span>       (4 is trained; 6 and 7 are in the buffer)</span>
+    <span class="cm"># 8,9,10,11  → keep <span class="regen">[8,9,11]</span>  (10 is in the buffer)</span></div>
 <p class="src">→ <a href="https://github.com/NVIDIA-NeMo/RL/blob/95844b65824bd7d1366c1f17d6d34a41eab3b675/nemo_rl/algorithms/async_utils/trajectory_collector.py#L486">trajectory_collector.py:486-542</a>,
-resume wiring at <a href="https://github.com/NVIDIA-NeMo/RL/blob/95844b65824bd7d1366c1f17d6d34a41eab3b675/nemo_rl/algorithms/grpo.py#L4317">grpo.py:4317-4340</a></p>
+restart setup at <a href="https://github.com/NVIDIA-NeMo/RL/blob/95844b65824bd7d1366c1f17d6d34a41eab3b675/nemo_rl/algorithms/grpo.py#L4317">grpo.py:4317-4340</a></p>
 
 <p>Set <code>checkpointing.load_replay_buffer: false</code>
 (<a href="https://github.com/NVIDIA-NeMo/RL/blob/95844b65824bd7d1366c1f17d6d34a41eab3b675/examples/configs/grpo_math_1B.yaml#L124">grpo_math_1B.yaml:124</a>)
-and <code>retained</code> is just empty — 6, 7 and 10 get regenerated too. Same code path either way.</p>
+and the buffer starts empty, so <code>still_in_buffer</code> is <code>[]</code> and 6, 7 and 10 get
+answered again too. Same code either way.</p>
 
 <h2>Does it work?</h2>
 
 <p><strong>Nobody has posted a run.</strong> There is no W&amp;B link, no reward curve, no
 before-and-after prompt-coverage count on the PR — so there is no evidence yet that a resumed run
-converges better, or that the ~30% skip rate on the long run that motivated this actually goes to
-zero. What exists is the measurement that started it (675 of 736 skipped prompts traced to these two
-mechanisms, <em>before</em> the fix) and an A/B test that replays the figure above in miniature:
-the old path skips exactly <code>[5, 8, 9, 11]</code>, the new path skips nothing and duplicates
-nothing
+learns better, or that the ~30% of prompts skipped on the long run that started this actually goes to
+zero. What exists is that first measurement (675 of 736 skipped prompts, traced to two causes,
+<em>before</em> the fix) and one test that runs the picture above both ways: the old way skips exactly
+<code>[5, 8, 9, 11]</code>, the new way skips nothing and repeats nothing
 (<a href="https://github.com/NVIDIA-NeMo/RL/blob/95844b65824bd7d1366c1f17d6d34a41eab3b675/tests/unit/algorithms/test_async_utils.py#L1530">test_async_utils.py:1530</a>).
 The right thing to ask for before merging is one resumed long run with the skip count reported.</p>
 
 <div class="warn">
-<strong>Two things to know before you resume.</strong> The prompts come back, but the trajectories do
-not: a regenerated prompt is a fresh sample under the post-resume weights, because in-flight vLLM
-state cannot be saved. You get the same prompts in the same order, not the same bytes. And if you
-resume from a checkpoint written <em>before</em> this PR, the run falls back to the old live-cursor
-behavior <em>permanently</em> — every checkpoint that run writes, and every run started from those,
-stays on the lossy path
+<strong>Two things to know before you restart a run.</strong> The prompts come back, but the answers do
+not: a prompt that is answered again gets a fresh answer from the newer weights, because a
+half-finished answer cannot be saved. You get the same prompts in the same order, not the same bytes.
+And if you restart from a checkpoint written <em>before</em> this PR, that run keeps the old, lossy
+behaviour <em>for good</em> — and so does every run started from the checkpoints it writes
 (<a href="https://github.com/NVIDIA-NeMo/RL/blob/95844b65824bd7d1366c1f17d6d34a41eab3b675/nemo_rl/algorithms/grpo.py#L4346">grpo.py:4346</a>
 logs a warning). Only runs started fresh after this PR are protected from their first save.
 </div>
