@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NVIDIA-NeMo/RL #3410 — how async PPO banks extra rollouts while the critic warms up</title>
+<style>
+:root{
+  --bg:#0d1117; --surface:#161b22; --surface2:#1c2128; --border:#30363d;
+  --text:#e6edf3; --dim:#8b949e; --accent:#58a6ff; --green:#3fb950;
+  --orange:#d29922; --red:#f85149;
+}
+:root[data-theme="light"]{
+  --bg:#ffffff; --surface:#f6f8fa; --surface2:#eaeef2; --border:#d0d7de;
+  --text:#1f2328; --dim:#59636e; --accent:#0969da; --green:#1a7f37;
+  --orange:#9a6700; --red:#cf222e;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:28px 20px 70px}
+h1{font-size:22px;margin:0 0 8px;line-height:1.3}
+h2{font-size:18px;margin:32px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;
+  font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
+.sub{color:var(--dim);font-size:13.5px;margin:0 0 16px}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);
+  border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;
+  font:13px/1 ui-monospace,Menlo,monospace;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.18)}
+.mono{font:12.5px ui-monospace,SFMono-Regular,Menlo,monospace;
+  background:var(--surface);border:1px solid var(--border);border-radius:8px;
+  padding:13px;overflow-x:auto;white-space:pre;line-height:1.5}
+.warn{border-left:3px solid var(--orange);background:var(--surface);
+  padding:12px 16px;margin:18px 0;border-radius:0 8px 8px 0}
+.src{color:var(--dim);font-size:12.5px;margin:6px 0 20px}
+table{border-collapse:collapse;width:100%;margin:14px 0;font-size:13.5px}
+th,td{border:1px solid var(--border);padding:7px 10px;text-align:left}
+th{background:var(--surface2)}
+svg{max-width:100%;height:auto;display:block;margin:16px 0}
+svg .box{fill:var(--surface);stroke:var(--border);stroke-width:1.4}
+svg .lbl{fill:var(--text);font:12.5px ui-monospace,Menlo,monospace}
+svg .lbl-b{fill:var(--text);font:bold 12.5px -apple-system,sans-serif}
+svg .note{fill:var(--dim);font:11.5px -apple-system,sans-serif}
+svg .hdr{fill:var(--accent);font:bold 12.5px -apple-system,sans-serif}
+svg .c-ok{fill:var(--green);opacity:.5;stroke:var(--green);stroke-width:1.4}
+svg .c-warn{fill:var(--orange);opacity:.5;stroke:var(--orange);stroke-width:1.4}
+svg .c-bad{fill:var(--red);opacity:.45;stroke:var(--red);stroke-width:1.4}
+svg .c-und{fill:var(--dim);opacity:.25;stroke:var(--dim);stroke-width:1.4}
+svg .big{fill:var(--text);font:bold 15px ui-monospace,Menlo,monospace}
+svg .frontier{stroke:var(--accent);stroke-width:2.2;stroke-dasharray:6 4;fill:none}
+svg .frontier-lbl{fill:var(--accent);font:bold 12px -apple-system,sans-serif}
+svg a text{text-decoration:underline;fill:var(--accent);font:11.5px ui-monospace,Menlo,monospace}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+  document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head>
+<body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+  function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+  function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
+    b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
+      else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+  document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+<div class="wrap">
+
+<h1>How async PPO banks extra rollouts while the critic warms up — without training on stale data</h1>
+<p class="sub">Companion illustration for
+<a href="https://github.com/NVIDIA-NeMo/RL/pull/3410">NVIDIA-NeMo/RL #3410</a> (async PPO).
+All permalinks pin the PR head <code>bac4a8c</code>.</p>
+
+<p>In async PPO, one set of GPUs generates rollouts while another set trains. Every rollout is tagged with
+the policy weight version that produced it, and the trainer refuses any rollout older than
+<code>max_trajectory_age_steps</code> versions (default <code>1</code>) —
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/bac4a8c46ee14d4c3dfb774be9577bacbb92ccf5/nemo_rl/algorithms/async_utils/replay_buffer.py#L225">replay_buffer.py:225</a>.
+PPO can also start with <strong>critic warmup</strong>: for the first <code>policy_training_start_step</code> steps
+only the value model trains and the policy is frozen. A frozen policy means those rollouts are not really
+going stale, so you would like to generate more of them and get further ahead. This PR adds
+<code>warmup_max_trajectory_age_steps</code> to do exactly that — and a cap so the banked rollouts are never
+actually used too late.</p>
+
+<h2>Why running further ahead is safe while the policy is frozen</h2>
+
+<p>Two numbers control the collector, and this PR is the first time they differ. <strong>Lead</strong> is how many
+future steps it may generate for. <strong>Age limit</strong> is how old a rollout may be and still be accepted.
+Everywhere else in the codebase they are the same number.</p>
+
+<svg viewBox="0 0 900 470" role="img" aria-label="Training steps 0 to 4 with policy_training_start_step=1, max age 1, warmup age 2. The rollout used at step 2 was made by weight version 0, so it is 2 generations old but only 1 policy update old, which is why it is still allowed.">
+  <text class="hdr" x="14" y="20">the config this page walks through:</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/bac4a8c46ee14d4c3dfb774be9577bacbb92ccf5/nemo_rl/algorithms/ppo.py#L226" target="_blank"><text x="222" y="20">policy_training_start_step = 1</text></a>
+  <text class="note" x="428" y="20">&#183;</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/bac4a8c46ee14d4c3dfb774be9577bacbb92ccf5/nemo_rl/algorithms/ppo.py#L122" target="_blank"><text x="440" y="20">max_trajectory_age_steps = 1</text></a>
+  <text class="note" x="632" y="20">&#183;</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/bac4a8c46ee14d4c3dfb774be9577bacbb92ccf5/nemo_rl/algorithms/ppo.py#L125" target="_blank"><text x="644" y="20">warmup_max_trajectory_age_steps = 2</text></a>
+
+  <text class="lbl-b" x="14" y="52">training step</text>
+  <text class="big" x="230" y="52">0</text>
+  <text class="big" x="360" y="52">1</text>
+  <text class="big" x="490" y="52">2</text>
+  <text class="big" x="620" y="52">3</text>
+  <text class="big" x="750" y="52">4</text>
+
+  <text class="lbl-b" x="14" y="88">policy</text>
+  <rect class="c-und" x="180" y="66" width="120" height="32" rx="6"/>
+  <text class="lbl" x="196" y="87">frozen</text>
+  <rect class="c-ok" x="310" y="66" width="450" height="32" rx="6"/>
+  <text class="lbl" x="452" y="87">training (policy updates every step)</text>
+
+  <text class="lbl-b" x="14" y="136">rollout used</text>
+  <text class="note" x="14" y="152">made by version</text>
+  <rect class="box" x="180" y="112" width="120" height="34" rx="6"/>
+  <text class="lbl" x="222" y="134">v0</text>
+  <rect class="box" x="310" y="112" width="120" height="34" rx="6"/>
+  <text class="lbl" x="352" y="134">v0</text>
+  <rect class="box" x="440" y="112" width="120" height="34" rx="6" style="stroke:var(--orange);stroke-width:2.4"/>
+  <text class="lbl" x="482" y="134">v0</text>
+  <rect class="box" x="570" y="112" width="120" height="34" rx="6"/>
+  <text class="lbl" x="612" y="134">v2</text>
+  <rect class="box" x="700" y="112" width="120" height="34" rx="6"/>
+  <text class="lbl" x="742" y="134">v3</text>
+
+  <text class="lbl-b" x="14" y="190">generations old</text>
+  <text class="note" x="14" y="206">step &#8722; version</text>
+  <rect class="c-ok" x="180" y="166" width="120" height="34" rx="6"/>
+  <text class="big" x="234" y="189">0</text>
+  <rect class="c-ok" x="310" y="166" width="120" height="34" rx="6"/>
+  <text class="big" x="364" y="189">1</text>
+  <rect class="c-warn" x="440" y="166" width="120" height="34" rx="6"/>
+  <text class="big" x="494" y="189">2</text>
+  <rect class="c-ok" x="570" y="166" width="120" height="34" rx="6"/>
+  <text class="big" x="624" y="189">1</text>
+  <rect class="c-ok" x="700" y="166" width="120" height="34" rx="6"/>
+  <text class="big" x="754" y="189">1</text>
+  <text class="note" x="440" y="222">above the normal limit of 1 &#8212;</text>
+  <text class="note" x="440" y="237">allowed only because the age limit is 2 here</text>
+
+  <text class="lbl-b" x="14" y="278">policy updates old</text>
+  <text class="note" x="14" y="294">what actually matters</text>
+  <rect class="c-ok" x="180" y="254" width="120" height="34" rx="6"/>
+  <text class="big" x="234" y="277">0</text>
+  <rect class="c-ok" x="310" y="254" width="120" height="34" rx="6"/>
+  <text class="big" x="364" y="277">0</text>
+  <rect class="c-ok" x="440" y="254" width="120" height="34" rx="6"/>
+  <text class="big" x="494" y="277">1</text>
+  <rect class="c-ok" x="570" y="254" width="120" height="34" rx="6"/>
+  <text class="big" x="624" y="277">1</text>
+  <rect class="c-ok" x="700" y="254" width="120" height="34" rx="6"/>
+  <text class="big" x="754" y="277">1</text>
+  <text class="note" x="180" y="310">never above 1 &#8212; the policy did not move between step 0 and step 1, so those two share a version</text>
+
+  <path class="frontier" d="M565 34 L565 300"/>
+  <text class="frontier-lbl" x="572" y="332">last step a frozen-policy rollout may be used</text>
+  <text class="note" x="572" y="348">= policy_training_start_step + max_trajectory_age_steps = 1 + 1 = 2</text>
+  <text class="note" x="572" y="364">at step 3 a v0 rollout would be 2 policy updates old, so the limit drops back to 1 and rejects it</text>
+
+  <rect class="box" x="14" y="386" width="872" height="66" rx="8"/>
+  <text class="lbl-b" x="28" y="408">legend</text>
+  <rect class="c-ok" x="100" y="394" width="20" height="15" rx="3"/>
+  <text class="note" x="126" y="407">within the limit</text>
+  <rect class="c-warn" x="238" y="394" width="20" height="15" rx="3"/>
+  <text class="note" x="264" y="407">over the normal limit, but safe here</text>
+  <rect class="c-und" x="490" y="394" width="20" height="15" rx="3"/>
+  <text class="note" x="516" y="407">policy frozen</text>
+  <text class="note" x="28" y="434">&#8220;version&#8221; = the policy weight version that produced the rollout. Banking = generating step 2&#8217;s batch early, while the policy is still frozen.</text>
+</svg>
+
+<p class="src">Age filter:
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/bac4a8c46ee14d4c3dfb774be9577bacbb92ccf5/nemo_rl/algorithms/async_utils/replay_buffer.py#L225">replay_buffer.py:225</a>
+&#183; which steps the collector may generate for:
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/bac4a8c46ee14d4c3dfb774be9577bacbb92ccf5/nemo_rl/algorithms/async_utils/trajectory_collector.py#L188">trajectory_collector.py:188</a></p>
+
+<h2>The two numbers, computed</h2>
+
+<p>Both are small pure functions in <code>ppo.py</code>, called once at startup and again after every weight
+update, then pushed to the collector with
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/bac4a8c46ee14d4c3dfb774be9577bacbb92ccf5/nemo_rl/algorithms/async_utils/trajectory_collector.py#L267">set_generation_window()</a>.
+Same numbers as the figure: <code>P=1</code>, <code>A=1</code>, <code>W=2</code>.</p>
+
+<div class="mono">lead(step)   # how many future steps may I generate for?
+  if step &gt;= P:  return A          # policy is training -> normal lead
+  # still in warmup: run ahead, but never past step P+A
+  return max(A, min(W, (P + A) - step))
+
+  step 0 -> max(1, min(2, 2-0)) = 2   # generate for steps 0, 1 AND 2  <- the banking
+  step 1 -> 1                          # P reached, back to normal
+</div>
+<p class="src"><a href="https://github.com/NVIDIA-NeMo/RL/blob/bac4a8c46ee14d4c3dfb774be9577bacbb92ccf5/nemo_rl/algorithms/ppo.py#L2045">_async_ppo_generation_lead_steps &#8212; ppo.py:2045</a></p>
+
+<div class="mono">age_limit(step)   # how old may a rollout be and still be used?
+  frontier = P + A                       # = 2
+  if P &gt; 0 and step &lt;= frontier: return W   # keep the banked ones valid
+  return A                                  # back to normal
+
+  steps 0,1,2 -> 2      # a v0 rollout is still accepted at step 2
+  step 3      -> 1      # v0 is now 3 generations old -> dropped
+</div>
+<p class="src"><a href="https://github.com/NVIDIA-NeMo/RL/blob/bac4a8c46ee14d4c3dfb774be9577bacbb92ccf5/nemo_rl/algorithms/ppo.py#L2064">_async_ppo_buffer_max_age &#8212; ppo.py:2064</a>
+(the <code>step &lt;= frontier</code> comparison on
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/bac4a8c46ee14d4c3dfb774be9577bacbb92ccf5/nemo_rl/algorithms/ppo.py#L2073">line 2073</a>
+is what keeps step 2 valid)</p>
+
+<p>Run together, they give the schedule the collector actually prints:</p>
+
+<table>
+<tr><th>weight version</th><th>lead</th><th>age limit</th><th>may generate for steps</th></tr>
+<tr><td>0</td><td>2</td><td>2</td><td>0, 1, 2 &nbsp;<span style="color:var(--orange)">&#8592; banks 3 steps of data from the frozen policy</span></td></tr>
+<tr><td>1</td><td>1</td><td>2</td><td>2 (already full &#8594; collector pauses)</td></tr>
+<tr><td>2</td><td>1</td><td>2</td><td>3</td></tr>
+<tr><td>3</td><td>1</td><td>1</td><td>4 &nbsp;<span style="color:var(--dim)">&#8592; warmup window closed</span></td></tr>
+</table>
+
+<h2>Does it work?</h2>
+
+<p>Yes for the mechanism, on a small real run. The functional test launches a 2-node Megatron job with exactly
+the config above, then checks the collector's own log lines for the three windows — so these are values from a
+running job, not a mocked assertion:</p>
+
+<div class="mono">grep -q "Updated generation window: version=0, lead=2, max_age=2"  run1.log
+grep -q "Updated generation window: version=1, lead=1, max_age=2"  run1.log
+grep -q "Updated generation window: version=3, lead=1, max_age=1"  run2.log   # after restart
+</div>
+<p class="src"><a href="https://github.com/NVIDIA-NeMo/RL/blob/bac4a8c46ee14d4c3dfb774be9577bacbb92ccf5/tests/functional/ppo_async_megatron.sh#L71">ppo_async_megatron.sh:71-72, 85</a>
+&#8212; run2 restarts from the run1 checkpoint, so it also proves the banked rollouts survive a resume.</p>
+
+<p>For end-to-end quality, the PR reports 40-step runs — AutoModel on 1 node &#215; 8 GPUs and Megatron on
+2 nodes &#215; 8 GPUs — that hit their reward and validation-accuracy gates, plus a matched sync-vs-async
+Megatron pair on the same node split showing no obvious regression. Curves are in the PR description.</p>
+
+<p><strong>The honest gap:</strong> those 40-step runs use <code>policy_training_start_step: 0</code> — warmup is
+<em>off</em>. So the banking path drawn on this page is only covered by the 2-step + 4-step test above. Nobody
+has run warmup banking at convergence scale.</p>
+
+<div class="warn">
+<strong>What to take away.</strong> The number that keeps this correct is the frontier,
+<code>policy_training_start_step + max_trajectory_age_steps</code>. Below it, generation-version age and
+policy-update age are different things, and only the second one matters; above it they are the same again.
+If you set <code>warmup_max_trajectory_age_steps</code>, note two things: it needs
+<code>policy_training_start_step &gt; 0</code> or the config is rejected at load, and the replay buffer grows to
+<code>num_prompts_per_step &#215; max(age, warmup_age) &#215; 2</code> — so doubling the warmup age doubles the
+resident buffer.
+</div>
+
+</div>
+</body>
+</html>
