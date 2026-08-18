@@ -165,7 +165,7 @@ decides where each piece has to live.</p>
 <rect x="30" y="48" width="316" height="34" rx="6" class="old"/>
 <text x="42" y="69" class="st">probe loop (asyncio task)</text>
 
-<rect x="30" y="92" width="316" height="46" rx="6" class="old"/>
+<rect x="30" y="92" width="316" height="46" rx="6" class="old"><title>absent_shards(): who cannot join a collective. record_actor_death(): Ray says the actor is gone, mark DEAD at once.</title></rect>
 <text x="42" y="110" class="st">GenerationFleetHealth — the ledger</text>
 <text x="42" y="126" class="st">+ absent_shards() · record_actor_death()</text>
 <text x="300" y="126" class="newtag">NEW</text>
@@ -180,7 +180,7 @@ decides where each piece has to live.</p>
 <path class="grn" style="marker-end:url(#a4)" d="M270,150 L270,140"/>
 <text x="120" y="204" class="note">report_failure() / report_success() ↑ · both relays hold the Ray handles</text>
 
-<rect x="30" y="216" width="316" height="46" rx="6" class="old"/>
+<rect x="30" y="216" width="316" height="46" rx="6" class="old"><title>reconcile_communicator(): rebuild the refit group over the survivors, at the top of every refit.</title></rect>
 <text x="42" y="234" class="st">WeightSynchronizer — issues the refit</text>
 <text x="42" y="250" class="st">+ reconcile_communicator() rebuilds</text>
 <text x="300" y="250" class="newtag">NEW</text>
@@ -198,7 +198,7 @@ decides where each piece has to live.</p>
 <rect x="646" y="118" width="140" height="38" rx="6" class="box s-dead"/>
 <text x="656" y="134" class="st">main thread</text>
 <text x="656" y="149" class="st">in NCCL</text>
-<rect x="800" y="118" width="138" height="38" rx="6" class="box s-ok"/>
+<rect x="800" y="118" width="138" height="38" rx="6" class="box s-ok"><title>RefitAbortWatchdog: armed with refit_timeout_s; on overrun it calls abort() from inside this process.</title></rect>
 <text x="810" y="134" class="st">watchdog</text>
 <text x="810" y="149" class="st">aborts</text>
 <text x="906" y="112" class="newtag">NEW</text>
@@ -211,7 +211,7 @@ decides where each piece has to live.</p>
 <rect x="630" y="274" width="150" height="38" rx="6" class="box s-dead"/>
 <text x="640" y="290" class="st">main thread</text>
 <text x="640" y="305" class="st">in NCCL</text>
-<rect x="796" y="274" width="152" height="38" rx="6" class="box s-ok"/>
+<rect x="796" y="274" width="152" height="38" rx="6" class="box s-ok"><title>RefitAbortWatchdog on the sending side; abort() ends in-flight NCCL work.</title></rect>
 <text x="806" y="290" class="st">watchdog</text>
 <text x="806" y="305" class="st">aborts</text>
 <text x="916" y="268" class="newtag">NEW</text>
@@ -249,22 +249,28 @@ decides where each piece has to live.</p>
 <text x="372" y="424" class="note">Gym traffic → router → shards is a separate path entirely.</text>
 </svg>
 
-<p>Most of this diagram is not new. The probe loop, the ledger, the two relay objects, the synchronizer,
-<code>is_alive()</code> and the router all arrived with
-<a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-3590-who-watches-what.html">part 2</a>. What this PR
-adds is marked <span style="color:var(--green);font-weight:700">NEW</span>: a watchdog thread inside each GPU
-worker, a deadline riding every refit call, and
-<a href="https://github.com/NVIDIA-NeMo/RL/blob/8779394e0a6794ada72e1e6caf0fc06255e79442/nemo_rl/weight_sync/collective_weight_synchronizer.py#L132"><code>reconcile_communicator()</code></a>
-to rebuild afterwards.</p>
+<p>Most of this diagram is not new. The probe loop, the ledger, the two relay objects, the synchronizer, <code>is_alive()</code> and the router all arrived with <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-3590-who-watches-what.html">part 2</a>. What this PR adds is tagged <span style="color:var(--green);font-weight:700">NEW</span>, and spelled out below the figure.</p>
 
-<p>Two things the numbering is meant to settle. <strong>①</strong> is one
-<a href="https://github.com/NVIDIA-NeMo/RL/blob/8779394e0a6794ada72e1e6caf0fc06255e79442/nemo_rl/weight_sync/collective_weight_synchronizer.py#L73"><code>sync_weights()</code></a> call: the
-synchronizer calls the trainers and the engines itself, through the two relay objects, which is why one event
-reaches two workers. <strong>②</strong> has nothing to do with the refit — it is answered by the vLLM <em>Ray
-actor</em>, one level above the engine process, so an engine that is up but failing every request still looks
-healthy. <strong>③</strong> is the reason the watchdog cannot live in the controller: a thread sitting in NCCL is
-not serving RPCs, so nothing sent from outside arrives. <strong>④</strong> is the abort surfacing as an exception
-through <code>ray.get</code>, landing back in the synchronizer, which is what triggers the rebuild.</p>
+
+
+<p style="margin-top:14px"><strong>What each new piece does</strong> (hover the green boxes too):</p>
+<table>
+<tr><th>new in this PR</th><th>what it does</th></tr>
+<tr><td><code>RefitAbortWatchdog</code></td>
+<td>a thread armed with the deadline; if the refit overruns it calls <code>abort()</code> from inside the worker</td></tr>
+<tr><td><code>abort()</code></td>
+<td>terminates in-flight NCCL work and drops the communicator, so the blocked thread returns</td></tr>
+<tr><td><a href="https://github.com/NVIDIA-NeMo/RL/blob/8779394e0a6794ada72e1e6caf0fc06255e79442/nemo_rl/models/generation/fleet_health.py#L272"><code>record_actor_death()</code></a></td>
+<td>Ray says the actor process is gone → mark it DEAD immediately, with no further probe counting</td></tr>
+<tr><td><a href="https://github.com/NVIDIA-NeMo/RL/blob/8779394e0a6794ada72e1e6caf0fc06255e79442/nemo_rl/models/generation/fleet_health.py#L188"><code>absent_shards()</code></a></td>
+<td>the shards that cannot join a collective — DEAD, RESTARTING, RETIRED</td></tr>
+<tr><td><a href="https://github.com/NVIDIA-NeMo/RL/blob/8779394e0a6794ada72e1e6caf0fc06255e79442/nemo_rl/models/generation/fleet_health.py#L363"><code>mark_weights_partial()</code></a></td>
+<td>an aborted refit left this shard holding a mix of old and new weights, so hold it back from serving</td></tr>
+<tr><td><code>reconcile_communicator()</code></td>
+<td>rebuild the refit group over the survivors, at the top of every refit</td></tr>
+<tr><td><a href="https://github.com/NVIDIA-NeMo/RL/blob/8779394e0a6794ada72e1e6caf0fc06255e79442/nemo_rl/weight_sync/membership.py#L55"><code>plan_refit_membership()</code></a></td>
+<td>works out the new rank layout, closing the gap the dead shard left</td></tr>
+</table>
 
 <h2>Closing the gap in the ranks</h2>
 
