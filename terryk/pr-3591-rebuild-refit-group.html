@@ -143,7 +143,7 @@ Ray still reports every actor as healthy. One observed run sat like that for abo
 so it is never inside a collective — which is also why it cannot pull a worker out of one. That single fact
 decides where each piece has to live.</p>
 
-<svg viewBox="0 0 960 470" role="img" aria-label="Ownership and information flow. The GPU-less controller actor owns the fleet ledger and the weight synchronizer. It polls generation workers for liveness and pushes the refit call with a deadline. Each worker creates its own watchdog thread, which aborts the NCCL group from inside the process. The controller cannot reach a worker blocked in NCCL.">
+<svg viewBox="0 0 960 540" role="img" aria-label="Ownership and information flow. The GPU-less controller owns the fleet ledger and the weight synchronizer. Its liveness probe stops at the generation Ray actor, whose is_alive returns True and never touches the engine. The router, on the Gym path, counts failed requests and the controller pulls them each tick; that is the only signal that catches a wedged engine. Each worker creates its own watchdog thread that aborts the NCCL group in-process.">
 <defs>
 <marker id="arr2" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto">
 <path d="M0,0 L7,3 L0,6 z" fill="var(--dim)"/></marker>
@@ -151,22 +151,27 @@ decides where each piece has to live.</p>
 <path d="M0,0 L7,3 L0,6 z" fill="var(--green)"/></marker>
 </defs>
 
-<!-- controller -->
-<rect x="24" y="54" width="286" height="212" rx="8" class="cont"/>
 <text x="36" y="44" class="hdr">SingleControllerActor · no GPU</text>
-<rect x="40" y="74" width="254" height="56" rx="6" class="box s-tr"/>
-<text x="52" y="96" class="st">GenerationFleetMonitor</text>
-<text x="52" y="114" class="st">who is DEAD / RESTARTING</text>
-<rect x="40" y="142" width="254" height="56" rx="6" class="box s-tr"/>
-<text x="52" y="164" class="st">WeightSynchronizer</text>
-<text x="52" y="182" class="st">owns the refit group</text>
-<text x="40" y="228" class="note">Never in a collective, so it can</text>
-<text x="40" y="244" class="note">always answer — and can never</text>
-<text x="40" y="260" class="note">interrupt one.</text>
+<rect x="24" y="54" width="286" height="176" rx="8" class="cont"/>
+<rect x="40" y="72" width="254" height="50" rx="6" class="box s-tr"/>
+<text x="52" y="92" class="st">GenerationFleetMonitor</text>
+<text x="52" y="110" class="st">the ledger: who is DEAD</text>
+<rect x="40" y="134" width="254" height="50" rx="6" class="box s-tr"/>
+<text x="52" y="154" class="st">WeightSynchronizer</text>
+<text x="52" y="172" class="st">owns the refit group</text>
+<text x="40" y="208" class="note">Never in a collective, so it can always</text>
+<text x="40" y="222" class="note">answer — and can never interrupt one.</text>
 
-<!-- policy worker -->
+<text x="36" y="286" class="hdr">GenerationRouter · Gym path only · from part 2</text>
+<rect x="24" y="296" width="286" height="76" rx="8" class="cont"/>
+<rect x="40" y="312" width="254" height="44" rx="6" class="box s-sus"/>
+<text x="52" y="330" class="st">counts failed requests</text>
+<text x="52" y="348" class="st">per backend URL</text>
+<text x="24" y="392" class="note">Holds no reference to the ledger.</text>
+<text x="24" y="406" class="note">Membership flows one way, in.</text>
+
 <text x="560" y="44" class="hdr">MegatronPolicyWorker · GPU · sender</text>
-<rect x="548" y="54" width="388" height="112" rx="8" class="cont"/>
+<rect x="548" y="54" width="388" height="104" rx="8" class="cont"/>
 <rect x="562" y="70" width="170" height="42" rx="6" class="box s-dead"/>
 <text x="574" y="88" class="st">main thread</text>
 <text x="574" y="104" class="st">stuck in NCCL</text>
@@ -174,56 +179,64 @@ decides where each piece has to live.</p>
 <text x="762" y="88" class="st">watchdog thread</text>
 <text x="762" y="104" class="st">created per refit</text>
 <path class="grn" style="marker-end:url(#arrg2)" d="M750,91 L738,91"/>
-<text x="562" y="134" class="note">abort() happens in-process — no RPC, nothing to schedule</text>
 <a href="https://github.com/NVIDIA-NeMo/RL/blob/8779394e0a6794ada72e1e6caf0fc06255e79442/nemo_rl/models/policy/workers/megatron_policy_worker.py#L2308">
-<text x="562" y="154" class="note">megatron_policy_worker.py:2308</text></a>
+<text x="562" y="140" class="note">abort() is in-process — megatron_policy_worker.py:2308</text></a>
 
-<!-- generation worker -->
-<text x="560" y="222" class="hdr">VllmGenerationWorker · GPU · receiver</text>
-<rect x="548" y="232" width="388" height="150" rx="8" class="cont"/>
-<rect x="562" y="248" width="360" height="118" rx="6" class="box"/>
-<text x="574" y="270" class="note">vLLM TP worker process (one level deeper, reached by collective_rpc)</text>
-<rect x="576" y="282" width="164" height="42" rx="6" class="box s-dead"/>
-<text x="588" y="300" class="st">main thread</text>
-<text x="588" y="316" class="st">stuck in NCCL</text>
-<rect x="756" y="282" width="152" height="42" rx="6" class="box s-ok"/>
-<text x="768" y="300" class="st">watchdog thread</text>
-<text x="768" y="316" class="st">created per refit</text>
-<path class="grn" style="marker-end:url(#arrg2)" d="M756,303 L746,303"/>
+<text x="560" y="196" class="hdr">VllmGenerationWorker · Ray actor · receiver</text>
+<rect x="548" y="206" width="388" height="216" rx="8" class="cont"/>
+<rect x="562" y="222" width="360" height="42" rx="6" class="box s-ok"/>
+<text x="574" y="240" class="st">is_alive() → return True</text>
+<text x="574" y="256" class="st">the actor answers; the engine is not consulted</text>
+<rect x="562" y="276" width="360" height="130" rx="6" class="box"/>
+<text x="574" y="296" class="note">vLLM TP worker process — one level deeper, via collective_rpc</text>
+<rect x="576" y="308" width="164" height="42" rx="6" class="box s-dead"/>
+<text x="588" y="326" class="st">main thread</text>
+<text x="588" y="342" class="st">stuck in NCCL</text>
+<rect x="756" y="308" width="152" height="42" rx="6" class="box s-ok"/>
+<text x="768" y="326" class="st">watchdog thread</text>
+<text x="768" y="342" class="st">created per refit</text>
+<path class="grn" style="marker-end:url(#arrg2)" d="M756,329 L746,329"/>
 <a href="https://github.com/NVIDIA-NeMo/RL/blob/8779394e0a6794ada72e1e6caf0fc06255e79442/nemo_rl/models/generation/vllm/vllm_backend.py#L774">
-<text x="576" y="352" class="note">vllm_backend.py:774 — VllmInternalWorkerExtension</text></a>
+<text x="576" y="376" class="note">vllm_backend.py:774 — VllmInternalWorkerExtension</text></a>
 
-<!-- flows -->
-<path class="ctrl" style="marker-end:url(#arr2)" d="M310,110 L548,290"/>
-<text x="322" y="146" class="note">1 · poll: is_alive() every probe_interval_s</text>
-<path class="arrow" style="marker-end:url(#arr2)" d="M548,308 L312,126"/>
-<text x="322" y="166" class="note">    reply → writes into the ledger</text>
+<path class="ctrl" style="marker-end:url(#arr2)" d="M310,100 L548,236"/>
+<text x="318" y="120" class="note">1 · poll every probe_interval_s — stops at the actor,</text>
+<text x="318" y="134" class="note">    so a wedged engine still answers "alive"</text>
 
-<path class="ctrl" style="marker-end:url(#arr2)" d="M310,170 L548,96"/>
-<text x="322" y="196" class="note">2 · push: refit call, carrying refit_timeout_s</text>
-<text x="322" y="212" class="note">    (the deadline travels with the call —</text>
-<text x="322" y="228" class="note">    it is not configured inside the worker)</text>
+<path class="ctrl" style="marker-end:url(#arr2)" d="M310,246 L560,318"/>
+<text x="318" y="252" class="note">2 · pull each tick: drain_backend_failures()</text>
+<text x="318" y="266" class="note">    the only signal that catches a wedged engine</text>
+<path class="arrow" style="marker-end:url(#arr2)" d="M232,296 L232,236"/>
 
-<path class="redline" d="M404,268 L470,300"/>
-<path class="redline" d="M470,268 L404,300"/>
-<text x="322" y="292" class="big">3 · cannot reach a blocked worker</text>
-<text x="322" y="322" class="note">4 · the abort is local; the worker then</text>
-<text x="322" y="338" class="note">    returns the failure through ray.get</text>
-<path class="arrow" style="marker-end:url(#arr2)" d="M548,346 L312,344"/>
-
-<text x="24" y="404" class="note">5 · controller rebuilds: init_collective on trainers, rebuild_collective on surviving generation leaders</text>
+<path class="ctrl" style="marker-end:url(#arr2)" d="M310,160 L548,90"/>
+<text x="318" y="440" class="note">3 · push the refit, carrying refit_timeout_s — the deadline travels with the call,</text>
+<text x="318" y="454" class="note">    it is not configured inside the worker</text>
+<path class="redline" d="M470,330 L520,356"/>
+<path class="redline" d="M520,330 L470,356"/>
+<text x="318" y="482" class="big">4 · cannot reach a worker already blocked in NCCL</text>
+<path class="arrow" style="marker-end:url(#arr2)" d="M548,412 L312,412"/>
+<text x="318" y="500" class="note">5 · the abort is local; the failure comes back through ray.get, and the controller rebuilds</text>
 <a href="https://github.com/NVIDIA-NeMo/RL/blob/8779394e0a6794ada72e1e6caf0fc06255e79442/nemo_rl/weight_sync/collective_weight_synchronizer.py#L132">
-<text x="24" y="422" class="note">collective_weight_synchronizer.py:132 — reconcile_communicator</text></a>
+<text x="318" y="518" class="note">    collective_weight_synchronizer.py:132 — reconcile_communicator</text></a>
 
-<rect x="640" y="392" width="14" height="14" rx="3" class="box s-ok"/><text x="662" y="404" class="note">runs inside the worker</text>
-<rect x="640" y="414" width="14" height="14" rx="3" class="box s-tr"/><text x="662" y="426" class="note">runs in the controller</text>
-<text x="24" y="446" class="note">Dashed blue = controller-initiated. Solid grey = reply or exception travelling back. Nothing tells the watchdog anything; it is armed at call time and decides alone.</text>
+<rect x="24" y="428" width="14" height="14" rx="3" class="box s-ok"/><text x="46" y="440" class="note">inside the worker</text>
+<rect x="24" y="450" width="14" height="14" rx="3" class="box s-tr"/><text x="46" y="462" class="note">in the controller</text>
+<rect x="24" y="472" width="14" height="14" rx="3" class="box s-sus"/><text x="46" y="484" class="note">Gym path only</text>
+<text x="24" y="510" class="note">Dashed blue = controller-initiated.</text>
+<text x="24" y="524" class="note">Grey = travelling back.</text>
 </svg>
 
-<p>So the ownership is: the controller holds the <em>knowledge</em> (which shards are gone) and does the
-rebuild, but the only thing that can break a stuck collective is a thread already inside that process. The
-watchdog is not a service and nothing calls it — it is created for the duration of one refit and it decides
-by itself.</p>
+<p>Two things are worth reading off this. First, <strong>the router never polls anything</strong> — it counts
+failures on requests it already forwards, and the controller pulls that count on the same tick it probes. It is
+told the serving set and reports nothing back on its own. Second, the probe
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/8779394e0a6794ada72e1e6caf0fc06255e79442/nemo_rl/models/generation/vllm/vllm_worker.py#L615"><code>is_alive()</code></a> is literally
+<code>return True</code> from the Ray actor. It proves the actor is answering; it never touches the engine. So an
+engine that is up but failing every request looks perfectly healthy to the probe, and the router's failure count
+is the only thing that can catch it — which is exactly why that second path exists.</p>
+
+<p>And the ownership: the controller holds the <em>knowledge</em> of which shards are gone and does the rebuild,
+but the only thing that can break a stuck collective is a thread already inside that process. The watchdog is not
+a service and nothing calls it — it is created for one refit and decides by itself.</p>
 
 <h2>Closing the gap in the ranks</h2>
 
