@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NVIDIA-NeMo/RL #3591 — rebuilding the refit group after a generation shard dies</title>
+<style>
+:root{
+  --bg:#0d1117; --surface:#161b22; --surface2:#1c2128; --border:#30363d;
+  --text:#e6edf3; --dim:#8b949e; --accent:#58a6ff; --green:#3fb950;
+  --orange:#d29922; --red:#f85149;
+}
+:root[data-theme="light"]{
+  --bg:#ffffff; --surface:#f6f8fa; --surface2:#eaeef2; --border:#d0d7de;
+  --text:#1f2328; --dim:#59636e; --accent:#0969da; --green:#1a7f37;
+  --orange:#9a6700; --red:#cf222e;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:28px 20px 70px}
+h1{font-size:22px;margin:0 0 8px;line-height:1.3}
+h2{font-size:18px;margin:32px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;
+  font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
+.sub{color:var(--dim);font-size:13.5px;margin:0 0 16px}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);
+  border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;
+  font:13px/1 ui-monospace,Menlo,monospace;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.18)}
+.mono{font:12.5px ui-monospace,SFMono-Regular,Menlo,monospace;
+  background:var(--surface);border:1px solid var(--border);border-radius:8px;
+  padding:13px;overflow-x:auto;white-space:pre}
+.warn{border-left:3px solid var(--red);background:var(--surface);
+  padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0}
+.hl{border-left:3px solid var(--accent);background:var(--surface);
+  padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0}
+table{border-collapse:collapse;font-size:13.5px;margin:12px 0}
+th,td{border:1px solid var(--border);padding:5px 10px;text-align:left}
+th{background:var(--surface)}
+.ok{color:var(--green);font-weight:700}
+.dead{color:var(--red);font-weight:700}
+svg{max-width:100%;height:auto;display:block;margin:16px 0}
+svg .box{fill:var(--surface);stroke:var(--border);stroke-width:1.4}
+svg .cont{fill:none;stroke:var(--dim);stroke-width:1.2;stroke-dasharray:5 4}
+svg .lbl{fill:var(--text);font:12px ui-monospace,Menlo,monospace}
+svg .lbl-b{fill:var(--text);font:bold 12.5px -apple-system,sans-serif}
+svg .note{fill:var(--dim);font:11px -apple-system,sans-serif}
+svg .hdr{fill:var(--accent);font:bold 12.5px -apple-system,sans-serif}
+svg .arrow{stroke:var(--dim);stroke-width:1.6;fill:none;marker-end:url(#arr)}
+svg .redline{stroke:var(--red);stroke-width:1.8;fill:none}
+svg .grn{stroke:var(--green);stroke-width:1.8;fill:none;marker-end:url(#arrg)}
+svg .s-ok{fill:var(--green);opacity:.5;stroke:var(--green)}
+svg .s-dead{fill:var(--red);opacity:.5;stroke:var(--red)}
+svg .s-tr{fill:var(--accent);opacity:.35;stroke:var(--accent)}
+svg .st{fill:var(--text);font:10.5px ui-monospace,Menlo,monospace}
+svg .big{fill:var(--red);font:bold 13px -apple-system,sans-serif}
+svg a text{text-decoration:underline;fill:var(--accent);font:11px ui-monospace,Menlo,monospace}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+  document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head>
+<body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+  function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+  function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
+    b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
+      else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+  document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+<div class="wrap">
+
+<h1>Why one dead generation shard freezes the whole run — and how the weight-copy group is rebuilt without it</h1>
+<p class="sub">Companion illustration for
+<a href="https://github.com/NVIDIA-NeMo/RL/pull/3591">NVIDIA-NeMo/RL #3591</a>
+(part 3/4 of the SingleController resiliency stack). Sequel to
+<a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-3590-who-watches-what.html">#3590 — who watches what</a>.
+All permalinks pin the PR head <code>8779394</code>.</p>
+
+<p>Every training step, the new weights are copied from the trainer to the inference engines. That copy is called the
+<strong>refit</strong>. When generation runs on its own GPUs, the refit is one NCCL broadcast over a single group —
+<code>model_update_group</code> — that is built once at startup and contains <em>every</em> trainer rank and
+<em>every</em> generation rank
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/8779394e0a6794ada72e1e6caf0fc06255e79442/nemo_rl/weight_sync/collective_weight_synchronizer.py#L112">collective_weight_synchronizer.py:112</a>).
+A NCCL broadcast only completes when every rank in the group calls it. So if one generation process dies, the next refit
+waits for a rank that will never arrive. <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-3590-who-watches-what.html">#3590</a>
+could already notice the dead shard and stop sending it requests — but it could not stop this, and this is the part that
+ends the run.</p>
+
+<p>The worst part is how it fails. There is no exception and no error. The process sits inside NCCL burning no CPU, and
+Ray still reports every actor as healthy. One observed run sat like that for about half an hour before anyone noticed.</p>
+
+<svg viewBox="0 0 960 340" role="img" aria-label="One NCCL group spans two trainer ranks and three generation ranks. Generation shard 1 at rank 3 has died. The broadcast from rank 0 reaches ranks 2 and 4 but never completes because rank 3 never calls it.">
+<defs>
+<marker id="arr" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto">
+<path d="M0,0 L7,3 L0,6 z" fill="var(--dim)"/></marker>
+</defs>
+
+<text x="40" y="30" class="hdr">model_update_group — one NCCL group, built once at startup, never changed</text>
+<rect x="34" y="44" width="892" height="132" rx="8" class="cont"/>
+
+<rect x="52" y="66" width="156" height="56" rx="6" class="box s-tr"/>
+<text x="64" y="88" class="st">rank 0 · trainer</text>
+<text x="64" y="106" class="st">broadcast root</text>
+
+<rect x="224" y="66" width="156" height="56" rx="6" class="box s-tr"/>
+<text x="236" y="88" class="st">rank 1 · trainer</text>
+
+<rect x="396" y="66" width="156" height="56" rx="6" class="box s-ok"/>
+<text x="408" y="88" class="st">rank 2 · gen shard 0</text>
+<text x="408" y="106" class="st">waiting…</text>
+
+<rect x="568" y="66" width="156" height="56" rx="6" class="box s-dead"/>
+<text x="580" y="88" class="st">rank 3 · gen shard 1</text>
+<text x="580" y="106" class="st">process gone ✕</text>
+
+<rect x="740" y="66" width="156" height="56" rx="6" class="box s-ok"/>
+<text x="752" y="88" class="st">rank 4 · gen shard 2</text>
+<text x="752" y="106" class="st">waiting…</text>
+
+<path class="arrow" d="M130,140 L474,140"/>
+<path class="arrow" d="M130,140 L818,140"/>
+<path class="redline" d="M600,128 L692,164"/>
+<path class="redline" d="M692,128 L600,164"/>
+<text x="150" y="160" class="note">broadcast(weights) — every rank must call it</text>
+
+<text x="40" y="212" class="big">The broadcast never returns.</text>
+<text x="40" y="234" class="note">No exception. No error. No CPU burn. Ray reports all actors healthy.</text>
+<text x="40" y="252" class="note">The trainer is stuck inside NCCL, so the controller cannot reach it to ask it to stop.</text>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/8779394e0a6794ada72e1e6caf0fc06255e79442/nemo_rl/utils/packed_tensor.py#L97">
+<text x="40" y="272" class="note">packed_broadcast_producer — group.broadcast(...) (packed_tensor.py:97)</text></a>
+
+<rect x="640" y="196" width="14" height="14" rx="3" class="box s-tr"/><text x="662" y="208" class="note">trainer rank</text>
+<rect x="640" y="220" width="14" height="14" rx="3" class="box s-ok"/><text x="662" y="232" class="note">generation rank, alive</text>
+<rect x="640" y="244" width="14" height="14" rx="3" class="box s-dead"/><text x="662" y="256" class="note">generation rank, dead</text>
+</svg>
+
+<h2>The fix: break the hang from inside, then rebuild the group over who is left</h2>
+
+<p>Three moves. The example below is the same one as the figure above: 2 trainer ranks, 3 generation shards of 1 GPU each,
+and shard 1 dies.</p>
+
+<svg viewBox="0 0 960 400" role="img" aria-label="Three steps. A watchdog thread inside the worker aborts the group. The controller rebuilds the group over the surviving shards, renumbering shard 2 from rank 4 to rank 3 so the ranks stay gap-free. The reshard transport also rebuilds its plan.">
+<defs>
+<marker id="arrg" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto">
+<path d="M0,0 L7,3 L0,6 z" fill="var(--green)"/></marker>
+</defs>
+
+<!-- step 1 -->
+<text x="34" y="26" class="hdr">1 · a thread inside the stuck worker breaks the collective</text>
+<rect x="34" y="38" width="430" height="92" rx="8" class="cont"/>
+<rect x="50" y="54" width="180" height="58" rx="6" class="box"/>
+<text x="62" y="76" class="lbl-b">main thread</text>
+<text x="62" y="94" class="note">blocked inside broadcast()</text>
+<rect x="256" y="54" width="192" height="58" rx="6" class="box"/>
+<text x="268" y="76" class="lbl-b">watchdog thread</text>
+<text x="268" y="94" class="note">deadline passes → abort()</text>
+<path class="grn" d="M256,83 L236,83"/>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/8779394e0a6794ada72e1e6caf0fc06255e79442/nemo_rl/distributed/refit_watchdog.py#L57">
+<text x="34" y="148" class="note">RefitAbortWatchdog (refit_watchdog.py:57)</text></a>
+<text x="34" y="166" class="note">It has to run in the worker: the controller cannot call in while the worker sits in NCCL.</text>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/8779394e0a6794ada72e1e6caf0fc06255e79442/nemo_rl/distributed/stateless_process_group.py#L42">
+<text x="34" y="184" class="note">abort(), not destroy() — destroy is itself a collective every rank must call (stateless_process_group.py:42)</text></a>
+
+<!-- step 2 -->
+<text x="34" y="232" class="hdr">2 · rebuild the group over the survivors — and close the gap</text>
+
+<text x="34" y="258" class="note">before</text>
+<rect x="96" y="244" width="104" height="26" rx="4" class="box s-tr"/><text x="108" y="262" class="st">0 trainer</text>
+<rect x="208" y="244" width="104" height="26" rx="4" class="box s-tr"/><text x="220" y="262" class="st">1 trainer</text>
+<rect x="320" y="244" width="104" height="26" rx="4" class="box s-ok"/><text x="332" y="262" class="st">2 shard 0</text>
+<rect x="432" y="244" width="104" height="26" rx="4" class="box s-dead"/><text x="444" y="262" class="st">3 shard 1</text>
+<rect x="544" y="244" width="104" height="26" rx="4" class="box s-ok"/><text x="556" y="262" class="st">4 shard 2</text>
+
+<path class="grn" d="M596,276 L484,302"/>
+<text x="672" y="266" class="note">shard 2 moves down a rank</text>
+
+<text x="34" y="322" class="note">after</text>
+<rect x="96" y="308" width="104" height="26" rx="4" class="box s-tr"/><text x="108" y="326" class="st">0 trainer</text>
+<rect x="208" y="308" width="104" height="26" rx="4" class="box s-tr"/><text x="220" y="326" class="st">1 trainer</text>
+<rect x="320" y="308" width="104" height="26" rx="4" class="box s-ok"/><text x="332" y="326" class="st">2 shard 0</text>
+<rect x="432" y="308" width="104" height="26" rx="4" class="box s-ok"/><text x="444" y="326" class="st">3 shard 2</text>
+<text x="556" y="326" class="note">world_size 5 → 4</text>
+
+<text x="34" y="360" class="note">Trainers are never dropped, so rank 0 stays a trainer and the broadcast root does not move.</text>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/8779394e0a6794ada72e1e6caf0fc06255e79442/nemo_rl/weight_sync/membership.py#L103">
+<text x="34" y="378" class="note">plan_refit_membership — prefixes = position * workers_per_shard (membership.py:103)</text></a>
+</svg>
+
+<p>Why close the gap instead of leaving rank 4 where it was? Because the other weight-transfer path builds its destination
+layout as <code>torch.arange(offset, offset + num_gpus)</code>. A hole in the numbering does not raise an error there — it
+just points every parameter at the wrong place. So the survivors are renumbered to run 0, 1, 2, … with nothing missing.
+That renumbering is the whole job of
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/8779394e0a6794ada72e1e6caf0fc06255e79442/nemo_rl/weight_sync/membership.py#L55"><code>plan_refit_membership</code></a>,
+a module of plain integer arithmetic with no Ray and no GPUs in it, so it can be tested on a laptop:</p>
+
+<div class="mono">plan_refit_membership(surviving_shards=[0, 2], dp_size=3,
+                      total_gen_workers=3, train_world_size=2)
+
+→ RefitMembership(world_size       = 4,        # was 5
+                  train_world_size = 2,        # unchanged: trainers are never dropped
+                  shard_prefixes   = {0: 0,    # shard 0 keeps its place  → global rank 2
+                                      2: 1},   # shard 2 slides down one  → global rank 3
+                  workers_per_shard = 1)</div>
+
+<p>The rebuild runs at the top of the weight sync
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/8779394e0a6794ada72e1e6caf0fc06255e79442/nemo_rl/algorithms/single_controller.py#L1290">single_controller.py:1290</a>),
+not when the death is noticed. That is on purpose: changing who is in a NCCL group is itself a group operation, so it is
+only safe at a moment when the group is idle and every rank agrees it is idle. The top of the refit is that moment.
+Running it every step also means a health update that arrives late or out of order fixes itself on the next step.</p>
+
+<p><strong>The third move applies to one transport only.</strong> The <code>nccl_reshard</code> path does not broadcast the
+same bytes to everyone — it cuts each parameter into pieces and sends a different piece to each generation rank. Which
+piece goes where is worked out once, from the number of generation ranks
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/8779394e0a6794ada72e1e6caf0fc06255e79442/nemo_rl/weight_sync/nccl_reshard_weight_synchronizer.py#L245">nccl_reshard_weight_synchronizer.py:245</a>).
+Reusing that plan after a shard is lost does not fail — the survivors simply write the pieces the dead shard used to own
+and leave their own pieces empty. So the plan is thrown away and worked out again, in the same
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/8779394e0a6794ada72e1e6caf0fc06255e79442/nemo_rl/weight_sync/nccl_reshard_weight_synchronizer.py#L161"><code>_build()</code></a>
+that the first startup uses — so every normal run exercises the rebuild code.</p>
+
+<div class="hl"><strong>One subtlety worth keeping.</strong> "Gone" is deliberately <em>not</em> the opposite of "serving".
+A shard can be held back from serving requests while its process is perfectly alive — because it is failing health checks,
+or because it was just reloaded and still holds old weights. Those shards must still take part in the refit; for the
+reloaded one, the refit is exactly how it stops being out of date. So the refit asks a narrower question, over
+<code>{DEAD, RESTARTING, RETIRED}</code> only
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/8779394e0a6794ada72e1e6caf0fc06255e79442/nemo_rl/models/generation/fleet_health.py#L70">fleet_health.py:70</a>).
+Using the serving set instead would drop a shard from the group over one slow health check.</div>
+
+<h2>Does it work?</h2>
+
+<p>The piece the whole design rests on — that you can free a process already stuck inside NCCL — was measured directly.
+With a peer killed in the middle of a broadcast, a survivor blocked in the collective was released <strong>0.15 s</strong>
+after another thread called <code>abort()</code>, on 2×A6000. That is the measurement that makes the watchdog possible,
+and it is why the code calls <code>abort()</code> rather than <code>destroy()</code>: NCCL documents destroy as an
+operation every rank must join, which is precisely what a dead rank cannot do. A healthy refit was timed at about
+<strong>1.9 s</strong> for a 1.5B model on GB200, which is what the deadline should be set well above
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/8779394e0a6794ada72e1e6caf0fc06255e79442/nemo_rl/algorithms/single_controller_utils/config.py#L194">config.py:194</a>).</p>
+
+<p>The end-to-end proof is thinner than it looks. There <em>is</em> a test that kills a shard mid-run and asserts training
+finishes — <code>grpo_sc_generation_shard_recovery.sh</code>, registered four times so it covers both transports and a kill
+placed inside the collective. But it needs at least 3 GPUs (2 generation shards plus a trainer), and it exits 0 with a
+"SKIP" message below that. The L1 runners have 2 GPUs, and a skip and a pass look identical to CI. <strong>So on the
+automated runs, that test has not executed.</strong> The right thing to ask for before merging is the same thing the
+previous PR in this stack did for its sibling test: a manual run on a machine with 3 or more GPUs, with the result posted
+on the PR.</p>
+
+<div class="warn"><strong>What this changes.</strong> Before this PR, losing one generation engine on the non-colocated
+path ended the run, in the most expensive way available: a silent hang that looks healthy from the outside, so the GPUs
+stay booked until a human notices. After it, the run keeps training on the shards that are left. The knob is
+<code>refit_timeout_s</code>, and it is off by default — leave it unset and no watchdog thread starts and the refit path is
+unchanged. Set it well above a normal refit: firing early aborts a run that was only slow, while firing late just means a
+hang lasts a little longer before it is broken.</div>
+
+</div>
+</body>
+</html>
