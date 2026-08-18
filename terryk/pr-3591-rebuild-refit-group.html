@@ -150,109 +150,109 @@ Ray still reports every actor as healthy. One observed run sat like that for abo
 so it is never inside a collective — which is also why it cannot pull a worker out of one. That single fact
 decides where each piece has to live.</p>
 
-<svg viewBox="0 0 960 470" role="img" aria-label="Ownership. One GPU-less controller process holds the fleet ledger, the weight synchronizer, and the Policy and VllmGeneration driver objects that hold the Ray worker groups. All arrows to the GPU workers start there. The liveness probe stops at the generation Ray actor, whose is_alive returns True without consulting the engine. The GPU workers never write to the ledger.">
+<svg viewBox="0 0 980 360" role="img" aria-label="Ownership and flow. Inside the GPU-less controller process: a probe loop, the fleet ledger, the Policy and VllmGeneration driver objects, and the WeightSynchronizer. The synchronizer issues one refit that fans out through both drivers to both kinds of GPU worker. The probe loop polls the generation actor and stops there. Only in-process code writes to the ledger.">
 <defs>
-<marker id="arr2" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto">
-<path d="M0,0 L7,3 L0,6 z" fill="var(--dim)"/></marker>
-<marker id="arrb" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto">
+<marker id="a2" markerWidth="9" markerHeight="9" refX="8" refY="3" orient="auto">
 <path d="M0,0 L7,3 L0,6 z" fill="var(--accent)"/></marker>
-<marker id="arrg2" markerWidth="9" markerHeight="9" refX="9" refY="3" orient="auto">
+<marker id="a3" markerWidth="9" markerHeight="9" refX="8" refY="3" orient="auto">
+<path d="M0,0 L7,3 L0,6 z" fill="var(--dim)"/></marker>
+<marker id="a4" markerWidth="9" markerHeight="9" refX="9" refY="3" orient="auto">
 <path d="M0,0 L7,3 L0,6 z" fill="var(--green)"/></marker>
 </defs>
 
-<text x="20" y="30" class="hdr">SingleControllerActor · one process · no GPU</text>
-<rect x="20" y="40" width="310" height="330" rx="8" class="cont"/>
-<rect x="34" y="56" width="282" height="44" rx="6" class="box s-tr"/>
-<text x="46" y="74" class="st">GenerationFleetHealth</text>
-<text x="46" y="90" class="st">the ledger: who is DEAD</text>
-<rect x="34" y="110" width="282" height="38" rx="6" class="box s-tr"/>
-<text x="46" y="134" class="st">WeightSynchronizer</text>
-<text x="34" y="176" class="note">Plain objects in this same process — not actors.</text>
-<text x="34" y="190" class="note">Each holds a RayWorkerGroup of handles:</text>
-<rect x="34" y="200" width="136" height="46" rx="6" class="box s-tr"/>
-<text x="46" y="218" class="st">Policy</text>
-<text x="46" y="234" class="st">→ trainers</text>
-<rect x="180" y="200" width="136" height="46" rx="6" class="box s-tr"/>
-<text x="192" y="218" class="st">VllmGeneration</text>
-<text x="192" y="234" class="st">→ gen shards</text>
-<path class="grn" style="marker-end:url(#arrg2)" d="M248,200 L248,102"/>
-<text x="34" y="272" class="note">VllmGeneration writes request failures straight</text>
-<text x="34" y="286" class="note">into the ledger — same process, no RPC.</text>
-<text x="34" y="314" class="note">Never in a collective, so it can always answer</text>
-<text x="34" y="328" class="note">— and can never interrupt one.</text>
-<text x="34" y="356" class="note">GenerationRouter (Gym path, part 2) takes no</text>
-<text x="34" y="370" class="note">part in probing; it only counts failed requests.</text>
+<text x="18" y="28" class="hdr">SingleControllerActor · one process · no GPU</text>
+<rect x="18" y="36" width="348" height="306" rx="8" class="cont"/>
 
-<text x="610" y="30" class="hdr">MegatronPolicyWorker · Ray actor · GPU</text>
-<rect x="610" y="40" width="330" height="86" rx="8" class="cont"/>
-<rect x="622" y="54" width="146" height="40" rx="6" class="box s-dead"/>
-<text x="632" y="70" class="st">main thread</text>
-<text x="632" y="86" class="st">stuck in NCCL</text>
-<rect x="782" y="54" width="146" height="40" rx="6" class="box s-ok"/>
-<text x="792" y="70" class="st">watchdog</text>
-<text x="792" y="86" class="st">per refit</text>
-<path class="grn" style="marker-end:url(#arrg2)" d="M782,74 L772,74"/>
+<rect x="30" y="50" width="324" height="36" rx="6" class="box s-tr"/>
+<text x="42" y="72" class="st">probe loop (asyncio task)</text>
+
+<rect x="30" y="100" width="324" height="40" rx="6" class="box s-tr"/>
+<text x="42" y="118" class="st">GenerationFleetHealth</text>
+<text x="42" y="133" class="st">the ledger: who is DEAD</text>
+
+<path class="grn" style="marker-end:url(#a4)" d="M84,86 L84,98"/>
+<text x="96" y="96" class="note">record_probe()</text>
+
+<rect x="30" y="166" width="158" height="44" rx="6" class="box s-tr"/>
+<text x="42" y="184" class="st">Policy</text>
+<text x="42" y="200" class="st">holds worker group</text>
+<rect x="196" y="166" width="158" height="44" rx="6" class="box s-tr"/>
+<text x="208" y="184" class="st">VllmGeneration</text>
+<text x="208" y="200" class="st">holds worker group</text>
+<path class="grn" style="marker-end:url(#a4)" d="M280,166 L280,144"/>
+<text x="150" y="160" class="note">report_failure() / report_success() on real requests</text>
+
+<rect x="30" y="242" width="324" height="38" rx="6" class="box s-tr"/>
+<text x="42" y="266" class="st">WeightSynchronizer — drives the refit</text>
+
+<text x="30" y="300" class="note">Green = written in-process, no RPC. A GPU</text>
+<text x="30" y="314" class="note">worker never writes to the ledger.</text>
+<text x="30" y="332" class="note">GenerationRouter (Gym, part 2) never probes.</text>
+
+<text x="618" y="28" class="hdr">MegatronPolicyWorker · Ray actor · GPU</text>
+<rect x="618" y="36" width="344" height="82" rx="8" class="cont"/>
+<rect x="630" y="50" width="152" height="38" rx="6" class="box s-dead"/>
+<text x="640" y="66" class="st">main thread</text>
+<text x="640" y="81" class="st">stuck in NCCL</text>
+<rect x="796" y="50" width="152" height="38" rx="6" class="box s-ok"/>
+<text x="806" y="66" class="st">watchdog</text>
+<text x="806" y="81" class="st">per refit</text>
+<path class="grn" style="marker-end:url(#a4)" d="M796,69 L788,69"/>
 <a href="https://github.com/NVIDIA-NeMo/RL/blob/8779394e0a6794ada72e1e6caf0fc06255e79442/nemo_rl/models/policy/workers/megatron_policy_worker.py#L2308">
-<text x="622" y="114" class="note">megatron_policy_worker.py:2308</text></a>
+<text x="630" y="108" class="note">megatron_policy_worker.py:2308</text></a>
 
-<text x="610" y="160" class="hdr">VllmGenerationWorker · Ray actor · GPU</text>
-<rect x="610" y="170" width="330" height="200" rx="8" class="cont"/>
-<rect x="622" y="184" width="306" height="38" rx="6" class="box s-ok"/>
-<text x="632" y="200" class="st">is_alive() → return True</text>
-<text x="632" y="215" class="st">engine not consulted</text>
-<rect x="622" y="232" width="306" height="124" rx="6" class="box"/>
-<text x="632" y="250" class="note">vLLM TP worker process (via collective_rpc)</text>
-<rect x="634" y="260" width="140" height="40" rx="6" class="box s-dead"/>
-<text x="644" y="276" class="st">main thread</text>
-<text x="644" y="292" class="st">stuck in NCCL</text>
-<rect x="788" y="260" width="128" height="40" rx="6" class="box s-ok"/>
-<text x="798" y="276" class="st">watchdog</text>
-<text x="798" y="292" class="st">per refit</text>
-<path class="grn" style="marker-end:url(#arrg2)" d="M788,280 L780,280"/>
+<text x="618" y="146" class="hdr">VllmGenerationWorker · Ray actor · GPU</text>
+<rect x="618" y="154" width="344" height="188" rx="8" class="cont"/>
+<rect x="630" y="168" width="320" height="36" rx="6" class="box s-ok"/>
+<text x="640" y="184" class="st">is_alive() → return True</text>
+<text x="640" y="198" class="st">engine not consulted</text>
+<rect x="630" y="214" width="320" height="116" rx="6" class="box"/>
+<text x="640" y="231" class="note">vLLM TP worker process (via collective_rpc)</text>
+<rect x="642" y="240" width="146" height="38" rx="6" class="box s-dead"/>
+<text x="652" y="256" class="st">main thread</text>
+<text x="652" y="271" class="st">stuck in NCCL</text>
+<rect x="800" y="240" width="138" height="38" rx="6" class="box s-ok"/>
+<text x="810" y="256" class="st">watchdog</text>
+<text x="810" y="271" class="st">per refit</text>
+<path class="grn" style="marker-end:url(#a4)" d="M800,259 L794,259"/>
 <a href="https://github.com/NVIDIA-NeMo/RL/blob/8779394e0a6794ada72e1e6caf0fc06255e79442/nemo_rl/models/generation/vllm/vllm_backend.py#L774">
-<text x="634" y="332" class="note">vllm_backend.py:774</text></a>
+<text x="642" y="306" class="note">vllm_backend.py:774</text></a>
 
-<text x="346" y="66" class="note">push refit + refit_timeout_s</text>
-<path class="ctrl" style="marker-end:url(#arrb)" d="M330,74 L610,74"/>
+<text x="392" y="52" class="note">poll is_alive() every probe_interval_s — stops at the actor</text>
+<path class="ctrl" style="marker-end:url(#a2)" d="M390,68 L618,180"/>
+<circle cx="378" cy="68" r="9" class="badge"/><text x="378" y="72" text-anchor="middle" class="bnum">2</text>
 
-<text x="346" y="195" class="note">poll is_alive() — stops here</text>
-<path class="ctrl" style="marker-end:url(#arrb)" d="M330,203 L610,203"/>
+<text x="392" y="242" class="note">one sync_weights() — fans out through BOTH drivers,</text>
+<text x="392" y="256" class="note">each call carrying refit_timeout_s</text>
+<path class="ctrl" style="marker-end:url(#a2)" d="M390,262 L618,72"/>
+<path class="ctrl" style="marker-end:url(#a2)" d="M390,266 L642,255"/>
+<circle cx="378" cy="264" r="9" class="badge"/><text x="378" y="268" text-anchor="middle" class="bnum">1</text>
 
-<text x="346" y="272" class="note">push refit + refit_timeout_s</text>
-<path class="ctrl" style="marker-end:url(#arrb)" d="M330,280 L622,280"/>
+<text x="392" y="292" class="note">failure returns via ray.get → the synchronizer rebuilds</text>
+<path class="arrow" style="marker-end:url(#a3)" d="M618,300 L392,300"/>
+<circle cx="378" cy="300" r="9" class="badgeg"/><text x="378" y="304" text-anchor="middle" class="bnum">4</text>
 
-<text x="346" y="331" class="big">cannot reach a blocked worker</text>
-<path class="ctrl" d="M330,339 L462,339"/>
-<path class="redline" d="M468,326 L510,352"/>
-<path class="redline" d="M510,326 L468,352"/>
-
-<text x="346" y="404" class="note">failure returns through ray.get; the controller rebuilds</text>
-<path class="arrow" style="marker-end:url(#arr2)" d="M610,412 L330,412"/>
-<a href="https://github.com/NVIDIA-NeMo/RL/blob/8779394e0a6794ada72e1e6caf0fc06255e79442/nemo_rl/weight_sync/collective_weight_synchronizer.py#L132">
-<text x="326" y="432" class="note">collective_weight_synchronizer.py:132 — reconcile_communicator</text></a>
-
-<rect x="20" y="400" width="13" height="13" rx="3" class="box s-tr"/><text x="40" y="411" class="note">controller process</text>
-<rect x="20" y="420" width="13" height="13" rx="3" class="box s-ok"/><text x="40" y="431" class="note">inside a GPU worker</text>
-<text x="20" y="456" class="note">Blue = controller-initiated. Grey = travelling back. The GPU workers never write to the ledger; they only answer.</text>
-<circle cx="340" cy="74" r="9" class="badge"/><text x="340" y="78" text-anchor="middle" class="bnum">1</text>
-<circle cx="340" cy="203" r="9" class="badge"/><text x="340" y="207" text-anchor="middle" class="bnum">2</text>
-<circle cx="340" cy="280" r="9" class="badge"/><text x="340" y="284" text-anchor="middle" class="bnum">3</text>
-<circle cx="340" cy="339" r="9" class="badge"/><text x="340" y="343" text-anchor="middle" class="bnum">4</text>
-<circle cx="340" cy="412" r="9" class="badgeg"/><text x="340" y="416" text-anchor="middle" class="bnum">5</text>
+<text x="392" y="322" class="big">cannot reach a worker inside NCCL</text>
+<path class="ctrl" d="M390,330 L470,330"/>
+<path class="redline" d="M478,320 L508,342"/>
+<path class="redline" d="M508,320 L478,342"/>
+<circle cx="378" cy="330" r="9" class="badge"/><text x="378" y="334" text-anchor="middle" class="bnum">3</text>
 </svg>
 
-<p>Two things are worth reading off this. First, <strong>the router plays no part in liveness</strong>. The
-controller talks to the generation workers directly; the router only counts failures on requests it already
-forwards, and the controller pulls that count on the same tick. It is told the serving set and asks nothing.
-Second, the probe
-<a href="https://github.com/NVIDIA-NeMo/RL/blob/8779394e0a6794ada72e1e6caf0fc06255e79442/nemo_rl/models/generation/vllm/vllm_worker.py#L615"><code>is_alive()</code></a> is literally
-<code>return True</code> from the Ray actor — it proves the actor answers, and never touches the engine. An engine
-that is up but failing every request looks healthy to it, which is why the router's failure count exists at all.</p>
+<p>Reading the flow: <strong>①</strong> is one
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/8779394e0a6794ada72e1e6caf0fc06255e79442/nemo_rl/weight_sync/collective_weight_synchronizer.py#L73"><code>sync_weights()</code></a> call. The
+synchronizer drives both halves of the refit itself — it calls the trainers through <code>Policy</code> and the
+engines through <code>VllmGeneration</code>, which is why one event reaches two kinds of worker. <strong>②</strong>
+is unrelated to the refit: a separate loop polling
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/8779394e0a6794ada72e1e6caf0fc06255e79442/nemo_rl/models/generation/vllm/vllm_worker.py#L615"><code>is_alive()</code></a>, which is literally
+<code>return True</code> from the Ray actor and never touches the engine. So an engine that is up but failing every
+request looks healthy to it — that is why the router counts failures at all, though the router itself never probes.</p>
 
-<p>Note also where the ledger lives. <code>Policy</code> and <code>VllmGeneration</code> are plain objects, not
-actors — they sit in the controller process and hold the Ray handles for the GPU workers. So a shard's health is
-written on the CPU side twice over: by the controller's probe loop, and by <code>VllmGeneration</code> when a real
-request fails. <strong>No GPU worker ever writes to the ledger</strong>; it only answers calls.</p>
+<p>The two green arrows are the <em>only</em> writers to the ledger, and both are in-process: the probe loop records
+each probe, and <code>VllmGeneration</code> records the outcome of real generation requests
+(<code>report_failure</code> / <code>report_success</code>). Neither is a GPU worker pushing its own status — the
+workers only answer calls. <code>Policy</code> and <code>VllmGeneration</code> are plain objects, not actors; they
+sit in this process holding the Ray handles.</p>
 
 <h2>Closing the gap in the ranks</h2>
 
@@ -267,7 +267,7 @@ request fails. <strong>No GPU worker ever writes to the ledger</strong>; it only
 <rect x="422" y="20" width="104" height="26" rx="4" class="box s-dead"/><text x="434" y="38" class="st">3 shard 1</text>
 <rect x="534" y="20" width="104" height="26" rx="4" class="box s-ok"/><text x="546" y="38" class="st">4 shard 2</text>
 
-<path class="grn" style="marker-end:url(#arrg2)" d="M586,52 L474,78"/>
+<path class="grn" style="marker-end:url(#arrg)" d="M586,52 L474,78"/>
 <text x="662" y="44" class="note">shard 2 moves down a rank</text>
 
 <text x="24" y="98" class="note">after</text>
