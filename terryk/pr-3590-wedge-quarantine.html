@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>NVIDIA-NeMo/RL #3590 — how a wedged engine gets quarantined (review proposal)</title>
+<title>NVIDIA-NeMo/RL #3590 — how a wedged engine gets quarantined (now in the PR)</title>
 <style>
 :root{
   --bg:#0d1117; --surface:#161b22; --surface2:#1c2128; --border:#30363d;
@@ -30,6 +30,8 @@ code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;
   border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;
   font:13px/1 ui-monospace,Menlo,monospace;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.18)}
 .warn{border-left:3px solid var(--red);background:var(--surface);
+  padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0}
+.hl{border-left:3px solid var(--green);background:var(--surface);
   padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0}
 table{border-collapse:collapse;font-size:13.5px;margin:12px 0}
 th,td{border:1px solid var(--border);padding:5px 10px;text-align:left}
@@ -65,27 +67,32 @@ svg a text{text-decoration:underline;fill:var(--accent);font:11px ui-monospace,M
   document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
 <div class="wrap">
 
-<h1>How a wedged engine gets quarantined — the fix proposed in review</h1>
-<p class="sub">Review proposal on <a href="https://github.com/NVIDIA-NeMo/RL/pull/3590">NVIDIA-NeMo/RL #3590</a>
-(not yet code in the PR). Companion to
-<a href="pr-3590-who-watches-what.html">who-watches-what</a>. Permalinks pin <code>8fec944</code>.</p>
+<h1>How a wedged engine gets quarantined — proposed in review, now code in the PR</h1>
+<p class="sub">Was a review proposal on <a href="https://github.com/NVIDIA-NeMo/RL/pull/3590">NVIDIA-NeMo/RL #3590</a>;
+the author shipped it (<a href="https://github.com/NVIDIA-NeMo/RL/pull/3590#discussion_r3764161942">thread</a>,
+commit <code>c02751a</code>). Companion to
+<a href="pr-3590-who-watches-what.html">who-watches-what</a>. Permalinks pin head <code>5c9b813</code>.</p>
 
 <p>A <strong>wedged</strong> engine is the worst failure: the worker process is alive, so the health probe
-passes forever — <a href="https://github.com/NVIDIA-NeMo/RL/blob/8fec9443c7ce32d657aced1f1ed64a4229a6d2c0/nemo_rl/models/generation/vllm/vllm_worker.py#L614-L616"><code>is_alive</code> is literally <code>return True</code></a> —
+passes forever — <a href="https://github.com/NVIDIA-NeMo/RL/blob/5c9b813a74938dee0cd7009320a286b15cecbd8b/nemo_rl/models/generation/vllm/vllm_worker.py#L614-L616"><code>is_alive</code> is literally <code>return True</code></a> —
 but generation requests sent to it never come back. No probe can detect this.
 <strong>Only traffic can</strong>: a request that times out is the proof.
-The review proposes two layers on the router's error path. Layer 1, the <em>reflex</em>: on a failed
-forward, remove that backend from the router's local serving list at once. Layer 2, the <em>report</em>:
-count those failures per URL, let the 5-second control tick collect the counts, and feed them into the
-health ledger through <a href="https://github.com/NVIDIA-NeMo/RL/blob/8fec9443c7ce32d657aced1f1ed64a4229a6d2c0/nemo_rl/models/generation/fleet_health.py#L247"><code>report_failure</code></a> —
-the same call the non-Gym path already uses for failures a probe cannot see.</p>
+The shipped fix has two layers on the router's error path. Layer 1, the <em>reflex</em>: a failed
+forward <a href="https://github.com/NVIDIA-NeMo/RL/blob/5c9b813a74938dee0cd7009320a286b15cecbd8b/nemo_rl/models/generation/generation_router.py#L218-L222">removes that backend from the router's local serving list at once</a>
+and answers Gym a <a href="https://github.com/NVIDIA-NeMo/RL/blob/5c9b813a74938dee0cd7009320a286b15cecbd8b/nemo_rl/models/generation/generation_router.py#L223">deliberate 500</a>
+(409 only when no backend is left) instead of the 504 aiohttp would pick — 500 Gym retries a
+bounded 3 times, 504 it retries forever. Layer 2, the <em>report</em>: the router
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/5c9b813a74938dee0cd7009320a286b15cecbd8b/nemo_rl/models/generation/generation_router.py#L217">counts each failure per backend URL</a>,
+the 5-second control tick <a href="https://github.com/NVIDIA-NeMo/RL/blob/5c9b813a74938dee0cd7009320a286b15cecbd8b/nemo_rl/algorithms/single_controller.py#L951">drains the counts</a>
+and feeds them into the health ledger through
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/5c9b813a74938dee0cd7009320a286b15cecbd8b/nemo_rl/models/generation/fleet_health.py#L252"><code>report_failure</code></a>.</p>
 
-<svg viewBox="0 0 980 480" role="img" aria-label="Two timelines: with the reflex alone the wedged backend re-enters the serving list every 5 seconds forever; with pulled reports the ledger quarantines it at the first tick">
+<svg viewBox="0 0 980 480" role="img" aria-label="Two timelines: with the reflex alone the wedged backend re-enters the serving list every 5 seconds forever; with drained reports the ledger quarantines it at the first tick">
 <defs><marker id="arrb" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto">
 <path d="M0,0 L7,3 L0,6 z" fill="var(--accent)"/></marker></defs>
 
 <!-- time axis labels -->
-<text x="30" y="30" class="hdr">Layer 1 alone (reflex drop) — the cycle repeats forever</text>
+<text x="30" y="30" class="hdr">Reflex alone (the trap the review flagged) — the cycle repeats forever</text>
 
 <!-- timeline 1 -->
 <line x1="60" y1="130" x2="920" y2="130" class="axis"/>
@@ -95,7 +102,6 @@ the same call the non-Gym path already uses for failures a probe cannot see.</p>
 <text x="685" y="148" class="note">15s</text>
 <text x="895" y="148" class="note">20s</text>
 
-<!-- W in/out segments: in [0-2],[5-7],[10-12],[15-17] out otherwise; x = 60 + t*43 -->
 <rect x="60" y="100" width="86" height="30" class="seg-in"/>
 <rect x="146" y="100" width="129" height="30" class="seg-out"/>
 <rect x="275" y="100" width="86" height="30" class="seg-in"/>
@@ -105,20 +111,17 @@ the same call the non-Gym path already uses for failures a probe cannot see.</p>
 <rect x="705" y="100" width="86" height="30" class="seg-in"/>
 <rect x="791" y="100" width="129" height="30" class="seg-out"/>
 
-<!-- sacrificial request dots on in-segments -->
 <circle cx="80" cy="115" r="4" class="sac"/><circle cx="105" cy="115" r="4" class="sac"/><circle cx="130" cy="115" r="4" class="sac"/>
 <circle cx="295" cy="115" r="4" class="sac"/><circle cx="320" cy="115" r="4" class="sac"/><circle cx="345" cy="115" r="4" class="sac"/>
 <circle cx="510" cy="115" r="4" class="sac"/><circle cx="535" cy="115" r="4" class="sac"/><circle cx="560" cy="115" r="4" class="sac"/>
 <circle cx="725" cy="115" r="4" class="sac"/><circle cx="750" cy="115" r="4" class="sac"/><circle cx="775" cy="115" r="4" class="sac"/>
 
-<!-- drops -->
 <line x1="146" y1="95" x2="146" y2="135" class="drop"/>
 <line x1="361" y1="95" x2="361" y2="135" class="drop"/>
 <line x1="576" y1="95" x2="576" y2="135" class="drop"/>
 <line x1="791" y1="95" x2="791" y2="135" class="drop"/>
 <text x="150" y="92" class="note">reflex drop (first failure returns)</text>
 
-<!-- pushes -->
 <line x1="275" y1="170" x2="275" y2="135" class="push"/>
 <line x1="490" y1="170" x2="490" y2="135" class="push"/>
 <line x1="705" y1="170" x2="705" y2="135" class="push"/>
@@ -131,7 +134,7 @@ the same call the non-Gym path already uses for failures a probe cannot see.</p>
 <circle cx="640" cy="65" r="4" class="sac"/><text x="650" y="70" class="note">sacrificed request (fails, then retried on a healthy shard)</text>
 
 <!-- Layer 2 -->
-<text x="30" y="245" class="hdr">Layers 1 + 2 (reflex + pulled reports) — over at the first tick</text>
+<text x="30" y="245" class="hdr">What shipped (reflex + drained reports) — over at the first tick</text>
 
 <line x1="60" y1="345" x2="920" y2="345" class="axis"/>
 <text x="55" y="363" class="note">0s</text>
@@ -149,19 +152,19 @@ the same call the non-Gym path already uses for failures a probe cannot see.</p>
 <line x1="146" y1="310" x2="146" y2="350" class="drop"/>
 
 <line x1="275" y1="385" x2="275" y2="350" class="push"/>
-<text x="180" y="400" class="note">5s tick: probe (ok) → drain {W: 3} → report_failure ×3 ≥ unhealthy_threshold → </text>
-<text x="620" y="400" class="lbl-b">W is DEAD in the ledger</text>
+<text x="180" y="400" class="note">5s tick: probe (ok, streak untouched) → drain {W: 3} → report_failure ×3 ≥ threshold →</text>
+<text x="660" y="400" class="lbl-b">W is DEAD in the ledger</text>
 <text x="290" y="335" class="st">quarantined — every future push excludes W; part 4's supervisor restarts it,</text>
 <text x="290" y="350" class="st">and it re-enters only after a completed weight sync (STALE → refit)</text>
 
-<a href="https://github.com/NVIDIA-NeMo/RL/blob/8fec9443c7ce32d657aced1f1ed64a4229a6d2c0/nemo_rl/algorithms/single_controller.py#L718">
-<text x="60" y="440" class="note">tick = _fleet_probe_pump :718</text></a>
-<a href="https://github.com/NVIDIA-NeMo/RL/blob/8fec9443c7ce32d657aced1f1ed64a4229a6d2c0/nemo_rl/models/generation/fleet_health.py#L247">
-<text x="290" y="440" class="note">report_failure :247</text></a>
-<a href="https://github.com/NVIDIA-NeMo/RL/blob/8fec9443c7ce32d657aced1f1ed64a4229a6d2c0/nemo_rl/models/generation/fleet_health.py#L242-L243">
-<text x="470" y="440" class="note">threshold → DEAD :242</text></a>
-<a href="https://github.com/NVIDIA-NeMo/RL/blob/8fec9443c7ce32d657aced1f1ed64a4229a6d2c0/nemo_rl/models/generation/policy_router.py#L96">
-<text x="650" y="440" class="note">push = set_serving_backends :96</text></a>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/5c9b813a74938dee0cd7009320a286b15cecbd8b/nemo_rl/algorithms/single_controller.py#L846">
+<text x="60" y="440" class="note">tick = _gen_fleet_probe_pump :846</text></a>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/5c9b813a74938dee0cd7009320a286b15cecbd8b/nemo_rl/models/generation/generation_router.py#L132">
+<text x="290" y="440" class="note">drain_backend_failures :132</text></a>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/5c9b813a74938dee0cd7009320a286b15cecbd8b/nemo_rl/models/generation/fleet_health.py#L271-L274">
+<text x="480" y="440" class="note">streak → DEAD :271</text></a>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/5c9b813a74938dee0cd7009320a286b15cecbd8b/nemo_rl/models/generation/generation_router.py#L110">
+<text x="660" y="440" class="note">push = set_serving_backends :110</text></a>
 </svg>
 
 <h2>One wedge, tick by tick</h2>
@@ -171,36 +174,72 @@ for readability — that is the refused-connection case. A wedge that accepts an
 shorten it: Gym never streams, so no bytes arrive until the generation finishes.
 Probe every 5 s, <code>unhealthy_threshold: 3</code>.</p>
 <table>
-<tr><th>t</th><th>event</th><th>W failures this window</th><th>W in router's list?</th><th>ledger says W is</th></tr>
+<tr><th>t</th><th>event</th><th>W's failure count in the router</th><th>W in router's list?</th><th>ledger says W is</th></tr>
 <tr><td>0–2 s</td><td>3 requests park on W (its in-flight count was lowest)</td><td>0</td><td class="sus">yes</td><td class="ok">HEALTHY</td></tr>
-<tr><td>~2 s</td><td>first one times out → 500 to Gym → <strong>reflex drop</strong>; all 3 retried by Gym, land on A, their rollouts keep going</td><td>3</td><td class="dead">no</td><td class="ok">HEALTHY</td></tr>
-<tr><td>5 s</td><td>tick: probe W → ok (process alive, streak resets) → <strong>drain {W: 3} → report_failure ×3</strong> → threshold hit</td><td>0</td><td class="dead">no</td><td class="dead">DEAD</td></tr>
+<tr><td>~2 s</td><td>first one fails → deliberate 500 to Gym → <strong>reflex drop</strong>; Gym re-sends each failed call, they land on A, and a multi-turn rollout keeps the turns it already finished</td><td>3</td><td class="dead">no</td><td class="ok">HEALTHY</td></tr>
+<tr><td>5 s</td><td>tick: probe W → ok, <strong>but ok cannot clear the reported streak</strong> → drain {W: 3} → <code>report_failure</code> ×3 → threshold hit</td><td>0</td><td class="dead">no</td><td class="dead">DEAD</td></tr>
 <tr><td>&gt;5 s</td><td>every push sends only A. Part 4's supervisor restarts W; it serves again only after the next weight sync.</td><td>—</td><td class="dead">no</td><td class="dead">DEAD → RESTARTING</td></tr>
 </table>
-<p><strong>The honest boundary:</strong> the probe's "ok" resets the failure streak
-(<a href="https://github.com/NVIDIA-NeMo/RL/blob/8fec9443c7ce32d657aced1f1ed64a4229a6d2c0/nemo_rl/models/generation/fleet_health.py#L229-L230">record_probe:229</a>),
-so quarantine needs ≥3 reported failures inside <em>one</em> 5-second window. Under real load that is the
-common case (the table above). Under a trickle — one request per window — W bounces between HEALTHY and
-SUSPECT and is never condemned; the reflex keeps the cost at one cheap sacrifice per push, but the tax
-never ends. A fix that survives trickle load would keep a separate streak for reported failures, one the
-probe's ok cannot reset.</p>
+<p>The earlier version of this page called out an honest boundary: reported failures used to share a
+counter with the probes, and a passing probe reset it — so under trickle load (one sacrifice per window)
+W bounced HEALTHY↔SUSPECT forever. That boundary is gone. Reported failures now keep
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/5c9b813a74938dee0cd7009320a286b15cecbd8b/nemo_rl/models/generation/fleet_health.py#L78-L79">their own streak</a>
+that a probe cannot touch, so even one sacrifice per window reaches 3 and condemns W — the trickle case is
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/5c9b813a74938dee0cd7009320a286b15cecbd8b/tests/unit/models/generation/test_fleet_health.py#L305">tested by name</a>:
+a shard answering every probe while failing every generation still dies.</p>
 
-<h2>Is any of this real?</h2>
+<h2>Where the code went past the proposal</h2>
+<p>The author took the two-layer design and hardened it in three ways the review had not asked for:</p>
 <table>
-<tr><th>piece</th><th>status</th></tr>
-<tr><td>reflex drop + deliberate 500</td><td>proposed in review, with a committable suggestion on the PR — not yet code</td></tr>
-<tr><td>pulled failure reports</td><td>proposed in review, sketch only</td></tr>
-<tr><td>the machinery the proposal reuses</td><td>already in the PR and tested: <code>report_failure</code> counting like probe failures (<code>test_reported_failures_count_the_same_as_probe_failures</code>), thresholds → DEAD, DEAD excluded from pushes</td></tr>
-<tr><td>restart + re-admission after DEAD</td><td>lands in parts 3–4 of the stack, with its own unit suite (dead shard restarted; restarted shard is STALE, not serving; a refit returns it)</td></tr>
+<tr><th>change</th><th>why it matters</th></tr>
+<tr><td>Separate failure streak, cleared only by a
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/5c9b813a74938dee0cd7009320a286b15cecbd8b/nemo_rl/models/generation/fleet_health.py#L278-L285">completed generation</a>
+or a <a href="https://github.com/NVIDIA-NeMo/RL/blob/5c9b813a74938dee0cd7009320a286b15cecbd8b/nemo_rl/models/generation/fleet_health.py#L326">refit</a></td>
+<td>The proposal only sketched "feed the counts into <code>report_failure</code>", which back then shared
+the probe counter — the trickle hole above. Splitting the counter closes it.</td></tr>
+<tr><td>Reflex armed <a href="https://github.com/NVIDIA-NeMo/RL/blob/5c9b813a74938dee0cd7009320a286b15cecbd8b/nemo_rl/models/generation/generation_router.py#L92-L96">only when fleet health drives membership</a></td>
+<td>Dropping a backend locally is safe only because a later push puts it back. Router on, fleet health
+off → nothing ever pushes, so a few transient blips would silently drain the fleet to nothing. Disarmed
+instead, and setup warns about the combination.</td></tr>
+<tr><td>Status split: 500 while others serve,
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/5c9b813a74938dee0cd7009320a286b15cecbd8b/nemo_rl/models/generation/generation_router.py#L223">409 when the list is empty</a></td>
+<td>500 is in Gym's bounded retry set — it re-sends that one call and the rollout keeps its finished
+turns. 409 is not retried, so it is reserved for "nothing left to route to", where failing the row is
+the right answer.</td></tr>
 </table>
-<p>Nothing here was executed end to end; the timings are arithmetic from the config defaults.</p>
+<p><strong>One asymmetry remains.</strong> The reset half of the streak,
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/5c9b813a74938dee0cd7009320a286b15cecbd8b/nemo_rl/models/generation/fleet_health.py#L278"><code>report_success</code></a>,
+is called only on the non-router path
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/5c9b813a74938dee0cd7009320a286b15cecbd8b/nemo_rl/models/generation/vllm/vllm_generation.py#L919">vllm_generation.py:919</a>).
+The drain carries failures only — the router never reports successes — and part 4's refit reset fires
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/b18740f736e710701d51d78a30aa02a4a873094e/nemo_rl/algorithms/single_controller.py#L1103-L1107">only for restarted (STALE) shards</a>.
+So on a router run, a healthy shard that collects 3 transport blips over a long run — spaced days apart —
+is condemned as if they were consecutive. With part 4 the cost is one needless restart and refit; in this
+PR alone the shard is out for good.</p>
+
+<h2>Does it work?</h2>
+<table>
+<tr><th>claim</th><th>evidence</th></tr>
+<tr><td>a wedged backend is answered 500, never Gym's retry-forever 504</td>
+<td><a href="https://github.com/NVIDIA-NeMo/RL/blob/5c9b813a74938dee0cd7009320a286b15cecbd8b/tests/unit/models/generation/test_generation_router.py#L347">test_a_wedged_backend_is_answered_500_and_never_504</a>
+(in <a href="https://github.com/NVIDIA-NeMo/RL/blob/5c9b813a74938dee0cd7009320a286b15cecbd8b/tests/unit/models/generation/test_generation_router.py#L337">TestBackendErrorHandling</a>:
+also the reflex drop, the disarm without fleet health, the last-backend 409, drain-once counting)</td></tr>
+<tr><td>a shard that passes every probe but fails every generation still dies</td>
+<td><a href="https://github.com/NVIDIA-NeMo/RL/blob/5c9b813a74938dee0cd7009320a286b15cecbd8b/tests/unit/models/generation/test_fleet_health.py#L297">TestReportedFailureStreak</a>,
+incl. <a href="https://github.com/NVIDIA-NeMo/RL/blob/5c9b813a74938dee0cd7009320a286b15cecbd8b/tests/unit/models/generation/test_fleet_health.py#L326">the success-clears-the-streak half</a></td></tr>
+<tr><td>end to end: kill a shard mid-run, training finishes through the router</td>
+<td><a href="https://github.com/NVIDIA-NeMo/RL/blob/5c9b813a74938dee0cd7009320a286b15cecbd8b/tests/functional/grpo_sc_gym_router_failover.sh">grpo_sc_gym_router_failover.sh</a>,
+registered in the SingleController functional lane (needs ≥3 GPUs, so it self-skips on 2-GPU CI machines)</td></tr>
+<tr><td>nothing else broke</td><td>PR CI at head <code>5c9b813</code>: 91 checks pass, 0 fail</td></tr>
+</table>
 
 <div class="warn">
 <strong>What to remember.</strong> A wedge is invisible to every probe — only a failed request proves it.
-The reflex drop turns the first failure into immediate local avoidance; the pulled report turns repeated
-failures into a real quarantine using the ledger's existing thresholds; part 4 then replaces the engine.
-Without the report layer, the membership push faithfully restores the wedged URL every 5 seconds and the
-sacrifice cycle runs for the rest of the job.
+The shipped fix makes the first failure an immediate local drop, counts the failures where they happen,
+and drains them into the ledger on the next 5-second tick, where a streak no probe can reset condemns the
+shard. The proposal's weakest point — trickle load resetting the count — was fixed by the author going
+one step further than asked. The open edge is the mirror image: on the router path nothing ever
+<em>clears</em> a healthy shard's streak, so rare unrelated blips accumulate forever.
 </div>
 
 </div>
