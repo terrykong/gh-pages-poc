@@ -54,6 +54,9 @@ svg .s-sus{fill:var(--orange);opacity:.5;stroke:var(--orange)}
 svg .s-dead{fill:var(--red);opacity:.5;stroke:var(--red)}
 svg .st{fill:var(--text);font:10.5px ui-monospace,Menlo,monospace}
 svg a text{text-decoration:underline;fill:var(--accent);font:11px ui-monospace,Menlo,monospace}
+svg .chg{fill:var(--green);font:bold 12.5px -apple-system,sans-serif}
+svg .chgn{fill:var(--green);font:11px -apple-system,sans-serif}
+svg .arrow-new{stroke:var(--green);stroke-width:1.8;fill:none;marker-end:url(#arrg)}
 </style>
 <script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
   document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
@@ -72,7 +75,8 @@ svg a text{text-decoration:underline;fill:var(--accent);font:11px ui-monospace,M
 <p class="sub">Companion illustration for
 <a href="https://github.com/NVIDIA-NeMo/RL/pull/3590">NVIDIA-NeMo/RL #3590</a>
 (part 2/4 of the SingleController resiliency stack).
-All permalinks pin the PR head <code>cff673e</code>.</p>
+Two snapshots: the first map and its links pin the review-time head <code>cff673e</code>;
+the second map shows the PR after the author's review fixes and pins the current head <code>5c9b813</code>.</p>
 
 <p>The confusing part of this PR is that it looks like three watchers doing the same job. They are not.
 The <a href="https://github.com/NVIDIA-NeMo/RL/blob/cff673ed3a69dacad42d2ffebe3bf318ab95593e/nemo_rl/models/generation/fleet_health.py"><code>GenerationFleetMonitor</code></a>
@@ -86,7 +90,9 @@ The <strong>watchdog</strong> is a different animal — it does not care about s
 (<em>how long since any rollout finished?</em>) and kills the run if the answer is "too long"
 (<a href="https://github.com/NVIDIA-NeMo/RL/blob/cff673ed3a69dacad42d2ffebe3bf318ab95593e/nemo_rl/algorithms/single_controller.py#L715">:715</a>).
 On the NeMo-Gym path there is one more piece: a <strong>router</strong> actor that all Gym requests flow through.
-The ledger's serving set is <em>pushed</em> into it — the router itself asks nothing and reports nothing back.</p>
+The ledger's serving set is <em>pushed</em> into it — at review time the router asked nothing and reported
+nothing back. The map below is the review-time picture, kept as-is; the names in it are the old ones,
+and the second map further down shows what the author changed.</p>
 
 <svg viewBox="0 0 980 660" role="img" aria-label="Data flow: probe loop and generate path feed the fleet ledger; shard picker, router push, and watchdog read it; the driver pings the whole event loop from outside; Gym requests flow through the router to serving shards">
 <defs><marker id="arr" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto">
@@ -220,6 +226,164 @@ The ledger's serving set is <em>pushed</em> into it — the router itself asks n
 <text x="30" y="648" class="note">native GRPO path skips this lane: the picker (top right) chooses a shard and the SC calls it directly.</text>
 </svg>
 
+<h2>The same map after the review fixes</h2>
+<p>Same layout, current head <code>5c9b813</code>. <strong>Green marks what changed.</strong>
+Everything got renamed for what it watches (<code>GenerationFleetHealth</code>, <code>gen fleet probe
+loop</code>, <code>stall watchdog</code>, <code>controller liveness watch</code>, <code>GenerationRouter</code>),
+and one arrow is new: the router now counts the failures it sees on real traffic and the probe tick
+<em>pulls</em> those counts into the ledger — the router is no longer silent, and a wedged engine that
+passes every probe is condemned anyway.</p>
+
+<svg viewBox="0 0 980 690" role="img" aria-label="Updated data flow at head 5c9b813: renamed observers, ledger and router; new pull lane drains router failure counts into the ledger each probe tick; generate path also reports successes to clear the streak">
+<defs><marker id="arr2" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto">
+<path d="M0,0 L7,3 L0,6 z" fill="var(--dim)"/></marker>
+<marker id="arrg" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto">
+<path d="M0,0 L7,3 L0,6 z" fill="var(--green)"/></marker></defs>
+
+<!-- vLLM fleet (unchanged) -->
+<text x="30" y="38" class="hdr">vLLM generation shards</text>
+<rect x="30" y="50" width="150" height="30" class="box s-ok"/>
+<text x="42" y="69" class="st">shard 0  HEALTHY</text>
+<rect x="30" y="86" width="150" height="30" class="box s-dead"/>
+<text x="42" y="105" class="st">shard 1  DEAD ✕</text>
+<rect x="30" y="122" width="150" height="30" class="box s-ok"/>
+<text x="42" y="141" class="st">shard 2  HEALTHY</text>
+<rect x="30" y="158" width="150" height="30" class="box s-sus"/>
+<text x="42" y="177" class="st">shard 3  SUSPECT</text>
+<text x="30" y="210" class="note">green + amber still take traffic;</text>
+<text x="30" y="224" class="note">red is quarantined</text>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/5c9b813a74938dee0cd7009320a286b15cecbd8b/nemo_rl/models/generation/fleet_health.py#L63">
+<text x="30" y="240" class="note">_SERVING_STATES (fleet_health.py:63)</text></a>
+
+<!-- SC actor container -->
+<rect x="248" y="26" width="452" height="360" class="cont"/>
+<text x="260" y="44" class="note">SingleControllerActor — everything below shares ONE asyncio event loop</text>
+
+<!-- probe pump -->
+<rect x="264" y="58" width="180" height="78" class="box"/>
+<text x="274" y="78" class="chg">gen fleet probe loop</text>
+<text x="274" y="94" class="note">every 5 s: is_alive? per shard,</text>
+<text x="274" y="108" class="chgn">then drain router failures + push</text>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/5c9b813a74938dee0cd7009320a286b15cecbd8b/nemo_rl/algorithms/single_controller.py#L846">
+<text x="274" y="126" class="note">_gen_fleet_probe_pump :846</text></a>
+<path class="arrow" d="M264,90 L192,90"/>
+<text x="196" y="84" class="note">poll</text>
+
+<!-- ledger -->
+<rect x="480" y="58" width="200" height="200" class="box"/>
+<text x="492" y="80" class="lbl-b">the ledger</text>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/5c9b813a74938dee0cd7009320a286b15cecbd8b/nemo_rl/models/generation/fleet_health.py#L122">
+<text x="492" y="96" class="note">GenerationFleetHealth :122</text></a>
+<text x="492" y="110" class="chgn">renamed: it is a ledger, not a</text>
+<text x="492" y="124" class="chgn">monitor — verbs update state</text>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/5c9b813a74938dee0cd7009320a286b15cecbd8b/nemo_rl/models/generation/fleet_health.py#L222">
+<text x="492" y="146" class="note">record_probe :222</text></a>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/5c9b813a74938dee0cd7009320a286b15cecbd8b/nemo_rl/models/generation/fleet_health.py#L252">
+<text x="492" y="162" class="note">report_failure :252</text></a>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/5c9b813a74938dee0cd7009320a286b15cecbd8b/nemo_rl/models/generation/fleet_health.py#L79">
+<text x="492" y="178" class="note">own failure streak :79 — a passing</text></a>
+<text x="492" y="192" class="chgn">probe cannot clear it; only a</text>
+<text x="492" y="206" class="chgn">completed generation or refit can</text>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/5c9b813a74938dee0cd7009320a286b15cecbd8b/nemo_rl/models/generation/fleet_health.py#L278">
+<text x="492" y="226" class="note">report_success :278</text></a>
+<text x="492" y="246" class="lbl">0 ✓  1 ✕  2 ✓  3 ?</text>
+
+<path class="arrow" d="M444,90 L480,90"/>
+<text x="448" y="84" class="note">write</text>
+
+<!-- generate path (feeder 2) -->
+<rect x="264" y="160" width="180" height="78" class="box"/>
+<text x="274" y="180" class="lbl-b">generate path (native)</text>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/5c9b813a74938dee0cd7009320a286b15cecbd8b/nemo_rl/models/generation/vllm/vllm_generation.py#L903">
+<text x="274" y="198" class="note">failure → report_failure :903</text></a>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/5c9b813a74938dee0cd7009320a286b15cecbd8b/nemo_rl/models/generation/vllm/vllm_generation.py#L919">
+<text x="274" y="214" class="note">success → report_success :919</text></a>
+<text x="274" y="230" class="chgn">successes now clear the streak</text>
+<path class="arrow" d="M444,192 L480,192"/>
+<text x="448" y="186" class="note">write</text>
+
+<!-- watchdog -->
+<rect x="264" y="290" width="416" height="80" class="box"/>
+<text x="276" y="310" class="chg">stall watchdog — a different question entirely</text>
+<text x="276" y="326" class="note">every 30 s: did ANY rollout land recently? No shard knowledge needed.</text>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/5c9b813a74938dee0cd7009320a286b15cecbd8b/nemo_rl/algorithms/single_controller.py#L758">
+<text x="276" y="344" class="note">_stall_watchdog_pump :758</text></a>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/5c9b813a74938dee0cd7009320a286b15cecbd8b/nemo_rl/algorithms/single_controller.py#L831">
+<text x="276" y="360" class="note">also reads ledger: publish fleet metrics :797, abort if too few shards :831</text></a>
+<path class="arrow" d="M560,290 L560,258"/>
+<text x="566" y="278" class="note">read</text>
+
+<!-- readers on the right -->
+<text x="730" y="44" class="hdr">decisions that read the ledger</text>
+<rect x="730" y="58" width="220" height="58" class="box"/>
+<text x="740" y="76" class="lbl-b">pick a shard (native path)</text>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/5c9b813a74938dee0cd7009320a286b15cecbd8b/nemo_rl/models/generation/fleet_health.py#L384">
+<text x="740" y="94" class="note">next_shard: fewest in flight :384</text></a>
+<text x="740" y="108" class="note">never picks red</text>
+<path class="arrow" d="M680,88 L730,88"/>
+
+<rect x="730" y="134" width="220" height="72" class="box"/>
+<text x="740" y="152" class="lbl-b">router push (Gym path)</text>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/5c9b813a74938dee0cd7009320a286b15cecbd8b/nemo_rl/algorithms/single_controller.py#L925">
+<text x="740" y="170" class="note">push serving URLs :925</text></a>
+<text x="740" y="184" class="chgn">now unconditional (no epoch gate),</text>
+<text x="740" y="198" class="chgn">so a restarted router self-heals</text>
+<path class="arrow" d="M680,163 L730,163"/>
+
+<rect x="730" y="290" width="220" height="80" class="box"/>
+<text x="740" y="310" class="lbl-b">what leaves the process</text>
+<text x="740" y="326" class="note">metrics: rollout/* + gen_fleet/*</text>
+<text x="740" y="340" class="note">(the watchdog is the only publisher)</text>
+<text x="740" y="358" class="note">fatal: RolloutStall or</text>
+<text x="740" y="372" class="note">GenerationFleetExhausted</text>
+<path class="arrow" d="M680,330 L730,330"/>
+
+<!-- driver watch -->
+<rect x="264" y="410" width="416" height="48" class="box"/>
+<text x="276" y="430" class="lbl-b">driver process — outside the actor</text>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/5c9b813a74938dee0cd7009320a286b15cecbd8b/examples/run_grpo_single_controller.py#L171">
+<text x="276" y="448" class="note">_run_with_controller_liveness_watch: ping() — is the loop above frozen? :171</text></a>
+<path class="arrow" d="M474,410 L474,388"/>
+<text x="480" y="404" class="note">ping</text>
+
+<!-- request traffic lane: Gym -> router -> shards -->
+<text x="30" y="512" class="hdr">where requests actually flow (Gym path only)</text>
+<rect x="740" y="530" width="210" height="88" class="box"/>
+<text x="750" y="550" class="lbl-b">NeMo-Gym</text>
+<text x="750" y="566" class="note">holds ONE fixed URL for the</text>
+<text x="750" y="580" class="note">whole run; never re-resolves,</text>
+<text x="750" y="594" class="note">never fails over — that is why</text>
+<text x="750" y="608" class="note">the router exists</text>
+
+<rect x="380" y="530" width="300" height="104" class="box"/>
+<text x="392" y="550" class="chg">GenerationRouter — a real HTTP proxy actor</text>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/5c9b813a74938dee0cd7009320a286b15cecbd8b/nemo_rl/models/generation/generation_router.py#L153">
+<text x="392" y="568" class="note">picks the serving backend with fewest in flight :153</text></a>
+<text x="392" y="584" class="chgn">a failed forward: deliberate 500 to Gym :223,</text>
+<text x="392" y="598" class="chgn">reflex-drop the backend :222 (armed only when</text>
+<text x="392" y="612" class="chgn">fleet health manages it :218), count the failure :217</text>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/5c9b813a74938dee0cd7009320a286b15cecbd8b/nemo_rl/models/generation/generation_router.py#L197">
+<text x="392" y="628" class="note">_on_backend_error :197</text></a>
+
+<path class="arrow" d="M740,574 L680,574"/>
+<text x="688" y="566" class="note">request</text>
+<path class="arrow" d="M380,574 L105,574 L105,196"/>
+<text x="120" y="566" class="note">forward to a serving shard only</text>
+
+<path class="ctrl" d="M840,206 L840,480 L530,480 L530,530"/>
+<text x="546" y="474" class="note">serving set — still pushed one way, every tick</text>
+
+<!-- NEW pull lane -->
+<path class="arrow-new" d="M380,548 L240,548 L240,110 L264,110"/>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/5c9b813a74938dee0cd7009320a286b15cecbd8b/nemo_rl/algorithms/single_controller.py#L951">
+<text x="196" y="500" class="note">NEW: failure counts pulled</text></a>
+<text x="196" y="514" class="chgn">each tick — drain :951 →</text>
+<text x="196" y="528" class="chgn">report_failure :970</text>
+
+<text x="30" y="676" class="chgn">green = changed since review.</text>
+<text x="248" y="676" class="note">native GRPO path skips the request lane: the picker (top right) chooses a shard and the SC calls it directly.</text>
+</svg>
+
 <h2>One dead engine, step by step</h2>
 <p>Two shards, default settings: probe every 5&nbsp;s, 3 failures to condemn, floor of 1 serving shard.
 Kill shard&nbsp;1's engine at t=0.</p>
@@ -243,15 +407,19 @@ answering probes again proves nothing about its weights, so re-entry requires a 
 <tr><th>claim</th><th>evidence</th></tr>
 <tr><td>faster, better-named failure</td><td>same kill-one-shard test on a 2-GPU box: part 1 dies in 222 s with <code>RolloutStall</code>; this PR dies in 62 s with <code>GenerationFleetExhausted</code> (from the PR description)</td></tr>
 <tr><td>the router does not corrupt payloads</td><td>end-to-end Gym run through the router: <code>gen_kl_error</code> (vLLM logprobs vs trainer recompute) unchanged</td></tr>
-<tr><td>ledger + router behavior</td><td>50 unit tests, router tests run against real HTTP servers. Caveat from the review: those two test files are not yet picked up by any CI shard — a fix is requested on the PR</td></tr>
+<tr><td>ledger + router behavior</td><td>unit tests run against real HTTP servers, now including the wedge cases (500-never-504, reflex drop, drained counts, probe-proof failure streak). The review's caveat is fixed: both files are collected by the L0 vLLM unit lanes. PR CI at <code>5c9b813</code>: 91 checks pass, 0 fail</td></tr>
+<tr><td>failover end to end</td><td><a href="https://github.com/NVIDIA-NeMo/RL/blob/5c9b813a74938dee0cd7009320a286b15cecbd8b/tests/functional/grpo_sc_gym_router_failover.sh">grpo_sc_gym_router_failover.sh</a>: kill one of two shards mid-run, training finishes through the router (needs ≥3 GPUs, so it self-skips on 2-GPU CI machines)</td></tr>
 </table>
 
 <div class="warn">
-<strong>What to remember.</strong> The "monitor" never acts on its own — it is a ledger that two
-observers write and three readers consult. The watchdog stays even with fleet health on, because it
-answers a question no per-shard probe can: is the run as a whole still making progress? And if you
-enable the Gym router without <code>fleet_health.enabled=true</code>, nothing ever updates the
-router's serving set — it stays health-blind forever (the review asks for a warning on that combination).
+<strong>What to remember.</strong> The ledger never acts on its own — observers write it, readers
+consult it, and it is now named for that (<code>GenerationFleetHealth</code>, not "monitor"). The
+watchdog stays even with fleet health on, because it answers a question no per-shard probe can: is the
+run as a whole still making progress? The router is no longer a silent reader of pushes: it counts the
+failures only real traffic can reveal, and the probe tick pulls them into the ledger — see the
+<a href="pr-3590-wedge-quarantine.html">wedge-quarantine page</a> for that path in detail. And enabling
+the router without <code>generation_fleet_health.enabled=true</code> now warns at setup and disarms the
+router's reflex drop, instead of silently staying health-blind.
 </div>
 
 </div>
