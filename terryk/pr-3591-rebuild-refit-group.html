@@ -53,6 +53,12 @@ svg .redline{stroke:var(--red);stroke-width:1.8;fill:none}
 svg .grn{stroke:var(--green);stroke-width:1.8;fill:none;marker-end:url(#arrg)}
 svg .ctrl{stroke:var(--accent);stroke-width:1.7;fill:none;stroke-dasharray:6 4}
 svg .s-sus{fill:var(--orange);opacity:.5;stroke:var(--orange)}
+#tip{position:fixed;z-index:300;max-width:340px;display:none;pointer-events:none;
+  background:var(--surface);color:var(--text);border:1px solid var(--border);border-radius:8px;
+  padding:8px 11px;font:12.5px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,sans-serif;
+  box-shadow:0 4px 16px rgba(0,0,0,.28)}
+#tip b{color:var(--accent)}
+svg [data-tip]{cursor:help}
 svg .old{fill:var(--surface2);stroke:var(--border);stroke-width:1.2;opacity:.85}
 svg .newtag{fill:var(--green);font:bold 9px -apple-system,sans-serif}
 svg .badge{fill:var(--accent)}
@@ -162,25 +168,25 @@ decides where each piece has to live.</p>
 <text x="18" y="26" class="hdr">SingleControllerActor · one process · no GPU</text>
 <rect x="18" y="34" width="342" height="300" rx="8" class="cont"/>
 
-<rect x="30" y="48" width="316" height="34" rx="6" class="old"/>
+<rect x="30" y="48" width="316" height="34" rx="6" class="old" data-tip="&lt;b&gt;probe loop&lt;/b&gt; — an asyncio task on the controller. Every probe_interval_s it calls is_alive() on each serving shard and folds the answer into the ledger. From part 2."/>
 <text x="42" y="69" class="st">probe loop (asyncio task)</text>
 
-<rect x="30" y="92" width="316" height="46" rx="6" class="old"><title>absent_shards(): who cannot join a collective. record_actor_death(): Ray says the actor is gone, mark DEAD at once.</title></rect>
+<rect x="30" y="92" width="316" height="46" rx="6" class="old" data-tip="&lt;b&gt;GenerationFleetHealth&lt;/b&gt; — the ledger. A plain table of per-shard state; it watches nothing itself.&lt;br&gt;&lt;br&gt;&lt;b&gt;NEW absent_shards()&lt;/b&gt; — who cannot join a collective: DEAD, RESTARTING, RETIRED. This is what the refit reads.&lt;br&gt;&lt;b&gt;NEW record_actor_death()&lt;/b&gt; — Ray reported the actor process gone, so mark it DEAD at once rather than waiting for unhealthy_threshold more probes."/>
 <text x="42" y="110" class="st">GenerationFleetHealth — the ledger</text>
 <text x="42" y="126" class="st">+ absent_shards() · record_actor_death()</text>
 <text x="300" y="126" class="newtag">NEW</text>
 <path class="grn" style="marker-end:url(#a4)" d="M84,82 L84,90"/>
 
-<rect x="30" y="150" width="152" height="40" rx="6" class="old"/>
+<rect x="30" y="150" width="152" height="40" rx="6" class="old" data-tip="&lt;b&gt;Policy&lt;/b&gt; — a plain object in this process, not an actor. Holds the RayWorkerGroup of trainer handles and relays calls to them."/>
 <text x="42" y="167" class="st">Policy</text>
 <text x="42" y="182" class="st">relay → trainers</text>
-<rect x="194" y="150" width="152" height="40" rx="6" class="old"/>
+<rect x="194" y="150" width="152" height="40" rx="6" class="old" data-tip="&lt;b&gt;VllmGeneration&lt;/b&gt; — a plain object in this process. Holds the generation worker handles, and writes report_failure() / report_success() into the ledger when a real request fails or succeeds."/>
 <text x="206" y="167" class="st">VllmGeneration</text>
 <text x="206" y="182" class="st">relay → gen shards</text>
 <path class="grn" style="marker-end:url(#a4)" d="M270,150 L270,140"/>
 <text x="120" y="204" class="note">report_failure() / report_success() ↑ · both relays hold the Ray handles</text>
 
-<rect x="30" y="216" width="316" height="46" rx="6" class="old"><title>reconcile_communicator(): rebuild the refit group over the survivors, at the top of every refit.</title></rect>
+<rect x="30" y="216" width="316" height="46" rx="6" class="old" data-tip="&lt;b&gt;WeightSynchronizer&lt;/b&gt; — issues the refit, calling the trainers and the engines itself.&lt;br&gt;&lt;br&gt;&lt;b&gt;NEW reconcile_communicator(absent_shards)&lt;/b&gt; — rebuilds the refit group over the survivors. Called at the top of every refit, the one moment the group is provably idle."/>
 <text x="42" y="234" class="st">WeightSynchronizer — issues the refit</text>
 <text x="42" y="250" class="st">+ reconcile_communicator() rebuilds</text>
 <text x="300" y="250" class="newtag">NEW</text>
@@ -191,14 +197,14 @@ decides where each piece has to live.</p>
 
 <text x="618" y="26" class="hdr">VllmGenerationWorker · Ray actor · GPU</text>
 <rect x="618" y="34" width="344" height="186" rx="8" class="cont"/>
-<rect x="630" y="48" width="320" height="34" rx="6" class="old"/>
+<rect x="630" y="48" width="320" height="34" rx="6" class="old" data-tip="&lt;b&gt;is_alive()&lt;/b&gt; — literally &lt;code&gt;return True&lt;/code&gt;, answered by the Ray actor. It proves the actor is responding; it never asks the vLLM engine anything. A wedged engine passes this."/>
 <text x="642" y="69" class="st">is_alive() → return True (the actor itself)</text>
-<rect x="630" y="92" width="320" height="114" rx="6" class="box"/>
+<rect x="630" y="92" width="320" height="114" rx="6" class="box" data-tip="&lt;b&gt;vLLM TP worker process&lt;/b&gt; — one level below the Ray actor, reached by collective_rpc. This is where the model and the NCCL communicator actually live."/>
 <text x="642" y="109" class="note">vLLM TP worker process (via collective_rpc)</text>
-<rect x="646" y="118" width="140" height="38" rx="6" class="box s-dead"/>
+<rect x="646" y="118" width="140" height="38" rx="6" class="box s-dead" data-tip="&lt;b&gt;main thread, inside NCCL&lt;/b&gt; — blocked in the collective waiting for a rank that will never arrive. It is not serving RPCs, so nothing sent from the controller can reach it."/>
 <text x="656" y="134" class="st">main thread</text>
 <text x="656" y="149" class="st">in NCCL</text>
-<rect x="800" y="118" width="138" height="38" rx="6" class="box s-ok"><title>RefitAbortWatchdog: armed with refit_timeout_s; on overrun it calls abort() from inside this process.</title></rect>
+<rect x="800" y="118" width="138" height="38" rx="6" class="box s-ok" data-tip="&lt;b&gt;NEW RefitAbortWatchdog&lt;/b&gt; — a thread started for the duration of one refit, armed with refit_timeout_s. If the refit outlives the deadline it calls abort() on the NCCL group from inside this process. Nothing calls it; it decides alone."/>
 <text x="810" y="134" class="st">watchdog</text>
 <text x="810" y="149" class="st">aborts</text>
 <text x="906" y="112" class="newtag">NEW</text>
@@ -208,10 +214,10 @@ decides where each piece has to live.</p>
 
 <text x="618" y="252" class="hdr">MegatronPolicyWorker · Ray actor · GPU</text>
 <rect x="618" y="260" width="344" height="80" rx="8" class="cont"/>
-<rect x="630" y="274" width="150" height="38" rx="6" class="box s-dead"/>
+<rect x="630" y="274" width="150" height="38" rx="6" class="box s-dead" data-tip="&lt;b&gt;main thread, inside NCCL&lt;/b&gt; — the sending side, blocked in the same collective."/>
 <text x="640" y="290" class="st">main thread</text>
 <text x="640" y="305" class="st">in NCCL</text>
-<rect x="796" y="274" width="152" height="38" rx="6" class="box s-ok"><title>RefitAbortWatchdog on the sending side; abort() ends in-flight NCCL work.</title></rect>
+<rect x="796" y="274" width="152" height="38" rx="6" class="box s-ok" data-tip="&lt;b&gt;NEW RefitAbortWatchdog&lt;/b&gt; — same thread on the sending side. &lt;b&gt;NEW abort()&lt;/b&gt; terminates in-flight NCCL operations and releases the communicator, so the blocked thread returns. abort() and not destroy(): destroy is itself a collective every rank must call."/>
 <text x="806" y="290" class="st">watchdog</text>
 <text x="806" y="305" class="st">aborts</text>
 <text x="916" y="268" class="newtag">NEW</text>
@@ -242,35 +248,16 @@ decides where each piece has to live.</p>
 
 <rect x="18" y="352" width="342" height="72" rx="8" class="cont"/>
 <text x="30" y="372" class="hdr">GenerationRouter · Ray actor · Gym path</text>
-<rect x="30" y="380" width="316" height="34" rx="6" class="old"/>
+<rect x="30" y="380" width="316" height="34" rx="6" class="old" data-tip="&lt;b&gt;GenerationRouter&lt;/b&gt; — fronts the shards on the NeMo-Gym path. It counts failed requests per backend URL and the controller pulls that count. It never probes, never refits, and holds no reference to the ledger. From part 2 — no role in this PR."/>
 <text x="42" y="401" class="st">counts failed requests per backend URL</text>
 <text x="372" y="392" class="note">Never probes, never refits, holds no ledger reference.</text>
 <text x="372" y="406" class="note">Its count is pulled by the controller — part 2, not this PR.</text>
 <text x="372" y="424" class="note">Gym traffic → router → shards is a separate path entirely.</text>
 </svg>
 
-<p>Most of this diagram is not new. The probe loop, the ledger, the two relay objects, the synchronizer, <code>is_alive()</code> and the router all arrived with <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-3590-who-watches-what.html">part 2</a>. What this PR adds is tagged <span style="color:var(--green);font-weight:700">NEW</span>, and spelled out below the figure.</p>
+<p>Most of this diagram is not new. The probe loop, the ledger, the two relay objects, the synchronizer, <code>is_alive()</code> and the router all arrived with <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-3590-who-watches-what.html">part 2</a>. What this PR adds is tagged <span style="color:var(--green);font-weight:700">NEW</span>, and spelled out in the figure — <strong>hover any box</strong> for what it does.</p>
 
 
-
-<p style="margin-top:14px"><strong>What each new piece does</strong> (hover the green boxes too):</p>
-<table>
-<tr><th>new in this PR</th><th>what it does</th></tr>
-<tr><td><code>RefitAbortWatchdog</code></td>
-<td>a thread armed with the deadline; if the refit overruns it calls <code>abort()</code> from inside the worker</td></tr>
-<tr><td><code>abort()</code></td>
-<td>terminates in-flight NCCL work and drops the communicator, so the blocked thread returns</td></tr>
-<tr><td><a href="https://github.com/NVIDIA-NeMo/RL/blob/8779394e0a6794ada72e1e6caf0fc06255e79442/nemo_rl/models/generation/fleet_health.py#L272"><code>record_actor_death()</code></a></td>
-<td>Ray says the actor process is gone → mark it DEAD immediately, with no further probe counting</td></tr>
-<tr><td><a href="https://github.com/NVIDIA-NeMo/RL/blob/8779394e0a6794ada72e1e6caf0fc06255e79442/nemo_rl/models/generation/fleet_health.py#L188"><code>absent_shards()</code></a></td>
-<td>the shards that cannot join a collective — DEAD, RESTARTING, RETIRED</td></tr>
-<tr><td><a href="https://github.com/NVIDIA-NeMo/RL/blob/8779394e0a6794ada72e1e6caf0fc06255e79442/nemo_rl/models/generation/fleet_health.py#L363"><code>mark_weights_partial()</code></a></td>
-<td>an aborted refit left this shard holding a mix of old and new weights, so hold it back from serving</td></tr>
-<tr><td><code>reconcile_communicator()</code></td>
-<td>rebuild the refit group over the survivors, at the top of every refit</td></tr>
-<tr><td><a href="https://github.com/NVIDIA-NeMo/RL/blob/8779394e0a6794ada72e1e6caf0fc06255e79442/nemo_rl/weight_sync/membership.py#L55"><code>plan_refit_membership()</code></a></td>
-<td>works out the new rank layout, closing the gap the dead shard left</td></tr>
-</table>
 
 <h2>Closing the gap in the ranks</h2>
 
@@ -363,5 +350,16 @@ unchanged. Set it well above a normal refit: firing early aborts a run that was 
 hang lasts a little longer before it is broken.</div>
 
 </div>
+<div id="tip"></div>
+<script>(function(){var t=document.getElementById('tip');
+function show(e){var el=e.target.closest('[data-tip]');if(!el){hide();return;}
+ t.innerHTML=el.getAttribute('data-tip');t.style.display='block';move(e);}
+function move(e){var pad=14,w=t.offsetWidth,h=t.offsetHeight,x=e.clientX+pad,y=e.clientY+pad;
+ if(x+w>window.innerWidth-8)x=e.clientX-w-pad;if(y+h>window.innerHeight-8)y=e.clientY-h-pad;
+ t.style.left=x+'px';t.style.top=y+'px';}
+function hide(){t.style.display='none';}
+document.addEventListener('mouseover',show);document.addEventListener('mousemove',function(e){
+ if(t.style.display==='block')move(e);});document.addEventListener('mouseout',function(e){
+ if(!e.relatedTarget||!e.relatedTarget.closest||!e.relatedTarget.closest('[data-tip]'))hide();});})();</script>
 </body>
 </html>
