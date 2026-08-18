@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NVIDIA-NeMo/RL #3665 — why one prompt the fleet could not answer ends the whole run</title>
+<style>
+:root{
+  --bg:#0d1117; --surface:#161b22; --surface2:#1c2128; --border:#30363d;
+  --text:#e6edf3; --dim:#8b949e; --accent:#58a6ff; --green:#3fb950;
+  --orange:#d29922; --red:#f85149; --purple:#bc8cff;
+}
+:root[data-theme="light"]{
+  --bg:#ffffff; --surface:#f6f8fa; --surface2:#eaeef2; --border:#d0d7de;
+  --text:#1f2328; --dim:#59636e; --accent:#0969da; --green:#1a7f37;
+  --orange:#9a6700; --red:#cf222e; --purple:#8250df;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:28px 20px 70px}
+h1{font-size:22px;margin:0 0 8px;line-height:1.3}
+h2{font-size:18px;margin:32px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;
+  font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
+.sub{color:var(--dim);font-size:13.5px;margin:0 0 16px}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);
+  border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;
+  font:13px/1 ui-monospace,Menlo,monospace;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.18)}
+.mono{font:12.5px ui-monospace,SFMono-Regular,Menlo,monospace;
+  background:var(--surface);border:1px solid var(--border);border-radius:8px;
+  padding:13px;overflow-x:auto;white-space:pre;line-height:1.55}
+.mono .c{color:var(--dim)}
+.mono .g{color:var(--green)}
+.mono .r{color:var(--red)}
+.mono .o{color:var(--orange)}
+.warn{border-left:3px solid var(--orange);background:var(--surface);
+  padding:12px 16px;margin:18px 0;border-radius:0 8px 8px 0}
+.src{font-size:12.5px;color:var(--dim);margin:5px 0 20px}
+table{border-collapse:collapse;width:100%;margin:14px 0;font-size:13.5px}
+th,td{border:1px solid var(--border);padding:7px 10px;text-align:left;vertical-align:top}
+th{background:var(--surface2);font-weight:600}
+svg{max-width:100%;height:auto;display:block;margin:16px 0}
+svg .box{fill:var(--surface);stroke:var(--border);stroke-width:1.4}
+svg .lbl{fill:var(--text);font:12.5px ui-monospace,Menlo,monospace}
+svg .lbl-b{fill:var(--text);font:bold 13px -apple-system,sans-serif}
+svg .note{fill:var(--dim);font:11.5px -apple-system,sans-serif}
+svg .hdr{fill:var(--accent);font:bold 12.5px -apple-system,sans-serif}
+svg .s-ok{fill:var(--green);opacity:.5;stroke:var(--green);stroke-width:1.3}
+svg .s-lost{fill:var(--red);opacity:.5;stroke:var(--red);stroke-width:1.3}
+svg .s-hole{fill:none;stroke:var(--red);stroke-width:1.6;stroke-dasharray:5 4}
+svg .s-txt{fill:var(--text);font:bold 12px ui-monospace,Menlo,monospace}
+svg .arw{stroke:var(--dim);stroke-width:1.6;fill:none}
+svg .arw-r{stroke:var(--red);stroke-width:2;fill:none}
+svg .div{stroke:var(--border);stroke-width:1;stroke-dasharray:4 4}
+svg .redtxt{fill:var(--red);font:bold 12.5px -apple-system,sans-serif}
+svg .greentxt{fill:var(--green);font:bold 12.5px -apple-system,sans-serif}
+svg a text{text-decoration:underline;fill:var(--accent);font:11px ui-monospace,Menlo,monospace}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+  document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head>
+<body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+  function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+  function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
+    b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
+      else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+  document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+<div class="wrap">
+
+<h1>Why one prompt the generation fleet could not answer ends the whole training run</h1>
+<p class="sub">The problem
+<a href="https://github.com/NVIDIA-NeMo/RL/pull/3665">NVIDIA-NeMo/RL #3665</a>
+is trying to solve. Behaviour shown is <code>main</code> at
+<a href="https://github.com/NVIDIA-NeMo/RL/commit/3d873ebc29b766d51802c69c75c092c78a59d6f6"><code>3d873eb</code></a>,
+the commit this PR sits on.
+Companion page: <a href="./pr-3665-replacing-a-lost-rollout.html">how the fix works</a>.</p>
+
+<p>Training runs for days on hundreds of GPUs. The completions are generated by a separate fleet of
+inference workers, and that fleet loses workers — a machine dies, a network link drops, a request times out.
+When one prompt keeps failing on every worker it is sent to, the SingleController has run out of options for
+it. Before this PR there was exactly one thing it could do next: raise, and take the whole job down
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/3d873ebc29b766d51802c69c75c092c78a59d6f6/nemo_rl/algorithms/single_controller.py#L388">single_controller.py:388</a> on <code>main</code>).
+Days of work, thrown away because 1 prompt out of many thousands did not come back.</p>
+
+<h2>One missing prompt, two bad endings</h2>
+
+<svg viewBox="0 0 900 520" role="img" aria-label="A training step needs four prompt groups; one is lost. On main this either raises immediately and kills the job, or, if drops are tolerated, leaves the training step waiting forever for a group nobody is generating.">
+
+  <text class="hdr" x="14" y="20">Training step 0 needs 4 prompt groups. P2 fails on every worker it is tried on.</text>
+
+  <text class="lbl" x="14" y="58">step 0 wants</text>
+  <rect class="s-ok"   x="120" y="42" width="62" height="30" rx="5"/><text class="s-txt" x="140" y="62">P0</text>
+  <rect class="s-ok"   x="188" y="42" width="62" height="30" rx="5"/><text class="s-txt" x="208" y="62">P1</text>
+  <rect class="s-lost" x="256" y="42" width="62" height="30" rx="5"/><text class="s-txt" x="276" y="62">P2</text>
+  <rect class="s-ok"   x="324" y="42" width="62" height="30" rx="5"/><text class="s-txt" x="344" y="62">P3</text>
+  <text class="note" x="400" y="62">P2 is retried on a different worker each time, and fails every time</text>
+
+  <path class="arw-r" d="M287 76 L287 100" marker-end="url(#ar)"/>
+  <text class="redtxt" x="300" y="96">infrastructure retry budget runs out</text>
+
+  <line class="div" x1="14" y1="112" x2="886" y2="112"/>
+
+  <!-- ===== ENDING A ===== -->
+  <text class="lbl-b" x="14" y="140">Ending A — the default on <tspan style="font-family:ui-monospace,Menlo,monospace">main</tspan></text>
+
+  <rect class="box" x="120" y="156" width="330" height="62" rx="7" style="stroke:var(--red)"/>
+  <text class="lbl" x="136" y="178">raise RolloutRedispatchExhausted</text>
+  <text class="note" x="136" y="198">the error travels up and ends the job</text>
+
+  <path class="arw-r" d="M458 187 L508 187" marker-end="url(#ar)"/>
+  <text class="redtxt" x="520" y="183">the entire run dies</text>
+  <text class="note"   x="520" y="201">3 days of training on hundreds of GPUs, gone</text>
+  <text class="note"   x="520" y="217">restart from the last checkpoint and hope it does not happen again</text>
+
+  <line class="div" x1="14" y1="238" x2="886" y2="238"/>
+
+  <!-- ===== ENDING B ===== -->
+  <text class="lbl-b" x="14" y="266">Ending B — if you asked</text>
+  <text class="lbl-b" x="14" y="282">for drops to be</text>
+  <text class="lbl-b" x="14" y="298">tolerated</text>
+  <text class="note"  x="14" y="318">max_skipped_prompts &gt; 0</text>
+
+  <text class="lbl" x="180" y="278">the buffer</text>
+  <text class="note" x="180" y="294">holds, labelled "step 0"</text>
+  <rect class="s-ok" x="360" y="262" width="62" height="30" rx="5"/><text class="s-txt" x="380" y="282">P0</text>
+  <rect class="s-ok" x="428" y="262" width="62" height="30" rx="5"/><text class="s-txt" x="448" y="282">P1</text>
+  <rect class="s-ok" x="496" y="262" width="62" height="30" rx="5"/><text class="s-txt" x="516" y="282">P3</text>
+  <rect class="s-hole" x="564" y="262" width="62" height="30" rx="5"/><text class="note" x="578" y="282" style="fill:var(--red)">empty</text>
+  <text class="note" x="640" y="282">only 3 will ever carry the label "step 0"</text>
+
+  <rect class="box" x="180" y="330" width="446" height="76" rx="7" style="stroke:var(--red)"/>
+  <text class="lbl" x="196" y="352">the train loop, on main:</text>
+  <text class="lbl" x="196" y="374" style="font-weight:bold">while groups_dispatched &lt; 4:</text>
+  <text class="lbl" x="196" y="394">    wait for a 4th group labelled "step 0" ...</text>
+
+  <path class="arw-r" d="M634 368 L684 368" marker-end="url(#ar)"/>
+  <text class="redtxt" x="696" y="356">waits forever</text>
+  <text class="note"   x="696" y="374">4 is a fixed number —</text>
+  <text class="note"   x="696" y="390">nothing can lower it</text>
+  <text class="note"   x="696" y="406">and nobody is generating</text>
+  <text class="note"   x="696" y="422">the missing group</text>
+
+  <text class="note" x="180" y="428">The <tspan style="font-family:ui-monospace,Menlo,monospace">in_order</tspan> sampler only lets step 0 train on groups labelled "step 0", so no other work can fill the gap.</text>
+  <text class="note" x="180" y="446">Both loops go quiet. No error, no crash — the job just stops making progress and holds the GPUs until the clock runs out.</text>
+
+  <line class="div" x1="14" y1="462" x2="886" y2="462"/>
+  <text class="greentxt" x="14" y="486">What #3665 wants instead: give up on P2, close step 0 on 3 groups (or substitute a spare), and keep training.</text>
+
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/3d873ebc29b766d51802c69c75c092c78a59d6f6/nemo_rl/algorithms/single_controller.py#L493" target="_blank"><text x="14" y="508">main: the fixed loop bound</text></a>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/ad048f995296473511641f8cb1b8418625fe61ea/nemo_rl/algorithms/async_utils/staleness_sampler.py#L409" target="_blank"><text x="220" y="508">InOrderSampler.select</text></a>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/ad048f995296473511641f8cb1b8418625fe61ea/nemo_rl/algorithms/single_controller.py#L838" target="_blank"><text x="400" y="508">the same line after the PR</text></a>
+
+  <defs>
+    <marker id="ar" markerWidth="9" markerHeight="9" refX="8" refY="3" orient="auto">
+      <path d="M0,0 L0,6 L8,3 z" fill="var(--red)"/></marker>
+  </defs>
+</svg>
+
+<h2>What the PR is asking for, and what it costs</h2>
+
+<p>Three questions have to be answered before a run is allowed to shrug off a lost prompt. Each one is a
+setting, and each is off by default — a run that sets nothing behaves exactly as it does today.</p>
+
+<table>
+<tr><th>The question</th><th>The setting</th><th>Default, and why</th></tr>
+<tr>
+  <td><strong>How do we tell "one flaky worker" from "the fleet is gone"?</strong>
+      Riding out an outage is good; retrying into a dead fleet for two days is not.</td>
+  <td><a href="https://github.com/NVIDIA-NeMo/RL/blob/ad048f995296473511641f8cb1b8418625fe61ea/nemo_rl/algorithms/single_controller_utils/config.py#L141"><code>max_consecutive_dropped_prompts</code></a></td>
+  <td><code>0</code> — fail on the first one, today's behaviour. It counts prompts lost <em>in a row</em>;
+      any completion that comes back resets it to zero, so it measures the outage, not the run.</td>
+</tr>
+<tr>
+  <td><strong>How small a batch is still a real training step?</strong>
+      The gradient comes from the batch, so a step that quietly halves is a silent change to training.</td>
+  <td><a href="https://github.com/NVIDIA-NeMo/RL/blob/ad048f995296473511641f8cb1b8418625fe61ea/nemo_rl/algorithms/single_controller_utils/config.py#L156"><code>min_step_batch_fraction</code></a></td>
+  <td><code>0.9</code> — a step may lose at most 10% of its prompts. A fraction, not a count, so it means
+      the same thing at any batch size and protects small batches harder.</td>
+</tr>
+<tr>
+  <td><strong>Do we accept the smaller step, or find another prompt?</strong></td>
+  <td><a href="https://github.com/NVIDIA-NeMo/RL/blob/ad048f995296473511641f8cb1b8418625fe61ea/nemo_rl/algorithms/single_controller_utils/config.py#L181"><code>on_dropped_prompt</code></a></td>
+  <td><code>shrink</code> — train on fewer. Set it to <code>replace</code> to keep the batch size by
+      generating a spare prompt instead. <a href="./pr-3665-replacing-a-lost-rollout.html">How that works →</a></td>
+</tr>
+</table>
+
+<p>There is a real trade here, and it is worth being blunt about it. <code>shrink</code> means some training
+steps compute their gradient from fewer samples than you configured. <code>replace</code> keeps the batch
+size but can leave the trainer idle waiting for a fresh completion. The PR's answer is that both are better
+than losing three days of work, and that you should be the one to choose — which is why every setting starts
+switched off.</p>
+
+<h2>Does it work?</h2>
+
+<p><strong>Nobody has posted a run.</strong> There is no W&amp;B link, no before/after comparison, and no log
+from a job that actually lost workers mid-training. Unit tests drive the real generate-and-train loops and
+check the bookkeeping, and CI is green, but neither of those shows that a real outage is survived.</p>
+
+<p>The evidence worth asking for is small and specific: one long run with an inference worker killed on
+purpose part way through, next to a clean baseline. Show that the run finishes, and show the reward curve
+lands in the same place. That answers both halves of the question — the run survives, <em>and</em> training
+quality did not quietly change.</p>
+
+<div class="warn">
+<strong>One thing to check before you turn this on.</strong> These settings only take effect with the
+<code>in_order</code> sampler, which is the one that labels each batch with a training step number. The other
+built-in samplers (<code>weight_fifo</code>, <code>windowed</code>) do not label batches, so a lost prompt is
+never accounted for and the shortfall surfaces later — as a run that stops making progress, or one that fails
+on its final step. Nothing that ships today sets these values, so no existing recipe is affected, but two
+shipped SingleController recipes do use <code>windowed</code>. Check which sampler your config uses first.
+</div>
+
+</div>
+</body>
+</html>
