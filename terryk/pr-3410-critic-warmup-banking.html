@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>NVIDIA-NeMo/RL #3410 — how async PPO banks extra rollouts while the critic warms up</title>
+<title>NVIDIA-NeMo/RL #3410 — what async PPO adds, and how it banks rollouts during critic warmup</title>
 <style>
 :root{
   --bg:#0d1117; --surface:#161b22; --surface2:#1c2128; --border:#30363d;
@@ -66,22 +66,80 @@ svg a text{text-decoration:underline;fill:var(--accent);font:11.5px ui-monospace
   document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
 <div class="wrap">
 
-<h1>How async PPO banks extra rollouts while the critic warms up — without training on stale data</h1>
+<h1>Async PPO: training stops waiting for generation — and what that needed for critic warmup</h1>
 <p class="sub">Companion illustration for
-<a href="https://github.com/NVIDIA-NeMo/RL/pull/3410">NVIDIA-NeMo/RL #3410</a> (async PPO).
+<a href="https://github.com/NVIDIA-NeMo/RL/pull/3410">NVIDIA-NeMo/RL #3410</a>.
 All permalinks pin the PR head <code>bac4a8c</code>.</p>
 
-<p>In async PPO, one set of GPUs generates rollouts while another set trains. Every rollout is tagged with
-the policy weight version that produced it, and the trainer refuses any rollout older than
-<code>max_trajectory_age_steps</code> versions (default <code>1</code>) —
-<a href="https://github.com/NVIDIA-NeMo/RL/blob/bac4a8c46ee14d4c3dfb774be9577bacbb92ccf5/nemo_rl/algorithms/async_utils/replay_buffer.py#L225">replay_buffer.py:225</a>.
-PPO can also start with <strong>critic warmup</strong>: for the first <code>policy_training_start_step</code> steps
-only the value model trains and the policy is frozen. A frozen policy means those rollouts are not really
-going stale, so you would like to generate more of them and get further ahead. This PR adds
-<code>warmup_max_trajectory_age_steps</code> to do exactly that — and a cap so the banked rollouts are never
-actually used too late.</p>
+<p>PPO already worked in NeMo-RL, but only one way: generate a batch of rollouts, train on it, generate the
+next batch. Generation ran <em>inside</em> the training step
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/bac4a8c46ee14d4c3dfb774be9577bacbb92ccf5/nemo_rl/algorithms/ppo.py#L1404">ppo.py:1404</a>),
+so even when generation had its own GPUs the two sets took turns and each sat idle while the other worked.
+This PR adds a second path,
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/bac4a8c46ee14d4c3dfb774be9577bacbb92ccf5/nemo_rl/algorithms/ppo.py#L2078">async_ppo_train</a>,
+where rollouts are produced without stopping on one set of GPUs while the policy and value models train on the
+other; <code>run_ppo.py</code> picks between the two on <code>ppo.async_ppo.enabled</code>. Most of the parts
+are reused from async GRPO — the replay buffer, weight versioning, in-flight weight updates. <strong>One idea in
+this PR is genuinely new, and the rest of this page is about it: what to do while the critic warms
+up.</strong></p>
 
-<h2>Why running further ahead is safe while the policy is frozen</h2>
+<svg viewBox="0 0 900 268" role="img" aria-label="Before this PR the generation GPUs and training GPUs alternate, each idle half the time. With async PPO generation never stops and training runs every step, so both sets stay busy.">
+  <text class="hdr" x="14" y="18">Before &#8212; synchronous PPO: the two GPU sets take turns</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/bac4a8c46ee14d4c3dfb774be9577bacbb92ccf5/nemo_rl/algorithms/ppo.py#L1215" target="_blank"><text x="392" y="18">ppo_train</text></a>
+
+  <text class="lbl-b" x="14" y="50">generation GPUs</text>
+  <rect class="c-ok" x="150" y="32" width="176" height="26" rx="5"/>
+  <text class="lbl" x="238" y="50" text-anchor="middle">generate step 0</text>
+  <rect class="c-und" x="330" y="32" width="176" height="26" rx="5"/>
+  <text class="note" x="418" y="50" text-anchor="middle">idle</text>
+  <rect class="c-ok" x="510" y="32" width="176" height="26" rx="5"/>
+  <text class="lbl" x="598" y="50" text-anchor="middle">generate step 1</text>
+  <rect class="c-und" x="690" y="32" width="176" height="26" rx="5"/>
+  <text class="note" x="778" y="50" text-anchor="middle">idle</text>
+
+  <text class="lbl-b" x="14" y="84">training GPUs</text>
+  <rect class="c-und" x="150" y="66" width="176" height="26" rx="5"/>
+  <text class="note" x="238" y="84" text-anchor="middle">idle</text>
+  <rect class="c-ok" x="330" y="66" width="176" height="26" rx="5"/>
+  <text class="lbl" x="418" y="84" text-anchor="middle">train step 0</text>
+  <rect class="c-und" x="510" y="66" width="176" height="26" rx="5"/>
+  <text class="note" x="598" y="84" text-anchor="middle">idle</text>
+  <rect class="c-ok" x="690" y="66" width="176" height="26" rx="5"/>
+  <text class="lbl" x="778" y="84" text-anchor="middle">train step 1</text>
+
+  <text class="note" x="150" y="108">each set of GPUs does nothing half the time</text>
+
+  <text class="hdr" x="14" y="150">After &#8212; async PPO: both sets stay busy</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/bac4a8c46ee14d4c3dfb774be9577bacbb92ccf5/nemo_rl/algorithms/ppo.py#L2078" target="_blank"><text x="330" y="150">async_ppo_train</text></a>
+
+  <text class="lbl-b" x="14" y="182">generation GPUs</text>
+  <rect class="c-ok" x="150" y="164" width="716" height="26" rx="5"/>
+  <text class="lbl" x="508" y="182" text-anchor="middle">generate, generate, generate &#8212; never stops</text>
+
+  <text class="lbl-b" x="14" y="216">training GPUs</text>
+  <rect class="c-und" x="150" y="198" width="80" height="26" rx="5"/>
+  <text class="note" x="190" y="216" text-anchor="middle">fill</text>
+  <rect class="c-ok" x="234" y="198" width="632" height="26" rx="5"/>
+  <text class="lbl" x="550" y="216" text-anchor="middle">train step 0, 1, 2, 3, &#8230; back to back</text>
+
+  <text class="note" x="150" y="240">the trainer takes a ready batch from a replay buffer instead of waiting for one to be made</text>
+
+  <rect class="c-ok" x="14" y="250" width="18" height="13" rx="3"/>
+  <text class="note" x="38" y="261">busy</text>
+  <rect class="c-und" x="92" y="250" width="18" height="13" rx="3"/>
+  <text class="note" x="116" y="261">idle</text>
+</svg>
+
+<h2>The new idea: banking rollouts while the critic warms up</h2>
+
+<p>Every rollout is tagged with the policy weight version that made it, and the trainer refuses any rollout older
+than <code>max_trajectory_age_steps</code> versions (default <code>1</code>) —
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/bac4a8c46ee14d4c3dfb774be9577bacbb92ccf5/nemo_rl/algorithms/async_utils/replay_buffer.py#L225">replay_buffer.py:225</a>.
+PPO can start with <strong>critic warmup</strong>: for the first <code>policy_training_start_step</code> steps only
+the value model trains and the policy is frozen. A frozen policy means those rollouts are not really going stale,
+so you would like to run further ahead and pile up more of them. This PR adds
+<code>warmup_max_trajectory_age_steps</code> to do that, plus a cut-off so the piled-up rollouts are never actually
+used too late.</p>
 
 <p>Two numbers control the collector, and this PR is the first time they differ. <strong>Lead</strong> is how many
 future steps it may generate for. <strong>Age limit</strong> is how old a rollout may be and still be accepted.
