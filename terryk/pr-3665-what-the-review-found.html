@@ -168,13 +168,24 @@ already reach it — but the PR adds a second way in, and its own YAML comment s
 <a href="https://github.com/NVIDIA-NeMo/RL/blob/ad048f995296473511641f8cb1b8418625fe61ea/nemo_rl/algorithms/single_controller_utils/config.py#L393"><code>_warn_on_inert_failure_settings</code></a>,
 which already works out whether the sampler applies labels. It blocks nothing that works today.</p>
 
-<h2><span class="sev sev-dsn">design</span> 2. A speed setting quietly decides which failure you get</h2>
+<h2><span class="sev sev-dsn">design</span> 2. Inside problem 1, a speed setting decides <em>which</em> failure you get</h2>
 
-<p><code>min_groups_for_streaming_train</code> is how many finished groups the trainer waits for before it
-starts a chunk of work. It is there for speed — do not run a training pass over 2 samples. It should have
-nothing to do with fault tolerance. But in the unlabelled case above nothing subtracts the lost prompt, so
-the trainer keeps asking for a full batch, and this speed setting becomes the only thing deciding what
-happens. Below: 4 prompts per step, one given up on in the first batch.</p>
+<div class="warn" style="border-left-color:var(--accent)">
+<strong>Read problem 1 first — this only happens with the same two samplers.</strong> With
+<code>in_order</code> none of this applies. The reason is easy to miss: when the sampler puts no label on a
+batch, <strong>neither "shrink" nor "replace" ever runs</strong>. Both bail on the same missing label —
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/ad048f995296473511641f8cb1b8418625fe61ea/nemo_rl/algorithms/single_controller.py#L757"><code>_credit_shortfall</code> returns immediately</a>
+and
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/ad048f995296473511641f8cb1b8418625fe61ea/nemo_rl/algorithms/single_controller.py#L706"><code>_take_replacement</code> returns nothing</a>.
+So the number of groups the step wants never drops from 4, <code>min_step_batch_fraction</code> is never
+consulted, and the "is 3 groups acceptable?" question is never even asked. The step just keeps wanting 4.
+</div>
+
+<p>Because the step still wants all 4, the only thing left deciding what happens is
+<code>min_groups_for_streaming_train</code> — how many finished groups the trainer waits for before it starts
+a chunk of work. That is a speed setting. It exists so the trainer does not run a training pass over 2
+samples, and under <code>in_order</code> it has no say in fault tolerance at all. Here it quietly becomes the
+setting that picks the failure. Below: 4 prompts per step, one given up on in the first batch.</p>
 
 <svg viewBox="0 0 900 430" role="img" aria-label="Two outcomes. If the trainer waits for a whole batch it asks for four prompts, only three exist, and it asks forever. If it will start on part of a batch it takes the three and tops up with one prompt from the next batch, which leaves that batch short, and the shortage moves along the line until the last step fails.">
 
@@ -194,11 +205,13 @@ happens. Below: 4 prompts per step, one given up on in the first batch.</p>
   <rect class="s-lost" x="240" y="94" width="44" height="30" rx="5"/>
 
   <path class="arw-r" d="M300 109 L346 109" marker-end="url(#a3)"/>
-  <text class="lbl"    x="358" y="105">step 1 asks for 4. Only 3 will ever be here.</text>
-  <text class="redtxt" x="358" y="125">It asks again, and again. Training stops.</text>
-  <path class="arw-r" d="M600 132 a 26 20 0 1 0 -26 -20" marker-end="url(#a3)"/>
+  <text class="lbl"    x="358" y="103">step 1 still wants 4. Only 3 will ever be here.</text>
+  <text class="lbl"    x="358" y="121">So it sleeps 5ms and asks again. Same answer.</text>
+  <text class="redtxt" x="358" y="141">No error is raised. The job holds its GPUs</text>
+  <text class="redtxt" x="358" y="159">until the wall clock kills it.</text>
+  
 
-  <line class="div" x1="14" y1="152" x2="886" y2="152"/>
+  <line class="div" x1="14" y1="172" x2="886" y2="172"/>
 
   <!-- ============ CASE B ============ -->
   <text class="lbl-b" x="14" y="182">B. trainer will start on part of a batch</text>
