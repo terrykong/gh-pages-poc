@@ -310,29 +310,32 @@ been committed lately:</p>
     <path d="M0,0 L0,6 L8,3 z" fill="var(--dim)"/></marker></defs>
 </svg>
 
-<p>The wider point is the count. <code>async_rl.rollout_failure</code> goes from 9 settings to 14, and each
-new one arrived with a check whose only job is to say "this combination does nothing" — including a
-four-way one between the batch floor, the batch size, the give-up budgets and the replace mode. The default
-already needs it: at <code>min_step_batch_fraction=0.9</code>, any batch of 8 prompts or fewer can lose
-nothing at all, so <code>max_consecutive_dropped_prompts</code> is silently doing nothing.</p>
+<p>The wider point is not the number of settings — exposing a knob someone might need is cheap, and both
+extra replace settings are defaulted sensibly. It is that one of them <strong>hides a mode inside a
+number</strong>. <code>max_consecutive_dropped_prompts: 0</code> does not mean "tolerate no drops and carry
+on". It means "end the whole run on the first one". That is the most important behaviour in this block, and
+the only way to learn it is to read the comment next to it.</p>
 
-<p>Two of the five also have no story for tuning them. <code>max_replacement_attempts</code> must be at
-least 1, defaults to 1, and falls back to a smaller batch anyway. <code>replacement_reserve_prompts</code>
-is a low-water mark on a pool that refills a whole batch at a time, so 1 and "a full batch" behave almost
-the same and anything larger trips the PR's own warning. Both read as internal constants that became
-settings. A smaller surface that keeps every capability:</p>
+<div class="mono"><span class="c"># today — what happens is split across two fields, one of them a magic number</span>
+on_dropped_prompt: shrink            <span class="c"># or replace</span>
+max_consecutive_dropped_prompts: <span class="r">0</span>   <span class="c"># 0 = end the run. Not obvious.</span>
 
-<div class="mono">async_rl:
-  rollout_failure:
-    on_dropped_prompt: fail | shrink | replace   <span class="c"># "fail" == today's default</span>
-    min_step_batch_fraction: 0.9
+<span class="c"># suggestion — the mode says WHAT happens, the budget says HOW MUCH is tolerated</span>
+on_dropped_prompt: <span class="g">fail</span>              <span class="c"># fail | shrink | replace; "fail" is today's default</span>
+max_consecutive_dropped_prompts: 8   <span class="c"># only read when the mode is not "fail"</span></div>
 
-<span class="c"># max_replacement_attempts     -&gt; a constant</span>
-<span class="c"># replacement_reserve_prompts  -&gt; a constant</span>
-<span class="c"># max_consecutive_dropped_prompts -&gt; the watchdog already does this (stall_action: abort)</span></div>
-<p class="src">Folding "0 means end the run" into a word that says so removes the special case, and drops 4 of
-the 5 new checks. Counter-argument worth keeping in view: a count-based budget fails faster and more
-predictably than a 600-second timer, so if it stays, the smaller ask is just to make the two defaults agree.</p>
+<p>That removes the magic <code>0</code> and makes the default describe itself, without losing any
+capability. The second ask is just to make the two defaults agree: a small non-zero budget as the fast,
+specific trip, and <code>stall_action: abort</code> as the catch-all backstop. There is a payoff for
+problem 1 in that — with the watchdog set to stop the run, the case above stops being an unbounded hang
+burning GPUs and becomes a bounded failure with a real error. It does not fix it, but it caps the damage.</p>
+
+<p class="src">Why this is worth raising at all: <code>async_rl.rollout_failure</code> goes from 9 settings to
+14 here, and the PR needed a whole new function purely to warn about combinations that quietly do nothing —
+including a four-way one between the batch floor, the batch size, the drop budgets and the mode. The default
+trips it: at <code>min_step_batch_fraction=0.9</code>, any batch of 8 prompts or fewer can lose nothing at
+all, so <code>max_consecutive_dropped_prompts</code> is silently doing nothing. Writing down how these
+settings interact would help as much as any rename.</p>
 
 <h2>How much to trust this</h2>
 
