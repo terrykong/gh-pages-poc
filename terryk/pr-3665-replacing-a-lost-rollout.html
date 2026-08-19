@@ -266,6 +266,31 @@ metrics: step 0 promoted_prompt_groups = 1
 <a href="https://github.com/NVIDIA-NeMo/RL/blob/ad048f995296473511641f8cb1b8418625fe61ea/nemo_rl/algorithms/single_controller.py#L601">_divert_batch_to_reserve</a> fills the pool ·
 <a href="https://github.com/NVIDIA-NeMo/RL/blob/ad048f995296473511641f8cb1b8418625fe61ea/nemo_rl/algorithms/single_controller.py#L643">_drain_reserve_into_steps</a> trains on whatever spares are left at the end, so no data is thrown away</p>
 
+
+<h2>The four numbers, and which ones move</h2>
+
+<p>Four similar-sounding numbers decide how big a step is. Two are settings you write in YAML; two are
+working values the trainer recomputes as it goes. Mixing them up is the easiest way to misread this feature.</p>
+
+<table>
+<tr><th>value</th><th>where it lives</th><th>what it is</th><th>when it changes</th></tr>
+<tr><td><code>num_prompts_per_step</code></td><td>your YAML</td><td>groups a full step wants</td><td><strong>never</strong></td></tr>
+<tr><td><code>min_step_batch_fraction</code></td><td>your YAML</td><td>how much of that is still acceptable</td><td>never</td></tr>
+<tr><td><code>min_groups_for_streaming_train</code></td><td>your YAML</td><td>smallest chunk worth starting a training pass on — a speed setting</td><td>never</td></tr>
+<tr><td><code>floor</code> = <code>ceil(N &times; fraction)</code></td><td>worked out at startup</td><td>below this the run stops with an error</td><td>never</td></tr>
+<tr><td><code>target_groups</code></td><td>working value</td><td>what <em>this</em> step will actually train on</td><td>once per step, per lost prompt</td></tr>
+<tr><td><code>max_prompt_groups</code></td><td>working value</td><td>how many this step still needs right now</td><td><strong>every pass of the loop</strong></td></tr>
+<tr><td><code>min_prompt_groups</code></td><td>working value</td><td>smallest chunk to ask for right now</td><td><strong>every pass of the loop</strong></td></tr>
+</table>
+
+<p>Two things that trip people up. <strong>The floor is a check, not a target</strong> — losing 1 prompt out
+of 4 gives <code>target_groups = 3</code>, not <code>4 &times; fraction</code>; the floor is only what 3 gets
+compared against. And <strong><code>min_prompt_groups</code> is capped by what is left</strong>
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/ad048f995296473511641f8cb1b8418625fe61ea/nemo_rl/algorithms/single_controller.py#L871">single_controller.py:871</a>),
+so a chunk size of 30 never blocks a step that only needs 17 — and never reaches into the next step to top
+itself up, because the take is capped at <code>max_prompt_groups</code> and the groups for other steps carry
+a different step number anyway.</p>
+
 <h2>Does it work?</h2>
 
 <p><strong>Nobody has posted a run.</strong> There is no W&amp;B link, no before/after step-count, and no

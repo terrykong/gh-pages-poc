@@ -102,10 +102,20 @@ progress. Problems 2 and 3 are about the settings themselves: one repeats a job 
 does, and one lets an unrelated speed setting decide which failure you get. Nothing that ships today is
 affected, because every new setting is off by default. Examples below use 4 prompts per training step.</p>
 
+
+<div class="warn" style="border-left-color:var(--accent)">
+<strong>One word first, because everything below turns on it.</strong> When the generator sends a batch of
+prompts out, the <code>in_order</code> sampler gives that batch <strong>the number of the training step it
+belongs to</strong> (in the code, <code>target_step</code>), and step 7 will only ever train on groups
+carrying the number 7. The other two built-in samplers, <code>weight_fifo</code> and <code>windowed</code>,
+hand back <code>None</code> instead — their batches carry <strong>no step number</strong>. Everything this PR
+adds is keyed off that number, so where you read "no step number" below, it means those two samplers.
+</div>
+
 <h2><span class="sev sev-bug">bug</span> 1. With two of the three samplers, giving up on a prompt stops training</h2>
 
-<p>The fix works by labelling each batch with the training step it belongs to, then subtracting lost prompts
-from that step's target. Only the <code>in_order</code> sampler applies labels. For <code>weight_fifo</code>
+<p>Everything this PR adds is keyed off the step number described above: a lost prompt is subtracted from
+its step's target. Only <code>in_order</code> issues that number. For <code>weight_fifo</code>
 and <code>windowed</code> there is no label, so
 <a href="https://github.com/NVIDIA-NeMo/RL/blob/ad048f995296473511641f8cb1b8418625fe61ea/nemo_rl/algorithms/single_controller.py#L757">the subtraction never happens</a>
 and the trainer keeps asking for a full batch that will never exist. With <code>weight_fifo</code> it never
@@ -172,8 +182,7 @@ which already works out whether the sampler applies labels. It blocks nothing th
 
 <div class="warn" style="border-left-color:var(--accent)">
 <strong>Read problem 1 first — this only happens with the same two samplers.</strong> With
-<code>in_order</code> none of this applies. The reason is easy to miss: when the sampler puts no label on a
-batch, <strong>neither "shrink" nor "replace" ever runs</strong>. Both bail on the same missing label —
+<code>in_order</code> none of this applies. The reason is easy to miss: when a batch carries no step number, <strong>neither "shrink" nor "replace" ever runs</strong>. Both bail on the same missing label —
 <a href="https://github.com/NVIDIA-NeMo/RL/blob/ad048f995296473511641f8cb1b8418625fe61ea/nemo_rl/algorithms/single_controller.py#L757"><code>_credit_shortfall</code> returns immediately</a>
 and
 <a href="https://github.com/NVIDIA-NeMo/RL/blob/ad048f995296473511641f8cb1b8418625fe61ea/nemo_rl/algorithms/single_controller.py#L706"><code>_take_replacement</code> returns nothing</a>.
@@ -330,7 +339,7 @@ predictably than a 600-second timer, so if it stays, the smaller ask is just to 
 <p>Problem 1 is the only one I would call a defect, and three reviewers reached it independently by reading
 the code; I confirmed the boundary mismatch myself. <strong>Nobody ran any of it.</strong> None of this came
 from a live failure — there is no run where a worker was killed and the wedge was watched happening, and the
-unit tests do not cover the unlabelled sampler on the training side, which is why the suite stays green.</p>
+unit tests do not cover the no-step-number sampler on the training side, which is why the suite stays green.</p>
 
 <p>What would settle it in about an hour: start a short run with <code>sampler.name: weight_fifo</code> and
 <code>max_consecutive_dropped_prompts: 1</code>, force one prompt to fail, and watch whether training steps
