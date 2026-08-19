@@ -83,43 +83,44 @@ svg a text{text-decoration:underline;fill:var(--accent);font:11px ui-monospace,M
   document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
 <div class="wrap">
 
-<div class="pagetag">part 3 of 3 &middot; <b>the review</b> &middot; three problems found in PR #3665</div>
+<div class="pagetag">part 3 of 3 &middot; <b>the review</b> &middot; three findings on PR #3665</div>
 
-<h1>Three problems a review of the new fault-tolerance settings turned up</h1>
+<h1>Three things a review of the new fault-tolerance settings turned up</h1>
 <p class="sub">Review notes on
 <a href="https://github.com/NVIDIA-NeMo/RL/pull/3665">NVIDIA-NeMo/RL #3665</a>.
 All permalinks pin the PR head <code>ad048f9</code>; "before" behaviour is
-<a href="https://github.com/NVIDIA-NeMo/RL/commit/3d873ebc29b766d51802c69c75c092c78a59d6f6"><code>3d873eb</code></a>.</p>
+<a href="https://github.com/NVIDIA-NeMo/RL/commit/3d873ebc29b766d51802c69c75c092c78a59d6f6"><code>3d873eb</code></a>.
+The numbering here matches the three review comments on the PR.</p>
 
 <div class="nav"><b>This page is the review.</b> The other two pages are about the PR itself:
-<a href="./pr-3665-why-a-lost-rollout-ends-the-run.html">part 1 — the problem it solves</a> ·
+<a href="./pr-3665-why-a-lost-rollout-ends-the-run.html">part 1 — the problem it solves</a> &middot;
 <a href="./pr-3665-replacing-a-lost-rollout.html">part 2 — how the fix works</a></div>
 
 <p>The PR lets a training run give up on a prompt the generation fleet cannot answer, instead of ending the
-run. To do that it adds five settings under <code>async_rl.rollout_failure</code>. Problem 1 is a real bug —
-the fix only works for one of the three built-in samplers, and with another one the run stops making
-progress. Problems 2 and 3 are about the settings themselves: one repeats a job another setting already
-does, and one lets an unrelated speed setting decide which failure you get. Nothing that ships today is
-affected, because every new setting is off by default. Examples below use 4 prompts per training step.</p>
-
+run. To do that it adds five settings under <code>async_rl.rollout_failure</code>. Only <strong>finding 1 is
+a defect</strong>; the other two are follow-up asks. Nothing that ships today is affected — every new
+setting is off by default. Examples use 4 prompts per training step.</p>
 
 <div class="warn" style="border-left-color:var(--accent)">
 <strong>One word first, because everything below turns on it.</strong> When the generator sends a batch of
 prompts out, the <code>in_order</code> sampler gives that batch <strong>the number of the training step it
 belongs to</strong> (in the code, <code>target_step</code>), and step 7 will only ever train on groups
 carrying the number 7. The other two built-in samplers, <code>weight_fifo</code> and <code>windowed</code>,
-hand back <code>None</code> instead — their batches carry <strong>no step number</strong>. Everything this PR
-adds is keyed off that number, so where you read "no step number" below, it means those two samplers.
+hand back <code>None</code> instead — their batches carry <strong>no step number</strong>.
 </div>
 
-<h2><span class="sev sev-bug">bug</span> 1. With two of the three samplers, giving up on a prompt stops training</h2>
+<h2 id="finding-1"><span class="sev sev-bug">bug</span> Finding 1 — with two of the three samplers, giving up on a prompt stops training</h2>
+<p class="src">Review comment on <code>config.py:442</code></p>
 
-<p>Everything this PR adds is keyed off the step number described above: a lost prompt is subtracted from
-its step's target. Only <code>in_order</code> issues that number. For <code>weight_fifo</code>
-and <code>windowed</code> there is no label, so
-<a href="https://github.com/NVIDIA-NeMo/RL/blob/ad048f995296473511641f8cb1b8418625fe61ea/nemo_rl/algorithms/single_controller.py#L757">the subtraction never happens</a>
-and the trainer keeps asking for a full batch that will never exist. With <code>weight_fifo</code> it never
-recovers, and the reason is a boundary that does not line up:</p>
+<p>Everything this PR adds is keyed off the step number: a lost prompt is subtracted from its step's target so
+the trainer stops waiting for it. With no step number there is nothing to subtract from. Both paths bail on
+exactly that — <a href="https://github.com/NVIDIA-NeMo/RL/blob/ad048f995296473511641f8cb1b8418625fe61ea/nemo_rl/algorithms/single_controller.py#L757"><code>_credit_shortfall</code> returns immediately</a> and
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/ad048f995296473511641f8cb1b8418625fe61ea/nemo_rl/algorithms/single_controller.py#L706"><code>_take_replacement</code> returns nothing</a> — so with <code>weight_fifo</code> or
+<code>windowed</code> <strong>neither "shrink" nor "replace" ever runs</strong>, the step's target stays at
+the full <code>num_prompts_per_step</code> forever, and <code>min_step_batch_fraction</code> is never
+consulted.</p>
+
+<p>With <code>weight_fifo</code> that is unrecoverable, because two ranges disagree at exactly one point:</p>
 
 <svg viewBox="0 0 900 430" role="img" aria-label="A weight version number line. The trainer sits at version 1. Selection looks at versions 0 through 1 and always takes the oldest, version 0, which is one group short. Eviction only removes versions strictly below 0, so version 0 is never cleared. The two ranges disagree at exactly one point.">
   <text class="hdr" x="14" y="20">Trainer is at weight version 1. Version 0 is one group short after a prompt was given up on.</text>
@@ -173,31 +174,16 @@ recovers, and the reason is a boundary that does not line up:</p>
   <a href="https://github.com/NVIDIA-NeMo/RL/blob/ad048f995296473511641f8cb1b8418625fe61ea/nemo_rl/algorithms/async_utils/staleness_sampler.py#L176" target="_blank"><text x="600" y="382">evict window :176</text></a>
 </svg>
 
-<p>Both loops then go quiet. The watchdog does notice, but <code>stall_action</code> defaults to
-<code>warn</code>, so it prints a line every 30 seconds and the job holds its GPUs until the wall clock
-kills it. <strong>This is pre-existing</strong> — the older <code>max_skipped_prompts</code> setting could
-already reach it — but the PR adds a second way in, and its own YAML comment suggests turning it on.</p>
-<p class="src">Suggested fix: reject the combination in
-<a href="https://github.com/NVIDIA-NeMo/RL/blob/ad048f995296473511641f8cb1b8418625fe61ea/nemo_rl/algorithms/single_controller_utils/config.py#L393"><code>_warn_on_inert_failure_settings</code></a>,
-which already works out whether the sampler applies labels. It blocks nothing that works today.</p>
+<p>No exception is raised. The train pump sleeps 5&nbsp;ms and re-asks forever, both pumps go idle, and the
+job holds its GPUs until the wall clock kills it — <code>stall_action</code> defaults to <code>warn</code>,
+so the watchdog only prints. <strong>This is pre-existing</strong> — the older
+<code>max_skipped_prompts</code> could already reach it — but the PR adds a second way in, and its own YAML
+comment suggests turning it on.</p>
 
-<h2><span class="sev sev-dsn">design</span> 2. Inside problem 1, a speed setting decides <em>which</em> failure you get</h2>
-
-<div class="warn" style="border-left-color:var(--accent)">
-<strong>Read problem 1 first — this only happens with the same two samplers.</strong> With
-<code>in_order</code> none of this applies. The reason is easy to miss: when a batch carries no step number, <strong>neither "shrink" nor "replace" ever runs</strong>. Both bail on the same missing label —
-<a href="https://github.com/NVIDIA-NeMo/RL/blob/ad048f995296473511641f8cb1b8418625fe61ea/nemo_rl/algorithms/single_controller.py#L757"><code>_credit_shortfall</code> returns immediately</a>
-and
-<a href="https://github.com/NVIDIA-NeMo/RL/blob/ad048f995296473511641f8cb1b8418625fe61ea/nemo_rl/algorithms/single_controller.py#L706"><code>_take_replacement</code> returns nothing</a>.
-So the number of groups the step wants never drops from 4, <code>min_step_batch_fraction</code> is never
-consulted, and the "is 3 groups acceptable?" question is never even asked. The step just keeps wanting 4.
-</div>
-
-<p>Because the step still wants all 4, the only thing left deciding what happens is
-<code>min_groups_for_streaming_train</code> — how many finished groups the trainer waits for before it starts
-a chunk of work. That is a speed setting. It exists so the trainer does not run a training pass over 2
-samples, and under <code>in_order</code> it has no say in fault tolerance at all. Here it quietly becomes the
-setting that picks the failure. Below: 4 prompts per step, one given up on in the first batch.</p>
+<p><strong>Which of the two failures you get is decided by an unrelated speed setting.</strong>
+<code>min_groups_for_streaming_train</code> is how many finished groups the trainer waits for before starting
+a chunk of work. Under <code>in_order</code> it has no say in fault tolerance at all. Here, because the
+step's target never moves, it is the only thing left deciding what happens:</p>
 
 <svg viewBox="0 0 900 430" role="img" aria-label="Two outcomes. If the trainer waits for a whole batch it asks for four prompts, only three exist, and it asks forever. If it will start on part of a batch it takes the three and tops up with one prompt from the next batch, which leaves that batch short, and the shortage moves along the line until the last step fails.">
 
@@ -267,17 +253,26 @@ setting that picks the failure. Below: 4 prompts per step, one given up on in th
     <path d="M0,0 L0,6 L8,3 z" fill="var(--red)"/></marker></defs>
 </svg>
 
-<p>Neither ending is written down anywhere, and nothing checks the pair. A reader has no reason to think a
-speed setting picks a failure mode. For <code>in_order</code> the two never fight, because the number of
-groups still wanted is worked out from the <em>already reduced</em> target
-(<a href="https://github.com/NVIDIA-NeMo/RL/blob/ad048f995296473511641f8cb1b8418625fe61ea/nemo_rl/algorithms/single_controller.py#L865">single_controller.py:865</a>),
-so a step that legitimately shrank to 3 asks for 3 and gets 3. That part is the design working.</p>
+<p class="src">Suggested fix: reject the combination in
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/ad048f995296473511641f8cb1b8418625fe61ea/nemo_rl/algorithms/single_controller_utils/config.py#L393"><code>_warn_on_inert_failure_settings</code></a>, which already works out whether the sampler
+issues a step number. It blocks nothing that works today. A committable suggestion is on the review comment.</p>
 
-<h2><span class="sev sev-dsn">design</span> 3. Two settings watching the same thing, disagreeing about it</h2>
+<h2 id="finding-2"><span class="sev sev-dsn">design</span> Finding 2 — a mode hidden inside a number, and two settings watching the same thing</h2>
+<p class="src">Review comment on <code>config.py:141</code></p>
 
-<p>The new <code>max_consecutive_dropped_prompts</code> and the existing <code>watchdog.stall_timeout_s</code>
-both answer "has the fleet stopped answering?", and both read it off the same counter — whether anything has
-been committed lately:</p>
+<p>One setting <strong>hides a mode inside a number</strong>.
+<code>max_consecutive_dropped_prompts: 0</code> does not mean "tolerate no drops and carry on". It means
+"end the whole run on the first one" — and the only way to learn that is to read the comment beside it.</p>
+
+<div class="mono"><span class="c"># today — what happens is split across two fields, one of them a magic number</span>
+on_dropped_prompt: shrink            <span class="c"># or replace</span>
+max_consecutive_dropped_prompts: <span class="r">0</span>   <span class="c"># 0 = end the run. Not obvious.</span>
+
+<span class="c"># suggestion — the mode says WHAT happens, the budget says HOW MUCH is tolerated</span>
+on_dropped_prompt: <span class="g">fail</span>              <span class="c"># fail | shrink | replace; "fail" is today's default</span>
+max_consecutive_dropped_prompts: 8   <span class="c"># only read when the mode is not "fail"</span></div>
+
+<p>It also measures the same thing the watchdog already measures, and the two defaults contradict each other:</p>
 
 <svg viewBox="0 0 900 300" role="img" aria-label="One counter, stats.committed, feeds two separate detectors: a time-based watchdog that defaults to only warning, and a count-based drop budget that defaults to stopping the run immediately.">
   <text class="hdr" x="14" y="20">One signal, two detectors, opposite default reactions</text>
@@ -314,44 +309,41 @@ been committed lately:</p>
     <path d="M0,0 L0,6 L8,3 z" fill="var(--dim)"/></marker></defs>
 </svg>
 
-<p>The wider point is not the number of settings — exposing a knob someone might need is cheap, and both
-extra replace settings are defaulted sensibly. It is that one of them <strong>hides a mode inside a
-number</strong>. <code>max_consecutive_dropped_prompts: 0</code> does not mean "tolerate no drops and carry
-on". It means "end the whole run on the first one". That is the most important behaviour in this block, and
-the only way to learn it is to read the comment next to it.</p>
+<p>The fix is to make the defaults agree: a small non-zero budget as the fast, specific trip, and
+<code>stall_action: abort</code> as the catch-all backstop. There is a payoff for finding 1 in that — with
+the watchdog set to stop the run, the stall above becomes a bounded failure with a real error instead of an
+unbounded one burning GPUs. It does not fix it, but it caps the damage.</p>
 
-<div class="mono"><span class="c"># today — what happens is split across two fields, one of them a magic number</span>
-on_dropped_prompt: shrink            <span class="c"># or replace</span>
-max_consecutive_dropped_prompts: <span class="r">0</span>   <span class="c"># 0 = end the run. Not obvious.</span>
+<h2 id="finding-3"><span class="sev sev-dsn">docs</span> Finding 3 — four similar-sounding numbers, no stated relationship</h2>
+<p class="src">Review comment on <code>config.py:156</code> — documentation only, nothing is broken here</p>
 
-<span class="c"># suggestion — the mode says WHAT happens, the budget says HOW MUCH is tolerated</span>
-on_dropped_prompt: <span class="g">fail</span>              <span class="c"># fail | shrink | replace; "fail" is today's default</span>
-max_consecutive_dropped_prompts: 8   <span class="c"># only read when the mode is not "fail"</span></div>
+<p>Four numbers decide how big a training step is. Two are settings you write in YAML, two are working
+values the trainer recomputes every pass of its loop, and the names do not say which is which:
+<code>num_prompts_per_step</code>, <code>min_step_batch_fraction</code>,
+<code>min_groups_for_streaming_train</code>, and the pair <code>min_prompt_groups</code> /
+<code>max_prompt_groups</code> that appear in the code.</p>
 
-<p>That removes the magic <code>0</code> and makes the default describe itself, without losing any
-capability. The second ask is just to make the two defaults agree: a small non-zero budget as the fast,
-specific trip, and <code>stall_action: abort</code> as the catch-all backstop. There is a payoff for
-problem 1 in that — with the watchdog set to stop the run, the case above stops being an unbounded hang
-burning GPUs and becomes a bounded failure with a real error. It does not fix it, but it caps the damage.</p>
+<p>They compose correctly under <code>in_order</code> — a step that legitimately shrank to 17 groups asks
+for 17 and gets 17, because the chunk size is capped by what the step still needs
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/ad048f995296473511641f8cb1b8418625fe61ea/nemo_rl/algorithms/single_controller.py#L871">single_controller.py:871</a>). No bug. But two things catch people out, and neither is written
+down: <strong>the floor is a check, not a target</strong> (losing 1 prompt of 4 gives a target of 3, not
+<code>4 &times; fraction</code>), and <strong>the chunk size never needs lowering</strong> to let a step
+shrink. One sentence on each field saying which thing it bounds would settle it.</p>
 
-<p class="src">Why this is worth raising at all: <code>async_rl.rollout_failure</code> goes from 9 settings to
-14 here, and the PR needed a whole new function purely to warn about combinations that quietly do nothing —
-including a four-way one between the batch floor, the batch size, the drop budgets and the mode. The default
-trips it: at <code>min_step_batch_fraction=0.9</code>, any batch of 8 prompts or fewer can lose nothing at
-all, so <code>max_consecutive_dropped_prompts</code> is silently doing nothing. Writing down how these
-settings interact would help as much as any rename.</p>
+<p class="src">The full breakdown of which numbers move and when is on
+<a href="./pr-3665-replacing-a-lost-rollout.html#the-four-numbers">part 2</a>.</p>
 
 <h2>How much to trust this</h2>
 
-<p>Problem 1 is the only one I would call a defect, and three reviewers reached it independently by reading
-the code; I confirmed the boundary mismatch myself. <strong>Nobody ran any of it.</strong> None of this came
-from a live failure — there is no run where a worker was killed and the wedge was watched happening, and the
-unit tests do not cover the no-step-number sampler on the training side, which is why the suite stays green.</p>
+<p>Finding 1 is the only defect, and three reviewers reached it independently by reading the code; the
+boundary mismatch was then confirmed by hand. <strong>Nobody ran any of it.</strong> None of this came from a
+live failure — there is no run where a worker was killed and the stall was watched happening, and the unit
+tests do not cover a no-step-number sampler on the training side, which is why the suite stays green.</p>
 
 <p>What would settle it in about an hour: start a short run with <code>sampler.name: weight_fifo</code> and
 <code>max_consecutive_dropped_prompts: 1</code>, force one prompt to fail, and watch whether training steps
-keep advancing. Problems 2 and 3 are judgement calls about the shape of the settings, not defects — reasonable
-people can disagree, and they are worth a follow-up rather than blocking the PR.</p>
+keep advancing. Findings 2 and 3 are judgement calls about the shape and naming of the settings, not
+defects — reasonable people can disagree, and they are worth a follow-up rather than blocking the PR.</p>
 
 <div class="warn">
 <strong>What to do with this.</strong> Nothing shipped is affected — every new setting is off by default, and
