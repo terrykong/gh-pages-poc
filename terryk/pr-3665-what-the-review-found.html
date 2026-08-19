@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NVIDIA-NeMo/RL #3665 — what a review of the fault-tolerance knobs found</title>
+<style>
+:root{
+  --bg:#0d1117; --surface:#161b22; --surface2:#1c2128; --border:#30363d;
+  --text:#e6edf3; --dim:#8b949e; --accent:#58a6ff; --green:#3fb950;
+  --orange:#d29922; --red:#f85149; --purple:#bc8cff;
+}
+:root[data-theme="light"]{
+  --bg:#ffffff; --surface:#f6f8fa; --surface2:#eaeef2; --border:#d0d7de;
+  --text:#1f2328; --dim:#59636e; --accent:#0969da; --green:#1a7f37;
+  --orange:#9a6700; --red:#cf222e; --purple:#8250df;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:28px 20px 70px}
+h1{font-size:22px;margin:0 0 8px;line-height:1.3}
+h2{font-size:18px;margin:34px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;
+  font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
+.sub{color:var(--dim);font-size:13.5px;margin:0 0 14px}
+.pagetag{display:inline-block;background:var(--surface2);border:1px solid var(--border);
+  border-radius:20px;padding:3px 11px;font:12px ui-monospace,Menlo,monospace;color:var(--dim);margin:0 0 10px}
+.pagetag b{color:var(--accent)}
+.nav{background:var(--surface);border:1px solid var(--border);border-radius:8px;
+  padding:10px 14px;margin:0 0 18px;font-size:13px;color:var(--dim)}
+.nav b{color:var(--text)}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);
+  border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;
+  font:13px/1 ui-monospace,Menlo,monospace;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.18)}
+.mono{font:12.5px ui-monospace,SFMono-Regular,Menlo,monospace;
+  background:var(--surface);border:1px solid var(--border);border-radius:8px;
+  padding:13px;overflow-x:auto;white-space:pre;line-height:1.55}
+.mono .c{color:var(--dim)} .mono .g{color:var(--green)} .mono .r{color:var(--red)}
+.warn{border-left:3px solid var(--orange);background:var(--surface);
+  padding:12px 16px;margin:18px 0;border-radius:0 8px 8px 0}
+.sev{display:inline-block;border-radius:5px;padding:1px 8px;font:11.5px ui-monospace,Menlo,monospace;
+  margin-right:8px;vertical-align:2px}
+.sev-bug{background:var(--red);color:#fff}
+.sev-dsn{background:var(--surface2);color:var(--dim);border:1px solid var(--border)}
+.src{font-size:12.5px;color:var(--dim);margin:5px 0 18px}
+table{border-collapse:collapse;width:100%;margin:12px 0;font-size:13.5px}
+th,td{border:1px solid var(--border);padding:7px 10px;text-align:left;vertical-align:top}
+th{background:var(--surface2);font-weight:600}
+svg{max-width:100%;height:auto;display:block;margin:14px 0}
+svg .box{fill:var(--surface);stroke:var(--border);stroke-width:1.4}
+svg .lbl{fill:var(--text);font:12.5px ui-monospace,Menlo,monospace}
+svg .lbl-b{fill:var(--text);font:bold 13px -apple-system,sans-serif}
+svg .note{fill:var(--dim);font:11.5px -apple-system,sans-serif}
+svg .hdr{fill:var(--accent);font:bold 12.5px -apple-system,sans-serif}
+svg .s-ok{fill:var(--green);opacity:.5;stroke:var(--green);stroke-width:1.3}
+svg .s-lost{fill:none;stroke:var(--red);stroke-width:1.6;stroke-dasharray:5 4}
+svg .s-new{fill:var(--accent);opacity:.45;stroke:var(--accent);stroke-width:1.3}
+svg .s-txt{fill:var(--text);font:bold 12px ui-monospace,Menlo,monospace}
+svg .axis{stroke:var(--dim);stroke-width:1.4}
+svg .selr{stroke:var(--green);stroke-width:2.6;fill:none}
+svg .evr{stroke:var(--red);stroke-width:2.6;fill:none}
+svg .arw{stroke:var(--dim);stroke-width:1.6;fill:none}
+svg .arw-r{stroke:var(--red);stroke-width:2;fill:none}
+svg .redtxt{fill:var(--red);font:bold 12.5px -apple-system,sans-serif}
+svg .greentxt{fill:var(--green);font:bold 12.5px -apple-system,sans-serif}
+svg .orgtxt{fill:var(--orange);font:bold 12.5px -apple-system,sans-serif}
+svg .div{stroke:var(--border);stroke-width:1;stroke-dasharray:4 4}
+svg a text{text-decoration:underline;fill:var(--accent);font:11px ui-monospace,Menlo,monospace}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+  document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head>
+<body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+  function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+  function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
+    b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
+      else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+  document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+<div class="wrap">
+
+<div class="pagetag">part 3 of 3 &middot; <b>the review</b> &middot; three problems found in PR #3665</div>
+
+<h1>Three problems a review of the new fault-tolerance settings turned up</h1>
+<p class="sub">Review notes on
+<a href="https://github.com/NVIDIA-NeMo/RL/pull/3665">NVIDIA-NeMo/RL #3665</a>.
+All permalinks pin the PR head <code>ad048f9</code>; "before" behaviour is
+<a href="https://github.com/NVIDIA-NeMo/RL/commit/3d873ebc29b766d51802c69c75c092c78a59d6f6"><code>3d873eb</code></a>.</p>
+
+<div class="nav"><b>This page is the review.</b> The other two pages are about the PR itself:
+<a href="./pr-3665-why-a-lost-rollout-ends-the-run.html">part 1 — the problem it solves</a> ·
+<a href="./pr-3665-replacing-a-lost-rollout.html">part 2 — how the fix works</a></div>
+
+<p>The PR lets a training run give up on a prompt the generation fleet cannot answer, instead of ending the
+run. To do that it adds five settings under <code>async_rl.rollout_failure</code>. Problem 1 is a real bug —
+the fix only works for one of the three built-in samplers, and with another one the run stops making
+progress. Problems 2 and 3 are about the settings themselves: one repeats a job another setting already
+does, and one lets an unrelated speed setting decide which failure you get. Nothing that ships today is
+affected, because every new setting is off by default. Examples below use 4 prompts per training step.</p>
+
+<h2><span class="sev sev-bug">bug</span> 1. With two of the three samplers, giving up on a prompt stops training</h2>
+
+<p>The fix works by labelling each batch with the training step it belongs to, then subtracting lost prompts
+from that step's target. Only the <code>in_order</code> sampler applies labels. For <code>weight_fifo</code>
+and <code>windowed</code> there is no label, so
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/ad048f995296473511641f8cb1b8418625fe61ea/nemo_rl/algorithms/single_controller.py#L757">the subtraction never happens</a>
+and the trainer keeps asking for a full batch that will never exist. With <code>weight_fifo</code> it never
+recovers, and the reason is a boundary that does not line up:</p>
+
+<svg viewBox="0 0 900 330" role="img" aria-label="A weight version number line. The trainer is at version 1. Selection looks at versions 0 through 1 inclusive and always picks the oldest, version 0, which is one group short. Eviction only removes versions strictly below 0, so version 0 is never cleared. The two ranges disagree at exactly one point.">
+  <text class="hdr" x="14" y="20">Trainer is at weight version 1. Version 0 is one group short after a prompt was given up on.</text>
+
+  <!-- axis -->
+  <line class="axis" x1="120" y1="128" x2="820" y2="128"/>
+  <text class="note" x="826" y="132">weight version</text>
+  <line class="axis" x1="300" y1="122" x2="300" y2="134"/>
+  <line class="axis" x1="560" y1="122" x2="560" y2="134"/>
+  <text class="lbl" x="294" y="152">0</text>
+  <text class="lbl" x="554" y="152">1</text>
+
+  <!-- cohort contents -->
+  <rect class="s-ok"   x="226" y="80" width="30" height="26" rx="4"/>
+  <rect class="s-ok"   x="260" y="80" width="30" height="26" rx="4"/>
+  <rect class="s-ok"   x="294" y="80" width="30" height="26" rx="4"/>
+  <rect class="s-lost" x="328" y="80" width="30" height="26" rx="4"/>
+  <text class="redtxt" x="366" y="98">3 of 4 — one was given up on</text>
+
+  <rect class="s-new" x="500" y="80" width="30" height="26" rx="4"/>
+  <rect class="s-new" x="534" y="80" width="30" height="26" rx="4"/>
+  <rect class="s-new" x="568" y="80" width="30" height="26" rx="4"/>
+  <rect class="s-new" x="602" y="80" width="30" height="26" rx="4"/>
+  <text class="note" x="640" y="98">new prompts land here — a different version, so they cannot fill the gap</text>
+
+  <!-- select range: inclusive at 0 -->
+  <circle cx="300" cy="182" r="6" fill="var(--green)"/>
+  <path class="selr" d="M300 182 L620 182"/>
+  <path class="selr" d="M620 176 L620 188"/>
+  <text class="greentxt" x="120" y="186">select looks at</text>
+  <text class="note" x="120" y="202">0 &lt;= v &lt;= 1</text>
+  <text class="greentxt" x="632" y="186">version 0 is INSIDE — and it always takes the oldest</text>
+  <text class="note" x="632" y="202">so every pass asks version 0 for 4 groups, gets 3, and gives up</text>
+
+  <!-- evict range: strict below 0 -->
+  <circle cx="300" cy="238" r="6" fill="none" stroke="var(--red)" stroke-width="2.2"/>
+  <path class="evr" d="M300 238 L150 238"/>
+  <path class="evr" d="M150 232 L150 244"/>
+  <text class="redtxt" x="632" y="242">version 0 is OUTSIDE — so it is never cleared away</text>
+  <text class="note" x="632" y="258">eviction only removes versions strictly older than 0</text>
+  <text class="redtxt" x="120" y="270">evict removes</text>
+  <text class="note" x="120" y="286">v &lt; 0</text>
+
+  <line class="div" x1="14" y1="300" x2="886" y2="300"/>
+  <text class="redtxt" x="14" y="320">Version 0 is picked forever and cleared never. The trainer cannot move to version 2 to age it out — the trainer is what is stuck.</text>
+
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/ad048f995296473511641f8cb1b8418625fe61ea/nemo_rl/algorithms/async_utils/staleness_sampler.py#L373" target="_blank"><text x="120" y="222">select window :373</text></a>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/ad048f995296473511641f8cb1b8418625fe61ea/nemo_rl/algorithms/async_utils/staleness_sampler.py#L176" target="_blank"><text x="120" y="306">evict window :176</text></a>
+</svg>
+
+<p>Both loops then go quiet. The watchdog does notice, but <code>stall_action</code> defaults to
+<code>warn</code>, so it prints a line every 30 seconds and the job holds its GPUs until the wall clock
+kills it. <strong>This is pre-existing</strong> — the older <code>max_skipped_prompts</code> setting could
+already reach it — but the PR adds a second way in, and its own YAML comment suggests turning it on.</p>
+<p class="src">Suggested fix: reject the combination in
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/ad048f995296473511641f8cb1b8418625fe61ea/nemo_rl/algorithms/single_controller_utils/config.py#L393"><code>_warn_on_inert_failure_settings</code></a>,
+which already works out whether the sampler applies labels. It blocks nothing that works today.</p>
+
+<h2><span class="sev sev-dsn">design</span> 2. A speed setting quietly decides which failure you get</h2>
+
+<p><code>min_groups_for_streaming_train</code> is how many finished groups the trainer waits for before
+starting a chunk of work inside a step. It is there for throughput — do not run a forward pass over 2
+samples. It should have nothing to do with fault tolerance. But in the unlabelled case above, it is the
+only thing left setting the floor, so it picks the failure:</p>
+
+<svg viewBox="0 0 900 300" role="img" aria-label="One dropped prompt forks into two different failures depending on whether min_groups_for_streaming_train equals the batch size or is smaller than it.">
+  <text class="hdr" x="14" y="20">One prompt given up on, sampler applies no labels. Two very different endings.</text>
+
+  <rect class="box" x="330" y="36" width="240" height="34" rx="7" style="stroke:var(--red)"/>
+  <text class="lbl" x="352" y="58">1 prompt given up on</text>
+
+  <path class="arw-r" d="M400 74 L250 74 L250 104" marker-end="url(#a3)"/>
+  <path class="arw-r" d="M500 74 L660 74 L660 104" marker-end="url(#a3)"/>
+
+  <!-- left branch -->
+  <rect class="box" x="80" y="108" width="340" height="46" rx="7"/>
+  <text class="lbl-b" x="98" y="128">min_groups_for_streaming_train</text>
+  <text class="lbl-b" x="98" y="146">== num_prompts_per_step</text>
+  <text class="note" x="290" y="146">what the example config sets</text>
+
+  <path class="arw-r" d="M250 158 L250 186" marker-end="url(#a3)"/>
+  <rect class="box" x="80" y="190" width="340" height="72" rx="7" style="stroke:var(--red)"/>
+  <text class="lbl" x="98" y="212">asks for 4, only 3 exist</text>
+  <text class="lbl" x="98" y="230">gets nothing back, every pass</text>
+  <text class="redtxt" x="98" y="252">training stops making progress</text>
+
+  <!-- right branch -->
+  <rect class="box" x="490" y="108" width="340" height="46" rx="7"/>
+  <text class="lbl-b" x="508" y="128">min_groups_for_streaming_train</text>
+  <text class="lbl-b" x="508" y="146">&lt; num_prompts_per_step</text>
+
+  <path class="arw-r" d="M660 158 L660 186" marker-end="url(#a3)"/>
+  <rect class="box" x="490" y="190" width="340" height="72" rx="7" style="stroke:var(--orange)"/>
+  <text class="lbl" x="508" y="212">takes the 3, then borrows 1 from</text>
+  <text class="lbl" x="508" y="230">the next batch — the gap walks forward</text>
+  <text class="orgtxt" x="508" y="252">the last step fails, hours later</text>
+
+  <text class="note" x="14" y="286">Neither is documented, and nothing checks the relationship. A reader has no reason to think a speed setting changes a failure mode.</text>
+
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/ad048f995296473511641f8cb1b8418625fe61ea/nemo_rl/algorithms/single_controller.py#L871" target="_blank"><text x="640" y="286">where the two meet :871</text></a>
+  <defs><marker id="a3" markerWidth="9" markerHeight="9" refX="8" refY="3" orient="auto">
+    <path d="M0,0 L0,6 L8,3 z" fill="var(--red)"/></marker></defs>
+</svg>
+
+<p>For <code>in_order</code> the two compose correctly, because the number of groups still wanted is worked
+out from the <em>already reduced</em> target
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/ad048f995296473511641f8cb1b8418625fe61ea/nemo_rl/algorithms/single_controller.py#L865">single_controller.py:865</a>).
+A step that legitimately shrank to 3 asks for 3 and gets 3. That part is the design working.</p>
+
+<h2><span class="sev sev-dsn">design</span> 3. Two settings watching the same thing, disagreeing about it</h2>
+
+<p>The new <code>max_consecutive_dropped_prompts</code> and the existing <code>watchdog.stall_timeout_s</code>
+both answer "has the fleet stopped answering?", and both read it off the same counter — whether anything has
+been committed lately:</p>
+
+<svg viewBox="0 0 900 300" role="img" aria-label="One counter, stats.committed, feeds two separate detectors: a time-based watchdog that defaults to only warning, and a count-based drop budget that defaults to stopping the run immediately.">
+  <text class="hdr" x="14" y="20">One signal, two detectors, opposite default reactions</text>
+
+  <rect class="box" x="330" y="40" width="250" height="50" rx="8" style="stroke:var(--accent)"/>
+  <text class="lbl-b" x="352" y="62">has anything committed?</text>
+  <text class="note"  x="352" y="80">the shared signal both read</text>
+
+  <path class="arw" d="M400 94 L230 94 L230 126" marker-end="url(#a4)"/>
+  <path class="arw" d="M510 94 L680 94 L680 126" marker-end="url(#a4)"/>
+
+  <rect class="box" x="60" y="130" width="340" height="116" rx="8"/>
+  <text class="lbl-b" x="80" y="152">watchdog.stall_timeout_s</text>
+  <text class="note"  x="80" y="172">counts TIME: nothing committed for 600s</text>
+  <text class="note"  x="80" y="190">resets its clock when the count moves</text>
+  <text class="greentxt" x="80" y="216">default: warn</text>
+  <text class="note"  x="170" y="216">— print a line, keep running</text>
+  <text class="note"  x="80" y="236">catches hangs too, not just given-up prompts</text>
+
+  <rect class="box" x="520" y="130" width="340" height="116" rx="8"/>
+  <text class="lbl-b" x="540" y="152">max_consecutive_dropped_prompts</text>
+  <text class="note"  x="540" y="172">counts PROMPTS: N given up in a row</text>
+  <text class="note"  x="540" y="190">resets its counter when anything commits</text>
+  <text class="redtxt" x="540" y="216">default: 0</text>
+  <text class="note"  x="600" y="216">— stop the run on the very first one</text>
+  <text class="note"  x="540" y="236">fails faster, and more predictably</text>
+
+  <text class="note" x="14" y="276">Out of the box the run is both very forgiving and completely unforgiving about the same condition. The v1 stack answers this with one setting.</text>
+
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/ad048f995296473511641f8cb1b8418625fe61ea/nemo_rl/algorithms/single_controller.py#L1172" target="_blank"><text x="80" y="266">watchdog reset :1172</text></a>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/ad048f995296473511641f8cb1b8418625fe61ea/nemo_rl/experience/rollout_manager.py#L1341" target="_blank"><text x="540" y="266">budget reset :1341</text></a>
+  <defs><marker id="a4" markerWidth="9" markerHeight="9" refX="8" refY="3" orient="auto">
+    <path d="M0,0 L0,6 L8,3 z" fill="var(--dim)"/></marker></defs>
+</svg>
+
+<p>The wider point is the count. <code>async_rl.rollout_failure</code> goes from 9 settings to 14, and each
+new one arrived with a check whose only job is to say "this combination does nothing" — including a
+four-way one between the batch floor, the batch size, the give-up budgets and the replace mode. The default
+already needs it: at <code>min_step_batch_fraction=0.9</code>, any batch of 8 prompts or fewer can lose
+nothing at all, so <code>max_consecutive_dropped_prompts</code> is silently doing nothing.</p>
+
+<p>Two of the five also have no story for tuning them. <code>max_replacement_attempts</code> must be at
+least 1, defaults to 1, and falls back to a smaller batch anyway. <code>replacement_reserve_prompts</code>
+is a low-water mark on a pool that refills a whole batch at a time, so 1 and "a full batch" behave almost
+the same and anything larger trips the PR's own warning. Both read as internal constants that became
+settings. A smaller surface that keeps every capability:</p>
+
+<div class="mono">async_rl:
+  rollout_failure:
+    on_dropped_prompt: fail | shrink | replace   <span class="c"># "fail" == today's default</span>
+    min_step_batch_fraction: 0.9
+
+<span class="c"># max_replacement_attempts     -&gt; a constant</span>
+<span class="c"># replacement_reserve_prompts  -&gt; a constant</span>
+<span class="c"># max_consecutive_dropped_prompts -&gt; the watchdog already does this (stall_action: abort)</span></div>
+<p class="src">Folding "0 means end the run" into a word that says so removes the special case, and drops 4 of
+the 5 new checks. Counter-argument worth keeping in view: a count-based budget fails faster and more
+predictably than a 600-second timer, so if it stays, the smaller ask is just to make the two defaults agree.</p>
+
+<h2>How much to trust this</h2>
+
+<p>Problem 1 is the only one I would call a defect, and three reviewers reached it independently by reading
+the code; I confirmed the boundary mismatch myself. <strong>Nobody ran any of it.</strong> None of this came
+from a live failure — there is no run where a worker was killed and the wedge was watched happening, and the
+unit tests do not cover the unlabelled sampler on the training side, which is why the suite stays green.</p>
+
+<p>What would settle it in about an hour: start a short run with <code>sampler.name: weight_fifo</code> and
+<code>max_consecutive_dropped_prompts: 1</code>, force one prompt to fail, and watch whether training steps
+keep advancing. Problems 2 and 3 are judgement calls about the shape of the settings, not defects — reasonable
+people can disagree, and they are worth a follow-up rather than blocking the PR.</p>
+
+<div class="warn">
+<strong>What to do with this.</strong> Nothing shipped is affected — every new setting is off by default, and
+no config in the repo turns one on. Before you turn them on, check which sampler your run uses: they only do
+what they say with <code>in_order</code>. Two of the shipped SingleController recipes use
+<code>windowed</code>, which is the milder of the two failures but still ends the run at its last step.
+</div>
+
+</div>
+</body>
+</html>
