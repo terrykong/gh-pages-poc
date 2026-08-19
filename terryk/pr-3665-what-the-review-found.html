@@ -170,54 +170,83 @@ which already works out whether the sampler applies labels. It blocks nothing th
 
 <h2><span class="sev sev-dsn">design</span> 2. A speed setting quietly decides which failure you get</h2>
 
-<p><code>min_groups_for_streaming_train</code> is how many finished groups the trainer waits for before
-starting a chunk of work inside a step. It is there for throughput — do not run a forward pass over 2
-samples. It should have nothing to do with fault tolerance. But in the unlabelled case above, it is the
-only thing left setting the floor, so it picks the failure:</p>
+<p><code>min_groups_for_streaming_train</code> is how many finished groups the trainer waits for before it
+starts a chunk of work. It is there for speed — do not run a training pass over 2 samples. It should have
+nothing to do with fault tolerance. But in the unlabelled case above nothing subtracts the lost prompt, so
+the trainer keeps asking for a full batch, and this speed setting becomes the only thing deciding what
+happens. Below: 4 prompts per step, one given up on in the first batch.</p>
 
-<svg viewBox="0 0 900 300" role="img" aria-label="One dropped prompt forks into two different failures depending on whether min_groups_for_streaming_train equals the batch size or is smaller than it.">
-  <text class="hdr" x="14" y="20">One prompt given up on, sampler applies no labels. Two very different endings.</text>
+<svg viewBox="0 0 900 430" role="img" aria-label="Two outcomes. If the trainer waits for a whole batch it asks for four prompts, only three exist, and it asks forever. If it will start on part of a batch it takes the three and tops up with one prompt from the next batch, which leaves that batch short, and the shortage moves along the line until the last step fails.">
 
-  <rect class="box" x="330" y="36" width="240" height="34" rx="7" style="stroke:var(--red)"/>
-  <text class="lbl" x="352" y="58">1 prompt given up on</text>
+  <rect class="s-ok"   x="14"  y="10" width="13" height="13" rx="3"/>
+  <text class="note" x="33"  y="21">finished</text>
+  <rect class="s-lost" x="110" y="10" width="13" height="13" rx="3"/>
+  <text class="note" x="129" y="21">given up on — never arrives</text>
 
-  <path class="arw-r" d="M400 74 L250 74 L250 104" marker-end="url(#a3)"/>
-  <path class="arw-r" d="M500 74 L660 74 L660 104" marker-end="url(#a3)"/>
+  <!-- ============ CASE A ============ -->
+  <text class="lbl-b" x="14" y="56">A. trainer waits for a whole batch</text>
+  <text class="note"  x="14" y="74">min_groups_for_streaming_train == num_prompts_per_step — what the example config sets</text>
 
-  <!-- left branch -->
-  <rect class="box" x="80" y="108" width="340" height="46" rx="7"/>
-  <text class="lbl-b" x="98" y="128">min_groups_for_streaming_train</text>
-  <text class="lbl-b" x="98" y="146">== num_prompts_per_step</text>
-  <text class="note" x="290" y="146">what the example config sets</text>
+  <text class="lbl" x="14" y="112">batch 1</text>
+  <rect class="s-ok"   x="90"  y="94" width="44" height="30" rx="5"/>
+  <rect class="s-ok"   x="140" y="94" width="44" height="30" rx="5"/>
+  <rect class="s-ok"   x="190" y="94" width="44" height="30" rx="5"/>
+  <rect class="s-lost" x="240" y="94" width="44" height="30" rx="5"/>
 
-  <path class="arw-r" d="M250 158 L250 186" marker-end="url(#a3)"/>
-  <rect class="box" x="80" y="190" width="340" height="72" rx="7" style="stroke:var(--red)"/>
-  <text class="lbl" x="98" y="212">asks for 4, only 3 exist</text>
-  <text class="lbl" x="98" y="230">gets nothing back, every pass</text>
-  <text class="redtxt" x="98" y="252">training stops making progress</text>
+  <path class="arw-r" d="M300 109 L346 109" marker-end="url(#a3)"/>
+  <text class="lbl"    x="358" y="105">step 1 asks for 4. Only 3 will ever be here.</text>
+  <text class="redtxt" x="358" y="125">It asks again, and again. Training stops.</text>
+  <path class="arw-r" d="M600 132 a 26 20 0 1 0 -26 -20" marker-end="url(#a3)"/>
 
-  <!-- right branch -->
-  <rect class="box" x="490" y="108" width="340" height="46" rx="7"/>
-  <text class="lbl-b" x="508" y="128">min_groups_for_streaming_train</text>
-  <text class="lbl-b" x="508" y="146">&lt; num_prompts_per_step</text>
+  <line class="div" x1="14" y1="152" x2="886" y2="152"/>
 
-  <path class="arw-r" d="M660 158 L660 186" marker-end="url(#a3)"/>
-  <rect class="box" x="490" y="190" width="340" height="72" rx="7" style="stroke:var(--orange)"/>
-  <text class="lbl" x="508" y="212">takes the 3, then borrows 1 from</text>
-  <text class="lbl" x="508" y="230">the next batch — the gap walks forward</text>
-  <text class="orgtxt" x="508" y="252">the last step fails, hours later</text>
+  <!-- ============ CASE B ============ -->
+  <text class="lbl-b" x="14" y="182">B. trainer will start on part of a batch</text>
+  <text class="note"  x="14" y="200">min_groups_for_streaming_train &lt; num_prompts_per_step</text>
 
-  <text class="note" x="14" y="286">Neither is documented, and nothing checks the relationship. A reader has no reason to think a speed setting changes a failure mode.</text>
+  <text class="note" x="60"  y="232">batch 1</text>
+  <text class="note" x="330" y="232">batch 2</text>
+  <text class="note" x="600" y="232">batch 3</text>
+  <text class="note" x="838" y="232">...</text>
 
-  <a href="https://github.com/NVIDIA-NeMo/RL/blob/ad048f995296473511641f8cb1b8418625fe61ea/nemo_rl/algorithms/single_controller.py#L871" target="_blank"><text x="640" y="286">where the two meet :871</text></a>
+  <rect class="s-ok"   x="30"  y="240" width="44" height="30" rx="5"/>
+  <rect class="s-ok"   x="80"  y="240" width="44" height="30" rx="5"/>
+  <rect class="s-ok"   x="130" y="240" width="44" height="30" rx="5"/>
+  <rect class="s-lost" x="180" y="240" width="44" height="30" rx="5"/>
+
+  <rect class="s-ok"   x="300" y="240" width="44" height="30" rx="5"/>
+  <rect class="s-ok"   x="350" y="240" width="44" height="30" rx="5"/>
+  <rect class="s-ok"   x="400" y="240" width="44" height="30" rx="5"/>
+  <rect class="s-new"  x="450" y="240" width="44" height="30" rx="5"/>
+
+  <rect class="s-ok"   x="570" y="240" width="44" height="30" rx="5"/>
+  <rect class="s-ok"   x="620" y="240" width="44" height="30" rx="5"/>
+  <rect class="s-ok"   x="670" y="240" width="44" height="30" rx="5"/>
+  <rect class="s-new"  x="720" y="240" width="44" height="30" rx="5"/>
+
+  <path class="arw-r" d="M472 238 C 460 196, 240 196, 208 236" marker-end="url(#a3)"/>
+  <text class="redtxt" x="286" y="192">step 1 tops itself up with 1 prompt from batch 2</text>
+
+  <path class="arw-r" d="M742 238 C 730 300, 500 300, 472 274" marker-end="url(#a3)"/>
+  <text class="redtxt" x="530" y="312">now batch 2 is short, so it does the same to batch 3</text>
+
+  <text class="greentxt" x="30" y="292">step 1 is full</text>
+
+  <text class="lbl"  x="14" y="348">The hole moves along the line, one batch at a time. Every step trains on a full batch —</text>
+  <text class="lbl"  x="14" y="368">until the last one, which has no batch after it to take a prompt from.</text>
+  <text class="redtxt" x="14" y="394">The final step is short and the run fails there, hours in:</text>
+  <text class="lbl"  x="14" y="414">&quot;rollout exhausted before a complete training step was assembled&quot;</text>
+
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/ad048f995296473511641f8cb1b8418625fe61ea/nemo_rl/algorithms/single_controller.py#L871" target="_blank"><text x="600" y="394">where the two settings meet :871</text></a>
   <defs><marker id="a3" markerWidth="9" markerHeight="9" refX="8" refY="3" orient="auto">
     <path d="M0,0 L0,6 L8,3 z" fill="var(--red)"/></marker></defs>
 </svg>
 
-<p>For <code>in_order</code> the two compose correctly, because the number of groups still wanted is worked
-out from the <em>already reduced</em> target
-(<a href="https://github.com/NVIDIA-NeMo/RL/blob/ad048f995296473511641f8cb1b8418625fe61ea/nemo_rl/algorithms/single_controller.py#L865">single_controller.py:865</a>).
-A step that legitimately shrank to 3 asks for 3 and gets 3. That part is the design working.</p>
+<p>Neither ending is written down anywhere, and nothing checks the pair. A reader has no reason to think a
+speed setting picks a failure mode. For <code>in_order</code> the two never fight, because the number of
+groups still wanted is worked out from the <em>already reduced</em> target
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/ad048f995296473511641f8cb1b8418625fe61ea/nemo_rl/algorithms/single_controller.py#L865">single_controller.py:865</a>),
+so a step that legitimately shrank to 3 asks for 3 and gets 3. That part is the design working.</p>
 
 <h2><span class="sev sev-dsn">design</span> 3. Two settings watching the same thing, disagreeing about it</h2>
 
