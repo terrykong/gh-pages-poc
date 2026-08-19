@@ -141,9 +141,15 @@ than <code>max_trajectory_age_steps</code> versions (default <code>1</code>) —
 <a href="https://github.com/NVIDIA-NeMo/RL/blob/bac4a8c46ee14d4c3dfb774be9577bacbb92ccf5/nemo_rl/algorithms/async_utils/replay_buffer.py#L225">replay_buffer.py:225</a>.
 PPO can start with <strong>critic warmup</strong>: for the first <code>policy_training_start_step</code> steps only
 the value model trains and the policy is frozen. A frozen policy means those rollouts are not really going stale,
-so you would like to run further ahead and pile up more of them. This PR adds
-<code>warmup_max_trajectory_age_steps</code> to do that, plus a cut-off so the piled-up rollouts are never actually
-used too late.</p>
+so you would like to run further ahead and pile up more of them. This PR adds one knob for that,
+<code>warmup_max_trajectory_age_steps</code>. <strong>There is no knob for the cut-off</strong> — it is worked out
+from the two you already set,
+<code>policy_training_start_step + max_trajectory_age_steps</code>
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/bac4a8c46ee14d4c3dfb774be9577bacbb92ccf5/nemo_rl/algorithms/ppo.py#L2072">ppo.py:2072</a>),
+and it is enforced from both ends: the collector never generates a rollout aimed past it, and the age limit drops
+back to normal as soon as training goes past it. So three numbers drive the whole mechanism —
+<code>policy_training_start_step</code>, <code>max_trajectory_age_steps</code>,
+<code>warmup_max_trajectory_age_steps</code> — and nothing else.</p>
 
 <p>Two numbers control the collector, and this PR is the first time they differ. <strong>Lead</strong> is how many
 future steps it may generate for. <strong>Age limit</strong> is how old a rollout may be and still be accepted.
@@ -235,8 +241,9 @@ Everywhere else in the codebase they are the same number.</p>
 
 <h2>The two numbers, computed</h2>
 
-<p>Both are small pure functions in <code>ppo.py</code>, called once at startup and again after every weight
-update, then pushed to the collector with
+<p>Both are small pure functions in <code>ppo.py</code>, and they are the two ends of the cut-off — the first
+limits what gets <em>made</em>, the second limits what gets <em>used</em>. Each is called once at startup and
+again after every weight update, then pushed to the collector with
 <a href="https://github.com/NVIDIA-NeMo/RL/blob/bac4a8c46ee14d4c3dfb774be9577bacbb92ccf5/nemo_rl/algorithms/async_utils/trajectory_collector.py#L267">set_generation_window()</a>.
 Same numbers as the figure: <code>P=1</code>, <code>A=1</code>, <code>W=2</code>.</p>
 
