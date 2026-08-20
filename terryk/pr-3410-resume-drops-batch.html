@@ -188,6 +188,23 @@ load_dataloader_state(dataloader, last_checkpoint_path, data_config)</div>
 therefore does not cause them to be regenerated &#8212; it causes them to be <em>replaced</em> by the next 7
 prompts in the stream, and the compute spent on them is spent again.</p>
 
+<p>Both branches end up training on 7 prompt groups, because
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/6e0362da959976adae6aff5076e394344c67b26a/nemo_rl/algorithms/async_utils/replay_buffer.py#L640">get_trajectories_needed</a> just asks for
+whatever is missing. So deleting the rows does not buy a better batch &#8212; the batch is the same size
+either way. It only changes which prompts fill it, and how much generation gets paid for twice.</p>
+
+<div class="warn" style="border-left-color:var(--accent)">
+<strong>One step, or several?</strong> Step 11 is not the only step that can be half-full when the
+checkpoint lands. Rollouts enter the buffer one prompt group at a time
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/6e0362da959976adae6aff5076e394344c67b26a/nemo_rl/algorithms/async_utils/trajectory_collector.py#L1126">one add() per group</a>), and the
+collector keeps several future steps on the go at once &#8212; it only stops when every step in its
+look-ahead window is finished or already claimed
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/6e0362da959976adae6aff5076e394344c67b26a/nemo_rl/algorithms/async_utils/trajectory_collector.py#L295">_should_pause_for_generation_limits</a>).
+Nothing stops or drains generation while the checkpoint is written. The delete runs over
+<em>every</em> half-full step it finds, not just the one being resumed, so a single checkpoint can bin
+several batches at once &#8212; as many as the look-ahead window is wide.
+</div>
+
 <h3 style="font-size:15px;margin:26px 0 6px">Who asks for which branch</h3>
 <table>
 <tr><th>caller</th><th>value</th><th>matches <code>main</code>?</th></tr>
@@ -213,12 +230,13 @@ says directly which branch ran and how much was thrown away.</p>
 
 <div class="warn">
 <strong>What this means.</strong> Every async PPO resume today takes the <span class="bad">true</span>
-branch, because nothing sets the flag. Each such resume skips a full batch of prompts rather than just
-the handful that were still generating, and discards the rollouts already paid for. The loss repeats on
-every restart, so a job that gets preempted often trains on noticeably less of its dataset than the epoch
-count claims. Setting the PPO default to <span class="ok">false</span> matches async GRPO and
-<code>main</code>, and shrinks the loss back to only the rollouts that were genuinely in flight &#8212; which
-is the smallest it can be until the saved loader place is rewound to cover them.
+branch, because nothing sets the flag. Each such resume skips whole batches of prompts rather than just
+the handful still generating, and bins rollouts already paid for. Both branches train on the same number
+of prompt groups, so the deletion buys nothing &#8212; whatever it keeps is a subset of what the other branch
+keeps. The loss repeats on every restart, so a job preempted often trains on less of its dataset than the
+epoch count suggests. <span class="ok">false</span> is what async GRPO and <code>main</code> both do, and
+it shrinks the loss to only the rollouts genuinely in flight &#8212; the smallest it can be until the saved
+loader place is rewound to cover them.
 </div>
 
 </div>
