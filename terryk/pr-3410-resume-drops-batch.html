@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NVIDIA-NeMo/RL #3410 — why a resumed async PPO run loses a whole batch of prompts</title>
+<style>
+:root{
+  --bg:#0d1117; --surface:#161b22; --surface2:#1c2128; --border:#30363d;
+  --text:#e6edf3; --dim:#8b949e; --accent:#58a6ff; --green:#3fb950;
+  --orange:#d29922; --red:#f85149;
+}
+:root[data-theme="light"]{
+  --bg:#ffffff; --surface:#f6f8fa; --surface2:#eaeef2; --border:#d0d7de;
+  --text:#1f2328; --dim:#59636e; --accent:#0969da; --green:#1a7f37;
+  --orange:#9a6700; --red:#cf222e;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:28px 20px 70px}
+h1{font-size:22px;margin:0 0 8px;line-height:1.3}
+h2{font-size:18px;margin:32px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;
+  font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
+.sub{color:var(--dim);font-size:13.5px;margin:0 0 16px}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);
+  border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;
+  font:13px/1 ui-monospace,Menlo,monospace;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.18)}
+.mono{font:12.5px ui-monospace,SFMono-Regular,Menlo,monospace;
+  background:var(--surface);border:1px solid var(--border);border-radius:8px;
+  padding:13px;overflow-x:auto;white-space:pre;line-height:1.5}
+.warn{border-left:3px solid var(--orange);background:var(--surface);
+  padding:12px 16px;margin:20px 0;border-radius:0 8px 8px 0}
+.src{color:var(--dim);font-size:12.5px;margin:6px 0 18px}
+table{border-collapse:collapse;width:100%;margin:14px 0;font-size:13.5px}
+th,td{border:1px solid var(--border);padding:7px 10px;text-align:left}
+th{background:var(--surface2)}
+.ok{color:var(--green)} .bad{color:var(--red)}
+svg{max-width:100%;height:auto;display:block;margin:16px 0}
+svg .lbl{fill:var(--text);font:12.5px ui-monospace,Menlo,monospace}
+svg .note{fill:var(--dim);font:11.5px -apple-system,sans-serif}
+svg .hdr{fill:var(--text);font:bold 12.5px -apple-system,sans-serif}
+svg .loss{fill:var(--text);font:12.5px -apple-system,sans-serif}
+svg .okw{fill:var(--green);font-weight:bold}
+svg .badw{fill:var(--red);font-weight:bold}
+svg .c-ok{fill:var(--green);opacity:.5;stroke:var(--green);stroke-width:1.4}
+svg .c-bad{fill:var(--red);opacity:.45;stroke:var(--red);stroke-width:1.4}
+svg .c-new{fill:var(--accent);opacity:.3;stroke:var(--accent);stroke-width:1.4}
+svg .legbox{fill:var(--surface);stroke:var(--border);stroke-width:1.2}
+svg .frontier{stroke:var(--accent);stroke-width:2.2;stroke-dasharray:6 4;fill:none}
+svg .frontier-lbl{fill:var(--accent);font:bold 12px -apple-system,sans-serif}
+svg a text{text-decoration:underline;fill:var(--accent);font:11.5px ui-monospace,Menlo,monospace}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+  document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head>
+<body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">&#127769; dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+  function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'\u2600 light':'\ud83c\udf19 dark';}
+  function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
+    b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
+      else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+  document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+<div class="wrap">
+
+<h1>Why resuming an async PPO run throws away a whole batch of prompts instead of two</h1>
+<p class="sub">One question inside
+<a href="https://github.com/NVIDIA-NeMo/RL/pull/3410">NVIDIA-NeMo/RL #3410</a> &#8212;
+<em>feat(ppo): support async ppo</em>. All permalinks pin the PR head <code>6e0362d</code>.</p>
+
+<p>Async PPO generates rollouts in the background while training runs. A background thread pulls
+prompt batches from the dataloader (<a href="https://github.com/NVIDIA-NeMo/RL/blob/6e0362da959976adae6aff5076e394344c67b26a/nemo_rl/algorithms/async_utils/trajectory_collector.py#L377">_collection_loop</a>)
+and puts finished rollouts into a replay buffer, each stamped with the training step it is meant for.
+A checkpoint saves two things side by side: the replay buffer, and the dataloader&#8217;s place &#8212; read
+straight off that same running loader (<a href="https://github.com/NVIDIA-NeMo/RL/blob/6e0362da959976adae6aff5076e394344c67b26a/nemo_rl/algorithms/async_utils/trajectory_collector.py#L707">trajectory_collector.py:707</a>,
+saved at <a href="https://github.com/NVIDIA-NeMo/RL/blob/6e0362da959976adae6aff5076e394344c67b26a/nemo_rl/algorithms/ppo.py#L2903">ppo.py:2903</a>). That place is already past every prompt handed to
+generation, including the ones whose rollouts have not come back yet, so a resume can never fetch
+those prompts again. This PR adds a flag that decides how many <em>more</em> prompts get thrown away
+on top of them.</p>
+
+<h2>What one checkpoint costs you</h2>
+
+<svg viewBox="0 0 940 452" role="img" aria-label="What the checkpoint saves and what resume rebuilds">
+<text class="hdr" x="10" y="22">1 &#8212; Checkpoint taken while step 11’s batch was still being generated</text>
+<text class="note" x="10" y="41">step 11 needs 7 prompt groups; the loader has handed out #12 through #18</text>
+<rect class="c-ok" x="60" y="54" width="58" height="32" rx="5"/>
+<text class="lbl" x="89" y="75" text-anchor="middle">#12</text>
+<rect class="c-ok" x="126" y="54" width="58" height="32" rx="5"/>
+<text class="lbl" x="155" y="75" text-anchor="middle">#13</text>
+<rect class="c-ok" x="192" y="54" width="58" height="32" rx="5"/>
+<text class="lbl" x="221" y="75" text-anchor="middle">#14</text>
+<rect class="c-ok" x="258" y="54" width="58" height="32" rx="5"/>
+<text class="lbl" x="287" y="75" text-anchor="middle">#15</text>
+<rect class="c-ok" x="324" y="54" width="58" height="32" rx="5"/>
+<text class="lbl" x="353" y="75" text-anchor="middle">#16</text>
+<rect class="c-bad" x="390" y="54" width="58" height="32" rx="5"/>
+<text class="lbl" x="419" y="75" text-anchor="middle">#17</text>
+<rect class="c-bad" x="456" y="54" width="58" height="32" rx="5"/>
+<text class="lbl" x="485" y="75" text-anchor="middle">#18</text>
+<path class="frontier" d="M523 44 L523 98"/>
+<text class="frontier-lbl" x="532" y="62">loader place saved = #19</text>
+<text class="note" x="532" y="79">it moved past all 7, including</text>
+<text class="note" x="532" y="93">the 2 that never finished</text>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/6e0362da959976adae6aff5076e394344c67b26a/nemo_rl/algorithms/async_utils/trajectory_collector.py#L707" target="_blank"><text class="lnk" x="10" y="112">trajectory_collector.py:707 — state_dict() of the live loader</text></a>
+<text class="hdr" x="10" y="158">2 &#8212; Resume with drop_incomplete_targets_on_restore = <tspan class="okw">false</tspan>  (async GRPO, and main today)</text>
+<rect class="c-ok" x="60" y="174" width="58" height="32" rx="5"/>
+<text class="lbl" x="89" y="195" text-anchor="middle">#12</text>
+<rect class="c-ok" x="126" y="174" width="58" height="32" rx="5"/>
+<text class="lbl" x="155" y="195" text-anchor="middle">#13</text>
+<rect class="c-ok" x="192" y="174" width="58" height="32" rx="5"/>
+<text class="lbl" x="221" y="195" text-anchor="middle">#14</text>
+<rect class="c-ok" x="258" y="174" width="58" height="32" rx="5"/>
+<text class="lbl" x="287" y="195" text-anchor="middle">#15</text>
+<rect class="c-ok" x="324" y="174" width="58" height="32" rx="5"/>
+<text class="lbl" x="353" y="195" text-anchor="middle">#16</text>
+<rect class="c-new" x="390" y="174" width="58" height="32" rx="5"/>
+<text class="lbl" x="419" y="195" text-anchor="middle">#19</text>
+<rect class="c-new" x="456" y="174" width="58" height="32" rx="5"/>
+<text class="lbl" x="485" y="195" text-anchor="middle">#20</text>
+<text class="note" x="532" y="195">keep 5, ask for 2 more</text>
+<text class="loss" x="10" y="232">#17 and #18 are never trained — 2 prompts lost.</text>
+<text class="hdr" x="10" y="278">3 &#8212; Resume with drop_incomplete_targets_on_restore = <tspan class="badw">true</tspan>  (what async PPO defaults to in this PR)</text>
+<rect class="c-new" x="60" y="294" width="58" height="32" rx="5"/>
+<text class="lbl" x="89" y="315" text-anchor="middle">#19</text>
+<rect class="c-new" x="126" y="294" width="58" height="32" rx="5"/>
+<text class="lbl" x="155" y="315" text-anchor="middle">#20</text>
+<rect class="c-new" x="192" y="294" width="58" height="32" rx="5"/>
+<text class="lbl" x="221" y="315" text-anchor="middle">#21</text>
+<rect class="c-new" x="258" y="294" width="58" height="32" rx="5"/>
+<text class="lbl" x="287" y="315" text-anchor="middle">#22</text>
+<rect class="c-new" x="324" y="294" width="58" height="32" rx="5"/>
+<text class="lbl" x="353" y="315" text-anchor="middle">#23</text>
+<rect class="c-new" x="390" y="294" width="58" height="32" rx="5"/>
+<text class="lbl" x="419" y="315" text-anchor="middle">#24</text>
+<rect class="c-new" x="456" y="294" width="58" height="32" rx="5"/>
+<text class="lbl" x="485" y="315" text-anchor="middle">#25</text>
+<text class="note" x="532" y="315">drop all 5, ask for 7</text>
+<text class="loss" x="10" y="352">#12 through #18 are all never trained — 7 prompts lost, and the 5 finished rollouts are thrown away.</text>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/6e0362da959976adae6aff5076e394344c67b26a/nemo_rl/algorithms/async_utils/replay_buffer.py#L529" target="_blank"><text class="lnk" x="10" y="371">replay_buffer.py:529 — the branch that deletes them</text></a>
+<rect class="legbox" x="6" y="392" width="928" height="52" rx="7"/>
+<rect class="c-ok" x="18" y="404" width="20" height="13" rx="3"/>
+<text class="note" x="46" y="414">rollout finished before the save, and is in the checkpoint</text>
+<rect class="c-bad" x="18" y="422" width="20" height="13" rx="3"/>
+<text class="note" x="46" y="432">still generating at the save — never written anywhere</text>
+<rect class="c-new" x="18" y="440" width="20" height="13" rx="3"/>
+<text class="note" x="46" y="450">fresh prompt the loader hands out after resume</text>
+</svg>
+
+
+<p class="src">Rows 2 and 3 are the same crash and the same checkpoint. The only difference is one boolean.</p>
+
+<h2>The three lines that decide it</h2>
+
+<p>On resume the buffer counts how many prompt groups survived for each training step, and calls a
+step &#8220;incomplete&#8221; if it has fewer than a full batch.</p>
+
+<div class="mono"># resuming at training step 11, batch = 7 prompt groups
+_prepare_for_training_step(current_step=11, num_prompts_per_step=7)
+
+target_counts = {11: 5}      # 5 rollouts made it into the checkpoint
+incomplete    = {11}         # 5 &lt; 7</div>
+<p class="src"><a href="https://github.com/NVIDIA-NeMo/RL/blob/6e0362da959976adae6aff5076e394344c67b26a/nemo_rl/algorithms/async_utils/replay_buffer.py#L513">replay_buffer.py:513</a> &#183; <a href="https://github.com/NVIDIA-NeMo/RL/blob/6e0362da959976adae6aff5076e394344c67b26a/nemo_rl/algorithms/async_utils/replay_buffer.py#L519">replay_buffer.py:519</a></p>
+
+<p>Then the flag picks a branch. One deletes those 5 rollouts; the other keeps them and prints a note.</p>
+
+<div class="mono">if incomplete and self._drop_incomplete_targets_on_restore:
+    self.trajectories = []                    # true  -&gt; the 5 finished rollouts are gone
+else:
+    print("   Incomplete target 11: 5/7")     # false -&gt; keep them, fill in the rest</div>
+<p class="src"><a href="https://github.com/NVIDIA-NeMo/RL/blob/6e0362da959976adae6aff5076e394344c67b26a/nemo_rl/algorithms/async_utils/replay_buffer.py#L529">replay_buffer.py:529</a></p>
+
+<p>Either way the collector then asks the buffer how many more it needs, and the loader supplies them
+starting from the place the checkpoint saved &#8212; #19.</p>
+
+<div class="mono">get_trajectories_needed(target_step=11, num_prompts_per_step=7)
+#   false -&gt; 7 - 5 = 2   -&gt; loader hands out #19, #20
+#   true  -&gt; 7 - 0 = 7   -&gt; loader hands out #19 ... #25
+
+# either way it starts at #19: the saved place is restored as-is
+load_dataloader_state(dataloader, last_checkpoint_path, data_config)</div>
+<p class="src"><a href="https://github.com/NVIDIA-NeMo/RL/blob/6e0362da959976adae6aff5076e394344c67b26a/nemo_rl/algorithms/async_utils/replay_buffer.py#L640">replay_buffer.py:640</a> &#183; <a href="https://github.com/NVIDIA-NeMo/RL/blob/6e0362da959976adae6aff5076e394344c67b26a/nemo_rl/algorithms/ppo.py#L466">ppo.py:466</a></p>
+
+<p>Prompts #12&#8211;#18 are behind #19, so nothing can bring them back. Deleting the 5 finished rollouts
+therefore does not cause them to be regenerated &#8212; it causes them to be <em>replaced</em> by the next 7
+prompts in the stream, and the compute spent on them is spent again.</p>
+
+<h3 style="font-size:15px;margin:26px 0 6px">Who asks for which branch</h3>
+<table>
+<tr><th>caller</th><th>value</th><th>matches <code>main</code>?</th></tr>
+<tr><td>async GRPO &#8212; <a href="https://github.com/NVIDIA-NeMo/RL/blob/6e0362da959976adae6aff5076e394344c67b26a/nemo_rl/algorithms/grpo.py#L4143">grpo.py:4143</a></td><td class="ok">false</td><td>yes</td></tr>
+<tr><td>async PPO &#8212; <a href="https://github.com/NVIDIA-NeMo/RL/blob/6e0362da959976adae6aff5076e394344c67b26a/nemo_rl/algorithms/ppo.py#L131">ppo.py:131</a> (the default; no recipe sets it)</td><td class="bad">true</td><td><strong>no &#8212; new here</strong></td></tr>
+</table>
+<p class="src">On <code>main</code>, this resume path never deleted incomplete steps &#8212; it only printed them.
+Deletion existed, but only on the branch taken when no training step is supplied, which resume does not take
+(<code>git show origin/main:nemo_rl/algorithms/async_utils/replay_buffer.py</code>, lines 451&#8211;462).
+So <span class="bad">true</span> is behaviour this PR introduces, for PPO only.</p>
+
+<h2>Has anyone resumed one of these runs?</h2>
+
+<p>No. There is no run posted anywhere for this path &#8212; not in the PR description, not in any review
+thread, and no nightly test resumes an async PPO job from a checkpoint. The unit test that builds a
+replay buffer for PPO passes <code>false</code> (<code>test_ppo.py:2361</code>), so the shipped default is
+not the branch being exercised there.</p>
+
+<p>The thing to ask for before merging is one async PPO run stopped mid-generation and resumed, with
+the resume log line reported: it prints either
+<code>Dropping incomplete restored targets: 11=5/7</code> or <code>Incomplete target 11: 5/7</code>, which
+says directly which branch ran and how much was thrown away.</p>
+
+<div class="warn">
+<strong>What this means.</strong> Every async PPO resume today takes the <span class="bad">true</span>
+branch, because nothing sets the flag. Each such resume skips a full batch of prompts rather than just
+the handful that were still generating, and discards the rollouts already paid for. The loss repeats on
+every restart, so a job that gets preempted often trains on noticeably less of its dataset than the epoch
+count claims. Setting the PPO default to <span class="ok">false</span> matches async GRPO and
+<code>main</code>, and shrinks the loss back to only the rollouts that were genuinely in flight &#8212; which
+is the smallest it can be until the saved loader place is rewound to cover them.
+</div>
+
+</div>
+</body>
+</html>
