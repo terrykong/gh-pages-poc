@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NVIDIA-NeMo/RL #3655 — how a Ray worker's spans nest under the driver's</title>
+<style>
+:root{
+  --bg:#0d1117; --surface:#161b22; --surface2:#1c2128; --border:#30363d;
+  --text:#e6edf3; --dim:#8b949e; --accent:#58a6ff; --green:#3fb950;
+  --orange:#d29922; --red:#f85149;
+}
+:root[data-theme="light"]{
+  --bg:#ffffff; --surface:#f6f8fa; --surface2:#eaeef2; --border:#d0d7de;
+  --text:#1f2328; --dim:#59636e; --accent:#0969da; --green:#1a7f37;
+  --orange:#9a6700; --red:#cf222e;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:28px 20px 70px}
+h1{font-size:22px;margin:0 0 8px;line-height:1.3}
+h2{font-size:18px;margin:32px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;
+  font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
+.sub{color:var(--dim);font-size:13.5px;margin:0 0 16px}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);
+  border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;
+  font:13px/1 ui-monospace,Menlo,monospace;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.18)}
+.mono{font:12.5px ui-monospace,SFMono-Regular,Menlo,monospace;
+  background:var(--surface);border:1px solid var(--border);border-radius:8px;
+  padding:13px;overflow-x:auto;white-space:pre;line-height:1.55}
+.warn{border-left:3px solid var(--red);background:var(--surface);
+  padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0}
+.hl{border-left:3px solid var(--green);background:var(--surface);
+  padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0}
+.step{color:var(--dim);font-size:12.5px;margin:4px 0 18px}
+svg{max-width:100%;height:auto;display:block;margin:16px 0}
+svg .box{fill:var(--surface);stroke:var(--border);stroke-width:1.4}
+svg .lbl{fill:var(--text);font:12.5px ui-monospace,Menlo,monospace}
+svg .lbl-b{fill:var(--text);font:bold 13px -apple-system,sans-serif}
+svg .note{fill:var(--dim);font:11.5px -apple-system,sans-serif}
+svg .hdr{fill:var(--accent);font:bold 12.5px -apple-system,sans-serif}
+svg .s-drv{fill:var(--accent);opacity:.5;stroke:var(--accent)}
+svg .s-col{fill:var(--green);opacity:.5;stroke:var(--green)}
+svg .s-orph{fill:var(--red);opacity:.42;stroke:var(--red)}
+svg .c-txt{fill:var(--text);font:11px ui-monospace,Menlo,monospace}
+svg .tick{stroke:var(--border);stroke-width:1;stroke-dasharray:3 3}
+svg .arr{stroke:var(--orange);stroke-width:2;fill:none}
+svg .arr-l{fill:var(--orange);font:bold 11.5px -apple-system,sans-serif}
+svg a text{text-decoration:underline;fill:var(--accent);font:11px ui-monospace,Menlo,monospace}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+  document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head>
+<body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+  function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+  function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
+    b.addEventListener('click',function(){var n=r.getAttribute('data-theme')==='light'?'dark':'light';
+    if(n==='light')r.setAttribute('data-theme','light');else r.removeAttribute('data-theme');
+    try{localStorage.setItem(K,n);}catch(e){}lbl();});lbl();}
+  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',wire);else wire();})();</script>
+
+<div class="wrap">
+
+<h1>How a Ray worker's spans nest under the driver's, across process boundaries</h1>
+<p class="sub">
+  <a href="https://github.com/NVIDIA-NeMo/RL/pull/3655">NVIDIA-NeMo/RL #3655</a> —
+  <em>add nemo-lens instrumentation and efficiency buckets</em> ·
+  all links pinned to <code>aad00c1</code>
+</p>
+
+<p>
+A <strong>span</strong> is one timed block of work with a name. Spans nest: a span opened inside
+another becomes its child, and a viewer draws the result as a waterfall. Inside one process that
+nesting is automatic — OpenTelemetry keeps the currently-open span in a
+<code>ContextVar</code>, so the next span started finds its parent by itself. Across a process
+boundary it is not automatic, because the child process has an empty
+<code>ContextVar</code> and no idea a parent exists. NeMo-RL runs its rollout collector as a
+separate Ray actor, so without help its spans start a brand-new tree. This PR fixes that for the
+collector by shipping the parent's ID over as a string.
+</p>
+
+<h2>The problem: two trees instead of one</h2>
+
+<svg viewBox="0 0 940 300" role="img" aria-label="Before: driver and collector produce two separate trace trees. After: one merged tree.">
+  <text class="hdr" x="10" y="16">BEFORE — no context passed: two unrelated traces</text>
+  <rect class="box" x="10" y="26" width="450" height="126" rx="7"/>
+  <text class="note" x="22" y="44">driver process</text>
+  <rect class="s-drv" x="22" y="52" width="330" height="17" rx="3"/>
+  <text class="c-txt" x="28" y="65">rl.grpo.job</text>
+  <rect class="s-drv" x="38" y="74" width="140" height="17" rx="3"/>
+  <text class="c-txt" x="44" y="87">rl.grpo.step 1</text>
+  <rect class="s-drv" x="192" y="74" width="140" height="17" rx="3"/>
+  <text class="c-txt" x="198" y="87">rl.grpo.step 2</text>
+  <text class="note" x="22" y="112">collector actor — its own root</text>
+  <rect class="s-orph" x="22" y="118" width="150" height="17" rx="3"/>
+  <text class="c-txt" x="28" y="131">collect_rollouts w=7</text>
+  <rect class="s-orph" x="180" y="118" width="150" height="17" rx="3"/>
+  <text class="c-txt" x="186" y="131">collect_rollouts w=8</text>
+  <text class="note" x="22" y="147">you must open these separately and line them up by clock</text>
+
+  <text class="hdr" x="490" y="16">AFTER — parent ID shipped over: one trace</text>
+  <rect class="box" x="490" y="26" width="440" height="126" rx="7"/>
+  <text class="note" x="502" y="44">one waterfall, one trace ID</text>
+  <rect class="s-drv" x="502" y="52" width="404" height="17" rx="3"/>
+  <text class="c-txt" x="508" y="65">rl.grpo.job</text>
+  <rect class="s-drv" x="518" y="74" width="130" height="17" rx="3"/>
+  <text class="c-txt" x="524" y="87">rl.grpo.step 1</text>
+  <rect class="s-drv" x="660" y="74" width="130" height="17" rx="3"/>
+  <text class="c-txt" x="666" y="87">rl.grpo.step 2</text>
+  <rect class="s-col" x="518" y="96" width="150" height="17" rx="3"/>
+  <text class="c-txt" x="524" y="109">collect_rollouts w=7</text>
+  <rect class="s-col" x="676" y="96" width="150" height="17" rx="3"/>
+  <text class="c-txt" x="682" y="109">collect_rollouts w=8</text>
+  <rect class="s-col" x="560" y="118" width="96" height="17" rx="3"/>
+  <text class="c-txt" x="566" y="131">idle.pause</text>
+  <text class="note" x="502" y="147">collector work sits under the step it overlapped</text>
+
+  <rect class="s-drv" x="10" y="176" width="13" height="13" rx="3"/>
+  <text class="note" x="30" y="187">driver span</text>
+  <rect class="s-col" x="130" y="176" width="13" height="13" rx="3"/>
+  <text class="note" x="150" y="187">collector span, correctly parented</text>
+  <rect class="s-orph" x="380" y="176" width="13" height="13" rx="3"/>
+  <text class="note" x="400" y="187">collector span, orphaned into its own trace</text>
+
+  <text class="lbl-b" x="10" y="216">The string that does it — W3C Trace Context, one header value:</text>
+  <rect class="box" x="10" y="226" width="700" height="30" rx="6"/>
+  <text class="c-txt" x="22" y="246">traceparent: 00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01</text>
+  <text class="note" x="22" y="272">00 = version · 4bf9… = trace ID (32 hex, shared by every span in the tree)</text>
+  <text class="note" x="22" y="289">00f0… = the parent span's ID (16 hex) · 01 = sampled</text>
+</svg>
+
+<p class="step">
+The collector is not a special case of "worker" — it is the <em>only</em> hop wired today. See the
+last box on this page.
+</p>
+
+<h2>The fix: capture a dict on the driver, re-open it on each worker thread</h2>
+
+<p>
+Three steps. The same run as the figure: 2 driver steps, 2 rollout batches at weight versions 7
+and&nbsp;8.
+</p>
+
+<div class="mono">
+<span style="color:var(--dim)"># 1. DRIVER — grab the currently-open span as a plain dict.</span>
+_tc_trace_carrier = current_trace_carrier()
+<span style="color:var(--dim)">#   -&gt; {"traceparent": "00-4bf92f35…4736-00f067aa0ba902b7-01"}
+#   Taken INSIDE rl.grpo.job, so 00f067aa0ba902b7 is that job span's ID.
+#   Returns {} when no span is open — see the catch at the bottom.</span>
+</div>
+<p class="step">
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/aad00c164ab49d24018221427e6b1a7d31c5498b/nemo_rl/algorithms/grpo.py#L4400">grpo.py:4400</a>
+· definition at <a href="https://github.com/NVIDIA-NeMo/RL/blob/aad00c164ab49d24018221427e6b1a7d31c5498b/nemo_rl/telemetry/instrumentation.py#L247">instrumentation.py:247</a>,
+which calls OpenTelemetry's <code>propagate.inject()</code>
+</p>
+
+<div class="mono">
+<span style="color:var(--dim)"># 2. HAND-OFF — it is just an argument. No Ray magic.</span>
+trajectory_collector = AsyncTrajectoryCollector.remote(
+    ...,
+    trace_carrier=_tc_trace_carrier,
+)
+<span style="color:var(--dim)">#   In the actor: self._trace_carrier = trace_carrier or {}</span>
+</div>
+<p class="step">
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/aad00c164ab49d24018221427e6b1a7d31c5498b/nemo_rl/algorithms/grpo.py#L4417">grpo.py:4417</a>
+· stored at <a href="https://github.com/NVIDIA-NeMo/RL/blob/aad00c164ab49d24018221427e6b1a7d31c5498b/nemo_rl/algorithms/async_utils/trajectory_collector.py#L118">trajectory_collector.py:118</a>
+</p>
+
+<div class="mono">
+<span style="color:var(--dim)"># 3. WORKER — re-open it, ONCE PER THREAD.</span>
+with remote_trace_context(self._trace_carrier):
+    _collect()          <span style="color:var(--dim)"># every span opened in here is now a child
+                        # of 00f067aa0ba902b7, in the driver's trace</span>
+</div>
+<p class="step">
+loop thread <a href="https://github.com/NVIDIA-NeMo/RL/blob/aad00c164ab49d24018221427e6b1a7d31c5498b/nemo_rl/algorithms/async_utils/trajectory_collector.py#L413">trajectory_collector.py:413</a>
+· each batch-worker thread <a href="https://github.com/NVIDIA-NeMo/RL/blob/aad00c164ab49d24018221427e6b1a7d31c5498b/nemo_rl/algorithms/async_utils/trajectory_collector.py#L603">:603</a>
+· definition at <a href="https://github.com/NVIDIA-NeMo/RL/blob/aad00c164ab49d24018221427e6b1a7d31c5498b/nemo_rl/telemetry/instrumentation.py#L272">instrumentation.py:272</a>
+</p>
+
+<p>
+Step 3 runs per thread on purpose. The open span lives in a <code>ContextVar</code>, and a plain
+<code>threading.Thread</code> starts with none of them — so a batch worker that skipped this would
+go back to emitting root spans. That is why the same two lines appear in both the collection loop
+and every batch worker.
+</p>
+
+<h2>Does it work?</h2>
+
+<p>
+<strong>Nobody has posted a trace.</strong> There is no screenshot, no Jaeger or Tempo link, and no
+run in the PR description or its comments. The code path is only reachable with an OTLP backend
+listening, which CI does not have.
+</p>
+<p>
+What does exist: the round-trip is unit-tested without a backend at
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/aad00c164ab49d24018221427e6b1a7d31c5498b/tests/unit/telemetry/test_instrumentation.py#L150">test_instrumentation.py:150</a>,
+which builds a carrier from a recording span and asserts a span opened inside
+<code>remote_trace_context</code> lands in the same trace. The nesting rule itself is
+OpenTelemetry's, not this PR's — this PR only moves the string.
+</p>
+<p>
+The honest thing to ask for before merging: <strong>one screenshot of a single trace</strong> from
+a short async GRPO run with <code>span_groups: per_step,job</code>, showing
+<code>collect_rollouts</code> nested under <code>rl.grpo.job</code> rather than sitting in its own
+trace. That is a five-minute check and it is the only thing that proves the hand-off end to end.
+</p>
+
+<div class="hl">
+<strong>Your question, directly: does this lay the groundwork, or block it?</strong>
+It lays exactly that groundwork, and blocks nothing. <code>traceparent</code> is a plain
+string→string carrier, so the same two helpers work over HTTP headers, gRPC metadata, or a Ray
+argument — nothing here is Ray-specific. The library underneath also already ships
+<code>traced_remote_call()</code> and <code>ray_dispatch_with_context()</code>, which wrap any Ray
+remote call with an automatic <code>_otel_carrier</code> argument. NeMo-RL does not use them yet,
+so extending nesting to another process is "pass the dict and wrap the entry point", not new
+plumbing.
+</div>
+
+<div class="warn">
+<strong>Two limits to know before you expect a single waterfall.</strong>
+<strong>(1) Only one hop is wired.</strong> The rollout collector gets a carrier; the policy, value
+and vLLM workers do not, so their spans still form separate traces — listed as a known gap at
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/aad00c164ab49d24018221427e6b1a7d31c5498b/nemo_rl/telemetry/README.md#L44">README.md:44</a>.
+<strong>(2) The <code>job</code> span group has to be on.</strong> The carrier is captured from
+whatever span is open at that moment; with <code>job</code> disabled nothing is open,
+<code>current_trace_carrier()</code> returns <code>{}</code>, and the collector silently falls back
+to its own root — no error. The <code>per_step</code> preset deliberately drops <code>job</code>
+to keep traces small, so the merged view needs <code>span_groups: per_step,job</code> (or
+<code>all</code>). Both points are documented at
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/aad00c164ab49d24018221427e6b1a7d31c5498b/docs/observability/span-groups.md#L247">span-groups.md:247</a>.
+</div>
+
+</div>
+</body>
+</html>
