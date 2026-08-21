@@ -88,21 +88,28 @@ a model. This PR replaces it with two transports that cover both.</p>
 <h2>Before: SGLang refit worked for one policy backend only</h2>
 
 <p>NeMo-RL can train with two different policy backends: FSDP2 (also called DTensor) and
-Megatron. Before this PR, SGLang refit went over HTTP, and that path was fully wired for
-FSDP2 — but the Megatron worker never implemented it, so a Megatron policy with SGLang
-rollouts hit <code>NotImplementedError</code>. Running the trainer and the engines on separate
-GPUs raised too. This PR replaces the HTTP transport with two new ones and makes both work
-with Megatron.</p>
+Megatron. Before this PR, SGLang refit <b>already moved the weights over CUDA IPC</b>: the
+trainer and the engine share the same GPU memory, so no weight data is copied at all. HTTP
+carried only the short handles that say <i>where</i> that memory is — a few hundred bytes per
+chunk. The old function was called <code>stream_weights_via_http</code>, which names the
+message channel, not the weights. That path was fully wired for FSDP2, but the Megatron worker
+never implemented it, so a Megatron policy with SGLang rollouts hit
+<code>NotImplementedError</code>. Trainer and engines on separate GPUs raised too.</p>
+
+<p>So the colocated change here is a swap of the message channel (HTTP → Ray), not a faster
+way to move weights. The two things that are genuinely new are Megatron support and a
+transport that works when the two sides do <i>not</i> share GPUs — CUDA IPC cannot cross that
+boundary, so that one has to send the real bytes, over NCCL.</p>
 
 <svg viewBox="0 0 940 400" role="img" aria-label="Before and after: the HTTP transport worked for FSDP2 only; two new transports work for both policy backends">
-  <text x="0" y="14" class="hdr">BEFORE — HTTP, and only one policy backend could use it</text>
+  <text x="0" y="14" class="hdr">BEFORE — weights over CUDA IPC, handles over HTTP; one backend only</text>
   <rect x="0" y="26" width="420" height="150" rx="8" class="box"/>
   <rect x="16" y="44" width="120" height="42" rx="6" class="live"/>
   <text x="76" y="62" class="lbl-b" text-anchor="middle">FSDP2</text>
   <text x="76" y="78" class="grnt" text-anchor="middle">worked</text>
   <rect x="160" y="44" width="240" height="42" rx="6" class="box"/>
   <text x="280" y="61" class="lbl-b" text-anchor="middle">HTTPWeightSynchronizer</text>
-  <text x="280" y="78" class="note" text-anchor="middle">live on main — deleted by this PR</text>
+  <text x="280" y="78" class="note" text-anchor="middle">POSTs IPC handles, not weights</text>
   <line x1="136" y1="65" x2="158" y2="65" class="ar-g" marker-end="url(#ah-g)"/>
   <rect x="16" y="98" width="120" height="42" rx="6" class="dead"/>
   <text x="76" y="116" class="lbl-b" text-anchor="middle">Megatron</text>
@@ -121,7 +128,7 @@ with Megatron.</p>
   <line x1="632" y1="65" x2="652" y2="65" class="ar" marker-end="url(#ah)"/>
   <rect x="536" y="106" width="184" height="60" rx="6" class="live"/>
   <text x="628" y="124" class="lbl-b" text-anchor="middle">Colocated</text>
-  <text x="628" y="140" class="note" text-anchor="middle">Ray CUDA-IPC, shared GPUs</text>
+  <text x="628" y="140" class="note" text-anchor="middle">same CUDA IPC, Ray handles</text>
   <text x="628" y="156" class="grnt" text-anchor="middle">FSDP2 + Megatron</text>
   <rect x="740" y="106" width="184" height="60" rx="6" class="live"/>
   <text x="832" y="124" class="lbl-b" text-anchor="middle">Disaggregated</text>
@@ -269,11 +276,13 @@ it works.</p>
 
 <div class="warn">
 <b>What to take away.</b> The shape of this change is right: SGLang refit now goes through the
-same one class every other backend uses, the dead transport is gone, and backend-specific
-code moved out of the training loop. The risk is not the design — it is that a per-step,
-critical-path rewrite is landing with zero measured evidence, and the one CI run that was
-requested produced none. Get the lint errors cleared and the branch rebased first; that alone
-turns the existing nightlies into real evidence.
+same one class every other backend uses, and backend-specific code moved out of the training
+loop. But the three things bundled here carry very different risk. The colocated FSDP2 path
+is a message-channel swap on a mechanism that already ran in production. Megatron support and
+the non-colocated NCCL transport are new code, a new process group and a new recipe — with no
+run behind them. Get the lint errors cleared and the branch rebased first; that alone turns
+the existing nightlies into real evidence, and it is worth asking whether the non-colocated
+transport should land separately from the Megatron support.
 </div>
 
 <p class="sub" style="margin-top:26px">Generated with Claude Code.</p>
