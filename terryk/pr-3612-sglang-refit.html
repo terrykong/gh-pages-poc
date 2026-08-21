@@ -174,7 +174,58 @@ boundary, so that one has to send the real bytes, over NCCL.</p>
   </defs>
 </svg>
 
-<h2>What one refit does, and where a guard is missing</h2>
+<p><b>What actually got called, before.</b> One refit, colocated, FSDP2 policy. Note there is no
+pause and no update session — weights are swapped while the engine is live:</p>
+
+<div class="mono"><a href="https://github.com/NVIDIA-NeMo/RL/blob/b86aa8e4b3b535604b67d9ebd268cfb3c81cd55f/nemo_rl/algorithms/grpo.py#L2326">refit_policy_generation()</a>                                  grpo.py
+├─ policy.offload_before_refit()                       free trainer GPU
+├─ generation.prepare_for_generation(tags=["weights"]) engine allocates buffers
+├─ isinstance(policy_generation, SGLangGeneration) ──▶ <span class="drop">the branch this PR deletes</span>
+│  └─ policy.<a href="https://github.com/NVIDIA-NeMo/RL/blob/7fa6e55192530ff1346d670ce74f9c70cab8f75b/nemo_rl/models/policy/lm_policy.py#L1066">stream_weights_via_http</a>(urls, buffer_size_bytes)
+│     └─ worker.<a href="https://github.com/NVIDIA-NeMo/RL/blob/7fa6e55192530ff1346d670ce74f9c70cab8f75b/nemo_rl/models/policy/workers/dtensor_policy_worker_v2.py#L1137">stream_weights_via_http</a>()      dtensor_policy_worker_v2
+│        └─ <a href="https://github.com/NVIDIA-NeMo/RL/blob/7fa6e55192530ff1346d670ce74f9c70cab8f75b/nemo_rl/models/policy/utils.py#L671">stream_weights_via_http_impl</a>()      policy/utils.py
+│           ├─ _ensure_ipc_topology()                  build the gather group
+│           └─ per bucket: <a href="https://github.com/NVIDIA-NeMo/RL/blob/7fa6e55192530ff1346d670ce74f9c70cab8f75b/nemo_rl/models/policy/utils.py#L595">_flush_bucket</a>()
+│              ├─ MultiprocessingSerializer.serialize()  <span class="kept">→ CUDA IPC handle</span>
+│              ├─ dist.gather_object(dst=gather_src)     handles → one rank
+│              └─ HTTP POST /update_weights_from_tensor  <span class="kept">handles only</span>
+├─ ray.get(futures_train)
+├─ policy.offload_after_refit()
+└─ generation.prepare_for_generation(tags=["kv_cache"])</div>
+
+<h2>What one refit does now, and where a guard is missing</h2>
+
+<p>The new path adds three things the old one had no equivalent for: it <b>stops the engine</b>
+first, it <b>drops the KV cache</b>, and it wraps the transfer in an explicit
+<b>update session</b>. The last hop also changes from an HTTP POST to a Ray call — but as
+above, both only ever carried handles.</p>
+
+<div class="mono"><a href="https://github.com/NVIDIA-NeMo/RL/blob/b86aa8e4b3b535604b67d9ebd268cfb3c81cd55f/nemo_rl/algorithms/grpo.py#L2326">refit_policy_generation()</a>
+└─ <a href="https://github.com/NVIDIA-NeMo/RL/blob/b86aa8e4b3b535604b67d9ebd268cfb3c81cd55f/nemo_rl/weight_sync/sglang_weight_synchronizer.py#L244">synchronizer.sync_weights()</a>                 SGLangColocatedWeightSynchronizer
+   ├─ _reject_kv_scales(kv_scales)              raises if FP8-KV is configured
+   ├─ policy.offload_before_refit()
+   ├─ generation.prepare_for_generation(tags=["weights"])   <span class="drop">← outside its try</span>
+   └─ <a href="https://github.com/NVIDIA-NeMo/RL/blob/b86aa8e4b3b535604b67d9ebd268cfb3c81cd55f/nemo_rl/weight_sync/sglang_weight_synchronizer.py#L129">_refit(buffer_size_bytes)</a>
+      ├─ <a href="https://github.com/NVIDIA-NeMo/RL/blob/b86aa8e4b3b535604b67d9ebd268cfb3c81cd55f/nemo_rl/models/generation/sglang/config.py#L29">get_sglang_quantization_scheme</a>()   validate before touching engines
+      ├─ generation.get_updatable_engines_and_lock()
+      ├─ if new engines: policy.connect_sglang_rollout_engines()
+      ├─ generation.<a href="https://github.com/NVIDIA-NeMo/RL/blob/b86aa8e4b3b535604b67d9ebd268cfb3c81cd55f/nemo_rl/weight_sync/sglang_weight_synchronizer.py#L155">pause_generation</a>(mode)         <span class="drop">← outside the try below</span>
+      ├─ try:
+      │  ├─ generation.invalidate_kv_cache()    <span class="kept">drop KV from the old weights</span>
+      │  ├─ generation.begin_weight_update()    <span class="kept">open the session</span>
+      │  ├─ try:
+      │  │  └─ ray.get(policy.update_weights_to_sglang_colocated(...))
+      │  │     └─ <a href="https://github.com/NVIDIA-NeMo/RL/blob/b86aa8e4b3b535604b67d9ebd268cfb3c81cd55f/nemo_rl/models/policy/utils.py#L699">send_hf_buckets_via_ipc_actor_impl</a>()
+      │  │        ├─ MultiprocessingSerializer.serialize()  <span class="kept">→ CUDA IPC handle</span>
+      │  │        ├─ dist.gather_object(dst=gather_src)
+      │  │        └─ engine.update_weights_from_tensor.remote()  <span class="kept">Ray, not HTTP</span>
+      │  └─ finally: generation.end_weight_update()
+      └─ finally: generation.continue_generation()   <span class="kept">always resumes…</span>
+   ├─ policy.offload_after_refit()
+   └─ generation.prepare_for_generation(tags=["kv_cache"])</div>
+
+<p>Read the two <span class="drop">red</span> markers together with the figure below: both calls sit
+<i>above</i> the <code>try</code> whose <code>finally</code> is supposed to undo them.</p>
 
 <p>An SGLang engine cannot take new weights while it is generating text, and its cached
 attention values (the <b>KV cache</b>) belong to the old weights. So a refit is a small
