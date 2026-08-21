@@ -289,14 +289,31 @@ not code that has run — no GPU here. Two real asymmetries to respect: Megatron
 megatron-inference resharding ships TP-local shards, not HF tensors — hence the
 <code>requires</code> capability rather than forcing everything through one iterator shape.</p>
 
-<div class="warn">
-<b>The ask for #3612.</b> Not a rewrite. Keep the synchronizers, the engine lifecycle, and the
-transfer impls exactly as they are — they are good. Move two things before this shape gets
-copied by the next backend: the constructor block into the transport's <code>setup()</code>
-(worker state becomes one unconditional <code>self._refit_state: dict</code>), and delete the
-SGLang-only iterator in favor of the shared HF iterator the vLLM path already uses. Those two
-moves are small against this diff, and they are the difference between the 4th backend costing
-one plugin file and it costing another copy of everything above.
+<div class="hl">
+<b>The compromise actually asked for in #3612</b> — none of the plugin design above; just
+consistency with what the repo already does, so no ground is broken:
+<div class="mono" style="margin-top:10px"><span class="dim2"># 1. Both constructor blocks (megatron_policy_worker + dtensor_policy_worker_v2) delete.</span>
+<span class="dim2">#    The base worker gains ONE backend-neutral line:</span>
+class BasePolicyWorker:
+    def __init__(self, ...):
+        self._refit_state: dict[str, dict] = {{}}   <span class="kept"># no backend names</span>
+
+<span class="dim2"># 2. State initializes lazily at first use — the maybe_init_zmq() precedent:</span>
+def connect_sglang_rollout_engines(self, ...):
+    _ensure_torch_reductions_patched()               <span class="kept"># was: in __init__</span>
+    state = self._refit_state.setdefault("sglang_ipc", {{}})
+    connect_colocate_topology(..., worker_state=state)
+
+<span class="dim2"># 3. megatron_sglang_weight_iterator.py deletes; Megatron reuses the same two</span>
+<span class="dim2">#    pieces the FSDP2 path in this same PR already composes:</span>
+bucket_iter = iter_named_tensor_buckets(
+    self._iter_params_with_optional_kv_scales(include_draft=False),
+    buffer_size_bytes=buffer_size_bytes,
+)
+send_hf_buckets_via_ipc_actor_impl(bucket_iterator=bucket_iter, ...)</div>
+That is the whole in-PR ask: one dict on the base, lazy init in the connect methods, one file
+deleted. The plugin design stays a direction for later — worth adopting the day a 4th backend
+or the mxfp8 transform makes the fused shape cost real duplication again.
 </div>
 
 <p class="sub" style="margin-top:26px">Generated with Claude Code.</p>
