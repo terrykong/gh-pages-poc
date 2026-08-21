@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NVIDIA-NeMo/RL #3612 — a composition design for backend-specific refit code</title>
+<style>
+:root{
+  --bg:#0d1117; --surface:#161b22; --surface2:#1c2128; --border:#30363d;
+  --text:#e6edf3; --dim:#8b949e; --accent:#58a6ff; --green:#3fb950;
+  --orange:#d29922; --red:#f85149;
+}
+:root[data-theme="light"]{
+  --bg:#ffffff; --surface:#f6f8fa; --surface2:#eaeef2; --border:#d0d7de;
+  --text:#1f2328; --dim:#59636e; --accent:#0969da; --green:#1a7f37;
+  --orange:#9a6700; --red:#cf222e;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:28px 20px 70px}
+h1{font-size:22px;margin:0 0 8px;line-height:1.3}
+h2{font-size:18px;margin:32px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;
+  font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
+.sub{color:var(--dim);font-size:13.5px;margin:0 0 16px}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);
+  border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;
+  font:13px/1 ui-monospace,Menlo,monospace;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.18)}
+.mono{font:12.5px ui-monospace,SFMono-Regular,Menlo,monospace;
+  background:var(--surface);border:1px solid var(--border);border-radius:8px;
+  padding:13px;overflow-x:auto;white-space:pre}
+.kept{color:var(--green);font-weight:700}
+.drop{color:var(--red);font-weight:700}
+.dim2{color:var(--dim)}
+.warn{border-left:3px solid var(--red);background:var(--surface);
+  padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0}
+.hl{border-left:3px solid var(--accent);background:var(--surface);
+  padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0}
+table{border-collapse:collapse;width:100%;margin:14px 0;font-size:13.5px}
+th,td{border:1px solid var(--border);padding:7px 10px;text-align:left;vertical-align:top}
+th{background:var(--surface2)}
+svg{max-width:100%;height:auto;display:block;margin:16px 0}
+svg .box{fill:var(--surface);stroke:var(--border);stroke-width:1.4}
+svg .lbl{fill:var(--text);font:12px ui-monospace,Menlo,monospace}
+svg .lbl-b{fill:var(--text);font:bold 13px -apple-system,sans-serif}
+svg .note{fill:var(--dim);font:11.5px -apple-system,sans-serif}
+svg .hdr{fill:var(--accent);font:bold 12.5px -apple-system,sans-serif}
+svg .dead{fill:var(--red);opacity:.14;stroke:var(--red);stroke-width:1.4}
+svg .live{fill:var(--green);opacity:.14;stroke:var(--green);stroke-width:1.4}
+svg .seam{fill:var(--accent);opacity:.12;stroke:var(--accent);stroke-width:1.6}
+svg .ar{stroke:var(--dim);stroke-width:1.5;fill:none}
+svg .ar-r{stroke:var(--red);stroke-width:1.5;fill:none;opacity:.75}
+svg .ar-g{stroke:var(--green);stroke-width:1.9;fill:none}
+svg .redt{fill:var(--red);font:bold 11.5px -apple-system,sans-serif}
+svg .grnt{fill:var(--green);font:bold 11.5px -apple-system,sans-serif}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+  document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head>
+<body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+  function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+  function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
+    b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
+      else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+  document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+<div class="wrap">
+
+<h1>Keeping backend-specific refit code out of the policy workers — a composition proposal</h1>
+<p class="sub">Design proposal against
+<a href="https://github.com/NVIDIA-NeMo/RL/pull/3612">NVIDIA-NeMo/RL #3612</a>.
+Code permalinks pinned to <code>b86aa8e</code>.</p>
+
+<p>#3612 makes the Megatron policy worker — the training-side class — carry SGLang-specific
+code in two places: its constructor now creates SGLang connection state and installs a
+serialization monkey patch when the generation backend is SGLang
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/b86aa8e4b3b535604b67d9ebd268cfb3c81cd55f/nemo_rl/models/policy/workers/megatron_policy_worker.py#L654">megatron_policy_worker.py:654</a>),
+and a new file re-implements the Megatron→HF weight walk just for SGLang
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/b86aa8e4b3b535604b67d9ebd268cfb3c81cd55f/nemo_rl/models/policy/workers/megatron_sglang_weight_iterator.py#L28">megatron_sglang_weight_iterator.py</a>).
+No other generation backend needed either. This page shows why the repo already contains the
+right seam, and a design that generalizes it — so the next backend adds <b>one file in its own
+package</b> and touches the policy workers <b>zero times</b>.</p>
+
+<h2>The seam already exists — the PR walked past it</h2>
+
+<p>Compare the vLLM transport (in tree before this PR) with the SGLang one this PR adds, both
+on the same Megatron worker:</p>
+
+<div class="mono"><span class="dim2"># vLLM ZMQ transport — no constructor state, lazy init, iterator INJECTED:</span>
+def <a href="https://github.com/NVIDIA-NeMo/RL/blob/b86aa8e4b3b535604b67d9ebd268cfb3c81cd55f/nemo_rl/models/policy/workers/megatron_policy_worker.py#L2465">stream_weights_via_ipc_zmq</a>(self, ...):
+    self.maybe_init_zmq()                       <span class="kept"># lazy, inside the method</span>
+    stream_weights_via_ipc_zmq_impl(
+        params_generator=self.<a href="https://github.com/NVIDIA-NeMo/RL/blob/b86aa8e4b3b535604b67d9ebd268cfb3c81cd55f/nemo_rl/models/policy/workers/megatron_policy_worker.py#L2160">_iter_params_with_optional_kv_scales</a>(...),  <span class="kept"># ← the seam</span>
+        ...)
+
+<span class="dim2"># SGLang transport (#3612) — constructor state + monkey patch + its own iterator:</span>
+def __init__(self, ...):                        <span class="drop"># backend branch in the trainer's ctor</span>
+    if generation_cfg.get("backend") == "sglang":
+        self._sglang_ipc_state = {}; self._sglang_dist_group = None; ...
+        monkey_patch_torch_reductions()         <span class="drop"># process-wide, at init</span>
+
+def <a href="https://github.com/NVIDIA-NeMo/RL/blob/b86aa8e4b3b535604b67d9ebd268cfb3c81cd55f/nemo_rl/models/policy/workers/megatron_policy_worker.py#L2342">update_weights_to_sglang_colocated</a>(self, ...):
+    iterator = MegatronSGLangHfWeightIterator(...)  <span class="drop"># 2nd copy of the export walk</span></div>
+
+<p>The vLLM impl takes <i>any</i> iterator of <code>(hf_name, tensor)</code> pairs. Both policy
+backends can already produce one — Megatron via
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/b86aa8e4b3b535604b67d9ebd268cfb3c81cd55f/nemo_rl/models/policy/workers/megatron_policy_worker.py#L2182"><code>export_hf_weights</code></a>,
+FSDP2 via
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/b86aa8e4b3b535604b67d9ebd268cfb3c81cd55f/nemo_rl/models/policy/workers/dtensor_policy_worker_v2.py#L1163"><code>dtensor_params_generator</code></a>.
+That iterator is the <b>narrow waist</b>: every transport ultimately ships HF-named tensors, and
+every policy backend can emit them. Fuse the two sides — as #3612 does — and you get one class
+per (policy × transport) pair. Keep them apart and you get one piece per side:</p>
+
+<svg viewBox="0 0 940 330" role="img" aria-label="Fused pairs versus a narrow waist: 2 sources plus 5 transports instead of 10 pairs">
+  <text x="0" y="14" class="hdr">TODAY — each transport is fused to each policy backend</text>
+  <rect x="0" y="24" width="150" height="34" rx="6" class="box"/><text x="75" y="45" class="lbl-b" text-anchor="middle">Megatron</text>
+  <rect x="0" y="66" width="150" height="34" rx="6" class="box"/><text x="75" y="87" class="lbl-b" text-anchor="middle">FSDP2</text>
+  <rect x="270" y="24" width="170" height="26" rx="5" class="box"/><text x="355" y="41" class="lbl" text-anchor="middle">vllm zmq-ipc</text>
+  <rect x="270" y="56" width="170" height="26" rx="5" class="box"/><text x="355" y="73" class="lbl" text-anchor="middle">vllm collective</text>
+  <rect x="270" y="88" width="170" height="26" rx="5" class="dead"/><text x="355" y="105" class="lbl" text-anchor="middle">sglang ray-ipc</text>
+  <rect x="270" y="120" width="170" height="26" rx="5" class="dead"/><text x="355" y="137" class="lbl" text-anchor="middle">sglang broadcast</text>
+  <rect x="270" y="152" width="170" height="26" rx="5" class="box"/><text x="355" y="169" class="lbl" text-anchor="middle">ckpt-engine</text>
+  <line x1="150" y1="38" x2="268" y2="38" class="ar"/>
+  <line x1="150" y1="42" x2="268" y2="66" class="ar"/>
+  <line x1="150" y1="46" x2="268" y2="98" class="ar-r"/>
+  <line x1="150" y1="50" x2="268" y2="130" class="ar-r"/>
+  <line x1="150" y1="80" x2="268" y2="46" class="ar"/>
+  <line x1="150" y1="84" x2="268" y2="74" class="ar"/>
+  <line x1="150" y1="88" x2="268" y2="106" class="ar-r"/>
+  <line x1="150" y1="96" x2="268" y2="162" class="ar"/>
+  <text x="0" y="130" class="redt">4 sglang methods + ctor state +</text>
+  <text x="0" y="146" class="redt">monkey patch, inside each worker</text>
+  <text x="0" y="176" class="note">FSDP2→broadcast missing (#3745):</text>
+  <text x="0" y="192" class="note">the pair was never written</text>
+
+  <text x="520" y="14" class="hdr">PROPOSED — 2 sources + 5 transports, one seam</text>
+  <rect x="520" y="24" width="130" height="34" rx="6" class="live"/><text x="585" y="45" class="lbl-b" text-anchor="middle">Megatron</text>
+  <rect x="520" y="66" width="130" height="34" rx="6" class="live"/><text x="585" y="87" class="lbl-b" text-anchor="middle">FSDP2</text>
+  <rect x="668" y="24" width="120" height="76" rx="8" class="seam"/>
+  <text x="728" y="52" class="lbl-b" text-anchor="middle">iter_hf_weights()</text>
+  <text x="728" y="70" class="note" text-anchor="middle">(hf_name, tensor)</text>
+  <text x="728" y="86" class="note" text-anchor="middle">the narrow waist</text>
+  <rect x="806" y="24" width="130" height="26" rx="5" class="live"/><text x="871" y="41" class="lbl" text-anchor="middle">vllm zmq-ipc</text>
+  <rect x="806" y="56" width="130" height="26" rx="5" class="live"/><text x="871" y="73" class="lbl" text-anchor="middle">vllm collective</text>
+  <rect x="806" y="88" width="130" height="26" rx="5" class="live"/><text x="871" y="105" class="lbl" text-anchor="middle">sglang ray-ipc</text>
+  <rect x="806" y="120" width="130" height="26" rx="5" class="live"/><text x="871" y="137" class="lbl" text-anchor="middle">sglang bcast</text>
+  <rect x="806" y="152" width="130" height="26" rx="5" class="live"/><text x="871" y="169" class="lbl" text-anchor="middle">ckpt-engine</text>
+  <line x1="650" y1="41" x2="666" y2="50" class="ar-g"/>
+  <line x1="650" y1="83" x2="666" y2="74" class="ar-g"/>
+  <line x1="788" y1="40" x2="804" y2="37" class="ar-g"/>
+  <line x1="788" y1="52" x2="804" y2="69" class="ar-g"/>
+  <line x1="788" y1="64" x2="804" y2="101" class="ar-g"/>
+  <line x1="788" y1="76" x2="804" y2="133" class="ar-g"/>
+  <line x1="788" y1="88" x2="804" y2="165" class="ar-g"/>
+  <text x="520" y="130" class="grnt">every pair exists for free:</text>
+  <text x="520" y="146" class="grnt">2 + 5 = 7 pieces, not 10 pairs</text>
+  <text x="520" y="176" class="note">FSDP2→broadcast (#3745) needs</text>
+  <text x="520" y="192" class="note">no new code at all</text>
+
+  <text x="0" y="234" class="hdr">Where each piece lives</text>
+  <text x="0" y="256" class="lbl">sources     → nemo_rl/models/policy/workers/           (one method per policy backend)</text>
+  <text x="0" y="276" class="lbl">transports  → nemo_rl/models/generation/&lt;backend&gt;/     (one plugin file per transport)</text>
+  <text x="0" y="296" class="lbl">driver      → nemo_rl/weight_sync/                     (synchronizers, unchanged role)</text>
+  <text x="0" y="316" class="note">The policy worker keeps ZERO backend names. Its only refit surface is iter_hf_weights() + one generic dispatch method.</text>
+</svg>
+
+<h2>The contract — three small interfaces</h2>
+
+<p><b>1. The source</b> — each policy backend implements exactly one method. Both bodies already
+exist in tree; this only names them uniformly:</p>
+
+<div class="mono">class BasePolicyWorker:
+    def iter_hf_weights(self, *, kv_scales=None) -> Iterator[tuple[str, Tensor]]:
+        raise NotImplementedError   <span class="dim2"># declared once, on the base</span>
+
+<span class="dim2"># MegatronPolicyWorker: body of _iter_params_with_optional_kv_scales (export_hf_weights walk)</span>
+<span class="dim2"># DTensorPolicyWorkerV2: body of dtensor_params_generator(self.model, self.dtype)</span></div>
+
+<p><b>2. The transport plugin</b> — a picklable object, owned by the <i>generation</i> backend's
+package. The driver builds it once; Ray ships it to every policy worker. It never subclasses the
+worker and never reaches back into it — everything it may touch arrives in a context:</p>
+
+<div class="mono">class RefitTransport(ABC):               <span class="dim2"># nemo_rl/weight_sync/transport.py</span>
+    key: str                             <span class="dim2"># "sglang-ray-ipc", "sglang-broadcast", ...</span>
+    requires: str = "hf_full"            <span class="dim2"># or "tp_local" (megatron-inference reshard)</span>
+
+    def setup(self, ctx) -> None: ...    <span class="dim2"># once per engine topology; may install</span>
+                                         <span class="dim2"># monkey patches, build gather/NCCL groups</span>
+    def transfer(self, ctx, req) -> None: ...   <span class="dim2"># once per refit</span>
+    def teardown(self, ctx) -> None: ...        <span class="dim2"># at shutdown; destroys groups</span>
+
+@dataclass
+class WorkerRefitContext:                <span class="dim2"># built worker-side, per call</span>
+    rank: int
+    world_size: int
+    weights: Callable[..., Iterator]     <span class="dim2"># = worker.iter_hf_weights</span>
+    state: dict                          <span class="dim2"># worker._refit_state[transport.key]</span>
+
+@dataclass
+class RefitRequest:                      <span class="dim2"># per-refit arguments, all picklable</span>
+    buffer_size_bytes: int
+    weight_version: int
+    engines: list                        <span class="dim2"># Ray actor handles serialize fine</span>
+    engine_lock: Any
+    quantization: dict</div>
+
+<p><b>3. The worker dispatch</b> — one generic method on the base worker. This is the whole
+policy-side surface; it never grows again:</p>
+
+<div class="mono">class BasePolicyWorker:
+    def run_refit_transport(self, transport, phase: str, req=None):
+        ctx = WorkerRefitContext(
+            rank=self.rank, world_size=self.world_size,
+            weights=self.iter_hf_weights,
+            state=self._refit_state.setdefault(transport.key, {}),  <span class="dim2"># unconditional dict</span>
+        )
+        return getattr(transport, phase)(ctx, req)   <span class="dim2"># setup / transfer / teardown</span></div>
+
+<p>The synchronizer keeps its current driver-side role — engine lifecycle, pause, KV
+invalidation — and stops needing four backend-named policy methods:</p>
+
+<div class="mono">class SGLangColocatedWeightSynchronizer(WeightSynchronizer):
+    def __init__(self, policy, generation, ...):
+        self._transport = SGLangRayIpcTransport(          <span class="dim2"># lives in models/generation/sglang/</span>
+            engines=generation.engine_handles, ...)
+
+    def init_communicator(self):
+        self._policy.run_refit_transport(self._transport, "setup")   <span class="kept"># eager: a bad
+                                          # topology or an unsupported source fails at t=0</span>
+
+    def sync_weights(self, *, timer=None, kv_scales=None):
+        ...pause / invalidate_kv_cache / begin_weight_update...      <span class="dim2"># unchanged</span>
+        ray.get(self._policy.run_refit_transport(
+            self._transport, "transfer",
+            RefitRequest(buffer_size_bytes=..., weight_version=..., engines=...)))
+        ...end_weight_update / continue_generation...
+
+    def shutdown(self):
+        self._policy.run_refit_transport(self._transport, "teardown")  <span class="kept"># no longer a no-op</span></div>
+
+<p>Inside <code>SGLangRayIpcTransport.transfer</code>, the pipeline is
+<b>source → transform → pack → ship</b>, with the two middle stages shared code:</p>
+
+<div class="mono">def transfer(self, ctx, req):
+    tensors = ctx.weights()                       <span class="dim2"># source (backend-agnostic)</span>
+    tensors = self.transform.apply(tensors)       <span class="dim2"># Bf16Passthrough today;</span>
+                                                  <span class="dim2"># Mxfp8Quantize in #3614 — and it works</span>
+                                                  <span class="dim2"># for BOTH policy backends automatically</span>
+    for bucket in iter_buckets(tensors, req.buffer_size_bytes):   <span class="dim2"># ONE bucketing impl</span>
+        self._ship_bucket(ctx, req, bucket)       <span class="dim2"># gather + IPC serialize + Ray call —</span>
+                                                  <span class="dim2"># today's send_hf_buckets_via_ipc_actor_impl</span></div>
+
+<h2>What each backend becomes, and what this buys</h2>
+
+<table>
+<tr><th>today</th><th>becomes</th></tr>
+<tr><td>ctor block at <a href="https://github.com/NVIDIA-NeMo/RL/blob/b86aa8e4b3b535604b67d9ebd268cfb3c81cd55f/nemo_rl/models/policy/workers/megatron_policy_worker.py#L654">megatron_policy_worker.py:654</a> (state + monkey patch)</td>
+    <td><code>SGLangRayIpcTransport.setup()</code>; state in <code>ctx.state</code>; patch installed lazily like <code>maybe_init_zmq</code></td></tr>
+<tr><td><a href="https://github.com/NVIDIA-NeMo/RL/blob/b86aa8e4b3b535604b67d9ebd268cfb3c81cd55f/nemo_rl/models/policy/workers/megatron_sglang_weight_iterator.py#L28">MegatronSGLangHfWeightIterator</a> (96-line file)</td>
+    <td><b>deleted</b> — <code>iter_hf_weights</code> + shared <code>iter_buckets</code> replace it</td></tr>
+<tr><td>4 sglang-named methods on <a href="https://github.com/NVIDIA-NeMo/RL/blob/b86aa8e4b3b535604b67d9ebd268cfb3c81cd55f/nemo_rl/models/policy/lm_policy.py#L1072">lm_policy.py:1072-1140</a> + workers</td>
+    <td>one generic <code>run_refit_transport</code>, declared once</td></tr>
+<tr><td>FSDP2 + broadcast missing (<a href="https://github.com/NVIDIA-NeMo/RL/issues/3745">#3745</a>)</td>
+    <td>exists for free — the broadcast transport never learns which source feeds it (rank-0-only sends keep the every-rank-drains rule inside the transport)</td></tr>
+<tr><td>mxfp8 (#3614) would live inside the Megatron-only iterator</td>
+    <td>a <code>WeightTransform</code> owned by the transport — both policy backends get it</td></tr>
+<tr><td><code>shutdown()</code> is <code>pass</code>; NCCL group never destroyed</td>
+    <td><code>teardown</code> hook, called by the synchronizer's <code>shutdown()</code></td></tr>
+<tr><td>unsupported combos fail at first refit, after a full rollout</td>
+    <td><code>setup()</code> checks <code>requires</code> against the source's capability at t=0</td></tr>
+<tr><td>vllm zmq / collective / trtllm / dynamo / megatron-inference</td>
+    <td>unchanged today; each can migrate later by wrapping its existing <code>*_impl</code> in a plugin (megatron-inference declares <code>requires="tp_local"</code>)</td></tr>
+</table>
+
+<p>Against the nested-classes sketch (<code>SglangWeightSynchronizer.MegatronSide / DtensorV2Side /
+SglangSide</code>): that shape works, but it is the fused matrix with better labels — adding mxfp8
+for FSDP2 still means writing a new Side, and each Side pair must agree on a private protocol.
+The plugin design needs one new piece per new <i>thing</i> (a source, a transport, or a
+transform), and the pieces meet only at the iterator.</p>
+
+<p><b>Honest caveats.</b> This is a paper design validated against every call site named above,
+not code that has run — no GPU here. Two real asymmetries to respect: Megatron's export walk is
+<i>collective</i>, so a rank-0-only transport must still drain the iterator on every rank
+(#3612 already handles this; it moves inside the transport's <code>transfer</code>), and
+megatron-inference resharding ships TP-local shards, not HF tensors — hence the
+<code>requires</code> capability rather than forcing everything through one iterator shape.</p>
+
+<div class="warn">
+<b>The ask for #3612.</b> Not a rewrite. Keep the synchronizers, the engine lifecycle, and the
+transfer impls exactly as they are — they are good. Move two things before this shape gets
+copied by the next backend: the constructor block into the transport's <code>setup()</code>
+(worker state becomes one unconditional <code>self._refit_state: dict</code>), and delete the
+SGLang-only iterator in favor of the shared HF iterator the vLLM path already uses. Those two
+moves are small against this diff, and they are the difference between the 4th backend costing
+one plugin file and it costing another copy of everything above.
+</div>
+
+<p class="sub" style="margin-top:26px">Generated with Claude Code.</p>
+
+</div>
+</body>
+</html>
