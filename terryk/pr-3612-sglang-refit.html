@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NVIDIA-NeMo/RL #3612 — how a trained weight reaches an SGLang engine</title>
+<style>
+:root{
+  --bg:#0d1117; --surface:#161b22; --surface2:#1c2128; --border:#30363d;
+  --text:#e6edf3; --dim:#8b949e; --accent:#58a6ff; --green:#3fb950;
+  --orange:#d29922; --red:#f85149;
+}
+:root[data-theme="light"]{
+  --bg:#ffffff; --surface:#f6f8fa; --surface2:#eaeef2; --border:#d0d7de;
+  --text:#1f2328; --dim:#59636e; --accent:#0969da; --green:#1a7f37;
+  --orange:#9a6700; --red:#cf222e;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:28px 20px 70px}
+h1{font-size:22px;margin:0 0 8px;line-height:1.3}
+h2{font-size:18px;margin:32px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;
+  font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
+.sub{color:var(--dim);font-size:13.5px;margin:0 0 16px}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);
+  border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;
+  font:13px/1 ui-monospace,Menlo,monospace;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.18)}
+.mono{font:12.5px ui-monospace,SFMono-Regular,Menlo,monospace;
+  background:var(--surface);border:1px solid var(--border);border-radius:8px;
+  padding:13px;overflow-x:auto;white-space:pre}
+.kept{color:var(--green);font-weight:700}
+.drop{color:var(--red);font-weight:700}
+.warn{border-left:3px solid var(--red);background:var(--surface);
+  padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0}
+.hl{border-left:3px solid var(--accent);background:var(--surface);
+  padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0}
+table{border-collapse:collapse;width:100%;margin:14px 0;font-size:13.5px}
+th,td{border:1px solid var(--border);padding:7px 10px;text-align:left;vertical-align:top}
+th{background:var(--surface2)}
+svg{max-width:100%;height:auto;display:block;margin:16px 0}
+svg .box{fill:var(--surface);stroke:var(--border);stroke-width:1.4}
+svg .lbl{fill:var(--text);font:12.5px ui-monospace,Menlo,monospace}
+svg .lbl-b{fill:var(--text);font:bold 13px -apple-system,sans-serif}
+svg .note{fill:var(--dim);font:11.5px -apple-system,sans-serif}
+svg .hdr{fill:var(--accent);font:bold 12.5px -apple-system,sans-serif}
+svg .dead{fill:var(--red);opacity:.14;stroke:var(--red);stroke-width:1.4}
+svg .live{fill:var(--green);opacity:.14;stroke:var(--green);stroke-width:1.4}
+svg .seam{fill:var(--accent);opacity:.12;stroke:var(--accent);stroke-width:1.6}
+svg .ar{stroke:var(--dim);stroke-width:1.6;fill:none}
+svg .ar-g{stroke:var(--green);stroke-width:1.9;fill:none}
+svg .ar-r{stroke:var(--red);stroke-width:1.9;fill:none}
+svg .redt{fill:var(--red);font:bold 11.5px -apple-system,sans-serif}
+svg .grnt{fill:var(--green);font:bold 11.5px -apple-system,sans-serif}
+svg a text{text-decoration:underline;fill:var(--accent);font:11px ui-monospace,Menlo,monospace}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+  document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head>
+<body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+  function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+  function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
+    b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
+      else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+  document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+<div class="wrap">
+
+<h1>How a trained weight reaches an SGLang engine — and what #3612 rebuilds</h1>
+<p class="sub">Companion illustration for
+<a href="https://github.com/NVIDIA-NeMo/RL/pull/3612">NVIDIA-NeMo/RL #3612</a>
+(re-cut of <a href="https://github.com/NVIDIA-NeMo/RL/pull/3190">#3190</a>).
+All permalinks pinned to <code>b86aa8e</code>.</p>
+
+<p>In RL training the trainer and the text generator hold two copies of the same model. After
+every training step the new weights have to be copied from the trainer into the generation
+engine. That copy is called a <b>refit</b>, and it happens once per step, so it sits directly
+on the critical path. NeMo-RL routes every refit through one class, a
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/b86aa8e4b3b535604b67d9ebd268cfb3c81cd55f/nemo_rl/weight_sync/interfaces.py#L47"><code>WeightSynchronizer</code></a>,
+so the training loop never has to know which engine is on the other end. For SGLang that
+class existed, but the transport under it only covered one of the two ways NeMo-RL can train
+a model. This PR replaces it with two transports that cover both.</p>
+
+<h2>Before: SGLang refit worked for one policy backend only</h2>
+
+<p>NeMo-RL can train with two different policy backends: FSDP2 (also called DTensor) and
+Megatron. Before this PR, SGLang refit went over HTTP, and that path was fully wired for
+FSDP2 — but the Megatron worker never implemented it, so a Megatron policy with SGLang
+rollouts hit <code>NotImplementedError</code>. Running the trainer and the engines on separate
+GPUs raised too. This PR replaces the HTTP transport with two new ones and makes both work
+with Megatron.</p>
+
+<svg viewBox="0 0 940 400" role="img" aria-label="Before and after: the HTTP transport worked for FSDP2 only; two new transports work for both policy backends">
+  <text x="0" y="14" class="hdr">BEFORE — HTTP, and only one policy backend could use it</text>
+  <rect x="0" y="26" width="420" height="150" rx="8" class="box"/>
+  <rect x="16" y="44" width="120" height="42" rx="6" class="live"/>
+  <text x="76" y="62" class="lbl-b" text-anchor="middle">FSDP2</text>
+  <text x="76" y="78" class="grnt" text-anchor="middle">worked</text>
+  <rect x="160" y="44" width="240" height="42" rx="6" class="box"/>
+  <text x="280" y="61" class="lbl-b" text-anchor="middle">HTTPWeightSynchronizer</text>
+  <text x="280" y="78" class="note" text-anchor="middle">live on main — deleted by this PR</text>
+  <line x1="136" y1="65" x2="158" y2="65" class="ar-g" marker-end="url(#ah-g)"/>
+  <rect x="16" y="98" width="120" height="42" rx="6" class="dead"/>
+  <text x="76" y="116" class="lbl-b" text-anchor="middle">Megatron</text>
+  <text x="76" y="132" class="redt" text-anchor="middle">not implemented</text>
+  <line x1="136" y1="119" x2="158" y2="80" class="ar-r" marker-end="url(#ah-r)"/>
+  <text x="16" y="160" class="redt">separate GPUs for trainer and engines → also raised</text>
+
+  <text x="520" y="14" class="hdr">AFTER — two transports, both backends</text>
+  <rect x="520" y="26" width="420" height="150" rx="8" class="box"/>
+  <rect x="536" y="44" width="96" height="42" rx="6" class="box"/>
+  <text x="584" y="62" class="lbl" text-anchor="middle">trainer</text>
+  <text x="584" y="78" class="lbl" text-anchor="middle">ranks</text>
+  <rect x="654" y="38" width="270" height="54" rx="6" class="seam"/>
+  <text x="789" y="57" class="lbl-b" text-anchor="middle">create_weight_synchronizer()</text>
+  <text x="789" y="74" class="note" text-anchor="middle">picks the class from colocated / not</text>
+  <line x1="632" y1="65" x2="652" y2="65" class="ar" marker-end="url(#ah)"/>
+  <rect x="536" y="106" width="184" height="60" rx="6" class="live"/>
+  <text x="628" y="124" class="lbl-b" text-anchor="middle">Colocated</text>
+  <text x="628" y="140" class="note" text-anchor="middle">Ray CUDA-IPC, shared GPUs</text>
+  <text x="628" y="156" class="grnt" text-anchor="middle">FSDP2 + Megatron</text>
+  <rect x="740" y="106" width="184" height="60" rx="6" class="live"/>
+  <text x="832" y="124" class="lbl-b" text-anchor="middle">Disaggregated</text>
+  <text x="832" y="140" class="note" text-anchor="middle">NCCL broadcast, own GPUs</text>
+  <text x="832" y="156" class="redt" text-anchor="middle">Megatron only, for now</text>
+  <line x1="740" y1="94" x2="660" y2="108" class="ar-g" marker-end="url(#ah-g)"/>
+  <line x1="838" y1="94" x2="846" y2="108" class="ar-g" marker-end="url(#ah-g)"/>
+
+  <text x="0" y="212" class="hdr">The disaggregated group, with the numbers from the shipped 2-node recipe</text>
+  <text x="0" y="232" class="note">tp_size 2, num_gpus 8 → 4 engines. Trainer rank 0 is the only sender; every engine GPU joins one NCCL group.</text>
+  <rect x="0" y="246" width="104" height="46" rx="6" class="live"/>
+  <text x="52" y="266" class="lbl-b" text-anchor="middle">trainer</text>
+  <text x="52" y="282" class="lbl" text-anchor="middle">rank 0</text>
+  <rect x="196" y="246" width="150" height="46" rx="6" class="box"/>
+  <text x="271" y="265" class="lbl-b" text-anchor="middle">engine 0</text>
+  <text x="271" y="282" class="lbl" text-anchor="middle">ranks 1, 2</text>
+  <rect x="360" y="246" width="150" height="46" rx="6" class="box"/>
+  <text x="435" y="265" class="lbl-b" text-anchor="middle">engine 1</text>
+  <text x="435" y="282" class="lbl" text-anchor="middle">ranks 3, 4</text>
+  <rect x="524" y="246" width="150" height="46" rx="6" class="box"/>
+  <text x="599" y="265" class="lbl-b" text-anchor="middle">engine 2</text>
+  <text x="599" y="282" class="lbl" text-anchor="middle">ranks 5, 6</text>
+  <rect x="688" y="246" width="150" height="46" rx="6" class="box"/>
+  <text x="763" y="265" class="lbl-b" text-anchor="middle">engine 3</text>
+  <text x="763" y="282" class="lbl" text-anchor="middle">ranks 7, 8</text>
+  <line x1="104" y1="269" x2="194" y2="269" class="ar-g" marker-end="url(#ah-g)"/>
+  <text x="852" y="266" class="grnt">world</text>
+  <text x="852" y="282" class="grnt">size 9</text>
+  <text x="0" y="318" class="note">One sender plus 8 engine GPUs is a group of 9. The trainer holds rank 0, so a broadcast from rank 0 reaches every engine GPU at once.</text>
+
+  <text x="0" y="352" class="note">Both transports are chosen here:</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/b86aa8e4b3b535604b67d9ebd268cfb3c81cd55f/nemo_rl/weight_sync/factory.py#L118"><text x="0" y="370">weight_sync/factory.py:118</text></a>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/b86aa8e4b3b535604b67d9ebd268cfb3c81cd55f/nemo_rl/weight_sync/sglang_weight_synchronizer.py#L220"><text x="196" y="370">sglang_weight_synchronizer.py:220 (colocated)</text></a>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/b86aa8e4b3b535604b67d9ebd268cfb3c81cd55f/nemo_rl/weight_sync/sglang_weight_synchronizer.py#L279"><text x="558" y="370">:279 (disaggregated)</text></a>
+
+  <defs>
+    <marker id="ah" markerWidth="9" markerHeight="7" refX="8" refY="3.5" orient="auto">
+      <polygon points="0 0, 9 3.5, 0 7" fill="var(--dim)"/></marker>
+    <marker id="ah-g" markerWidth="9" markerHeight="7" refX="8" refY="3.5" orient="auto">
+      <polygon points="0 0, 9 3.5, 0 7" fill="var(--green)"/></marker>
+    <marker id="ah-r" markerWidth="9" markerHeight="7" refX="8" refY="3.5" orient="auto">
+      <polygon points="0 0, 9 3.5, 0 7" fill="var(--red)"/></marker>
+  </defs>
+</svg>
+
+<h2>What one refit does, and where a guard is missing</h2>
+
+<p>An SGLang engine cannot take new weights while it is generating text, and its cached
+attention values (the <b>KV cache</b>) belong to the old weights. So a refit is a small
+protocol: stop generating, throw away the cache, open a weight-update session, send the
+weights in chunks, close the session, start generating again. Six steps, and the last one
+has to run even when an earlier one fails — otherwise the engines stay stopped and the run
+hangs with nothing in the log explaining why.</p>
+
+<p>Five of the six steps are wrapped correctly. The first one is not.</p>
+
+<svg viewBox="0 0 940 300" role="img" aria-label="The six refit steps, showing that pause_generation sits outside the try block that resumes generation">
+  <text x="0" y="14" class="hdr">_refit() — the six steps, and which ones a failure can undo</text>
+
+  <rect x="150" y="52" width="640" height="196" rx="8" fill="none" stroke="var(--green)" stroke-width="1.5" stroke-dasharray="5 4"/>
+  <text x="470" y="70" class="grnt" text-anchor="middle">try: … finally: continue_generation()  — everything in here is safe</text>
+
+  <rect x="0" y="88" width="132" height="44" rx="6" class="dead"/>
+  <text x="66" y="106" class="lbl-b" text-anchor="middle">1 pause</text>
+  <text x="66" y="122" class="redt" text-anchor="middle">OUTSIDE</text>
+
+  <rect x="172" y="88" width="132" height="44" rx="6" class="live"/>
+  <text x="238" y="106" class="lbl-b" text-anchor="middle">2 drop KV</text>
+  <text x="238" y="122" class="note" text-anchor="middle">cache</text>
+
+  <rect x="326" y="88" width="132" height="44" rx="6" class="live"/>
+  <text x="392" y="106" class="lbl-b" text-anchor="middle">3 begin</text>
+  <text x="392" y="122" class="note" text-anchor="middle">session</text>
+
+  <rect x="480" y="88" width="132" height="44" rx="6" class="live"/>
+  <text x="546" y="106" class="lbl-b" text-anchor="middle">4 send</text>
+  <text x="546" y="122" class="note" text-anchor="middle">weight chunks</text>
+
+  <rect x="634" y="88" width="132" height="44" rx="6" class="live"/>
+  <text x="700" y="106" class="lbl-b" text-anchor="middle">5 end</text>
+  <text x="700" y="122" class="note" text-anchor="middle">session</text>
+
+  <rect x="788" y="88" width="132" height="44" rx="6" class="live"/>
+  <text x="854" y="106" class="lbl-b" text-anchor="middle">6 resume</text>
+  <text x="854" y="122" class="note" text-anchor="middle">always runs</text>
+
+  <line x1="132" y1="110" x2="170" y2="110" class="ar" marker-end="url(#a2)"/>
+  <line x1="304" y1="110" x2="324" y2="110" class="ar" marker-end="url(#a2)"/>
+  <line x1="458" y1="110" x2="478" y2="110" class="ar" marker-end="url(#a2)"/>
+  <line x1="612" y1="110" x2="632" y2="110" class="ar" marker-end="url(#a2)"/>
+  <line x1="766" y1="110" x2="786" y2="110" class="ar" marker-end="url(#a2)"/>
+
+  <text x="0" y="164" class="redt">If step 1 fails part-way, step 6 never runs.</text>
+  <text x="0" y="184" class="note">pause is one Ray call per engine, awaited together. With 4 engines: engines 0, 1 and 3 pause fine, engine 2 times out.</text>
+  <text x="0" y="202" class="note">The await raises — but it raises before the try is entered, so the resume in the finally is skipped.</text>
+  <text x="0" y="220" class="note">Engines 0, 1 and 3 stay stopped for the rest of the run. Every later rollout on them hangs.</text>
+
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/b86aa8e4b3b535604b67d9ebd268cfb3c81cd55f/nemo_rl/weight_sync/sglang_weight_synchronizer.py#L155"><text x="0" y="252">sglang_weight_synchronizer.py:155 (the pause)</text></a>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/b86aa8e4b3b535604b67d9ebd268cfb3c81cd55f/nemo_rl/weight_sync/sglang_weight_synchronizer.py#L178"><text x="330" y="252">:178 (the finally that resumes)</text></a>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/b86aa8e4b3b535604b67d9ebd268cfb3c81cd55f/nemo_rl/models/generation/sglang/sglang_generation.py#L341"><text x="622" y="252">sglang_generation.py:341 (the fan-out)</text></a>
+
+  <defs><marker id="a2" markerWidth="9" markerHeight="7" refX="8" refY="3.5" orient="auto">
+    <polygon points="0 0, 9 3.5, 0 7" fill="var(--dim)"/></marker></defs>
+</svg>
+
+<p>The fix is to move one line inside the block that already exists:</p>
+
+<div class="mono">  pause_mode = self._generation.pause_generation_mode
+- self._generation.pause_generation(mode=pause_mode)   <span class="drop"># a failure here skips the resume</span>
+  try:
++     self._generation.pause_generation(mode=pause_mode)
+      ...
+  finally:
+      self._generation.continue_generation()           <span class="kept"># now reached on every path</span></div>
+
+<p>The same shape appears once more, at
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/b86aa8e4b3b535604b67d9ebd268cfb3c81cd55f/nemo_rl/weight_sync/sglang_weight_synchronizer.py#L252"><code>sglang_weight_synchronizer.py:252</code></a>:
+the call that gives the engine its weight buffers runs before the block whose <code>finally</code>
+restores the trainer's memory, so an out-of-memory error there leaves the trainer's weights
+parked on CPU.</p>
+
+<h2>Does it work?</h2>
+
+<p><b>Nobody has run this tree.</b> That is stated in the PR description, and the CI run does not
+change it. The author asked for tests on this exact commit, and the run stopped before any
+test started:</p>
+
+<table>
+<tr><th>Check</th><th>Result</th><th>Why it matters</th></tr>
+<tr><td><code>Lint check</code></td><td style="color:var(--red)"><b>fail</b></td>
+    <td>9 type errors, all in code this PR adds to <code>nemo_rl/models/policy/utils.py</code></td></tr>
+<tr><td>every GPU / unit / nightly job</td><td style="color:var(--dim)"><b>skipped</b></td>
+    <td>they wait on <code>Lint check</code>, so none of them ran</td></tr>
+<tr><td>branch freshness</td><td style="color:var(--red)"><b>fail</b></td>
+    <td>past the 10-commit limit, and conflicts with <code>main</code> in 5 files</td></tr>
+</table>
+
+<p>So there is no number to report: no reward curve, no refit timing, no comparison against
+the vLLM path. Two things are worth asking for before this merges, and one of them is nearly
+free. The 1n8g SGLang recipe already existed on the old transport, so a reward curve on that
+recipe is a direct before-and-after on the same config. And the disaggregated NCCL path is a
+new transport, a new process group and a new recipe all at once, with no exercised evidence
+at all — a passing 450-step nightly on the 2-node recipe would be the first real signal that
+it works.</p>
+
+<div class="warn">
+<b>What to take away.</b> The shape of this change is right: SGLang refit now goes through the
+same one class every other backend uses, the dead transport is gone, and backend-specific
+code moved out of the training loop. The risk is not the design — it is that a per-step,
+critical-path rewrite is landing with zero measured evidence, and the one CI run that was
+requested produced none. Get the lint errors cleared and the branch rebased first; that alone
+turns the existing nightlies into real evidence.
+</div>
+
+<p class="sub" style="margin-top:26px">Generated with Claude Code.</p>
+
+</div>
+</body>
+</html>
