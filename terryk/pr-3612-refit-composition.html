@@ -80,7 +80,7 @@ SGLang-specific code where no other generation backend has any: the training-sid
 a serialization patch, and a <b>new 96-line file</b> re-implements the Megatron→HF weight walk
 and the bucket packing that already exist in the repo. Both are avoidable with the patterns
 already in these files, and the fix is a net <b>deletion</b>:
-<code>5 files changed, +67 −171</code>.</p>
+<code>5 files changed, +69 −171</code>.</p>
 
 <h2>The two pieces, and the in-repo pattern each one skipped</h2>
 
@@ -154,8 +154,10 @@ commit on top of #3612's head, so the PR diff is exactly this and nothing else.<
 <span class="dim2">#    (base_policy_worker.py — replaces both constructor blocks)</span>
 class AbstractPolicyWorker:
     def _refit_transport_state(self, key: str) -> dict:
-        states = self.__dict__.setdefault("_refit_state", {})
-        return states.setdefault(key, {})
+        <span class="dim2"># this base class has no __init__, so the dict is created on first use</span>
+        if not hasattr(self, "_refit_state"):
+            self._refit_state: dict[str, dict] = {}
+        return self._refit_state.setdefault(key, {})
 
 <span class="dim2"># 2. The patch installs at first connect, not at import/init.</span>
 <span class="dim2">#    It is idempotent (guards on _reduce_tensor_original), so every-connect is safe.</span>
@@ -194,10 +196,9 @@ weights, which SGLang must not receive</td>
 the mxfp8 follow-up #3614</td>
 <td>when #3614 lands, the expansion fits between the iterator and the bucketing — where both
 policy backends get it, not only Megatron</td></tr>
-<tr><td>Megatron passed an explicit weight-version counter; DTensor let the IPC impl track it
-in <code>worker_state</code></td>
-<td>aligned on the DTensor shape; the distributed path keeps its counter inside the
-<code>"sglang_dist"</code> dict</td></tr>
+<tr><td>the weight-version counter lived in a constructor field</td>
+<td>stays explicit, byte-for-byte the original behavior — it just lives in the transport
+dict instead of a constructor field</td></tr>
 </table>
 
 <h2>What this buys, and what it does not</h2>
@@ -209,7 +210,7 @@ in <code>worker_state</code></td>
 <tr><td><code>base_policy_worker.py:122</code> reads an attribute only two subclasses conditionally define</td><td>the base owns the state it reads</td></tr>
 <tr><td>3 copies of the export walk + 2 copies of the bucketing</td><td>1 of each; Megatron and FSDP2 SGLang paths are the same shape</td></tr>
 <tr><td>96-line SGLang-only file</td><td>deleted</td></tr>
-<tr><td colspan="2"><b>net: 5 files, +67 −171</b> · no public API changes · synchronizers untouched</td></tr>
+<tr><td colspan="2"><b>net: 5 files, +69 −171</b> · no public API changes · synchronizers untouched</td></tr>
 </table>
 
 <p><b>What it does not do:</b> it has not run on hardware — the diff is CPU syntax-checked only,
