@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NVIDIA-NeMo/RL #2935 — why mooncake_cpu never actually used RDMA</title>
+<style>
+:root{
+  --bg:#0d1117; --surface:#161b22; --surface2:#1c2128; --border:#30363d;
+  --text:#e6edf3; --dim:#8b949e; --accent:#58a6ff; --green:#3fb950;
+  --orange:#d29922; --red:#f85149;
+}
+:root[data-theme="light"]{
+  --bg:#ffffff; --surface:#f6f8fa; --surface2:#eaeef2; --border:#d0d7de;
+  --text:#1f2328; --dim:#59636e; --accent:#0969da; --green:#1a7f37;
+  --orange:#9a6700; --red:#cf222e;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:28px 20px 70px}
+h1{font-size:22px;margin:0 0 8px;line-height:1.3}
+h2{font-size:18px;margin:32px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;
+  font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
+.sub{color:var(--dim);font-size:13.5px;margin:0 0 16px}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);
+  border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;
+  font:13px/1 ui-monospace,Menlo,monospace;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.18)}
+.mono{font:12.5px ui-monospace,SFMono-Regular,Menlo,monospace;
+  background:var(--surface);border:1px solid var(--border);border-radius:8px;
+  padding:13px;overflow-x:auto;white-space:pre}
+.warn{border-left:3px solid var(--red);background:var(--surface);
+  padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0}
+.hl{border-left:3px solid var(--accent);background:var(--surface);
+  padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0}
+table{border-collapse:collapse;width:100%;margin:14px 0;font-size:13.5px}
+th,td{border:1px solid var(--border);padding:7px 10px;text-align:left;vertical-align:top}
+th{background:var(--surface2);font-weight:600}
+td.num{font:12.5px ui-monospace,Menlo,monospace;white-space:nowrap}
+svg{max-width:100%;height:auto;display:block;margin:16px 0}
+svg .box{fill:var(--surface);stroke:var(--border);stroke-width:1.4}
+svg .lbl{fill:var(--text);font:12.5px ui-monospace,Menlo,monospace}
+svg .path{fill:var(--text);font:14px ui-monospace,Menlo,monospace}
+svg .lbl-b{fill:var(--text);font:bold 13px -apple-system,sans-serif}
+svg .note{fill:var(--dim);font:11.5px -apple-system,sans-serif}
+svg .note-m{fill:var(--dim);font:11.5px ui-monospace,Menlo,monospace}
+svg .hdr{fill:var(--accent);font:bold 12.5px -apple-system,sans-serif}
+svg .brk{stroke:var(--dim);stroke-width:1.3;fill:none}
+svg .brk-bad{stroke:var(--red);stroke-width:1.8;fill:none}
+svg .hi-ok{fill:var(--green);opacity:.22}
+svg .hi-bad{fill:var(--red);opacity:.22}
+svg .t-ok{fill:var(--green);font:bold 12.5px ui-monospace,Menlo,monospace}
+svg .t-bad{fill:var(--red);font:bold 12.5px ui-monospace,Menlo,monospace}
+svg .bar-bad{fill:var(--red);opacity:.55;stroke:var(--red)}
+svg .bar-ok{fill:var(--green);opacity:.55;stroke:var(--green)}
+svg .grid{stroke:var(--border);stroke-width:1;stroke-dasharray:3 3}
+svg a text{text-decoration:underline;fill:var(--accent);font:11.5px ui-monospace,Menlo,monospace}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+  document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head>
+<body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+  function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+  function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
+    b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
+      else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+  document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+<div class="wrap">
+
+<h1>Why <code>data_plane.backend=mooncake_cpu</code> never actually used RDMA — and what turning it on cost</h1>
+<p class="sub">Companion illustration for
+<a href="https://github.com/NVIDIA-NeMo/RL/pull/2935">NVIDIA-NeMo/RL #2935</a>.
+All permalinks pin the PR head <code>881a433</code>.</p>
+
+<p>NeMo-RL can move rollout data between processes through a <strong>data plane</strong>. One
+backend, <code>mooncake_cpu</code>, is meant to push that data over RDMA — the network card
+copies memory straight to another machine without the CPU. To do that, mooncake needs the
+<em>name</em> of a network card, like <code>mlx5_3</code>. The old code looked that name up by
+walking a file path in <code>/sys</code>, and it cut one directory too few, so it always returned
+the word <code>ports</code> — not a card. This page shows that walk, and the second thing the fix
+uncovered: once RDMA really turned on, the memory settings became real allocations.</p>
+
+<h2>1. The path walk that could never name a card</h2>
+
+<p>Linux lists each card under <code>/sys/class/infiniband/</code>. The probe globbed one file per
+card and then walked back up the path to recover the card's name. <code>dirname</code> removes
+the last piece of a path; <code>basename</code> keeps only the last piece. The old code ran
+<code>dirname</code> twice where it needed three.</p>
+
+<svg viewBox="0 0 940 330" role="img" aria-label="Path walk showing two dirnames yield the word ports instead of the card name mlx5_3">
+  <text class="hdr" x="44" y="26">one file the probe finds, for card mlx5_3</text>
+
+  <!-- highlights behind the two candidate segments -->
+  <rect class="hi-ok"  x="228.8" y="62" width="50.4" height="22" rx="3"/>
+  <rect class="hi-bad" x="287.6" y="62" width="42"   height="22" rx="3"/>
+
+  <!-- the path, drawn in segments so each can be coloured -->
+  <text class="path" x="44"    y="78">/sys/class/infiniband</text>
+  <text class="path" x="220.4" y="78">/</text>
+  <text class="t-ok" x="228.8" y="78">mlx5_3</text>
+  <text class="path" x="279.2" y="78">/</text>
+  <text class="t-bad" x="287.6" y="78">ports</text>
+  <text class="path" x="329.6" y="78">/1/link_layer</text>
+
+  <!-- bracket 1: dirname strips /link_layer -->
+  <path class="brk" d="M346.4 92 L346.4 100 L438.8 100 L438.8 92"/>
+  <text class="note" x="452" y="104">dirname #1 removes <tspan class="note-m">/link_layer</tspan></text>
+
+  <!-- bracket 2: dirname strips /1 -->
+  <path class="brk" d="M329.6 92 L329.6 128 L346.4 128 L346.4 92"/>
+  <text class="note" x="452" y="132">dirname #2 removes <tspan class="note-m">/1</tspan> — the old code stops here</text>
+
+  <!-- bracket 3: the missing one -->
+  <path class="brk-bad" d="M279.2 92 L279.2 156 L329.6 156 L329.6 92"/>
+  <text class="note" x="452" y="160" fill="var(--red)">dirname #3 removes <tspan class="note-m">/ports</tspan> — missing on <tspan class="note-m">main</tspan></text>
+
+  <line class="grid" x1="44" y1="186" x2="896" y2="186"/>
+
+  <!-- results -->
+  <rect x="44" y="202" width="14" height="14" rx="3" fill="var(--red)" opacity="0.55"/>
+  <text class="lbl-b" x="68" y="214">on <tspan font-family="ui-monospace,Menlo,monospace">main</tspan>:</text>
+  <text class="lbl" x="140" y="214">basename after 2 dirnames  →  </text>
+  <text class="t-bad" x="368" y="214">"ports"</text>
+  <text class="note" x="452" y="214">no card has this name, so RDMA could never start</text>
+
+  <rect x="44" y="240" width="14" height="14" rx="3" fill="var(--green)" opacity="0.55"/>
+  <text class="lbl-b" x="68" y="252">this PR:</text>
+  <text class="lbl" x="140" y="252">Path(...).parents[2].name  →  </text>
+  <text class="t-ok" x="368" y="252">"mlx5_3"</text>
+  <text class="note" x="452" y="252">a real card — no shell involved at all</text>
+
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/881a433ff8bdd14e3da93aca51ec0485607becd5/nemo_rl/data_plane/adapters/transfer_queue_env.py#L59">
+    <text x="140" y="286">transfer_queue_env.py:59 — rail_link_layers()</text>
+  </a>
+  <text class="note" x="44" y="310">Green = the card name the probe should return. Red = what it actually returned.</text>
+</svg>
+
+<p>There was a second reason RDMA never ran: the transport defaulted to TCP. The old
+<code>_mooncake_transport_config()</code> read <code>MC_MOONCAKE_PROTOCOL</code> and returned
+<code>{"protocol": "tcp"}</code> unless you set it to <code>rdma</code> by hand. So a run either
+used TCP, or — if you did set the variable — asked for a card called <code>ports</code> and
+failed. Either way, no run over RDMA.</p>
+
+<p>This PR removes the choice. <code>mooncake_cpu</code> is now RDMA only: a host with no usable
+card <a href="https://github.com/NVIDIA-NeMo/RL/blob/881a433ff8bdd14e3da93aca51ec0485607becd5/nemo_rl/data_plane/adapters/transfer_queue.py#L128">raises</a>
+instead of quietly running over TCP, and every card on the host is offered rather than just the
+first one.</p>
+
+<h2>2. Turning RDMA on made the memory real</h2>
+
+<p>Mooncake reserves two blocks of host memory per process: a <strong>segment</strong> it shares
+with other machines, and a <strong>local buffer</strong>. Over TCP those were ordinary
+allocations the kernel only backs with real pages when touched. Over RDMA they are pinned with
+<code>ibv_reg_mr</code> at startup — real, resident, and not swappable. The old defaults were
+sized as if they were free. One process runs per GPU, so an 8-GPU host pays eight times.</p>
+
+<svg viewBox="0 0 940 290" role="img" aria-label="Host memory pinned per node, 4608 GiB before versus 544 GiB after">
+  <text class="hdr" x="44" y="24">host memory pinned at startup, per 8-GPU node</text>
+
+  <!-- gridlines -->
+  <line class="grid" x1="342" y1="40" x2="342" y2="176"/>
+  <text class="note-m" x="342" y="196" text-anchor="middle">1,024</text>
+  <line class="grid" x1="484" y1="40" x2="484" y2="176"/>
+  <text class="note-m" x="484" y="196" text-anchor="middle">2,048</text>
+  <line class="grid" x1="627" y1="40" x2="627" y2="176"/>
+  <text class="note-m" x="627" y="196" text-anchor="middle">3,072</text>
+  <line class="grid" x1="769" y1="40" x2="769" y2="176"/>
+  <text class="note-m" x="769" y="196" text-anchor="middle">4,096</text>
+  <text class="note" x="627" y="214" text-anchor="middle">GiB pinned per node</text>
+
+  <!-- before -->
+  <text class="lbl-b" x="44" y="76">before</text>
+  <rect class="bar-bad" x="200" y="56" width="640" height="30" rx="3"/>
+  <text class="lbl" x="852" y="76">4,608</text>
+
+  <!-- after -->
+  <text class="lbl-b" x="44" y="136">after</text>
+  <rect class="bar-ok" x="200" y="116" width="75.6" height="30" rx="3"/>
+  <text class="lbl" x="288" y="136">544</text>
+
+  <text class="note-m" x="44" y="248">before   8 processes x (segment 512 GiB  +  buffer 64 GiB)  =  4,608 GiB</text>
+  <text class="note-m" x="44" y="268">after    8 processes x (segment  64 GiB  +  buffer  4 GiB)  =    544 GiB</text>
+</svg>
+
+<p class="sub">The number 64 appears in both rows but means two different settings: the
+<em>old</em> local buffer, and the <em>new</em> segment. Every other value on this page appears
+once.</p>
+
+<p>The new defaults live on the config class, and each backend now has its own block in the YAML
+rather than four settings sitting loose at the top level:</p>
+
+<div class="mono">data_plane:
+  backend: "mooncake_cpu"
+  mooncake_cpu:                        # only the block named by `backend` is read
+    global_segment_size: 68719476736   # 64 GiB per process   (was 512 GiB)
+    local_buffer_size:    4294967296   #  4 GiB per process   (was  64 GiB)</div>
+<p class="sub">
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/881a433ff8bdd14e3da93aca51ec0485607becd5/examples/configs/grpo_math_1B.yaml#L544">grpo_math_1B.yaml:544</a> ·
+defaults on <a href="https://github.com/NVIDIA-NeMo/RL/blob/881a433ff8bdd14e3da93aca51ec0485607becd5/nemo_rl/data_plane/interfaces.py#L87">MooncakeCpuConfig</a>
+</p>
+
+<h2>3. Does it work?</h2>
+
+<p>Two runs, both with <code>backend=mooncake_cpu</code> over RDMA, and both repeated with
+<code>backend=simple</code> as a control so the data plane could be told apart from the model.</p>
+
+<table>
+  <tr><th>Run</th><th>Setup</th><th>Result</th><th>W&amp;B</th></tr>
+  <tr>
+    <td>llama-3.1-8B</td>
+    <td class="num">2 nodes x 8 GPUs, 10 steps</td>
+    <td>10/10 steps, reward 0.343 → 0.437</td>
+    <td><a href="https://wandb.ai/nvidia/nemo-rl-data-plane/runs/xdsn2kek">xdsn2kek</a></td>
+  </tr>
+  <tr>
+    <td>DeepSeek-V3</td>
+    <td class="num">32 nodes x 8 GPUs (256 GPUs), 10 steps</td>
+    <td><code>check_metrics.py</code> 3/3 pass; ~270–400 s/step</td>
+    <td><a href="https://wandb.ai/nvidia/nemo-rl-data-plane/runs/cpqmwppy">cpqmwppy</a></td>
+  </tr>
+</table>
+
+<p>The author reports zero <code>falling back to TCP</code> lines in either run, which is the
+thing to check given that a silent TCP fallback is exactly what used to hide the broken probe. At
+2 nodes the two backends track each other step for step (reward agrees to about 0.015), so the
+data plane is not changing the maths.</p>
+
+<p>One honest gap: on DeepSeek-V3 the metric <code>train/token_mult_prob_error</code> shows
+occasional large spikes — 37.99 on mooncake, and 2039 on <code>simple</code>, which never touches
+mooncake or RDMA at all. So the spikes belong to that model and recipe, not to this change. The
+recipe's own check only asserts the <em>smallest</em> value stays under 1.05, so it cannot see
+those spikes on either backend.</p>
+
+<div class="warn">
+<strong>What this means for you.</strong> Any earlier run that claimed mooncake RDMA coverage was
+really running TCP, so treat those numbers as a TCP baseline. If you turn this backend on now,
+budget the memory: it is pinned at startup and multiplied by the number of GPUs on the node, so
+the 544 GiB above is the floor for an 8-GPU host, not an average. And if your host has no RDMA
+card, the run now stops with a clear error instead of silently running slower — set
+<code>data_plane.backend=simple</code> if that is what you want.
+</div>
+
+</div>
+</body>
+</html>
