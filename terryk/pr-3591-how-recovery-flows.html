@@ -1,0 +1,288 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>How a dead generation shard stops killing the run</title>
+<style>
+:root{
+  --bg:#0d1117; --surface:#161b22; --surface2:#1c2128; --border:#30363d;
+  --text:#e6edf3; --dim:#8b949e; --accent:#58a6ff; --green:#3fb950;
+  --orange:#d29922; --red:#f85149; --purple:#bc8cff;
+}
+:root[data-theme="light"]{
+  --bg:#ffffff; --surface:#f6f8fa; --surface2:#eaeef2; --border:#d0d7de;
+  --text:#1f2328; --dim:#59636e; --accent:#0969da; --green:#1a7f37;
+  --orange:#9a6700; --red:#cf222e; --purple:#8250df;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;
+  padding:28px 18px 70px}
+main{max-width:1000px;margin:0 auto}
+h1{font-size:26px;line-height:1.25;margin:0 0 6px;letter-spacing:-.01em}
+h2{font-size:19px;margin:34px 0 10px;padding-top:14px;border-top:1px solid var(--border)}
+p.sub{color:var(--dim);font-size:13.5px;margin:0 0 18px}
+p{margin:0 0 12px}
+a{color:var(--accent)}
+code{font:12.5px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;
+  background:var(--surface2);border:1px solid var(--border);border-radius:4px;padding:1px 5px}
+figure{margin:18px 0 8px;background:var(--surface);border:1px solid var(--border);
+  border-radius:10px;padding:14px 10px}
+figcaption{color:var(--dim);font-size:12.5px;margin-top:8px;padding:0 6px}
+svg{width:100%;height:auto;display:block}
+svg text{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+svg .m{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+svg a text{text-decoration:underline}
+.t{fill:var(--text)} .d{fill:var(--dim)} .g{fill:var(--green)}
+.r{fill:var(--red)} .o{fill:var(--orange)} .a{fill:var(--accent)} .p{fill:var(--purple)}
+.sf{fill:var(--surface2)} .bs{stroke:var(--border);fill:none}
+.hl{background:var(--surface);border:1px solid var(--border);border-left:3px solid var(--accent);
+  border-radius:6px;padding:12px 14px;margin:16px 0}
+.warn{background:var(--surface);border:1px solid var(--border);border-left:3px solid var(--orange);
+  border-radius:6px;padding:12px 14px;margin:16px 0}
+table{border-collapse:collapse;width:100%;margin:12px 0;font-size:13.5px}
+th,td{border:1px solid var(--border);padding:7px 9px;text-align:left;vertical-align:top}
+th{background:var(--surface2);font-weight:600}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);
+  border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;
+  font:13px/1 ui-monospace,SFMono-Regular,Menlo,monospace;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.18)}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+  document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head>
+<body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+  function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+  function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
+    b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
+      else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+  document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+<main>
+
+<h1>How a dead generation shard stops killing the run</h1>
+<p class="sub">
+  <a href="https://github.com/NVIDIA-NeMo/RL/pull/3591">PR #3591</a> ·
+  part 3/4 of <a href="https://github.com/NVIDIA-NeMo/RL/issues/3454">#3454</a> ·
+  all links pinned at <code>ab0ffe2f</code> ·
+  builds on <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-3590-who-watches-what.html">who watches what (#3590)</a>
+</p>
+
+<p>
+#3590 gave the fleet a ledger: every shard has a state, and a dead one stops receiving traffic.
+That is enough to keep <em>generating</em>. It is not enough to keep <em>training</em>, because the
+weight refit is a <strong>collective</strong> — and a collective does not care that you stopped
+talking to a rank. Every remaining rank blocks inside NCCL waiting for one that will never arrive:
+no exception, no CPU burn, and Ray still reporting every actor healthy. This PR notices that from
+inside the stuck worker, breaks it, and rebuilds the communicator over whoever is left.
+</p>
+
+<figure>
+<svg viewBox="0 0 980 796" role="img" aria-label="Timeline of a refit interrupted by a dead shard and recovered">
+  <text x="0" y="16" class="t" font-size="13.5" font-weight="600">One refit, one dead shard, in order</text>
+  <text x="0" y="34" class="d" font-size="11.5">2 trainer ranks · 3 generation shards · shard 0 dies · refit_timeout_s: 30</text>
+
+  <!-- lane headers -->
+  <rect x="452" y="46" width="150" height="26" rx="5" class="sf"/>
+  <rect x="612" y="46" width="150" height="26" rx="5" class="sf"/>
+  <rect x="772" y="46" width="196" height="26" rx="5" class="sf"/>
+  <text x="527" y="64" class="t" font-size="11.5" text-anchor="middle" font-weight="600">2 trainer ranks</text>
+  <text x="687" y="64" class="t" font-size="11.5" text-anchor="middle" font-weight="600">shard 0</text>
+  <text x="870" y="64" class="t" font-size="11.5" text-anchor="middle" font-weight="600">shards 1 &amp; 2</text>
+
+  <!-- new-in-3591 bracket -->
+  <rect x="8" y="290" width="960" height="286" rx="7" fill="var(--accent)" opacity="0.055"/>
+  <text x="18" y="308" class="a" font-size="11" font-weight="600">NEW IN #3591</text>
+
+  <!-- ============ step rows ============ -->
+  <!-- 1 -->
+  <circle cx="24" cy="104" r="11" class="sf" stroke="var(--border)"/>
+  <text x="24" y="108" class="t" font-size="11" text-anchor="middle">1</text>
+  <text x="46" y="100" class="t" font-size="12.5">Refit starts. Every rank enters the collective.</text>
+  <text x="46" y="116" class="d" font-size="11">Built once at setup over all training + inference ranks. World = 2 + 3 = 5.</text>
+  <rect x="452" y="90" width="150" height="24" rx="4" fill="var(--green)" opacity="0.16"/>
+  <rect x="612" y="90" width="150" height="24" rx="4" fill="var(--green)" opacity="0.16"/>
+  <rect x="772" y="90" width="196" height="24" rx="4" fill="var(--green)" opacity="0.16"/>
+  <text x="527" y="106" class="g" font-size="11" text-anchor="middle">in collective</text>
+  <text x="687" y="106" class="g" font-size="11" text-anchor="middle">in collective</text>
+  <text x="870" y="106" class="g" font-size="11" text-anchor="middle">in collective</text>
+
+  <!-- 2 -->
+  <circle cx="24" cy="152" r="11" class="sf" stroke="var(--border)"/>
+  <text x="24" y="156" class="t" font-size="11" text-anchor="middle">2</text>
+  <text x="46" y="148" class="t" font-size="12.5">Shard 0's process dies.</text>
+  <text x="46" y="164" class="d" font-size="11">Mid-collective — it never reaches the other side of the broadcast.</text>
+  <rect x="612" y="138" width="150" height="24" rx="4" fill="var(--red)" opacity="0.2"/>
+  <text x="687" y="154" class="r" font-size="11" text-anchor="middle" font-weight="600">dead ✕</text>
+
+  <!-- 3 -->
+  <circle cx="24" cy="212" r="11" class="sf" stroke="var(--border)"/>
+  <text x="24" y="216" class="t" font-size="11" text-anchor="middle">3</text>
+  <text x="46" y="200" class="t" font-size="12.5">Everyone else blocks inside NCCL. <tspan class="r" font-weight="600">This is the wedge.</tspan></text>
+  <text x="46" y="216" class="d" font-size="11">No exception. No CPU burn. Ray still reports every actor healthy, so nothing</text>
+  <text x="46" y="230" class="d" font-size="11">upstream notices. Before this PR the run sat here — job 6258553 for 33 minutes.</text>
+  <rect x="452" y="192" width="150" height="42" rx="4" fill="var(--red)" opacity="0.14"/>
+  <rect x="772" y="192" width="196" height="42" rx="4" fill="var(--red)" opacity="0.14"/>
+  <text x="527" y="210" class="r" font-size="11" text-anchor="middle">blocked</text>
+  <text x="527" y="225" class="d" font-size="10">forever</text>
+  <text x="870" y="210" class="r" font-size="11" text-anchor="middle">blocked</text>
+  <text x="870" y="225" class="d" font-size="10">forever</text>
+  <rect x="612" y="192" width="150" height="42" rx="4" class="sf" opacity="0.5"/>
+  <text x="687" y="216" class="d" font-size="11" text-anchor="middle">gone</text>
+
+  <!-- 4 -->
+  <circle cx="24" cy="330" r="11" fill="var(--accent)" opacity="0.25" stroke="var(--accent)"/>
+  <text x="24" y="334" class="a" font-size="11" text-anchor="middle" font-weight="600">4</text>
+  <text x="46" y="326" class="t" font-size="12.5">At +30 s a watchdog thread <tspan font-style="italic">inside each stuck worker</tspan> gives up and aborts.</text>
+  <text x="46" y="342" class="d" font-size="11">Armed around the refit, in-process — because the stuck thread cannot report on itself.</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/ab0ffe2f83e64ace988c8ef604996b8100b2b46c/nemo_rl/distributed/refit_watchdog.py#L57">
+    <text x="46" y="358" class="a m" font-size="10.5">RefitAbortWatchdog · refit_watchdog.py:57</text></a>
+  <rect x="452" y="316" width="150" height="42" rx="4" fill="var(--accent)" opacity="0.16"/>
+  <rect x="772" y="316" width="196" height="42" rx="4" fill="var(--accent)" opacity="0.16"/>
+  <text x="527" y="334" class="a" font-size="11" text-anchor="middle">abort()</text>
+  <text x="527" y="349" class="d" font-size="10" text-anchor="middle">released in 0.15 s</text>
+  <text x="870" y="334" class="a" font-size="11" text-anchor="middle">abort()</text>
+  <text x="870" y="349" class="d" font-size="10" text-anchor="middle">released in 0.15 s</text>
+
+  <!-- 5 -->
+  <circle cx="24" cy="400" r="11" fill="var(--accent)" opacity="0.25" stroke="var(--accent)"/>
+  <text x="24" y="404" class="a" font-size="11" text-anchor="middle" font-weight="600">5</text>
+  <text x="46" y="396" class="t" font-size="12.5"><tspan class="m" font-size="11.5">abort</tspan>, not <tspan class="m" font-size="11.5">destroy</tspan> — and that is forced, not a preference.</text>
+  <text x="46" y="412" class="d" font-size="11">NCCL documents destroy as a collective every rank must call, which is exactly what a</text>
+  <text x="46" y="426" class="d" font-size="11">dead rank cannot do. The freed ranks raise RefitAborted so the controller can tell why.</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/ab0ffe2f83e64ace988c8ef604996b8100b2b46c/nemo_rl/distributed/stateless_process_group.py#L115">
+    <text x="46" y="442" class="a m" font-size="10.5">StatelessProcessGroup.abort · stateless_process_group.py:115</text></a>
+
+  <!-- 6 -->
+  <circle cx="24" cy="480" r="11" fill="var(--accent)" opacity="0.25" stroke="var(--accent)"/>
+  <text x="24" y="484" class="a" font-size="11" text-anchor="middle" font-weight="600">6</text>
+  <text x="46" y="476" class="t" font-size="12.5">The controller asks the ledger who is gone, then plans the new rank layout.</text>
+  <text x="46" y="492" class="d" font-size="11">absent = {0}. Survivors are <tspan font-style="italic">compacted to a contiguous prefix</tspan>, not left with a hole.</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/ab0ffe2f83e64ace988c8ef604996b8100b2b46c/nemo_rl/weight_sync/membership.py#L55">
+    <text x="46" y="508" class="a m" font-size="10.5">plan_refit_membership · membership.py:55</text></a>
+  <rect x="452" y="466" width="516" height="46" rx="5" class="sf"/>
+  <text x="466" y="484" class="d m" font-size="10.5">before:  shard 0 → rank 2   shard 1 → rank 3   shard 2 → rank 4     world 5</text>
+  <text x="466" y="502" class="t m" font-size="10.5">after:   <tspan class="r">✕</tspan>              shard 1 → rank 2   shard 2 → rank 3     world 4</text>
+
+  <!-- 7 -->
+  <circle cx="24" cy="556" r="11" fill="var(--accent)" opacity="0.25" stroke="var(--accent)"/>
+  <text x="24" y="560" class="a" font-size="11" text-anchor="middle" font-weight="600">7</text>
+  <text x="46" y="552" class="t" font-size="12.5">The transport rebuilds its communicator over the survivors — and re-addresses dispatch.</text>
+  <text x="46" y="568" class="d" font-size="11">Rebuilding is only half of it: refit dispatch walks the worker group, so without the second</text>
+  <text x="46" y="582" class="d" font-size="11">half it keeps calling shard 0's dead Ray actor and the next sync fails with RayActorError.</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/ab0ffe2f83e64ace988c8ef604996b8100b2b46c/nemo_rl/weight_sync/interfaces.py#L125">
+    <text x="46" y="598" class="a m" font-size="10.5">reconcile_communicator · weight_sync/interfaces.py:125</text></a>
+
+  <!-- 8 -->
+  <circle cx="24" cy="640" r="11" class="sf" stroke="var(--green)"/>
+  <text x="24" y="644" class="g" font-size="11" text-anchor="middle" font-weight="600">8</text>
+  <text x="46" y="636" class="t" font-size="12.5">The refit is retried on the smaller fleet. Training continues.</text>
+  <text x="46" y="652" class="d" font-size="11">Trainers are never excluded, so rank 0 stays a trainer and the broadcast root is stable.</text>
+  <rect x="452" y="626" width="150" height="24" rx="4" fill="var(--green)" opacity="0.16"/>
+  <rect x="772" y="626" width="196" height="24" rx="4" fill="var(--green)" opacity="0.16"/>
+  <text x="527" y="642" class="g" font-size="11" text-anchor="middle">training</text>
+  <text x="870" y="642" class="g" font-size="11" text-anchor="middle">generating</text>
+  <rect x="612" y="626" width="150" height="24" rx="4" class="sf" opacity="0.5"/>
+  <text x="687" y="642" class="d" font-size="11" text-anchor="middle">gone</text>
+
+  <!-- reconcile note -->
+  <line x1="8" y1="686" x2="968" y2="686" class="bs"/>
+  <text x="8" y="708" class="t" font-size="12" font-weight="600">Steps 6–7 do not wait for a death event.</text>
+  <text x="8" y="726" class="d" font-size="11.5">They run at the top of every weight sync — the one moment the refit group is provably idle and every rank is</text>
+  <text x="8" y="742" class="d" font-size="11.5">synchronized, which matters because the operations that change membership are themselves collectives. Doing it</text>
+  <text x="8" y="758" class="d" font-size="11.5">every time converges after a missed or reordered health update, instead of needing replay.</text>
+  <text x="8" y="782" class="d" font-size="11">Green = working · red = blocked or dead · blue = added by this PR</text>
+</svg>
+<figcaption>
+  The whole feature is steps 4–7. Steps 1–3 are what already happened; step 8 is what #3590 could not reach.
+</figcaption>
+</figure>
+
+<h2>The four things this PR had to invent</h2>
+
+<p>
+Three of these are new files or new interface methods; the fourth is a rule about the ledger from
+#3590 that is easy to get backwards.
+</p>
+
+<table>
+<tr><th style="width:23%">Abstraction</th><th style="width:39%">What it is</th><th>Why it had to exist</th></tr>
+<tr>
+  <td><a href="https://github.com/NVIDIA-NeMo/RL/blob/ab0ffe2f83e64ace988c8ef604996b8100b2b46c/nemo_rl/distributed/refit_watchdog.py#L57"><code>RefitAbortWatchdog</code></a><br><span style="color:var(--dim);font-size:12px">new file</span></td>
+  <td>A thread armed around the refit inside each worker. If the deadline passes it calls <code>abort()</code> on every group it was handed, and records that it fired.</td>
+  <td>The stuck thread is inside NCCL and cannot report on itself, and the controller cannot see the difference between a slow refit and a wedged one. Somebody local has to hold a clock.</td>
+</tr>
+<tr>
+  <td><a href="https://github.com/NVIDIA-NeMo/RL/blob/ab0ffe2f83e64ace988c8ef604996b8100b2b46c/nemo_rl/distributed/stateless_process_group.py#L115"><code>abort()</code></a><br><span style="color:var(--dim);font-size:12px">new method</span></td>
+  <td>Tears down the communicator with <code>ncclCommAbort</code> and drops the rendezvous store. Safe to call twice, and safe on a group that never built a communicator.</td>
+  <td><code>destroy</code> is a collective every rank must call. A dead rank cannot call it. <code>abort</code> works whether or not the peers are alive, which makes it the only safe choice on a path that exists to handle dead peers.</td>
+</tr>
+<tr>
+  <td><a href="https://github.com/NVIDIA-NeMo/RL/blob/ab0ffe2f83e64ace988c8ef604996b8100b2b46c/nemo_rl/weight_sync/membership.py#L55"><code>plan_refit_membership</code></a><br><span style="color:var(--dim);font-size:12px">new file, pure</span></td>
+  <td>Takes the set of surviving shards and returns the whole rank layout: new world size, and each survivor's new offset, compacted to a contiguous prefix with no holes.</td>
+  <td>The reshard destination mesh is <code>arange(offset, offset + n)</code>, so a gap does not error — it silently misaligns every parameter. This is the part that must be exactly right and the part you cannot exercise without ≥3 GPUs, so it was split out as plain Python with no Ray in it.</td>
+</tr>
+<tr>
+  <td><a href="https://github.com/NVIDIA-NeMo/RL/blob/ab0ffe2f83e64ace988c8ef604996b8100b2b46c/nemo_rl/weight_sync/interfaces.py#L125"><code>reconcile_communicator</code></a><br><span style="color:var(--dim);font-size:12px">new interface method</span></td>
+  <td>One hook per weight-sync transport. Returns <code>True</code> rebuilt, <code>False</code> nothing was absent, <code>None</code> this transport owns no membership.</td>
+  <td>Only two of the seven transports own an NCCL world. The other five inherit a no-op, so the controller can say "this transport cannot recover that way" instead of guessing. Adding an eighth NCCL transport costs one method.</td>
+</tr>
+</table>
+
+<div class="hl">
+<strong>The rule that is easy to get backwards.</strong> "Absent" is deliberately <em>not</em> the
+complement of "serving". The obvious implementation reads the serving set, and it is a bug:
+<code>SUSPECT</code> (failing probes, not yet condemned) and <code>STALE</code> (reloaded, holding old
+weights) are both withheld from traffic while their processes are alive, and both join a refit
+normally. Using the serving set would abort a run on one failed probe — and would abort it precisely
+when a <code>STALE</code> shard is waiting to be refit, which is the recovery, not the failure. Hence
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/ab0ffe2f83e64ace988c8ef604996b8100b2b46c/nemo_rl/models/generation/fleet_health.py#L192"><code>absent_shards()</code></a>
+over <code>{DEAD, RESTARTING, RETIRED}</code> only.
+</div>
+
+<h2>Does it work?</h2>
+
+<p>
+<strong>The abort itself is measured.</strong> On 2×A6000, with a peer <code>SIGKILL</code>ed
+mid-broadcast, a survivor blocked in the collective was released <strong>0.15 s</strong> after
+another thread called <code>abort()</code>. That is the one number on this page that came from
+hardware, and it pins the only part that was genuinely uncertain — that <code>ncclCommAbort</code>
+frees a thread already inside a collective.
+</p>
+
+<p>
+<strong>End to end, nobody has watched it recover in CI.</strong> The recovery harness needs 3 GPUs
+(2 generation shards + 1 trainer) and both CI lanes have 2, so on this PR's own green run every one
+of the seven registered lines printed <code>[recovery] SKIP: … found 2.</code> and exited — seven
+lines in 0.79 s on
+<a href="https://github.com/NVIDIA-NeMo/RL/actions/runs/32564749039/job/97023856729">H100</a> and
+0.48 s on <a href="https://github.com/NVIDIA-NeMo/RL/actions/runs/32564749039/job/97023856703">GB200</a>,
+both reported PASSED. The feature was validated by hand on ≥3-GPU hardware — the 7-digit job IDs in
+the harness comments are an internal scheduler's, not GitHub Actions' — so the evidence exists; it
+just is not in CI, and a green lane currently says nothing about shard-death recovery either way.
+</p>
+
+<div class="warn">
+<strong>One gap the review found, because it is the same failure this page is about.</strong>
+The Python reshard path splits the communicator into per-replica-group children. NCCL gives a split
+child <em>its own</em> abort flag unless <code>splitShare</code> is set, and it defaults to 0
+(<a href="https://github.com/NVIDIA/nccl/blob/v2.30.7-1/src/init.cc#L2196-L2198">init.cc:2196</a>),
+while <code>ncclCommAbort</code> sets only the parent's
+(<a href="https://github.com/NVIDIA/nccl/blob/v2.30.7-1/src/init.cc#L2915-L2925">:2915</a>). So step 4
+does not release a rank blocked on a child, and the run wedges exactly as it did before — the
+watchdog fires and nothing happens. Narrow (it needs the Python transfer path and a multi-member
+replica group), but it is step 3 coming back after step 4 was supposed to end it. Raised on the PR
+with a two-line fix: hand the children to the same cleanup before aborting the parent.
+</div>
+
+<p style="color:var(--dim);font-size:13px;margin-top:22px">
+Read next: <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-3590-who-watches-what.html">who watches what</a>
+(#3590 — the ledger these steps read) ·
+<a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-3591-rebuild-refit-group.html">how the rebuild works</a>
+(the mechanics of step 7).
+</p>
+
+</main>
+</body>
+</html>
