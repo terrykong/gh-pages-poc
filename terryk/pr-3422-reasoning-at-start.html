@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Why one parity test checks nothing on vLLM</title>
+<style>
+:root{--bg:#0d1117;--bg2:#161b22;--bg3:#21262d;--border:#30363d;--text:#e6edf3;
+  --muted:#8b949e;--accent:#58a6ff;--green:#3fb950;--red:#f85149;--orange:#d29922}
+:root[data-theme="light"]{--bg:#fff;--bg2:#f6f8fa;--bg3:#eaeef2;--border:#d0d7de;
+  --text:#1f2328;--muted:#59636e;--accent:#0969da;--green:#1a7f37;--red:#cf222e;--orange:#9a6700}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:15.5px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:26px 18px 70px}
+h1{font-size:26px;line-height:1.25;margin:0 0 6px}
+h2{font-size:19px;margin:34px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+.sub{color:var(--muted);font-size:13.5px;margin:0 0 20px}
+p{margin:11px 0}
+code{background:var(--bg3);padding:1px 5px;border-radius:5px;
+  font:12.8px/1.45 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+pre{background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:12px;
+  overflow-x:auto;font:12.6px/1.55 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;margin:12px 0}
+pre code{background:none;padding:0}
+a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
+.warn{background:var(--bg2);border-left:4px solid var(--orange);border-radius:0 8px 8px 0;padding:14px 17px;margin:18px 0}
+.hl{background:var(--bg2);border-left:4px solid var(--accent);border-radius:0 8px 8px 0;padding:14px 17px;margin:18px 0}
+figure{margin:20px 0;padding:0}
+figure svg{display:block;width:100%;height:auto;background:var(--bg2);
+  border:1px solid var(--border);border-radius:9px}
+figcaption{color:var(--muted);font-size:13px;margin-top:9px;line-height:1.55}
+svg .box{fill:var(--bg);stroke:var(--border);stroke-width:1.5}
+svg .box-ok{fill:var(--bg);stroke:var(--green);stroke-width:2}
+svg .box-bad{fill:var(--bg);stroke:var(--red);stroke-width:2.5}
+svg .tb{fill:var(--text);font:600 13px -apple-system,Segoe UI,sans-serif}
+svg .tm{fill:var(--text);font:10.5px ui-monospace,Menlo,monospace}
+svg .td{fill:var(--muted);font:11.5px -apple-system,Segoe UI,sans-serif}
+svg .tg{fill:var(--green);font:600 11.5px -apple-system,Segoe UI,sans-serif}
+svg .tr{fill:var(--red);font:600 12.5px -apple-system,Segoe UI,sans-serif}
+svg .ar{stroke:var(--muted);stroke-width:1.8;fill:none;marker-end:url(#a1)}
+svg .arr{stroke:var(--red);stroke-width:2.2;fill:none;marker-end:url(#a2)}
+svg a text{text-decoration:underline;fill:var(--accent);font:10.5px ui-monospace,Menlo,monospace}
+.toggle{position:fixed;top:12px;right:12px;z-index:99;background:var(--bg3);color:var(--text);
+  border:1px solid var(--border);border-radius:18px;padding:5px 12px;cursor:pointer;font-size:12.5px}
+@media(max-width:640px){.wrap{padding:16px 12px 50px}h1{font-size:21px}}
+</style>
+<script>(function(){try{if(localStorage.getItem('th')==='light')document.documentElement.setAttribute('data-theme','light')}catch(e){}})()</script>
+</head>
+<body>
+<button class="toggle" id="tg">theme</button>
+<script>(function(){var r=document.documentElement,b=document.getElementById('tg');
+function lbl(){b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'☾ dark'}
+b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem('th','dark')}catch(e){}}
+else{r.setAttribute('data-theme','light');try{localStorage.setItem('th','light')}catch(e){}}lbl()};lbl()})()</script>
+
+<div class="wrap">
+
+<h1>Why one of the parity tests checks nothing on vLLM</h1>
+<p class="sub">
+<a href="https://github.com/NVIDIA-NeMo/RL/pull/3422">NVIDIA-NeMo/RL#3422</a> ·
+review comment <a href="https://github.com/NVIDIA-NeMo/RL/pull/3422#discussion_r3839631907">r3839631907</a> ·
+all links pinned to <code>c2ed2fc</code>
+</p>
+
+<p>A model can write its thinking in two shapes. Either it writes the whole block itself —
+<code>&lt;think&gt;…&lt;/think&gt;answer</code> — or the prompt already ends with
+<code>&lt;think&gt;</code>, so the model starts <em>inside</em> the block and its output has no
+opening tag at all: <code>…&lt;/think&gt;answer</code>. A parser has to know which shape it is
+looking at, because in the second one there is no <code>&lt;think&gt;</code> to search for.</p>
+
+<p>TRT-LLM's parser takes a flag for this. The test sets it directly
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/c2ed2fc3b79b6e7384b7b93c0e0641f654847b4e/nemo_rl/models/generation/trtllm/trtllm_http_server.py#L74">trtllm_http_server.py:74</a>).
+vLLM's parsers have no such flag — they work it out from the text. So the vLLM test fakes the
+second shape by gluing <code>&lt;think&gt;</code> onto the front of the output
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/c2ed2fc3b79b6e7384b7b93c0e0641f654847b4e/tests/unit/models/generation/test_vllm_http_server_parity.py#L301">test_vllm_http_server_parity.py:301</a>).
+That is the problem: gluing the tag back on turns the second shape into the first one.</p>
+
+<figure>
+<svg viewBox="0 0 900 396" role="img" aria-label="Two different test cases become the same string on the vLLM path">
+<defs>
+<marker id="a1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--muted)"/></marker>
+<marker id="a2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--red)"/></marker>
+</defs>
+
+<text class="td" x="26" y="24">The two test cases, as written in the shared table</text>
+
+<rect class="box-ok" x="26" y="36" width="400" height="80" rx="8"/>
+<text class="tb" x="42" y="58">1. model wrote the whole block</text>
+<text class="tm" x="42" y="80">&lt;think&gt;inspect files&lt;/think&gt;Visible answer</text>
+<text class="td" x="42" y="100">reasoning_at_start = False</text>
+
+<rect class="box-ok" x="474" y="36" width="400" height="80" rx="8"/>
+<text class="tb" x="490" y="58">2. prompt opened the block</text>
+<text class="tm" x="490" y="80">inspect files&lt;/think&gt;Visible answer</text>
+<text class="td" x="490" y="100">reasoning_at_start = True</text>
+<text class="tg" x="490" y="116" font-size="10.5">no opening tag — this is the case worth testing</text>
+
+<path class="ar" d="M226,116 L226,152"/>
+<path class="arr" d="M674,116 L674,152"/>
+<text class="td" x="236" y="140">left alone</text>
+<text class="tr" x="684" y="140" font-size="11">glue "&lt;think&gt;" on the front</text>
+
+<text class="td" x="26" y="176">What the vLLM parser actually receives</text>
+
+<rect class="box" x="26" y="188" width="400" height="52" rx="8"/>
+<text class="tm" x="42" y="218">&lt;think&gt;inspect files&lt;/think&gt;Visible answer</text>
+
+<rect class="box" x="474" y="188" width="400" height="52" rx="8"/>
+<text class="tm" x="490" y="218">&lt;think&gt;inspect files&lt;/think&gt;Visible answer</text>
+
+<path class="ar" d="M226,240 L226,272 L450,272 L450,292"/>
+<path class="ar" d="M674,240 L674,272 L450,272"/>
+
+<rect class="box-bad" x="176" y="294" width="548" height="76" rx="8"/>
+<text class="tr" x="450" y="320" text-anchor="middle">Identical. Case 2 never happens on vLLM.</text>
+<text class="td" x="450" y="342" text-anchor="middle">Both cases run shape 1 through the parser and assert the same answer,</text>
+<text class="td" x="450" y="359" text-anchor="middle">so the &#8220;no opening tag&#8221; shape is never tested on this backend.</text>
+</svg>
+<figcaption>Green = a real case. Red = where the two collapse. The test still passes — it just
+passes for a reason that has nothing to do with what it was written to check.</figcaption>
+</figure>
+
+<h2>What to do instead</h2>
+
+<p>Two options. Either is fine; the point is that the page of the test should match what it
+really covers.</p>
+
+<pre><code># Option A — say out loud that the backends test different things.
+# Drop reasoning_at_start from the shared table, and in the vLLM test:
+#
+#   vLLM parsers have no reasoning_at_start flag; they infer the shape
+#   from the text. The prompt-opened-the-block case is covered on the
+#   TRT-LLM side only, where the parser can be told directly.
+
+# Option B — pick an input where the two cases really differ.
+# Keep the flag, but stop rebuilding shape 1 out of shape 2:
+raw_output        = "inspect files&lt;/think&gt;Visible answer"   # no opening tag
+reasoning_at_start = True
+# ...and assert that vLLM still splits it into reasoning + answer.
+# If vLLM cannot do that, Option A is the honest answer.</code></pre>
+
+<p>Worth saying: the flag is <em>used</em> now, which it was not before — an earlier round of
+review found it was being ignored on the vLLM side entirely. This is the second half of that
+fix, not a new bug.</p>
+
+<h2>How I checked</h2>
+
+<p>No GPU, no engine, no run. The whole thing is one line of string handling copied out of the
+test, so anyone can re-run it in a second:</p>
+
+<pre><code>def vllm_parser_input(raw_output, reasoning_at_start):      # test_vllm_http_server_parity.py:301
+    return "&lt;think&gt;" + raw_output if reasoning_at_start else raw_output
+
+explicit_reasoning_answer        flag=False -&gt; '&lt;think&gt;inspect files&lt;/think&gt;Visible answer'
+prompt_injected_reasoning_start  flag=True  -&gt; '&lt;think&gt;inspect files&lt;/think&gt;Visible answer'
+
+the two parser inputs are identical: True</code></pre>
+
+<p>What has <em>not</em> happened: nobody has run the vLLM test lane on this branch. CI shows
+<code>No tests run: Label CI:L*</code>, so the only checks that have run are lint and doc builds.
+The thing to ask for before merging is one real run of the vLLM and TRT-LLM unit lanes.</p>
+
+<div class="warn">
+<strong>So what.</strong> Nothing is broken and no training run is affected — this is a test that
+covers less than it appears to. The cost is future: if vLLM ever changes how it handles output
+with no opening <code>&lt;think&gt;</code> tag, this suite stays green and nobody finds out. The
+fix is a comment or a different input, not code.
+</div>
+
+</div>
+</body>
+</html>
