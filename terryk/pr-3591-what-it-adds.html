@@ -1,0 +1,403 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NVIDIA-NeMo/RL #3591 — what it adds, what changed, and why the group is rebuilt</title>
+<style>
+:root{
+  --bg:#0d1117; --surface:#161b22; --surface2:#1c2128; --border:#30363d;
+  --text:#e6edf3; --dim:#8b949e; --accent:#58a6ff; --green:#3fb950;
+  --orange:#d29922; --red:#f85149;
+}
+:root[data-theme="light"]{
+  --bg:#ffffff; --surface:#f6f8fa; --surface2:#eaeef2; --border:#d0d7de;
+  --text:#1f2328; --dim:#59636e; --accent:#0969da; --green:#1a7f37;
+  --orange:#9a6700; --red:#cf222e;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:28px 20px 70px}
+h1{font-size:22px;margin:0 0 8px;line-height:1.3}
+h2{font-size:18px;margin:34px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;
+  font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
+.sub{color:var(--dim);font-size:13.5px;margin:0 0 16px}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);
+  border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;
+  font:13px/1 ui-monospace,Menlo,monospace;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.18)}
+.mono{font:12.5px ui-monospace,SFMono-Regular,Menlo,monospace;
+  background:var(--surface);border:1px solid var(--border);border-radius:8px;
+  padding:13px;overflow-x:auto;white-space:pre}
+.warn{border-left:3px solid var(--red);background:var(--surface);
+  padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0}
+.hl{border-left:3px solid var(--accent);background:var(--surface);
+  padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0}
+.good{border-left:3px solid var(--green);background:var(--surface);
+  padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0}
+table{border-collapse:collapse;font-size:13.5px;margin:12px 0;width:100%}
+th,td{border:1px solid var(--border);padding:6px 10px;text-align:left;vertical-align:top}
+th{background:var(--surface)}
+.ok{color:var(--green);font-weight:700}
+.dead{color:var(--red);font-weight:700}
+.new{color:var(--green);font-weight:700}
+svg{max-width:100%;height:auto;display:block;margin:16px 0}
+svg .box{fill:var(--surface);stroke:var(--border);stroke-width:1.4}
+svg .old{fill:var(--surface2);stroke:var(--border);stroke-width:1.2;opacity:.9}
+svg .newbox{fill:var(--surface);stroke:var(--green);stroke-width:1.6}
+svg .cont{fill:none;stroke:var(--dim);stroke-width:1.2;stroke-dasharray:5 4}
+svg .contg{fill:none;stroke:var(--green);stroke-width:1.3;stroke-dasharray:5 4}
+svg .lbl{fill:var(--text);font:12px ui-monospace,Menlo,monospace}
+svg .lbl-b{fill:var(--text);font:bold 12.5px -apple-system,sans-serif}
+svg .note{fill:var(--dim);font:11px -apple-system,sans-serif}
+svg .noteg{fill:var(--green);font:11px -apple-system,sans-serif}
+svg .hdr{fill:var(--accent);font:bold 12.5px -apple-system,sans-serif}
+svg .hdrg{fill:var(--green);font:bold 12.5px -apple-system,sans-serif}
+svg .hdrd{fill:var(--dim);font:bold 12.5px -apple-system,sans-serif}
+svg .arrow{stroke:var(--dim);stroke-width:1.6;fill:none;marker-end:url(#arr)}
+svg .grn{stroke:var(--green);stroke-width:1.8;fill:none;marker-end:url(#arrg)}
+svg .redline{stroke:var(--red);stroke-width:1.8;fill:none;marker-end:url(#arrr)}
+svg .big{fill:var(--red);font:bold 13px -apple-system,sans-serif}
+svg .st{fill:var(--text);font:10.5px ui-monospace,Menlo,monospace}
+svg a text{text-decoration:underline;fill:var(--accent);font:11px ui-monospace,Menlo,monospace}
+#tip{position:fixed;z-index:300;max-width:340px;display:none;pointer-events:none;
+  background:var(--surface);color:var(--text);border:1px solid var(--border);border-radius:8px;
+  padding:8px 11px;font:12.5px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,sans-serif;
+  box-shadow:0 4px 16px rgba(0,0,0,.28)}
+#tip b{color:var(--accent)}
+svg [data-tip]{cursor:help}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+  document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head>
+<body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+  function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+  function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
+    b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
+      else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+  document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+<div class="wrap">
+
+<h1>PR #3591 as it stands: what it adds on top of #3590, what changed since review, and why the weight-copy group is rebuilt rather than shrunk</h1>
+<p class="sub">Status page for
+<a href="https://github.com/NVIDIA-NeMo/RL/pull/3591">NVIDIA-NeMo/RL #3591</a>,
+part 3/4 of the SingleController resiliency stack. All permalinks pinned to
+<code>ab0ffe2f</code>. Background:
+<a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-3590-who-watches-what.html">the #3590 page</a>
+(who watches what) and
+<a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-3591-rebuild-refit-group.html">the earlier #3591 page</a>
+(how the rebuild works). <strong>Hover any box in the figures.</strong></p>
+
+<p>Every training step copies fresh weights from the trainers to the inference engines. That copy — the
+<em>refit</em> — is one NCCL broadcast over a group spanning every trainer rank and every inference rank,
+built once at setup. NCCL requires every rank in the group to take part, so one dead inference rank blocks
+the copy forever: inside NCCL, with no error, no CPU burn, and Ray still reporting every actor healthy.
+#3590 could already tell that a shard was bad and stop sending it requests — but the refit group still
+contained it, so the next weight copy hung anyway. #3591 is what closes that gap.</p>
+
+<h2>1 &middot; What this PR adds, and what was already there</h2>
+
+<svg viewBox="0 0 960 470" role="img" aria-label="What #3590 already provided versus what #3591 adds">
+<defs>
+<marker id="arr" markerWidth="9" markerHeight="9" refX="8" refY="3" orient="auto">
+  <path d="M0,0 L8,3 L0,6 z" fill="var(--dim)"/></marker>
+<marker id="arrg" markerWidth="9" markerHeight="9" refX="8" refY="3" orient="auto">
+  <path d="M0,0 L8,3 L0,6 z" fill="var(--green)"/></marker>
+<marker id="arrr" markerWidth="9" markerHeight="9" refX="8" refY="3" orient="auto">
+  <path d="M0,0 L8,3 L0,6 z" fill="var(--red)"/></marker>
+</defs>
+
+<text x="20" y="18" class="hdrd">ALREADY IN MAIN — from #3590</text>
+<text x="20" y="34" class="note">Answers one question: which shard is bad?</text>
+<rect x="14" y="44" width="392" height="290" rx="9" class="cont"/>
+
+<rect x="30" y="58" width="360" height="38" rx="6" class="old"
+ data-tip="&lt;b&gt;probe loop&lt;/b&gt; — an asyncio task on the controller. Every probe_interval_s it calls is_alive() on each serving shard and folds the answer into the ledger."/>
+<text x="42" y="74" class="lbl">probe loop → is_alive()</text>
+<text x="42" y="89" class="note">every probe_interval_s, from the controller</text>
+
+<rect x="30" y="106" width="360" height="52" rx="6" class="old"
+ data-tip="&lt;b&gt;GenerationFleetHealth&lt;/b&gt; — the ledger. A plain table of per-shard state. It watches nothing itself; the probe loop and real traffic write into it."/>
+<text x="42" y="123" class="lbl">GenerationFleetHealth — the ledger</text>
+<text x="42" y="139" class="st">HEALTHY · SUSPECT · STALE · DEAD · RESTARTING · RETIRED</text>
+<text x="42" y="152" class="note">a table of per-shard state; watches nothing itself</text>
+
+<rect x="30" y="168" width="360" height="38" rx="6" class="old"
+ data-tip="&lt;b&gt;report_failure() / report_success()&lt;/b&gt; — written by VllmGeneration when a real generation request fails or succeeds. Separate from the probe streak, because a wedged engine still answers is_alive()."/>
+<text x="42" y="184" class="lbl">report_failure() / report_success()</text>
+<text x="42" y="199" class="note">from real traffic, not probes</text>
+
+<rect x="30" y="216" width="360" height="38" rx="6" class="old"
+ data-tip="&lt;b&gt;GenerationRouter&lt;/b&gt; — fronts the shards on the NeMo-Gym path and counts failed requests per backend URL. It never probes and never refits — no role in this PR."/>
+<text x="42" y="232" class="lbl">GenerationRouter (NeMo-Gym path)</text>
+<text x="42" y="247" class="note">counts per-URL failures; no role in the refit</text>
+
+<rect x="30" y="272" width="360" height="44" rx="6" class="box"/>
+<text x="42" y="290" class="lbl-b">→ stop sending that shard traffic</text>
+<text x="42" y="305" class="note">quarantine. The run keeps generating on the rest.</text>
+
+<path class="redline" d="M414 250 L536 250"/>
+<rect x="410" y="150" width="130" height="92" rx="7" class="box" style="stroke:var(--red)"/>
+<text x="420" y="170" class="big">THE GAP</text>
+<text x="420" y="188" class="note">a quarantined shard</text>
+<text x="420" y="202" class="note">was still a member of</text>
+<text x="420" y="216" class="note">the refit group, so the</text>
+<text x="420" y="230" class="note">next weight copy hung</text>
+<text x="424" y="268" class="note">#3591 closes it</text>
+
+<text x="556" y="18" class="hdrg">NEW IN #3591</text>
+<text x="556" y="34" class="note">Answers the next question: now keep training anyway</text>
+<rect x="550" y="44" width="396" height="290" rx="9" class="contg"/>
+
+<rect x="566" y="58" width="364" height="52" rx="6" class="newbox"
+ data-tip="&lt;b&gt;absent_shards()&lt;/b&gt; — who cannot join a collective: DEAD, RESTARTING, RETIRED. Deliberately NOT the complement of serving: a SUSPECT or STALE shard is withheld from traffic but its process is alive and joins a refit normally.&lt;br&gt;&lt;br&gt;&lt;b&gt;record_actor_death()&lt;/b&gt; — Ray reported the actor process gone, so mark it DEAD at once instead of waiting for more probe rounds.&lt;br&gt;&lt;br&gt;&lt;b&gt;mark_weights_partial()&lt;/b&gt; — after an aborted refit an engine holds a mix of old and new weights, so pull it out of service until a refit completes."/>
+<text x="578" y="75" class="lbl">ledger additions</text>
+<text x="578" y="91" class="st">absent_shards() · record_actor_death()</text>
+<text x="578" y="104" class="st">mark_weights_partial()</text>
+
+<rect x="566" y="120" width="364" height="52" rx="6" class="newbox"
+ data-tip="&lt;b&gt;RefitAbortWatchdog&lt;/b&gt; — a thread inside the worker process, started for the duration of one refit and armed with refit_timeout_s. Nothing calls it; it decides alone. The controller cannot rescue a worker whose thread is blocked inside NCCL, because that worker is not serving RPCs.&lt;br&gt;&lt;br&gt;&lt;b&gt;abort()&lt;/b&gt; terminates in-flight NCCL operations and releases the communicator, so the blocked thread returns."/>
+<text x="578" y="137" class="lbl">breaking the hang, from inside the worker</text>
+<text x="578" y="153" class="st">RefitAbortWatchdog · StatelessProcessGroup</text>
+<text x="578" y="166" class="st">.abort() → RefitAborted</text>
+
+<rect x="566" y="182" width="364" height="52" rx="6" class="newbox"
+ data-tip="&lt;b&gt;reconcile_communicator(absent_shards)&lt;/b&gt; — rebuilds the refit group over the survivors. Called at the top of every refit, the one moment the group is provably idle.&lt;br&gt;&lt;br&gt;&lt;b&gt;plan_refit_membership()&lt;/b&gt; — pure rank arithmetic. Compacts survivors to a contiguous prefix, because a gap would silently misalign every parameter: the reshard destination mesh is torch.arange(offset, offset + num_gpus)."/>
+<text x="578" y="199" class="lbl">rebuilding the group over the survivors</text>
+<text x="578" y="215" class="st">reconcile_communicator()</text>
+<text x="578" y="228" class="st">plan_refit_membership()</text>
+
+<rect x="566" y="244" width="364" height="52" rx="6" class="newbox"
+ data-tip="&lt;b&gt;_recover_from_failed_refit()&lt;/b&gt; — probes the fleet now rather than on the probe's clock, marks survivors partial, rebuilds, and retries exactly once.&lt;br&gt;&lt;br&gt;&lt;b&gt;_recovery_window()&lt;/b&gt; — while recovering, the serving set is deliberately empty; this stands the stall watchdog down so it cannot end the run over a fleet that is about to come back.&lt;br&gt;&lt;br&gt;&lt;b&gt;_promote_refit_shards()&lt;/b&gt; — returns shards holding current weights to the serving set."/>
+<text x="578" y="261" class="lbl">driving the recovery, on the controller</text>
+<text x="578" y="277" class="st">_recover_from_failed_refit() · _recovery_window()</text>
+<text x="578" y="290" class="st">_promote_refit_shards()</text>
+
+<rect x="566" y="272" width="0" height="0"/>
+<rect x="566" y="300" width="364" height="0" rx="6"/>
+
+<rect x="14" y="348" width="932" height="46" rx="7" class="box" style="stroke:var(--green)"/>
+<text x="28" y="366" class="lbl-b">→ the weight copy survives the death: the group is rebuilt without the dead ranks and the refit retries once</text>
+<text x="28" y="382" class="note">Training continues on the surviving shards instead of wedging inside NCCL until the job's walltime expires.</text>
+
+<rect x="14" y="406" width="932" height="52" rx="7" class="cont"/>
+<text x="28" y="424" class="hdrd">LEGEND</text>
+<rect x="96" y="413" width="16" height="12" rx="3" class="old"/>
+<text x="120" y="424" class="note">already in main (#3590)</text>
+<rect x="268" y="413" width="16" height="12" rx="3" class="newbox"/>
+<text x="292" y="424" class="note">new in #3591</text>
+<text x="28" y="446" class="note">#3591 touches 44 files (+4398 −76). Everything green above is new machinery; everything gray is what it builds on.</text>
+</svg>
+
+<p>The split matters because the two PRs answer different questions. #3590 decides <em>which shard is bad</em>
+and stops sending it requests. That is enough to keep generating, but not enough to keep training — the weight
+copy is a collective, and a collective does not care that you have stopped talking to a rank. #3591 adds the
+machinery that lets the copy itself survive: a way to notice the hang from
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/ab0ffe2f83e64ace988c8ef604996b8100b2b46c/nemo_rl/distributed/refit_watchdog.py#L57">inside the stuck worker</a>,
+a way to <a href="https://github.com/NVIDIA-NeMo/RL/blob/ab0ffe2f83e64ace988c8ef604996b8100b2b46c/nemo_rl/distributed/stateless_process_group.py#L115">break it</a>,
+and a way to <a href="https://github.com/NVIDIA-NeMo/RL/blob/ab0ffe2f83e64ace988c8ef604996b8100b2b46c/nemo_rl/weight_sync/collective_weight_synchronizer.py#L140">rebuild the group</a>
+over whoever is left.</p>
+
+<div class="hl"><strong>One distinction worth holding on to.</strong>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/ab0ffe2f83e64ace988c8ef604996b8100b2b46c/nemo_rl/models/generation/fleet_health.py#L192"><code>absent_shards()</code></a>
+is <em>not</em> the opposite of "serving". A SUSPECT or STALE shard is held back from traffic, but its process is
+alive and it joins the refit normally. Only DEAD, RESTARTING and RETIRED count as absent. Getting this backwards
+would drop live ranks out of the group and corrupt the copy.</div>
+
+<h2>2 &middot; What changed since the last review</h2>
+
+<p>The author picked up the review from the fork mirror and answered 13 of the 17 inline comments, each with a
+commit. Three findings were confirmed as real bugs and fixed with regression tests that were verified to fail
+without the fix. The branch was also merged with <code>main</code>, which finally makes the diff readable —
+<strong>44 files, +4398 −76</strong>, instead of the +7080 that the stale merge base was showing.</p>
+
+<table>
+<tr><th>Commit</th><th>What it fixes</th><th>Why it mattered</th></tr>
+<tr><td><code>754427da</code></td>
+    <td>DTensor workers accept and honour <code>refit_timeout_s</code></td>
+    <td class="dead">The headline bug. The façade forwarded the new keyword to every worker but only the Megatron worker had been updated, so both DTensor workers raised <code>TypeError: got an unexpected keyword argument</code> on the first refit — breaking every non-colocated DTensor run, which is the default LLM path.</td></tr>
+<tr><td><code>0ed86ac2</code></td>
+    <td>Sync vLLM worker forwards the deadline too</td>
+    <td>Same mistake, third site. The deadline was accepted and then dropped, leaving a configured timeout silently inert.</td></tr>
+<tr><td><code>124ee41b</code></td>
+    <td>The deadline becomes part of the generation contract</td>
+    <td>Declared on the interface rather than re-invented per worker, so a fourth site cannot diverge silently.</td></tr>
+<tr><td><code>2de01f53</code></td>
+    <td>Three correctness fixes (below)</td>
+    <td class="dead">The substantive one.</td></tr>
+<tr><td>7 test commits</td>
+    <td>Reworked the fault-injection harness</td>
+    <td>A killed rank never reaches the deadline — see the evidence section.</td></tr>
+</table>
+
+<p>The three fixes inside <code>2de01f53</code> are worth naming, because each was a case where the feature
+looked like it worked and did not:</p>
+
+<table>
+<tr><th>#</th><th>The bug</th><th>The fix</th></tr>
+<tr><td>1</td>
+    <td><strong>The abort was not authoritative.</strong> A refit is many broadcasts, not one. <code>abort()</code>
+    nulls the communicator, so the buffer in flight returned cleanly — but the <em>next</em> one raised a bare
+    <code>RuntimeError</code> that escaped the caller's <code>with</code> block before <code>guard.fired</code>
+    was ever read. No <code>RefitAborted</code>, no recovery, and the run died reporting a missing communicator
+    instead of the abort that caused it. Invisible on anything small enough to fit in one buffer, which is why
+    the functional test never saw it.</td>
+    <td><a href="https://github.com/NVIDIA-NeMo/RL/blob/ab0ffe2f83e64ace988c8ef604996b8100b2b46c/nemo_rl/distributed/stateless_process_group.py#L208"><code>broadcast()</code></a>
+    now raises <code>RefitAborted</code> whenever the group was aborted, fixing all four guarded sites at once
+    rather than wrapping each in a <code>try</code>. Plain <code>RuntimeError</code> is kept for the genuinely
+    different "never initialized" case.</td></tr>
+<tr><td>2</td>
+    <td><strong>The exhaustion check could kill the recovery.</strong> Recovery marks every serving shard
+    partial, so the serving set is empty across two <code>await</code>s. The stall watchdog runs on that same
+    loop and called <code>raise_if_exhausted()</code> every 30s — a tick landing in that window ended the run
+    and blamed an exhausted fleet, killing a recovery that was about to succeed.</td>
+    <td>A <a href="https://github.com/NVIDIA-NeMo/RL/blob/ab0ffe2f83e64ace988c8ef604996b8100b2b46c/nemo_rl/algorithms/single_controller.py#L1502"><code>_recovery_window()</code></a>
+    that stands the check down, released in a <code>finally</code> so a raising retry cannot leak the flag on
+    permanently.</td></tr>
+<tr><td>3</td>
+    <td><strong>Recovery cleared the counter that condemns a wedged engine.</strong> <code>serving_shards()</code>
+    includes SUSPECT, so a suspect survivor was relabelled STALE and then promoted back to HEALTHY, zeroing
+    <code>consecutive_reported_failures</code> — the one counter kept separate from the probe streak precisely
+    because a wedged engine still answers <code>is_alive()</code>. A shard could fail generations forever and
+    never reach the threshold.</td>
+    <td><code>ShardHealth</code> records the state before the demotion, and <code>report_refit</code> restores
+    SUSPECT with the streak intact.</td></tr>
+</table>
+
+<p>Also landed: the sync vLLM worker re-raises <code>RefitAborted</code> instead of folding it into
+<code>return False</code> (it was the only one of four that did not); both per-PP-stage communicator families
+are released before rebuild rather than stranded; <code>reconcile_communicator</code> returns <code>None</code>
+from the base so "this transport owns no membership" stops being reported as "no shard was absent"; the
+functional harness no longer loses its failure diagnostics to <code>set -e</code>; and
+<code>refit_timeout_s</code> is now in the exemplar YAML with a docstring that names both the
+<code>enabled=True</code> and <code>enabled=False</code> behaviours.</p>
+
+<div class="good"><strong>A new contract test now makes the recurring bug class impossible.</strong>
+The same mistake — fan a new keyword out to workers, update only some of them — happened in four places, and
+Ray binds actor signatures at call time, so each surfaced as a <code>TypeError</code> far from its cause.
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/ab0ffe2f83e64ace988c8ef604996b8100b2b46c/tests/unit/models/policy/test_worker_refit_signatures.py#L149"><code>test_worker_refit_signatures.py</code></a>
+reads signatures from the <em>AST</em> rather than by importing, because <code>dtensor_policy_worker_v2</code>
+needs a per-worker venv that the base one lacks — an import-based check would have skipped exactly the worker
+that regressed.</div>
+
+<p><strong>Four comments got no reply.</strong> Three of them are fixed in the code anyway — the DTensor
+signature, the deadline on the generation interface, and the shrink/grow docstring below. The fourth is a
+promised reply about the signature test that never got posted. Nothing looks dropped, but the thread on
+<code>_drain_router_failures</code> is still unanswered.</p>
+
+<h2>3 &middot; Why the group is rebuilt, not shrunk or grown</h2>
+
+<p>This was the open question from review, and the answer has two halves that are easy to run together. They are
+separate decisions, forced by different things.</p>
+
+<svg viewBox="0 0 960 300" role="img" aria-label="Abort versus destroy, and rebuild versus shrink">
+<rect x="14" y="14" width="460" height="266" rx="9" class="cont"/>
+<text x="30" y="38" class="hdr">A. Breaking the hang → abort(), not destroy()</text>
+<text x="30" y="58" class="note">Forced. Not a preference.</text>
+<rect x="30" y="72" width="428" height="58" rx="6" class="box" style="stroke:var(--red)"/>
+<text x="42" y="92" class="lbl">destroy() is itself a collective</text>
+<text x="42" y="108" class="note">NCCL documents it as an operation every rank must call,</text>
+<text x="42" y="122" class="note">or it hangs — exactly what a dead rank cannot do.</text>
+<rect x="30" y="142" width="428" height="58" rx="6" class="box" style="stroke:var(--green)"/>
+<text x="42" y="162" class="lbl">abort() terminates in-flight operations</text>
+<text x="42" y="178" class="note">Works whether or not the peers are alive, which makes it</text>
+<text x="42" y="192" class="note">the only safe choice on a path that exists for dead peers.</text>
+<rect x="30" y="212" width="428" height="52" rx="6" class="box"/>
+<text x="42" y="231" class="lbl-b">Measured on 2×A6000</text>
+<text x="42" y="248" class="note">Peer killed mid-broadcast; a survivor blocked in the collective</text>
+<text x="42" y="260" class="note">was released 0.15s after another thread called abort().</text>
+
+<rect x="486" y="14" width="460" height="266" rx="9" class="cont"/>
+<text x="502" y="38" class="hdr">B. Restoring service → rebuild, not shrink/grow</text>
+<text x="502" y="58" class="note">A choice, with reasons. NCCL supports both.</text>
+<rect x="502" y="72" width="428" height="46" rx="6" class="box"/>
+<text x="514" y="90" class="lbl">The pinned NCCL exports shrink AND grow</text>
+<text x="514" y="106" class="note">plus revoke, suspend, resume, split. So this is not a limitation.</text>
+<rect x="502" y="128" width="428" height="66" rx="6" class="box" style="stroke:var(--green)"/>
+<text x="514" y="147" class="lbl-b">The deciding reason: metadata, not the communicator</text>
+<text x="514" y="164" class="note">The reshard transport is a mesh-to-mesh redistribute, not a broadcast.</text>
+<text x="514" y="178" class="note">Each gen rank receives its OWN slice, derived from gen_world_size.</text>
+<text x="514" y="191" class="note">Drop a rank and its slices are orphaned — resizing alone corrupts.</text>
+<rect x="502" y="204" width="428" height="60" rx="6" class="box"/>
+<text x="514" y="222" class="lbl">Two more, both minor by comparison</text>
+<text x="514" y="238" class="note">· restore time is dominated by the minutes an engine takes to reload</text>
+<text x="514" y="252" class="note">· one path shared with init_communicator, exercised by every normal run</text>
+</svg>
+
+<p>Your instinct was right, and it lands on half B. The plan <em>has</em> to be regenerated on any membership
+change no matter what NCCL supports, because
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/ab0ffe2f83e64ace988c8ef604996b8100b2b46c/nemo_rl/weight_sync/nccl_reshard_weight_synchronizer.py#L259"><code>prepare_nccl_reshard_refit_info</code></a>
+derives every parameter's destination from <code>gen_world_size</code>. Shrinking the communicator without
+regenerating the plan would not merely reduce the number of receivers — it would orphan the slices the dead rank
+owned, and the survivors would come back holding weights that were never written. <strong>Silently.</strong>
+Once you are regenerating the plan anyway, keeping a second membership-change path buys nothing.</p>
+
+<p>Half A is independent of all of that: <code>abort()</code> is not chosen over <code>destroy()</code> for
+metadata reasons, but because <code>destroy</code> is a collective and the rank you are trying to escape is the
+one that cannot participate in it.</p>
+
+<div class="hl"><strong>The review comment that prompted this was correct and is fixed.</strong> The docstring
+used to claim NCCL exported <code>shrink</code> but not <code>grow</code>, which was wrong — the pinned version
+exports both. The
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/ab0ffe2f83e64ace988c8ef604996b8100b2b46c/nemo_rl/weight_sync/collective_weight_synchronizer.py#L153">rewritten paragraph</a>
+now presents the rebuild as a choice with reasons rather than a limitation, which is the honest framing.</div>
+
+<h2>Does it work?</h2>
+
+<p>Yes, on hardware, and the interesting part is what it took to prove it. Five variants of the recovery
+scenario now run in the <code>L1_Functional_Tests_SingleController</code> lane, and all CI is green on
+<code>ab0ffe2f</code>.</p>
+
+<table>
+<tr><th>Variant</th><th>What it pins</th><th>Result</th></tr>
+<tr><td>SIGKILL at a step boundary</td><td>the plain recovery — rebuild between refits</td><td class="ok">pass</td></tr>
+<tr><td>…on the reshard transport</td><td>rebuilds two communicator families <em>and</em> regenerates the plan</td><td class="ok">pass</td></tr>
+<tr><td>SIGKILL <em>inside</em> the refit</td><td>the abort-and-rebuild path</td><td class="ok">pass</td></tr>
+<tr><td>…on the reshard transport</td><td>a different abort: two families, either of which may hang</td><td class="ok">pass</td></tr>
+<tr><td>SIGSTOP (freeze) inside the refit</td><td>the only variant that reaches the deadline at all</td><td class="ok">pass</td></tr>
+</table>
+
+<div class="warn"><strong>The finding that cost five hardware runs: a killed rank never exercises the
+watchdog.</strong> SIGKILL makes NCCL error out within milliseconds, so <code>ActorDiedError</code> wins the
+race every time and the deadline never fires — the mid-refit kill variants were green and had
+<em>never once</em> produced a <code>RefitAborted</code>. Only SIGSTOP, which leaves the rank alive and simply
+silent, reaches the timeout. Without the frozen variant the deadline had unit tests and signature assertions
+behind it, but no test had ever made a refit actually abort on hardware.</div>
+
+<p>Measured on 4×GB200: the run now ends or recovers within about 40 seconds of the fault. The same scenario
+previously sat inside NCCL for <strong>33 minutes</strong> before anyone noticed.</p>
+
+<div class="hl"><strong>An honest limit, documented rather than hidden.</strong> A frozen-but-alive rank reaches
+SUSPECT and stops there — and recovery's own <code>mark_weights_partial</code> then makes it STALE. Neither
+state counts as absent, so the reconcile correctly refuses to rebuild over a fleet that still holds a silent
+rank, and the run ends attributably instead of recovering. The author removed an earlier test variant that
+asserted a rebuild in that case, because it was demanding an outcome the state machine cannot produce. That is
+the right call: a test asserting an impossible outcome is worse than no test.</div>
+
+<div class="warn"><strong>So what.</strong> With this merged, losing one inference engine mid-run costs a rebuild
+and one retried weight copy instead of the whole job. Without it, a single dead shard wedges training inside
+NCCL until walltime expires — silently, with every actor still reporting healthy. The feature is off by default:
+<code>refit_timeout_s: null</code> starts no watchdog thread and leaves the refit path byte-for-byte unchanged,
+so nothing here is on the critical path of a normal run until you arm it. If you arm the deadline without
+<code>generation_fleet_health.enabled</code>, you get the abort but no recovery — still far better than an
+unbounded hang, and the docstring now says so plainly.</div>
+
+</div>
+<div id="tip"></div>
+<script>(function(){var t=document.getElementById('tip');
+function show(e){var el=e.target.closest('[data-tip]');if(!el){hide();return;}
+ t.innerHTML=el.getAttribute('data-tip');t.style.display='block';move(e);}
+function move(e){var pad=14,w=t.offsetWidth,h=t.offsetHeight,x=e.clientX+pad,y=e.clientY+pad;
+ if(x+w>window.innerWidth-8)x=e.clientX-w-pad;if(y+h>window.innerHeight-8)y=e.clientY-h-pad;
+ t.style.left=x+'px';t.style.top=y+'px';}
+function hide(){t.style.display='none';}
+document.addEventListener('mouseover',show);document.addEventListener('mousemove',function(e){
+ if(t.style.display==='block')move(e);});document.addEventListener('mouseout',function(e){
+ if(!e.relatedTarget||!e.relatedTarget.closest||!e.relatedTarget.closest('[data-tip]'))hide();});})();</script>
+</body>
+</html>
