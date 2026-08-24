@@ -1,0 +1,267 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Which process owns each piece of the refit recovery</title>
+<style>
+:root{
+  --bg:#0d1117; --surface:#161b22; --surface2:#1c2128; --border:#30363d;
+  --text:#e6edf3; --dim:#8b949e; --accent:#58a6ff; --green:#3fb950;
+  --orange:#d29922; --red:#f85149; --purple:#bc8cff;
+}
+:root[data-theme="light"]{
+  --bg:#ffffff; --surface:#f6f8fa; --surface2:#eaeef2; --border:#d0d7de;
+  --text:#1f2328; --dim:#59636e; --accent:#0969da; --green:#1a7f37;
+  --orange:#9a6700; --red:#cf222e; --purple:#8250df;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;
+  padding:28px 18px 70px}
+main{max-width:1000px;margin:0 auto}
+h1{font-size:26px;line-height:1.25;margin:0 0 6px;letter-spacing:-.01em}
+h2{font-size:19px;margin:34px 0 10px;padding-top:14px;border-top:1px solid var(--border)}
+p.sub{color:var(--dim);font-size:13.5px;margin:0 0 18px}
+p{margin:0 0 12px}
+a{color:var(--accent)}
+code{font:12.5px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;
+  background:var(--surface2);border:1px solid var(--border);border-radius:4px;padding:1px 5px}
+figure{margin:18px 0 8px;background:var(--surface);border:1px solid var(--border);
+  border-radius:10px;padding:14px 10px}
+figcaption{color:var(--dim);font-size:12.5px;margin-top:8px;padding:0 6px}
+svg{width:100%;height:auto;display:block}
+svg text{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+svg .m{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+svg a text{text-decoration:underline}
+.t{fill:var(--text)} .d{fill:var(--dim)} .g{fill:var(--green)}
+.r{fill:var(--red)} .o{fill:var(--orange)} .a{fill:var(--accent)} .p{fill:var(--purple)}
+.sf{fill:var(--surface2)} .bs{stroke:var(--border);fill:none}
+.hl{background:var(--surface);border:1px solid var(--border);border-left:3px solid var(--accent);
+  border-radius:6px;padding:12px 14px;margin:16px 0}
+.warn{background:var(--surface);border:1px solid var(--border);border-left:3px solid var(--orange);
+  border-radius:6px;padding:12px 14px;margin:16px 0}
+table{border-collapse:collapse;width:100%;margin:12px 0;font-size:13.5px}
+th,td{border:1px solid var(--border);padding:7px 9px;text-align:left;vertical-align:top}
+th{background:var(--surface2);font-weight:600}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);
+  border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;
+  font:13px/1 ui-monospace,SFMono-Regular,Menlo,monospace;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.18)}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+  document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head>
+<body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+  function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+  function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
+    b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
+      else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+  document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+<main>
+
+<h1>Which process owns each piece of the refit recovery</h1>
+<p class="sub">
+  <a href="https://github.com/NVIDIA-NeMo/RL/pull/3591">PR #3591</a> ·
+  all links pinned at <code>ab0ffe2f</code> ·
+  companion to <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-3590-who-watches-what.html">who watches what (#3590)</a>
+  and <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-3591-how-recovery-flows.html">how recovery flows</a>
+</p>
+
+<p>
+The recovery machinery is spread across three kinds of process, and the piece that does the
+actual rescuing lives in the least obvious one. The ledger of shard health and the decision to
+rebuild are both in the driver, with no GPU. The communicators are in the GPU workers. The
+watchdog that breaks the hang is <strong>a thread inside each GPU worker process</strong>, created
+fresh for every refit and owned by nothing — which is why you cannot find it by looking for a
+long-lived object. The router, despite being the thing that routes traffic away from a dead
+shard, takes no part in the refit at all.
+</p>
+
+<figure>
+<svg viewBox="0 0 980 616" role="img" aria-label="Which process owns each object in the refit recovery path">
+  <text x="0" y="14" class="t" font-size="13.5" font-weight="600">Where each object lives · 2 trainer ranks, 3 generation shards</text>
+
+  <!-- ================= DRIVER ================= -->
+  <rect x="6" y="30" width="968" height="150" rx="8" class="bs"/>
+  <text x="18" y="50" class="t" font-size="12.5" font-weight="600">SingleControllerActor — one process, no GPU</text>
+  <text x="18" y="66" class="d" font-size="11">Everything here runs in one Python process. Nothing below writes to it.</text>
+
+  <rect x="18" y="78" width="222" height="88" rx="5" class="sf"/>
+  <text x="28" y="96" class="t" font-size="11.5" font-weight="600">GenerationFleetHealth</text>
+  <text x="28" y="112" class="d" font-size="10.5">the ledger: state per shard</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/ab0ffe2f83e64ace988c8ef604996b8100b2b46c/nemo_rl/models/generation/fleet_health.py#L192">
+    <text x="28" y="130" class="a m" font-size="10">+ absent_shards()</text></a>
+  <text x="28" y="146" class="g" font-size="10">new here</text>
+  <text x="28" y="160" class="d" font-size="10">rest came with #3590</text>
+
+  <rect x="252" y="78" width="222" height="88" rx="5" class="sf"/>
+  <text x="262" y="96" class="t" font-size="11.5" font-weight="600">WeightSynchronizer</text>
+  <text x="262" y="112" class="d" font-size="10.5">issues the refit</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/ab0ffe2f83e64ace988c8ef604996b8100b2b46c/nemo_rl/weight_sync/interfaces.py#L125">
+    <text x="262" y="130" class="a m" font-size="10">+ reconcile_communicator()</text></a>
+  <text x="262" y="146" class="g" font-size="10">new here — decides to rebuild</text>
+
+  <rect x="486" y="78" width="222" height="88" rx="5" class="sf"/>
+  <text x="496" y="96" class="t" font-size="11.5" font-weight="600">VllmGeneration</text>
+  <text x="496" y="112" class="d" font-size="10.5">handle to the gen actors</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/ab0ffe2f83e64ace988c8ef604996b8100b2b46c/nemo_rl/models/generation/vllm/vllm_generation.py#L280">
+    <text x="496" y="130" class="a m" font-size="10">+ _refit_membership</text></a>
+  <text x="496" y="146" class="g" font-size="10">new — who to dispatch to</text>
+
+  <rect x="720" y="78" width="242" height="88" rx="5" class="sf"/>
+  <text x="730" y="96" class="t" font-size="11.5" font-weight="600">plan_refit_membership()</text>
+  <text x="730" y="112" class="d" font-size="10.5">pure function — no Ray, no torch</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/ab0ffe2f83e64ace988c8ef604996b8100b2b46c/nemo_rl/weight_sync/membership.py#L55">
+    <text x="730" y="130" class="a m" font-size="10">membership.py:55</text></a>
+  <text x="730" y="146" class="g" font-size="10">new file — the rank layout</text>
+
+  <!-- ================= TRAIN WORKER ================= -->
+  <rect x="6" y="196" width="470" height="150" rx="8" class="bs"/>
+  <text x="18" y="216" class="t" font-size="12.5" font-weight="600">Trainer — Ray actor, GPU  (x2)</text>
+
+  <rect x="18" y="228" width="216" height="52" rx="5" class="sf"/>
+  <text x="28" y="246" class="t m" font-size="10.5">self.model_update_group</text>
+  <text x="28" y="262" class="d" font-size="10">StatelessProcessGroup</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/ab0ffe2f83e64ace988c8ef604996b8100b2b46c/nemo_rl/models/policy/workers/base_policy_worker.py#L60">
+    <text x="28" y="276" class="a m" font-size="9.5">base_policy_worker.py:60</text></a>
+
+  <rect x="246" y="228" width="216" height="52" rx="5" class="sf"/>
+  <text x="256" y="246" class="t m" font-size="10.5">self.pp_comm_group</text>
+  <text x="256" y="262" class="d" font-size="10">second group, reshard only</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/ab0ffe2f83e64ace988c8ef604996b8100b2b46c/nemo_rl/distributed/stateless_process_group.py#L115">
+    <text x="256" y="276" class="a m" font-size="9.5">+ abort() — new here</text></a>
+
+  <rect x="18" y="292" width="444" height="44" rx="5" fill="var(--accent)" opacity="0.14"/>
+  <text x="28" y="310" class="a" font-size="11" font-weight="600">RefitAbortWatchdog — a thread, per refit</text>
+  <text x="28" y="326" class="d" font-size="10">created by a `with` block, joined on exit. No attribute holds it.</text>
+
+  <!-- ================= GEN WORKER ================= -->
+  <rect x="490" y="196" width="484" height="150" rx="8" class="bs"/>
+  <text x="502" y="216" class="t" font-size="12.5" font-weight="600">VllmGenerationWorker — Ray actor, GPU  (x3)</text>
+
+  <rect x="502" y="224" width="460" height="112" rx="6" class="bs" stroke-dasharray="4 3"/>
+  <text x="512" y="240" class="d" font-size="11">vLLM TP worker process — reached by collective_rpc</text>
+  <text x="512" y="254" class="t m" font-size="10.5">VllmInternalWorkerExtension</text>
+
+  <rect x="512" y="262" width="212" height="26" rx="4" class="sf"/>
+  <text x="520" y="279" class="t m" font-size="10">self.model_update_group</text>
+  <rect x="734" y="262" width="218" height="26" rx="4" class="sf"/>
+  <text x="742" y="279" class="t m" font-size="10">self.pp_comm_groups {stage: g}</text>
+
+  <rect x="512" y="294" width="440" height="34" rx="5" fill="var(--accent)" opacity="0.14"/>
+  <text x="522" y="311" class="a" font-size="11" font-weight="600">RefitAbortWatchdog — a thread, per refit</text>
+  <text x="522" y="324" class="d" font-size="9.5">two sites, inside this innermost process</text>
+
+  <!-- arrows driver -> workers -->
+  <path d="M 130 180 L 130 196" stroke="var(--green)" fill="none" stroke-width="1.6" marker-end="url(#ar)"/>
+  <path d="M 700 180 L 700 196" stroke="var(--green)" fill="none" stroke-width="1.6" marker-end="url(#ar)"/>
+  <defs><marker id="ar" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto">
+    <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--green)"/></marker></defs>
+  <text x="140" y="193" class="g" font-size="9.5">.remote()</text>
+  <text x="710" y="193" class="g" font-size="9.5">.remote()</text>
+
+  <!-- ================= ROUTER ================= -->
+  <rect x="6" y="362" width="968" height="52" rx="8" class="bs" stroke-dasharray="4 3" opacity="0.6"/>
+  <text x="18" y="382" class="d" font-size="12" font-weight="600">GenerationRouter — its own Ray actor, no GPU</text>
+  <text x="18" y="400" class="d" font-size="11">Routes traffic away from a dead shard; reports failures to the ledger. Nothing in the refit path calls it.</text>
+
+  <!-- ================= the point ================= -->
+  <line x1="6" y1="434" x2="974" y2="434" class="bs"/>
+  <text x="6" y="456" class="t" font-size="12.5" font-weight="600">The watchdog exists in six places and is owned by none of them</text>
+  <text x="6" y="476" class="d" font-size="11.5">It is never stored on an object, so there is no "who owns it". Each refit builds one, arms it, and joins it. Four sites on the</text>
+  <text x="6" y="492" class="d" font-size="11.5">training side, two on the generation side:</text>
+
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/ab0ffe2f83e64ace988c8ef604996b8100b2b46c/nemo_rl/models/policy/workers/megatron_policy_worker.py#L2501">
+    <text x="18" y="514" class="a m" font-size="10">megatron_policy_worker.py:2501</text></a>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/ab0ffe2f83e64ace988c8ef604996b8100b2b46c/nemo_rl/models/policy/workers/megatron_policy_worker.py#L2879">
+    <text x="228" y="514" class="a m" font-size="10">megatron_policy_worker.py:2879</text></a>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/ab0ffe2f83e64ace988c8ef604996b8100b2b46c/nemo_rl/models/policy/workers/dtensor_policy_worker.py#L1922">
+    <text x="438" y="514" class="a m" font-size="10">dtensor_policy_worker.py:1922</text></a>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/ab0ffe2f83e64ace988c8ef604996b8100b2b46c/nemo_rl/models/policy/workers/dtensor_policy_worker_v2.py#L1203">
+    <text x="644" y="514" class="a m" font-size="10">dtensor_policy_worker_v2.py:1203</text></a>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/ab0ffe2f83e64ace988c8ef604996b8100b2b46c/nemo_rl/models/generation/vllm/vllm_backend.py#L785">
+    <text x="18" y="532" class="a m" font-size="10">vllm_backend.py:785</text></a>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/ab0ffe2f83e64ace988c8ef604996b8100b2b46c/nemo_rl/models/generation/vllm/vllm_backend.py#L1167">
+    <text x="228" y="532" class="a m" font-size="10">vllm_backend.py:1167</text></a>
+
+  <text x="6" y="562" class="t" font-size="12" font-weight="600">Reading the box colors</text>
+  <text x="6" y="580" class="d" font-size="11">Solid outline = a real OS process. Dashed = a process inside a process, or a component the refit never touches.</text>
+  <text x="6" y="596" class="d" font-size="11">Blue fill = added by this PR. Green text = a method or field this PR adds to something that already existed.</text>
+  <text x="6" y="612" class="d" font-size="11">Green arrow = a Ray call from the driver into a worker. The ledger is written only in the driver; no GPU worker writes to it.</text>
+</svg>
+<figcaption>
+  Three process kinds, and a fourth thing that is not a process at all — the watchdog thread.
+</figcaption>
+</figure>
+
+<h2>Why the watchdog cannot live in the driver</h2>
+
+<p>
+This is the design choice that makes the rest work, and it is worth being explicit about because
+the driver is where you would naturally put a timeout.
+</p>
+
+<p>
+The driver cannot tell a slow refit from a wedged one. From outside, both look like
+<code>ray.get</code> not returning yet, and a large model's refit legitimately takes seconds. The
+driver also cannot break the hang even if it guessed right: freeing a rank stuck in NCCL means
+calling <code>abort()</code> on <em>that rank's own communicator object</em>, which only exists
+inside that worker's process.
+</p>
+
+<p>
+And the stuck thread cannot rescue itself — it is blocked inside a NCCL call and will not run
+another line of Python until that call returns. So the only place a clock can usefully sit is
+<strong>a second thread in the same process</strong>: close enough to touch the communicator,
+separate enough to still be running. That is what
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/ab0ffe2f83e64ace988c8ef604996b8100b2b46c/nemo_rl/distributed/refit_watchdog.py#L57"><code>RefitAbortWatchdog</code></a>
+is, and why it is created at the call site rather than owned by anything.
+</p>
+
+<table>
+<tr><th style="width:30%">Question</th><th>Answer</th></tr>
+<tr><td>Does it live in the driver?</td><td><strong>No.</strong> Six worker-side sites, four training and two generation.</td></tr>
+<tr><td>Does <code>VllmGeneration</code> own it?</td><td><strong>No.</strong> That object is driver-side and holds the membership, not the watchdog.</td></tr>
+<tr><td>Does the generation Ray actor own it?</td><td><strong>Not quite.</strong> It is one level deeper — in the vLLM TP worker process, inside <code>VllmInternalWorkerExtension</code>.</td></tr>
+<tr><td>Does the router own it?</td><td><strong>No.</strong> The router is not in the refit path at all.</td></tr>
+<tr><td>What holds a reference?</td><td><strong>Nothing.</strong> It is a <code>with</code>-block local, joined when the block exits.</td></tr>
+</table>
+
+<h2>Does it work?</h2>
+
+<p>
+The one thing this arrangement depends on is that a second thread calling
+<code>ncclCommAbort</code> can actually free a thread already blocked inside a collective. That was
+measured: on 2×A6000, with a peer <code>SIGKILL</code>ed mid-broadcast, the blocked survivor was
+released <strong>0.15 s</strong> after another thread called <code>abort()</code>. If that had not
+worked, the in-process thread design would have bought nothing.
+</p>
+
+<p>
+End to end, no CI job has watched this recover. The recovery harness needs 3 GPUs and both lanes
+have 2, so on the PR's own green run every registered variant printed
+<code>[recovery] SKIP: … found 2.</code> and exited. The feature was exercised by hand on larger
+hardware, so the evidence exists — it is just not in CI, and a green lane says nothing about it.
+</p>
+
+<div class="warn">
+<strong>One consequence of the watchdog being per-process.</strong> It can only abort communicators
+it was handed. On the reshard path the transfer also creates <em>split child</em> communicators, and
+those are never passed to it — so a rank blocked on a child is not freed, and the run wedges even
+though the watchdog fired. That is
+<a href="https://github.com/NVIDIA-NeMo/RL/pull/3591#pullrequestreview-5003440464">raised on the PR</a>;
+the fix is to release the children in <code>abort()</code> before the parent goes.
+</div>
+
+<p style="color:var(--dim);font-size:13px;margin-top:22px">
+Read in order:
+<a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-3590-who-watches-what.html">who watches what</a> (#3590, the ledger) →
+<strong>this page</strong> (where the #3591 pieces live) →
+<a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-3591-how-recovery-flows.html">how recovery flows</a> (what happens, in order).
+</p>
+
+</main>
+</body>
+</html>
