@@ -1,0 +1,242 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Which generation failures the run survives, and which end it</title>
+<style>
+:root{
+  --bg:#0d1117; --surface:#161b22; --surface2:#1c2128; --border:#30363d;
+  --text:#e6edf3; --dim:#8b949e; --accent:#58a6ff; --green:#3fb950;
+  --orange:#d29922; --red:#f85149; --purple:#bc8cff;
+}
+:root[data-theme="light"]{
+  --bg:#ffffff; --surface:#f6f8fa; --surface2:#eaeef2; --border:#d0d7de;
+  --text:#1f2328; --dim:#59636e; --accent:#0969da; --green:#1a7f37;
+  --orange:#9a6700; --red:#cf222e; --purple:#8250df;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;
+  padding:28px 18px 70px}
+main{max-width:1000px;margin:0 auto}
+h1{font-size:26px;line-height:1.25;margin:0 0 6px;letter-spacing:-.01em}
+h2{font-size:19px;margin:34px 0 10px;padding-top:14px;border-top:1px solid var(--border)}
+p.sub{color:var(--dim);font-size:13.5px;margin:0 0 18px}
+p{margin:0 0 12px}
+a{color:var(--accent)}
+code{font:12.5px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;
+  background:var(--surface2);border:1px solid var(--border);border-radius:4px;padding:1px 5px}
+figure{margin:18px 0 8px;background:var(--surface);border:1px solid var(--border);
+  border-radius:10px;padding:14px 10px}
+figcaption{color:var(--dim);font-size:12.5px;margin-top:8px;padding:0 6px}
+svg{width:100%;height:auto;display:block}
+svg text{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+svg .m{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+svg a text{text-decoration:underline}
+.t{fill:var(--text)} .d{fill:var(--dim)} .g{fill:var(--green)}
+.r{fill:var(--red)} .o{fill:var(--orange)} .a{fill:var(--accent)}
+.sf{fill:var(--surface2)} .bs{stroke:var(--border);fill:none}
+.hl{background:var(--surface);border:1px solid var(--border);border-left:3px solid var(--accent);
+  border-radius:6px;padding:12px 14px;margin:16px 0}
+.warn{background:var(--surface);border:1px solid var(--border);border-left:3px solid var(--orange);
+  border-radius:6px;padding:12px 14px;margin:16px 0}
+table{border-collapse:collapse;width:100%;margin:12px 0;font-size:13px}
+th,td{border:1px solid var(--border);padding:6px 8px;text-align:left;vertical-align:top}
+th{background:var(--surface2);font-weight:600}
+td.ok{color:var(--green);font-weight:600;white-space:nowrap}
+td.no{color:var(--red);font-weight:600;white-space:nowrap}
+td.mid{color:var(--orange);font-weight:600;white-space:nowrap}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);
+  border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;
+  font:13px/1 ui-monospace,SFMono-Regular,Menlo,monospace;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.18)}
+nav.chain{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 6px;padding:0}
+nav.chain a,nav.chain span{display:inline-block;padding:5px 11px;border:1px solid var(--border);
+  border-radius:20px;background:var(--surface);text-decoration:none;color:var(--accent);
+  font-size:12.5px;line-height:1.3;white-space:nowrap}
+nav.chain a:hover{background:var(--surface2)}
+nav.chain span.here{background:var(--accent);color:var(--bg);border-color:var(--accent);font-weight:600}
+p.chainnote{color:var(--dim);font-size:12px;margin:0 0 18px}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+  document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head>
+<body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+  function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+  function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
+    b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
+      else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+  document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+<main>
+
+<h1>Which generation failures the run survives, and which end it</h1>
+<p class="sub">
+  <a href="https://github.com/NVIDIA-NeMo/RL/pull/3591">PR #3591</a> ·
+  with <a href="https://github.com/NVIDIA-NeMo/RL/pull/3589">#3589</a> and
+  <a href="https://github.com/NVIDIA-NeMo/RL/pull/3590">#3590</a> ·
+  links pinned at <code>ab0ffe2f</code>
+</p>
+
+
+<nav class="chain">
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-3590-who-watches-what.html">1 · who watches what</a>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-3591-where-it-runs.html">2 · where it runs</a>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-3591-how-recovery-flows.html">3 · how recovery flows</a>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-3591-why-rebuild-not-shrink.html">4 · why rebuild, not shrink</a>
+  <span class="here">5 · what survives</span>
+</nav>
+<p class="chainnote">Five pages, one question each — this one: which failures recover.</p>
+
+<p>
+Page 3 walks one failure end to end. This one asks the harder question: across every way a
+generation shard can go wrong, which ones does the run actually survive? The answer turns on a
+single distinction — <strong>was the shard already known to be gone before the weight sync
+started, or did it go wrong during it?</strong> Those two cases take completely different routes,
+and only the first works on a default config.
+</p>
+
+<figure>
+<svg viewBox="0 0 980 470" role="img" aria-label="Two recovery routes and where each one fails">
+  <text x="0" y="15" class="t" font-size="13.5" font-weight="600">Two routes, decided by when the shard was noticed</text>
+
+  <!-- ROUTE A -->
+  <rect x="0" y="34" width="470" height="196" rx="8" class="bs" stroke="var(--green)"/>
+  <text x="14" y="56" class="g" font-size="12.5" font-weight="600">A · noticed BEFORE the weight sync</text>
+  <text x="14" y="74" class="d" font-size="11">A probe or a failed request already marked it DEAD.</text>
+
+  <rect x="14" y="86" width="442" height="26" rx="4" class="sf"/>
+  <text x="24" y="103" class="t m" font-size="10.5">absent_shards() → {2}</text>
+  <rect x="14" y="118" width="442" height="26" rx="4" class="sf"/>
+  <text x="24" y="135" class="t m" font-size="10.5">reconcile at top of _sync_weights → rebuild smaller</text>
+  <rect x="14" y="150" width="442" height="26" rx="4" class="sf"/>
+  <text x="24" y="167" class="t m" font-size="10.5">broadcast over survivors only</text>
+
+  <text x="14" y="196" class="g" font-size="12" font-weight="600">Nobody was ever blocked.</text>
+  <text x="14" y="214" class="d" font-size="11">No watchdog needed. Works on defaults today.</text>
+
+  <!-- ROUTE B -->
+  <rect x="500" y="34" width="470" height="196" rx="8" class="bs" stroke="var(--orange)"/>
+  <text x="514" y="56" class="o" font-size="12.5" font-weight="600">B · went wrong DURING the weight sync</text>
+  <text x="514" y="74" class="d" font-size="11">Every other rank is already blocked inside NCCL.</text>
+
+  <rect x="514" y="86" width="442" height="26" rx="4" class="sf"/>
+  <text x="524" y="103" class="t m" font-size="10.5">watchdog deadline → abort() releases the ranks</text>
+  <rect x="514" y="118" width="442" height="26" rx="4" class="sf"/>
+  <text x="524" y="135" class="t m" font-size="10.5">re-probe: who is gone?</text>
+  <rect x="514" y="150" width="442" height="26" rx="4" class="sf"/>
+  <text x="524" y="167" class="t m" font-size="10.5">rebuild smaller, retry once</text>
+
+  <text x="514" y="196" class="o" font-size="12" font-weight="600">Needs two things it may not have.</text>
+  <text x="514" y="214" class="d" font-size="11">An armed watchdog, and a shard it can name.</text>
+
+  <!-- the two failure points -->
+  <line x1="0" y1="250" x2="978" y2="250" class="bs"/>
+  <text x="0" y="272" class="t" font-size="12.5" font-weight="600">Route B has two ways to stop before it recovers</text>
+
+  <rect x="0" y="286" width="470" height="120" rx="7" fill="var(--red)" opacity="0.09"/>
+  <text x="14" y="308" class="r" font-size="12" font-weight="600">1 · The watchdog is not armed</text>
+  <text x="14" y="326" class="d" font-size="11">refit_timeout_s defaults to null, so no thread starts.</text>
+  <text x="14" y="342" class="d" font-size="11">Nothing releases the blocked ranks — and a Ray actor</text>
+  <text x="14" y="358" class="d" font-size="11">stuck in NCCL cannot accept the rebuild call either.</text>
+  <text x="14" y="380" class="r" font-size="11" font-weight="600">The recovery itself wedges. Run ends on the</text>
+  <text x="14" y="396" class="r" font-size="11" font-weight="600">stall watchdog, ~600 s later.</text>
+
+  <rect x="500" y="286" width="470" height="120" rx="7" fill="var(--red)" opacity="0.09"/>
+  <text x="514" y="308" class="r" font-size="12" font-weight="600">2 · No shard can be named</text>
+  <text x="514" y="326" class="d" font-size="11">The re-probe asks is_alive(), which returns True</text>
+  <text x="514" y="342" class="d" font-size="11">from the Ray actor without touching the engine. A</text>
+  <text x="514" y="358" class="d" font-size="11">wedged engine answers it and stays HEALTHY.</text>
+  <text x="514" y="380" class="r" font-size="11" font-weight="600">Nothing is absent, so there is nothing to</text>
+  <text x="514" y="396" class="r" font-size="11" font-weight="600">rebuild over. The run raises and ends.</text>
+
+  <text x="0" y="432" class="d" font-size="11.5">Both are on the reactive route only. Route A is unaffected by either, which is why a shard that dies quietly between</text>
+  <text x="0" y="448" class="d" font-size="11.5">steps is handled cleanly while one that dies mid-refit — the harder case, and the reason the PR exists — is the fragile one.</text>
+  <text x="0" y="464" class="d" font-size="11">Green = recovers · orange = conditional · red = the run ends</text>
+</svg>
+<figcaption>
+  The distinction that decides everything is <em>when</em>, not <em>how badly</em>.
+</figcaption>
+</figure>
+
+<h2>Every failure mode, and what happens</h2>
+
+<table>
+<tr><th style="width:23%">What fails</th><th style="width:26%">How it is noticed</th><th style="width:11%">Survives?</th><th>What happens</th></tr>
+
+<tr><td><strong>Shard process dies between refits</strong></td>
+<td>probe gets <code>RayActorError</code> → <a href="https://github.com/NVIDIA-NeMo/RL/blob/ab0ffe2f83e64ace988c8ef604996b8100b2b46c/nemo_rl/models/generation/fleet_health.py#L276"><code>record_actor_death</code></a></td>
+<td class="ok">yes</td>
+<td>Route A. Rebuilt before the next broadcast. <span style="color:var(--dim)">detect #3590 · verdict + rebuild #3591</span></td></tr>
+
+<tr><td><strong>Shard process dies during a refit</strong></td>
+<td><code>ray.get</code> raises <code>RayActorError</code></td>
+<td class="mid">only if armed</td>
+<td>Route B. Works when <code>refit_timeout_s</code> is set; otherwise the recovery wedges. <span style="color:var(--dim)">#3591</span></td></tr>
+
+<tr><td><strong>Engine wedged, condemned before a refit</strong></td>
+<td>generation times out (900 s) → <a href="https://github.com/NVIDIA-NeMo/RL/blob/ab0ffe2f83e64ace988c8ef604996b8100b2b46c/nemo_rl/models/generation/vllm/vllm_generation.py#L976"><code>report_failure</code></a> ×3</td>
+<td class="mid">eventually</td>
+<td>Route A, but condemnation takes up to 45 min — and a success resets the streak, so an intermittent engine may never reach it. <span style="color:var(--dim)">#3591</span></td></tr>
+
+<tr><td><strong>Engine wedged, reaches a refit first</strong></td>
+<td>watchdog aborts; re-probe says healthy</td>
+<td class="no">no</td>
+<td>Run raises. The likely path, since refits run every step and condemnation takes minutes. <span style="color:var(--dim)">raised in review</span></td></tr>
+
+<tr><td><strong>Refit hangs, default config</strong></td>
+<td>nothing, until the stall watchdog</td>
+<td class="no">no</td>
+<td>No watchdog thread exists. Run ends ~600 s later with a stall message. <span style="color:var(--dim)">raised in review</span></td></tr>
+
+<tr><td><strong>Second shard dies during the retry</strong></td>
+<td>the retry raises</td>
+<td class="no">no</td>
+<td>Deliberate: one retry only, because retrying forever would recreate the wedge. The second shard is never even condemned — the probe ran before the retry. If you see this, something bigger is wrong. <span style="color:var(--dim)">#3591, intended</span></td></tr>
+
+<tr><td><strong>Fleet drops below <code>min_healthy_shards</code></strong></td>
+<td><a href="https://github.com/NVIDIA-NeMo/RL/blob/ab0ffe2f83e64ace988c8ef604996b8100b2b46c/nemo_rl/models/generation/fleet_health.py#L423"><code>raise_if_exhausted</code></a></td>
+<td class="no">no</td>
+<td>Correct outcome — a run with too few shards cannot generate. <span style="color:var(--dim)">#3590, intended</span></td></tr>
+
+<tr><td><strong>A trainer dies</strong></td>
+<td><code>RayActorError</code></td>
+<td class="no">no</td>
+<td>No remediation. <a href="https://github.com/NVIDIA-NeMo/RL/blob/ab0ffe2f83e64ace988c8ef604996b8100b2b46c/nemo_rl/weight_sync/membership.py#L34">Trainers are never excluded</a> from the group — this whole stack is about generation shards. <span style="color:var(--dim)">out of scope</span></td></tr>
+</table>
+
+<div class="hl">
+<strong>Why "trainers are never excluded" is the right call, not an omission.</strong> Dropping a
+generation shard costs throughput. Dropping a training rank changes the parallelism the model was
+sharded for, so the optimizer state and the model layout no longer match the world — you cannot
+carry on without rebuilding the trainer itself. Keeping rank 0 a trainer also keeps the broadcast
+root stable across every rebuild.
+</div>
+
+<h2>Does it work?</h2>
+
+<p>
+The one measured number is the abort: on 2×A6000, a survivor blocked in a collective was released
+<strong>0.15 s</strong> after another thread called <code>abort()</code>. Everything on Route B
+depends on that being true, and it is.
+</p>
+
+<p>
+Nothing in this table has been exercised end to end by CI. The recovery harness needs 3 GPUs and
+both lanes have 2, so on the PR's own green run every registered variant printed
+<code>[recovery] SKIP: … found 2.</code> and exited. Route A and the hard-death half of Route B were
+exercised by hand on larger hardware; the wedged-engine rows have not been run anywhere, which is
+consistent with them being the rows that do not work.
+</p>
+
+<div class="warn">
+<strong>The short version if you are configuring a run.</strong> Set
+<code>refit_timeout_s</code>. Without it you get detection and quarantine but no refit recovery at
+all — and the failure mode is not a clean error, it is the recovery deadlocking behind the ranks it
+was supposed to rescue. A value around 300 s is ~150× a healthy refit, so it cannot fire early.
+</div>
+
+</main>
+</body>
+</html>
