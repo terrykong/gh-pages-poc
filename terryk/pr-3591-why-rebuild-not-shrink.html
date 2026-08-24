@@ -1,0 +1,208 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Why the refit group is rebuilt instead of shrunk</title>
+<style>
+:root{
+  --bg:#0d1117; --surface:#161b22; --surface2:#1c2128; --border:#30363d;
+  --text:#e6edf3; --dim:#8b949e; --accent:#58a6ff; --green:#3fb950;
+  --orange:#d29922; --red:#f85149; --purple:#bc8cff;
+}
+:root[data-theme="light"]{
+  --bg:#ffffff; --surface:#f6f8fa; --surface2:#eaeef2; --border:#d0d7de;
+  --text:#1f2328; --dim:#59636e; --accent:#0969da; --green:#1a7f37;
+  --orange:#9a6700; --red:#cf222e; --purple:#8250df;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;
+  padding:28px 18px 70px}
+main{max-width:1000px;margin:0 auto}
+h1{font-size:26px;line-height:1.25;margin:0 0 6px;letter-spacing:-.01em}
+h2{font-size:19px;margin:34px 0 10px;padding-top:14px;border-top:1px solid var(--border)}
+p.sub{color:var(--dim);font-size:13.5px;margin:0 0 18px}
+p{margin:0 0 12px}
+a{color:var(--accent)}
+code{font:12.5px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;
+  background:var(--surface2);border:1px solid var(--border);border-radius:4px;padding:1px 5px}
+figure{margin:18px 0 8px;background:var(--surface);border:1px solid var(--border);
+  border-radius:10px;padding:14px 10px}
+figcaption{color:var(--dim);font-size:12.5px;margin-top:8px;padding:0 6px}
+svg{width:100%;height:auto;display:block}
+svg text{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+svg .m{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+svg a text{text-decoration:underline}
+.t{fill:var(--text)} .d{fill:var(--dim)} .g{fill:var(--green)}
+.r{fill:var(--red)} .o{fill:var(--orange)} .a{fill:var(--accent)}
+.sf{fill:var(--surface2)} .bs{stroke:var(--border);fill:none}
+.hl{background:var(--surface);border:1px solid var(--border);border-left:3px solid var(--accent);
+  border-radius:6px;padding:12px 14px;margin:16px 0}
+.warn{background:var(--surface);border:1px solid var(--border);border-left:3px solid var(--orange);
+  border-radius:6px;padding:12px 14px;margin:16px 0}
+table{border-collapse:collapse;width:100%;margin:12px 0;font-size:13.5px}
+th,td{border:1px solid var(--border);padding:7px 9px;text-align:left;vertical-align:top}
+th{background:var(--surface2);font-weight:600}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);
+  border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;
+  font:13px/1 ui-monospace,SFMono-Regular,Menlo,monospace;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.18)}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+  document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head>
+<body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+  function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+  function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
+    b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
+      else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+  document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+<main>
+
+<h1>Why the refit group is rebuilt instead of shrunk</h1>
+<p class="sub">
+  <a href="https://github.com/NVIDIA-NeMo/RL/pull/3591">PR #3591</a> ·
+  links pinned at <code>ab0ffe2f</code> and <a href="https://github.com/NVIDIA/nccl/tree/v2.30.7-1">nccl v2.30.7-1</a> ·
+  companion to <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-3591-how-recovery-flows.html">how recovery flows</a>
+</p>
+
+<p>
+NCCL can resize a communicator in place. The pinned version declares
+<a href="https://github.com/NVIDIA/nccl/blob/v2.30.7-1/src/nccl.h.in#L239"><code>ncclCommShrink</code></a>
+and <a href="https://github.com/NVIDIA/nccl/blob/v2.30.7-1/src/nccl.h.in#L256"><code>ncclCommGrow</code></a>,
+so "drop the dead rank and carry on" is a real option, not something the library refuses. This PR
+throws the communicator away and builds a new one instead. That looks like the more expensive
+choice, and the reason it is right has nothing to do with communicators — it is about a plan that
+lives beside them.
+</p>
+
+<figure>
+<svg viewBox="0 0 980 396" role="img" aria-label="Shrinking the communicator without regenerating the refit plan orphans slices">
+  <text x="0" y="15" class="t" font-size="13.5" font-weight="600">One parameter, split across 3 generation shards. Shard 0 dies.</text>
+  <text x="0" y="33" class="d" font-size="11.5">The reshard transport does not broadcast the same bytes to everyone — each shard receives its own slice.</text>
+
+  <!-- BEFORE -->
+  <text x="0" y="62" class="t" font-size="12" font-weight="600">The plan, made once at setup</text>
+  <rect x="0" y="72" width="300" height="70" rx="6" class="sf"/>
+  <text x="12" y="92" class="d m" font-size="10.5">slice A  →  shard 0</text>
+  <text x="12" y="110" class="d m" font-size="10.5">slice B  →  shard 1</text>
+  <text x="12" y="128" class="d m" font-size="10.5">slice C  →  shard 2</text>
+  <text x="0" y="160" class="d" font-size="10.5">every destination derived from gen_world_size = 3</text>
+
+  <!-- arrow down -->
+  <path d="M 150 168 L 150 190" stroke="var(--red)" fill="none" stroke-width="1.6" marker-end="url(#ax)"/>
+  <defs><marker id="ax" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto">
+    <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--red)"/></marker></defs>
+  <text x="160" y="184" class="r" font-size="11">shard 0 dies</text>
+
+  <!-- PATH A: shrink only -->
+  <rect x="0" y="200" width="470" height="180" rx="8" class="bs" stroke="var(--red)"/>
+  <text x="14" y="222" class="r" font-size="12.5" font-weight="600">Shrink the communicator only</text>
+  <text x="14" y="240" class="d" font-size="11">The group is now 2 ranks. The plan is untouched.</text>
+
+  <rect x="14" y="252" width="290" height="70" rx="6" class="sf"/>
+  <text x="26" y="272" class="r m" font-size="10.5">slice A  →  shard 0   (nobody)</text>
+  <text x="26" y="290" class="d m" font-size="10.5">slice B  →  shard 1</text>
+  <text x="26" y="308" class="d m" font-size="10.5">slice C  →  shard 2</text>
+
+  <text x="14" y="342" class="r" font-size="11.5" font-weight="600">Slice A is never written. No error.</text>
+  <text x="14" y="360" class="d" font-size="11">A stale plan is still a valid plan — the survivors come back</text>
+  <text x="14" y="374" class="d" font-size="11">holding weights nobody ever sent them.</text>
+
+  <!-- PATH B: rebuild -->
+  <rect x="500" y="200" width="470" height="180" rx="8" class="bs" stroke="var(--green)"/>
+  <text x="514" y="222" class="g" font-size="12.5" font-weight="600">Rebuild, and regenerate the plan</text>
+  <text x="514" y="240" class="d" font-size="11">New group over the survivors, new destinations.</text>
+
+  <rect x="514" y="252" width="290" height="70" rx="6" class="sf"/>
+  <text x="526" y="272" class="g m" font-size="10.5">slice A' →  shard 1</text>
+  <text x="526" y="290" class="g m" font-size="10.5">slice B' →  shard 2</text>
+  <text x="526" y="308" class="d m" font-size="10.5">gen_world_size = 2</text>
+
+  <text x="514" y="342" class="g" font-size="11.5" font-weight="600">Every slice has an owner that exists.</text>
+  <text x="514" y="360" class="d" font-size="11">The parameter is re-split for the fleet that is actually there.</text>
+</svg>
+<figcaption>
+  Shrinking fixes who is in the group. It does not fix who each slice was addressed to.
+</figcaption>
+</figure>
+
+<h2>Two decisions, forced by different things</h2>
+
+<p>
+These get run together in conversation, so it is worth separating them. Only one of them is a
+judgement call.
+</p>
+
+<table>
+<tr><th style="width:26%">Decision</th><th style="width:16%">Forced or chosen?</th><th>Why</th></tr>
+<tr>
+  <td><strong>Break the hang with <code>abort()</code>, not <code>destroy()</code></strong></td>
+  <td><strong>Forced</strong></td>
+  <td><code>destroy</code> is itself a collective that every rank has to call, which is exactly what a dead rank cannot do. <code>abort</code> ends in-flight work whether or not the peers are alive, so it is the only one that works on a path built for dead peers. See <a href="https://github.com/NVIDIA-NeMo/RL/blob/ab0ffe2f83e64ace988c8ef604996b8100b2b46c/nemo_rl/distributed/stateless_process_group.py#L115"><code>StatelessProcessGroup.abort</code></a>.</td>
+</tr>
+<tr>
+  <td><strong>Restore service by rebuilding, not shrinking</strong></td>
+  <td><strong>Chosen</strong></td>
+  <td>NCCL offers both. The plan has to be regenerated on any membership change regardless, and once you are doing that, a second way to change membership buys nothing.</td>
+</tr>
+</table>
+
+<p>
+The deciding reason is the figure above.
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/ab0ffe2f83e64ace988c8ef604996b8100b2b46c/nemo_rl/weight_sync/nccl_reshard_utils.py#L562"><code>prepare_nccl_reshard_refit_info</code></a>
+derives every parameter's destination from <code>gen_world_size</code>. Change the fleet and every
+destination changes with it. Shrinking the communicator alone does not reduce the number of
+receivers — it orphans the slices the dead shard owned, and the run continues with weights that
+were never written. Silently, which is the part that matters.
+</p>
+
+<div class="hl">
+<strong>Two smaller reasons, both minor next to that one.</strong> Restart time is dominated by the
+minutes an engine takes to reload a model, so the rendezvous a shrink would save is noise. And
+because the rebuild shares
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/ab0ffe2f83e64ace988c8ef604996b8100b2b46c/nemo_rl/weight_sync/nccl_reshard_weight_synchronizer.py#L158"><code>_build(membership)</code></a>
+with the very first build, every normal run exercises the recovery arithmetic — so the code that
+only matters after a failure is not code that only runs after a failure.
+</div>
+
+<h2>Does it work?</h2>
+
+<p>
+The half that is <em>forced</em> is the half that was measured. On 2×A6000, with a peer
+<code>SIGKILL</code>ed mid-broadcast, a survivor blocked in the collective was released
+<strong>0.15 s</strong> after another thread called <code>abort()</code>. That is the fact the whole
+design rests on: if aborting from a second thread had not freed a blocked collective, none of the
+rest would matter.
+</p>
+
+<p>
+The half that is <em>chosen</em> has not been compared against the alternative — nobody has built
+the shrink version and measured it, and given the argument above nobody should need to. What has
+not been shown end to end is the rebuild itself under CI: the recovery harness needs 3 GPUs and
+both lanes have 2, so those variants skip. The rebuild has been exercised by hand on larger
+hardware.
+</p>
+
+<div class="warn">
+<strong>One thing the shrink-versus-rebuild framing hides.</strong> Both options assume the abort
+actually freed every rank. On the reshard path the transfer also creates <em>split child</em>
+communicators, and NCCL does not pass an abort down to them — so a rank blocked on a child stays
+blocked whichever option you pick. That is
+<a href="https://github.com/NVIDIA-NeMo/RL/pull/3591#pullrequestreview-5003440464">raised on the PR</a>,
+and it has to be fixed before either design is safe.
+</div>
+
+<p style="color:var(--dim);font-size:13px;margin-top:22px">
+Read in order:
+<a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-3590-who-watches-what.html">who watches what</a> (#3590) →
+<a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-3591-where-it-runs.html">where it runs</a> →
+<a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-3591-how-recovery-flows.html">how recovery flows</a> →
+<strong>this page</strong>.
+</p>
+
+</main>
+</body>
+</html>

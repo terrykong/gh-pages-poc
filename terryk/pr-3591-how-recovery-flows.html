@@ -79,6 +79,48 @@ inside the stuck worker, breaks it, and rebuilds the communicator over whoever i
 </p>
 
 <figure>
+<svg viewBox="0 0 980 250" role="img" aria-label="Five ranks in a broadcast, one dead, the rest blocked forever">
+  <text x="0" y="15" class="t" font-size="13.5" font-weight="600">The wedge: one rank leaves, everybody waits</text>
+  <text x="0" y="33" class="d" font-size="11.5">The refit group is built once at setup over every training and inference rank. World = 2 + 3 = 5.</text>
+
+  <rect x="0" y="48" width="186" height="60" rx="6" fill="var(--green)" opacity="0.16"/>
+  <text x="12" y="68" class="t" font-size="11.5" font-weight="600">rank 0 · trainer</text>
+  <text x="12" y="85" class="d" font-size="10.5">broadcast root</text>
+  <text x="12" y="100" class="g" font-size="10.5">waiting…</text>
+
+  <rect x="198" y="48" width="186" height="60" rx="6" fill="var(--green)" opacity="0.16"/>
+  <text x="210" y="68" class="t" font-size="11.5" font-weight="600">rank 1 · trainer</text>
+  <text x="210" y="100" class="g" font-size="10.5">waiting…</text>
+
+  <rect x="396" y="48" width="186" height="60" rx="6" fill="var(--red)" opacity="0.2"/>
+  <text x="408" y="68" class="t" font-size="11.5" font-weight="600">rank 2 · gen shard 0</text>
+  <text x="408" y="85" class="r" font-size="10.5" font-weight="600">process gone ✕</text>
+  <text x="408" y="100" class="d" font-size="10.5">never calls broadcast</text>
+
+  <rect x="594" y="48" width="186" height="60" rx="6" fill="var(--green)" opacity="0.16"/>
+  <text x="606" y="68" class="t" font-size="11.5" font-weight="600">rank 3 · gen shard 1</text>
+  <text x="606" y="100" class="g" font-size="10.5">waiting…</text>
+
+  <rect x="792" y="48" width="186" height="60" rx="6" fill="var(--green)" opacity="0.16"/>
+  <text x="804" y="68" class="t" font-size="11.5" font-weight="600">rank 4 · gen shard 2</text>
+  <text x="804" y="100" class="g" font-size="10.5">waiting…</text>
+
+  <line x1="0" y1="126" x2="978" y2="126" stroke="var(--red)" stroke-width="1.4" stroke-dasharray="5 4"/>
+  <text x="0" y="146" class="t" font-size="12">every rank must call it —</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/ab0ffe2f83e64ace988c8ef604996b8100b2b46c/nemo_rl/utils/packed_tensor.py#L111">
+    <text x="176" y="146" class="a m" font-size="10.5">packed_tensor.py:111</text></a>
+
+  <text x="0" y="176" class="r" font-size="14" font-weight="600">The broadcast never returns.</text>
+  <text x="0" y="198" class="d" font-size="12">No exception. No error. No CPU burn. Ray reports every actor healthy.</text>
+  <text x="0" y="220" class="d" font-size="12">Nothing upstream can tell this apart from a refit that is merely slow — which is why the timeout has to</text>
+  <text x="0" y="236" class="d" font-size="12">live inside the stuck process, not in the driver.</text>
+</svg>
+<figcaption>
+  Before this PR the run stayed here. One recorded case sat for 33 minutes before anyone noticed.
+</figcaption>
+</figure>
+
+<figure>
 <svg viewBox="0 0 980 796" role="img" aria-label="Timeline of a refit interrupted by a dead shard and recovered">
   <text x="0" y="16" class="t" font-size="13.5" font-weight="600">One refit, one dead shard, in order</text>
   <text x="0" y="34" class="d" font-size="11.5">2 trainer ranks · 3 generation shards · shard 0 dies · refit_timeout_s: 30</text>
@@ -161,9 +203,27 @@ inside the stuck worker, breaks it, and rebuilds the communicator over whoever i
   <text x="46" y="492" class="d" font-size="11">absent = {0}. Survivors are <tspan font-style="italic">compacted to a contiguous prefix</tspan>, not left with a hole.</text>
   <a href="https://github.com/NVIDIA-NeMo/RL/blob/ab0ffe2f83e64ace988c8ef604996b8100b2b46c/nemo_rl/weight_sync/membership.py#L55">
     <text x="46" y="508" class="a m" font-size="10.5">plan_refit_membership · membership.py:55</text></a>
-  <rect x="452" y="466" width="516" height="46" rx="5" class="sf"/>
-  <text x="466" y="484" class="d m" font-size="10.5">before:  shard 0 → rank 2   shard 1 → rank 3   shard 2 → rank 4     world 5</text>
-  <text x="466" y="502" class="t m" font-size="10.5">after:   <tspan class="r">✕</tspan>              shard 1 → rank 2   shard 2 → rank 3     world 4</text>
+  <rect x="452" y="460" width="516" height="56" rx="5" class="sf"/>
+  <text x="462" y="476" class="d" font-size="9.5">before</text>
+  <text x="504" y="476" class="d m" font-size="10">0 tr</text>
+  <text x="546" y="476" class="d m" font-size="10">1 tr</text>
+  <text x="590" y="476" class="r m" font-size="10">2 sh0</text>
+  <text x="648" y="476" class="d m" font-size="10">3 sh1</text>
+  <text x="706" y="476" class="d m" font-size="10">4 sh2</text>
+  <text x="790" y="476" class="d m" font-size="10">world 5</text>
+
+  <path d="M 660 481 L 610 494" stroke="var(--accent)" fill="none" stroke-width="1.2" marker-end="url(#a2)"/>
+  <path d="M 718 481 L 668 494" stroke="var(--accent)" fill="none" stroke-width="1.2" marker-end="url(#a2)"/>
+  <defs><marker id="a2" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="4" markerHeight="4" orient="auto">
+    <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--accent)"/></marker></defs>
+
+  <text x="462" y="508" class="d" font-size="9.5">after</text>
+  <text x="504" y="508" class="d m" font-size="10">0 tr</text>
+  <text x="546" y="508" class="d m" font-size="10">1 tr</text>
+  <text x="590" y="508" class="g m" font-size="10">2 sh1</text>
+  <text x="648" y="508" class="g m" font-size="10">3 sh2</text>
+  <text x="706" y="508" class="r m" font-size="10">✕</text>
+  <text x="790" y="508" class="g m" font-size="10">world 4</text>
 
   <!-- 7 -->
   <circle cx="24" cy="556" r="11" fill="var(--accent)" opacity="0.25" stroke="var(--accent)"/>
@@ -277,10 +337,11 @@ with a two-line fix: hand the children to the same cleanup before aborting the p
 </div>
 
 <p style="color:var(--dim);font-size:13px;margin-top:22px">
-Read next: <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-3590-who-watches-what.html">who watches what</a>
-(#3590 — the ledger these steps read) ·
-<a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-3591-rebuild-refit-group.html">how the rebuild works</a>
-(the mechanics of step 7).
+Read in order:
+<a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-3590-who-watches-what.html">who watches what</a> (#3590, the ledger) →
+<a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-3591-where-it-runs.html">where it runs</a> (which process owns what) →
+<strong>this page</strong> →
+<a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-3591-why-rebuild-not-shrink.html">why rebuild, not shrink</a> (the design choice behind step 7).
 </p>
 
 </main>
