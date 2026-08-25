@@ -76,8 +76,12 @@ All permalinks pin the PR head <code>608e9bd</code>; "before" links pin its merg
 
 <p>Training here runs two loops at once. A <strong>rollout pump</strong> takes prompts from the
 dataloader and generates answers; a <strong>train pump</strong> consumes finished answers a batch at a
-time. Finished-but-not-yet-trained answers wait in a replay buffer, and the pump is allowed to run
-one batch ahead of the trainer. A checkpoint therefore has to save that buffer, or the answers in it
+time. Finished-but-not-yet-trained answers wait in a replay buffer, and the pump is allowed to run a
+set number of batches ahead of the trainer — <code>max_lookahead_versions</code> for
+<code>in_order</code>, <code>max_staleness_versions</code> for <code>weight_fifo</code>
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/608e9bde376d23604b7c6472e1e1e19a43bf8345/nemo_rl/algorithms/async_utils/staleness_sampler.py#L353">staleness_sampler.py:353</a>).
+Both default to 1, which is what the shipped SingleController config uses, and the example below.
+A checkpoint has to save that buffer, or the answers in it
 are lost. Before this PR the buffer was saved every time, for every sampler
 (<a href="https://github.com/NVIDIA-NeMo/RL/blob/7cba25ac3d876f727efbf06bfa9719fd3aa8def5/nemo_rl/algorithms/single_controller.py#L808">before: single_controller.py:808</a>).
 This PR only saves it when the sampler declares it can restore it
@@ -163,13 +167,21 @@ and only <code>windowed</code> declares that
   <text class="note" x="150" y="432">Nothing is printed at any point. No error, no warning, no metric.</text>
 </svg>
 
-<p>The lost prompts are not spare capacity that happened to be sitting around. With
-<code>in_order</code> the generator is allowed to run exactly one step ahead, and the step that just
-finished consumed everything stamped for itself. So what is left in the buffer is precisely the
-batch the <em>next</em> step was queued to train on — and before this PR those groups came back
-selectable, because <a href="https://github.com/NVIDIA-NeMo/RL/blob/608e9bde376d23604b7c6472e1e1e19a43bf8345/nemo_rl/algorithms/async_utils/staleness_sampler.py#L429"><code>InOrderSampler.select</code></a>
+<p>The lost prompts are not spare capacity that happened to be sitting around. The step that just
+finished consumed everything stamped for itself, so what is left in the buffer is the work queued
+for the steps <em>after</em> it — and before this PR those groups came back selectable, because
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/608e9bde376d23604b7c6472e1e1e19a43bf8345/nemo_rl/algorithms/async_utils/staleness_sampler.py#L429"><code>InOrderSampler.select</code></a>
 picks groups whose stamp equals the step being run, and a resume restores that step number
 unchanged.</p>
+
+<p>How much that is depends on your config, so the 3 prompts above is the smallest interesting case,
+not a fixed cost. The gate lets generation run <code>max_lookahead_versions</code> batches ahead, and
+the buffer is sized <code>num_prompts_per_step × (max_lookahead_versions + 1)</code> — one live batch
+plus one per lookahead version
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/608e9bde376d23604b7c6472e1e1e19a43bf8345/nemo_rl/algorithms/async_utils/staleness_sampler.py#L321">staleness_sampler.py:321</a>).
+So at the shipped default of 1 you lose one batch per restart; raise the lookahead and you lose that
+many batches. Set it to 0 and nothing is buffered, so nothing is lost. A separate hard cap,
+<code>max_buffered_rollouts</code>, can hold the number below what the gate would otherwise allow.</p>
 
 <h2>The fix, and why it goes at startup</h2>
 
@@ -222,7 +234,8 @@ number is the whole argument, and right now nobody has it.</p>
 <div class="warn">
 <strong>What this means for you.</strong> If you run SingleController with
 <code>in_order</code> or <code>weight_fifo</code> and checkpointing on, every restart silently throws
-away one batch of finished generations and the prompts behind them, and those prompts never come
+away whatever generation had run ahead — one batch at the default lookahead of 1, more if you raised
+it — along with the prompts behind them, and those prompts never come
 back. It is quiet: the run resumes, the loss curve looks fine, and the only sign is that your model
 saw slightly less of the dataset than you think. Before this PR the same restart kept them. Until a
 warning lands, <code>windowed</code> is the only sampler where a restart is lossless.
