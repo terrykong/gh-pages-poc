@@ -73,82 +73,77 @@ svg a text{text-decoration:underline;fill:var(--accent);font:11px ui-monospace,M
 <p>PPO runs three GPU jobs at once: <strong>generation</strong> writes completions,
 the <strong>policy</strong> learns from them, and the <strong>critic</strong> — a
 second trained model, new on this path — predicts how much reward each completion
-will earn. Two questions follow, and the code answers them differently. Whether
-generation shares GPUs with training is a config switch. Whether the policy and
-the critic share GPUs is not: <strong>they always do</strong>, which is why a PPO
-step is a sequence of copies to and from CPU memory.</p>
+will earn. On the SingleController path the split is fixed, not tuned:
+<strong>generation always gets its own GPUs, and the policy and critic always
+share</strong>. That sharing is why a PPO step is a sequence of copies to and
+from CPU memory.</p>
 
 <h2>Where each one runs</h2>
 
-<p><code>_build_clusters</code>
+<p>The SingleController guide requires
+<code>policy.generation.colocated.enabled: false</code> as a
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/90c48c958d77f38e0ee8edb3666ebb88ccb85d79/docs/guides/single-controller.md#L28">mandatory
+setting</a> — rollout is driven through <code>generate_and_push</code>, which only
+works on the disaggregated async engine. So generation is always on separate GPUs.
+<code>_build_clusters</code>
 (<a href="https://github.com/NVIDIA-NeMo/RL/blob/90c48c958d77f38e0ee8edb3666ebb88ccb85d79/nemo_rl/algorithms/single_controller_utils/setup.py#L132">setup.py:132</a>)
-returns a training cluster and an inference cluster. The switch is
-<code>policy.generation.colocated.enabled</code>. When it is on, both names point
-at <em>the same</em> cluster
-(<a href="https://github.com/NVIDIA-NeMo/RL/blob/90c48c958d77f38e0ee8edb3666ebb88ccb85d79/nemo_rl/algorithms/single_controller_utils/setup.py#L163">:163</a>).
-Either way the critic is added to the training side by one line:
+then hands the critic to the training side with one line:
 <code>train_worker_groups = 2 if is_ppo_run(...) else 1</code>
 (<a href="https://github.com/NVIDIA-NeMo/RL/blob/90c48c958d77f38e0ee8edb3666ebb88ccb85d79/nemo_rl/algorithms/single_controller_utils/setup.py#L146">:146</a>).</p>
 
-<svg viewBox="0 0 940 268" role="img" aria-label="GPU allocation in colocated and non-colocated mode">
+<svg viewBox="0 0 940 236" role="img" aria-label="GPU allocation on the SingleController path: generation on its own cluster, policy and critic sharing the training cluster">
   <rect class="gen" x="0" y="6" width="14" height="12" rx="2"/>
   <text class="note" x="20" y="16">generation</text>
   <rect class="pol" x="108" y="6" width="14" height="12" rx="2"/>
   <text class="note" x="128" y="16">policy</text>
   <rect class="cri" x="186" y="6" width="14" height="12" rx="2"/>
   <text class="note" x="206" y="16">critic</text>
-  <text class="note" x="256" y="16">— a box split between two colors means those two take turns on that GPU.</text>
+  <text class="note" x="256" y="16">— policy and critic sit in one box because they take turns on those GPUs.</text>
 
-  <!-- LEFT: colocated -->
-  <text class="hdr" x="0" y="46">colocated.enabled: true — one cluster, everything shares</text>
-  <rect class="node" x="0" y="56" width="430" height="94" rx="6"/>
-  <text class="note" x="10" y="72">one cluster, every GPU</text>
-  <rect class="gen" x="14" y="82" width="132" height="26" rx="4"/>
-  <text class="lbl" x="30" y="99">generation</text>
-  <rect class="pol" x="152" y="82" width="132" height="26" rx="4"/>
-  <text class="lbl" x="182" y="99">policy</text>
-  <rect class="cri" x="290" y="82" width="126" height="26" rx="4"/>
-  <text class="lbl" x="322" y="99">critic</text>
-  <text class="note" x="14" y="128">All three stacked on the same GPUs. With vLLM that is</text>
-  <text class="note" x="14" y="142">3 worker groups per GPU; with Megatron generation, 2.</text>
+  <rect class="node" x="0" y="34" width="420" height="98" rx="6"/>
+  <text class="hdr" x="12" y="52">inference cluster</text>
+  <rect class="gen" x="14" y="62" width="392" height="30" rx="4"/>
+  <text class="lbl" x="168" y="82">generation</text>
+  <text class="note" x="14" y="112">Its own GPUs, one worker group</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/90c48c958d77f38e0ee8edb3666ebb88ccb85d79/nemo_rl/algorithms/single_controller_utils/setup.py#L205" target="_blank">
+    <text x="212" y="112">setup.py:205</text></a>
+  <text class="note" x="14" y="126">— it never waits for training.</text>
 
-  <!-- RIGHT: non-colocated -->
-  <text class="hdr" x="480" y="46">colocated.enabled: false — two clusters, no overlap</text>
-  <rect class="node" x="480" y="56" width="204" height="94" rx="6"/>
-  <text class="note" x="490" y="72">inference cluster</text>
-  <rect class="gen" x="494" y="82" width="176" height="26" rx="4"/>
-  <text class="lbl" x="546" y="99">generation</text>
-  <text class="note" x="494" y="128">Its own GPUs. Never</text>
-  <text class="note" x="494" y="142">waits for training.</text>
+  <rect class="node" x="470" y="34" width="470" height="98" rx="6"/>
+  <text class="hdr" x="482" y="52">training cluster</text>
+  <rect class="pol" x="484" y="62" width="222" height="30" rx="4"/>
+  <text class="lbl" x="558" y="82">policy</text>
+  <rect class="cri" x="712" y="62" width="214" height="30" rx="4"/>
+  <text class="lbl" x="792" y="82">critic</text>
+  <text class="note" x="484" y="112">Two worker groups on the same GPUs</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/90c48c958d77f38e0ee8edb3666ebb88ccb85d79/nemo_rl/algorithms/single_controller_utils/setup.py#L196" target="_blank">
+    <text x="716" y="112">setup.py:196</text></a>
+  <text class="note" x="484" y="126">— this sharing is what the next figure is about.</text>
 
-  <rect class="node" x="700" y="56" width="240" height="94" rx="6"/>
-  <text class="note" x="710" y="72">training cluster</text>
-  <rect class="pol" x="714" y="82" width="106" height="26" rx="4"/>
-  <text class="lbl" x="740" y="99">policy</text>
-  <rect class="cri" x="826" y="82" width="100" height="26" rx="4"/>
-  <text class="lbl" x="852" y="99">critic</text>
-  <text class="note" x="714" y="128">Still share. This is the</text>
-  <text class="note" x="714" y="142">sharing the next figure is about.</text>
-
-  <!-- how the split is chosen -->
-  <text class="lbl-b" x="0" y="180">How the non-colocated split is chosen</text>
-  <text class="note" x="0" y="200">One node: carve GPUs out of it —</text>
+  <text class="lbl-b" x="0" y="162">How the split is sized</text>
+  <text class="note" x="0" y="182">One node: carve GPUs out of it —</text>
   <a href="https://github.com/NVIDIA-NeMo/RL/blob/90c48c958d77f38e0ee8edb3666ebb88ccb85d79/nemo_rl/algorithms/single_controller_utils/setup.py#L179" target="_blank">
-    <text x="212" y="200">train_gpus = gpus_per_node - inference_gpus_per_node  setup.py:179</text></a>
-  <text class="note" x="0" y="220">More than one node: carve whole nodes —</text>
+    <text x="212" y="182">train_gpus = gpus_per_node - inference_gpus_per_node  setup.py:179</text></a>
+  <text class="note" x="0" y="202">More than one node: carve whole nodes —</text>
   <a href="https://github.com/NVIDIA-NeMo/RL/blob/90c48c958d77f38e0ee8edb3666ebb88ccb85d79/nemo_rl/algorithms/single_controller_utils/setup.py#L186" target="_blank">
-    <text x="252" y="220">train_nodes = num_nodes - inference_nodes  setup.py:186</text></a>
-  <text class="note" x="0" y="244">Megatron generation cannot be split off — setup asserts against it</text>
-  <a href="https://github.com/NVIDIA-NeMo/RL/blob/90c48c958d77f38e0ee8edb3666ebb88ccb85d79/nemo_rl/algorithms/single_controller_utils/setup.py#L166" target="_blank">
-    <text x="370" y="244">setup.py:166</text></a>
-  <text class="note" x="452" y="244">— so colocated is the only choice there.</text>
+    <text x="252" y="202">train_nodes = num_nodes - inference_nodes  setup.py:186</text></a>
+  <text class="note" x="0" y="226">Every SingleController config in the repo that sets it sets colocated.enabled: false.</text>
 </svg>
 
-<p>Both PPO configs this PR ships choose <strong>non-colocated</strong>. The
-small exemplar takes a single 2-GPU node and gives generation one GPU, leaving one
-for policy and critic together. The nightly recipe takes two nodes of 8 GPUs and
-gives generation a whole node, leaving the other node's 8 GPUs to policy and
-critic together.</p>
+<p>Both PPO configs this PR ships follow that. The small exemplar takes a single
+2-GPU node and gives generation one GPU, leaving one for policy and critic
+together. The nightly recipe takes two nodes of 8 GPUs and gives generation a
+whole node, leaving the other node's 8 GPUs to policy and critic together.</p>
+
+<p><em>A caveat worth knowing.</em> <code>_build_clusters</code> still carries a
+colocated branch that would stack all three on one cluster
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/90c48c958d77f38e0ee8edb3666ebb88ccb85d79/nemo_rl/algorithms/single_controller_utils/setup.py#L163">:163</a>),
+and this PR extends its arithmetic so the critic is counted there too. But that is
+cluster sizing, not a working mode: the guide requires colocated off, the
+SingleController actor has no way to put generation to sleep while training runs,
+and no shipped config turns it on. Nothing in the code rejects
+<code>colocated.enabled: true</code> either, so it is a documented requirement
+with no check behind it.</p>
 
 <h2>One RL step on the training GPUs</h2>
 
@@ -164,7 +159,7 @@ to one source:</p>
 </table>
 
 <svg viewBox="0 0 940 396" role="img" aria-label="Timeline of one PPO RL step showing which model occupies the training GPUs, with generation running alongside">
-  <text class="lbl-b" x="0" y="14">One RL step, non-colocated (12 rows, ppo_epochs = 2)</text>
+  <text class="lbl-b" x="0" y="14">One RL step on the training GPUs (12 rows, ppo_epochs = 2)</text>
   <text class="note" x="0" y="32">The policy and critic bars never overlap — that is the hand-off. Generation is on other GPUs, so it just keeps running.</text>
 
   <!-- rails -->
@@ -299,10 +294,12 @@ under-reports by that factor. The PR says so plainly.</li>
 the policy and critic sharing GPUs is not. That sharing is what the copies pay
 for, and they are not free — <code>ppo_epochs: 4</code> means four rounds of
 moving the policy out and back per step, so raising it buys extra optimizer steps
-at the price of extra host-device traffic. Run non-colocated if you can spare the
-GPUs: generation then never waits on the hand-off. If you are porting a PPO
-config, the two rules above — one chunk per step, and critic batch size equal to
-prompts × generations — are what setup will reject you for.
+at the price of extra host-device traffic. Generation is unaffected — it has its
+own GPUs and keeps running through the hand-off. If you are porting a PPO config,
+the two rules above — one chunk per step, and critic batch size equal to
+prompts × generations — are what setup will reject you for, and
+<code>colocated.enabled</code> must stay <code>false</code>, which setup will
+<em>not</em> tell you.
 </div>
 
 </div>
