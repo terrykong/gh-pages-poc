@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NVIDIA-NeMo/RL #3480 — which process owns which piece of the checkpoint</title>
+<style>
+:root{
+  --bg:#0d1117; --surface:#161b22; --surface2:#1c2128; --border:#30363d;
+  --text:#e6edf3; --dim:#8b949e; --accent:#58a6ff; --green:#3fb950;
+  --orange:#d29922; --red:#f85149;
+}
+:root[data-theme="light"]{
+  --bg:#ffffff; --surface:#f6f8fa; --surface2:#eaeef2; --border:#d0d7de;
+  --text:#1f2328; --dim:#59636e; --accent:#0969da; --green:#1a7f37;
+  --orange:#9a6700; --red:#cf222e;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:28px 20px 70px}
+h1{font-size:22px;margin:0 0 8px;line-height:1.3}
+h2{font-size:18px;margin:30px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;
+  font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
+.sub{color:var(--dim);font-size:13.5px;margin:0 0 16px}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);
+  border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;
+  font:13px/1 ui-monospace,Menlo,monospace;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.18)}
+.hl{border-left:3px solid var(--accent);background:var(--surface);
+  padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0}
+table{border-collapse:collapse;width:100%;margin:14px 0;font-size:13.5px}
+th,td{border:1px solid var(--border);padding:7px 10px;text-align:left;vertical-align:top}
+th{background:var(--surface);font-weight:600}
+td code{font-size:12px}
+.n{display:inline-block;min-width:19px;height:19px;line-height:19px;text-align:center;
+  border-radius:50%;background:var(--accent);color:var(--bg);font-weight:700;font-size:12px}
+svg{max-width:100%;height:auto;display:block;margin:16px 0}
+svg .band{fill:none;stroke:var(--border);stroke-width:1.3;stroke-dasharray:6 5}
+svg .bandlbl{fill:var(--dim);font:bold 11.5px -apple-system,sans-serif}
+svg .box{fill:var(--surface);stroke:var(--border);stroke-width:1.3}
+svg .box-new{fill:var(--surface);stroke:var(--green);stroke-width:2}
+svg .lbl{fill:var(--text);font:12.5px ui-monospace,Menlo,monospace}
+svg .sm{fill:var(--dim);font:11px ui-monospace,Menlo,monospace}
+svg .hdr{fill:var(--accent);font:bold 12.5px -apple-system,sans-serif}
+svg .new{fill:var(--green);font:bold 10.5px -apple-system,sans-serif}
+svg .arr{stroke:var(--dim);stroke-width:1.6;fill:none}
+svg .arr-new{stroke:var(--green);stroke-width:2;fill:none}
+svg .num{fill:var(--accent);font:bold 12px -apple-system,sans-serif}
+svg a text{text-decoration:underline;fill:var(--accent);font:11.5px ui-monospace,Menlo,monospace}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+  document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head>
+<body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+  function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+  function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
+    b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
+      else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+  document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+<div class="wrap">
+
+<h1>Which process owns which piece of the SingleController checkpoint</h1>
+<p class="sub">Architecture companion for
+<a href="https://github.com/NVIDIA-NeMo/RL/pull/3480">NVIDIA-NeMo/RL #3480</a>
+· green = added by this PR · all permalinks pin the PR head <code>608e9bd</code> ·
+see also <a href="pr-3480-lost-lookahead.html">what a restart loses with <code>in_order</code></a>.</p>
+
+<p>Two things about this layout surprise people. First, almost nothing is built inside the
+controller actor: <a href="https://github.com/NVIDIA-NeMo/RL/blob/608e9bde376d23604b7c6472e1e1e19a43bf8345/nemo_rl/algorithms/single_controller_utils/setup.py#L459"><code>setup_single_controller()</code></a>
+builds every object on the driver and hands them over in one argument, so the actor's
+<code>__init__</code> does no construction
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/608e9bde376d23604b7c6472e1e1e19a43bf8345/nemo_rl/algorithms/single_controller_utils/setup.py#L92">why</a>).
+Second, there are <strong>two</strong> data-plane clients, and this PR gives them different jobs: the
+trainer's client restores TransferQueue during setup, and the controller's client writes the snapshot
+later. TransferQueue is the only place rollout tensors are ever stored.</p>
+
+<svg viewBox="0 0 900 524" role="img" aria-label="Ownership diagram. The driver process owns setup and TQPolicy with a bootstrap data-plane client. The SingleController actor owns the two pumps, the sampler, the replay buffer, a connect-only client and the new checkpoint barrier. A right-hand column holds the trainer workers, generation workers and the TransferQueue controller and storage. A bottom band shows the checkpoint bundle on disk with two new files.">
+
+  <!-- ============ driver band ============ -->
+  <rect class="band" x="16" y="34" width="608" height="148" rx="9"/>
+  <text class="bandlbl" x="30" y="52">DRIVER PROCESS — run_grpo_single_controller.py</text>
+
+  <rect class="box" x="32" y="62" width="212" height="40" rx="6"/>
+  <text class="lbl" x="44" y="87">setup_single_controller()</text>
+
+  <rect class="box" x="258" y="62" width="350" height="58" rx="6"/>
+  <text class="lbl" x="270" y="82">TQPolicy — owns trainer workers</text>
+  <text class="sm" x="270" y="102">dp_client(bootstrap=True)</text>
+
+  <rect class="box-new" x="258" y="130" width="350" height="30" rx="6"/>
+  <text class="lbl" x="270" y="150">load_data_plane_checkpoint()</text>
+  <text class="new" x="560" y="150">NEW</text>
+
+  <text class="sm" x="32" y="152">restore happens here,</text>
+  <text class="sm" x="32" y="168">before the actor exists</text>
+
+  <!-- ============ SC actor band ============ -->
+  <rect class="band" x="16" y="200" width="608" height="170" rx="9"/>
+  <text class="bandlbl" x="30" y="218">SingleControllerActor — one Ray actor, one asyncio loop</text>
+
+  <rect class="box" x="32" y="228" width="132" height="38" rx="6"/>
+  <text class="lbl" x="44" y="252">rollout pump</text>
+  <rect class="box" x="176" y="228" width="126" height="38" rx="6"/>
+  <text class="lbl" x="188" y="252">train pump</text>
+  <rect class="box" x="314" y="228" width="110" height="38" rx="6"/>
+  <text class="lbl" x="326" y="252">sampler</text>
+  <rect class="box" x="436" y="228" width="172" height="38" rx="6"/>
+  <text class="lbl" x="448" y="252">TQReplayBuffer</text>
+
+  <rect class="box-new" x="32" y="280" width="282" height="30" rx="6"/>
+  <text class="lbl" x="44" y="300">DataPlaneCheckpointBarrier</text>
+  <text class="new" x="268" y="300">NEW</text>
+
+  <rect class="box" x="326" y="280" width="282" height="30" rx="6"/>
+  <text class="lbl" x="338" y="300">dp_client(bootstrap=False)</text>
+
+  <rect class="box-new" x="32" y="324" width="576" height="30" rx="6"/>
+  <text class="sm" x="44" y="344">_validate_replay_inventory()  +  _save_data_plane_checkpoint()</text>
+  <text class="new" x="562" y="344">NEW</text>
+
+  <!-- ============ right column : ray actors ============ -->
+  <rect class="band" x="644" y="34" width="240" height="336" rx="9"/>
+  <text class="bandlbl" x="658" y="52">OTHER RAY ACTORS</text>
+
+  <rect class="box" x="656" y="62" width="216" height="40" rx="6"/>
+  <text class="lbl" x="668" y="87">trainer workers</text>
+
+  <rect class="box" x="656" y="116" width="216" height="40" rx="6"/>
+  <text class="lbl" x="668" y="141">generation (vLLM)</text>
+
+  <rect class="box" x="656" y="196" width="216" height="58" rx="6"/>
+  <text class="lbl" x="668" y="216">TransferQueue</text>
+  <text class="sm" x="668" y="236">controller + storage</text>
+  <text class="sm" x="668" y="272">the only place rollout</text>
+  <text class="sm" x="668" y="288">tensors are stored</text>
+
+  <!-- ============ arrows ============ -->
+  <!-- 1 driver -> actor -->
+  <path class="arr" d="M120 182 L120 200"/>
+  <path class="arr" d="M120 200 L114 192 M120 200 L126 192"/>
+  <text class="num" x="132" y="196">1</text>
+
+  <!-- 2 TQPolicy -> TQ (restore) -->
+  <path class="arr-new" d="M608 145 L632 145 L632 210 L654 210"/>
+  <path class="arr-new" d="M654 210 L646 205 M654 210 L646 215"/>
+  <text class="num" x="614" y="138">2</text>
+
+  <!-- 3 buffer -> TQ (live writes) -->
+  <path class="arr" d="M608 247 L640 247 L640 226 L654 226"/>
+  <path class="arr" d="M654 226 L646 221 M654 226 L646 231"/>
+  <text class="num" x="614" y="242">3</text>
+
+  <!-- 4 SC checkpoint calls -> TQ -->
+  <path class="arr-new" d="M608 339 L628 339 L628 246 L654 246"/>
+  <path class="arr-new" d="M654 246 L646 241 M654 246 L646 251"/>
+  <text class="num" x="612" y="334">4</text>
+
+  <!-- 5 down to disk -->
+  <path class="arr-new" d="M320 370 L320 396"/>
+  <path class="arr-new" d="M320 396 L314 388 M320 396 L326 388"/>
+  <text class="num" x="330" y="392">5</text>
+
+  <!-- ============ disk band ============ -->
+  <rect class="band" x="16" y="398" width="868" height="112" rx="9"/>
+  <text class="bandlbl" x="30" y="416">CHECKPOINT BUNDLE ON DISK — step_N/</text>
+
+  <rect class="box" x="32" y="426" width="250" height="40" rx="6"/>
+  <text class="sm" x="44" y="450">policy/ · train_dataloader.pt</text>
+
+  <rect class="box-new" x="298" y="426" width="250" height="40" rx="6"/>
+  <text class="lbl" x="310" y="450">data_plane/</text>
+  <text class="new" x="500" y="450">NEW</text>
+
+  <rect class="box-new" x="564" y="426" width="304" height="40" rx="6"/>
+  <text class="sm" x="576" y="450">replay_buffer_metadata.pt</text>
+  <text class="new" x="820" y="450">NEW</text>
+
+  <text class="sm" x="32" y="486">data_plane/ holds the tensors and is written by TransferQueue itself.</text>
+  <text class="sm" x="32" y="502">replay_buffer_metadata.pt holds only which rows belong to which group — no tensors.</text>
+</svg>
+
+<h2>The five flows, and which are new</h2>
+
+<table>
+<tr><th style="width:34px"></th><th style="width:210px">What moves</th><th>Detail</th></tr>
+
+<tr><td><span class="n">1</span></td>
+<td>Driver → controller actor</td>
+<td>Everything the actor needs, cloudpickled as one
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/608e9bde376d23604b7c6472e1e1e19a43bf8345/nemo_rl/algorithms/single_controller_utils/setup.py#L92"><code>SingleControllerActorArgs</code></a>.
+This PR adds one field to it — <code>data_plane_checkpoint_metadata</code>, the metadata the driver
+read back during restore, which the actor later checks its own sidecar against.</td></tr>
+
+<tr><td><span class="n">2</span></td>
+<td><strong style="color:var(--green)">New.</strong> Trainer's client → TransferQueue: restore</td>
+<td><a href="https://github.com/NVIDIA-NeMo/RL/blob/608e9bde376d23604b7c6472e1e1e19a43bf8345/nemo_rl/models/policy/tq_policy.py#L138"><code>TQPolicy.load_data_plane_checkpoint()</code></a>
+→ <code>dp_client.load_checkpoint()</code> → <code>tq.load_checkpoint()</code>. This runs on the
+driver at
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/608e9bde376d23604b7c6472e1e1e19a43bf8345/nemo_rl/algorithms/single_controller_utils/setup.py#L697">setup.py:697</a>,
+<em>before</em> the connect-only client is built and before the actor exists. It has to: TransferQueue
+can only be restored while it is still untouched, and the adapter refuses a restore after any read or
+write through that client
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/608e9bde376d23604b7c6472e1e1e19a43bf8345/nemo_rl/data_plane/adapters/transfer_queue.py#L492"><code>_require_clean_for_load</code></a>).</td></tr>
+
+<tr><td><span class="n">3</span></td>
+<td>Replay buffer → TransferQueue: live rollouts</td>
+<td>Unchanged in shape — <code>put_samples</code> on commit, <code>clear_samples</code> when a group
+is dropped. What is new is that both now run inside the barrier, so they cannot overlap a snapshot.</td></tr>
+
+<tr><td><span class="n">4</span></td>
+<td><strong style="color:var(--green)">New.</strong> Controller → TransferQueue: snapshot</td>
+<td>Three new client methods:
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/608e9bde376d23604b7c6472e1e1e19a43bf8345/nemo_rl/data_plane/interfaces.py#L427"><code>list_sample_ids()</code></a>
+to check the stored rows match the index,
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/608e9bde376d23604b7c6472e1e1e19a43bf8345/nemo_rl/data_plane/interfaces.py#L474"><code>save_checkpoint()</code></a>,
+and <code>load_checkpoint()</code>. All three are on the abstract client, so every adapter implements
+them.</td></tr>
+
+<tr><td><span class="n">5</span></td>
+<td><strong style="color:var(--green)">New.</strong> Controller → disk: the index file</td>
+<td>The controller writes <code>replay_buffer_metadata.pt</code> itself from
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/608e9bde376d23604b7c6472e1e1e19a43bf8345/nemo_rl/algorithms/async_utils/replay_buffer.py#L1078"><code>metadata_state_dict()</code></a>.
+TransferQueue writes <code>data_plane/</code> separately. A digest ties the two together so a
+mismatched pair is caught on resume.</td></tr>
+</table>
+
+<h2>What the barrier is for</h2>
+
+<p>Generation keeps running while a checkpoint is being written, so without something holding them
+apart the snapshot and the index would describe different sets of rows.
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/608e9bde376d23604b7c6472e1e1e19a43bf8345/nemo_rl/algorithms/async_utils/replay_buffer.py#L153"><code>DataPlaneCheckpointBarrier</code></a>
+is the new piece that stops that. It allows many writes at once but only one checkpoint, and a
+checkpoint waits for the writes already in progress to finish before it starts. Finished rollouts
+still arrive during a save — they just wait at the commit step.</p>
+
+<p>It lives in the controller actor and is handed to the replay buffer once at startup
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/608e9bde376d23604b7c6472e1e1e19a43bf8345/nemo_rl/algorithms/single_controller.py#L207">single_controller.py:207</a>),
+which is why both the buffer's writes and the controller's snapshot go through the same object. It is
+plain <code>asyncio</code> with no Ray or torch in it, so it can be tested on its own in
+milliseconds — worth keeping that way.</p>
+
+<div class="hl">
+<strong>The part worth remembering.</strong> Restore and save happen in different processes through
+different clients: the trainer's client restores TransferQueue on the driver during setup, and the
+controller's client writes the snapshot later from inside the actor. That ordering is held together
+by the order of statements in one setup function, with nothing asserting it. If the connect-only
+client or the replay buffer were ever built before
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/608e9bde376d23604b7c6472e1e1e19a43bf8345/nemo_rl/algorithms/single_controller_utils/setup.py#L697">setup.py:697</a>,
+the restore would land on a TransferQueue that had already been touched, and the guard inside the
+adapter could not see it — it only knows about its own client.
+</div>
+
+</div>
+</body>
+</html>
