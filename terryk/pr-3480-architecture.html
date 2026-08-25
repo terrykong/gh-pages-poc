@@ -229,6 +229,85 @@ TransferQueue writes <code>data_plane/</code> separately. A digest ties the two 
 mismatched pair is caught on resume.</td></tr>
 </table>
 
+<h2>Recovery, in order</h2>
+
+<p>The ordering is the part that is easy to get wrong, so here it is as a sequence. Note where the
+line is drawn: everything above it happens on the driver, before the controller actor is created.</p>
+
+<svg viewBox="0 0 900 466" role="img" aria-label="Sequence diagram of recovery. On the driver, setup reads the trainer checkpoint, TQPolicy loads the TransferQueue snapshot through its bootstrap client, and only then is the connect-only client built and the actor created. Inside the actor, run() loads the sidecar, rebuilds the index without writing to TransferQueue, validates the inventory, and starts the pumps.">
+  <text class="hdr" x="16" y="18">Restart: what happens, in order</text>
+
+  <!-- lifelines -->
+  <text class="bandlbl" x="24" y="46">setup (driver)</text>
+  <text class="bandlbl" x="222" y="46">TQPolicy</text>
+  <text class="bandlbl" x="372" y="46">TransferQueue</text>
+  <text class="bandlbl" x="560" y="46">SC actor</text>
+  <text class="bandlbl" x="712" y="46">replay buffer</text>
+  <path class="arr" d="M70 54 L70 442" style="stroke-dasharray:3 4"/>
+  <path class="arr" d="M252 54 L252 442" style="stroke-dasharray:3 4"/>
+  <path class="arr" d="M420 54 L420 442" style="stroke-dasharray:3 4"/>
+  <path class="arr" d="M592 54 L592 442" style="stroke-dasharray:3 4"/>
+  <path class="arr" d="M760 54 L760 442" style="stroke-dasharray:3 4"/>
+
+  <!-- 1 -->
+  <text class="sm" x="16" y="76">read step_N/</text>
+  <path class="arr" d="M70 84 L70 96"/>
+  <text class="sm" x="82" y="94">trainer state, dataloader cursor</text>
+
+  <!-- 2 -->
+  <path class="arr-new" d="M70 116 L246 116"/>
+  <path class="arr-new" d="M246 116 L238 111 M246 116 L238 121"/>
+  <text class="new" x="82" y="110">load_data_plane_checkpoint()</text>
+
+  <!-- 3 -->
+  <path class="arr-new" d="M252 142 L414 142"/>
+  <path class="arr-new" d="M414 142 L406 137 M414 142 L406 147"/>
+  <text class="new" x="262" y="136">bootstrap client: load_checkpoint()</text>
+  <text class="sm" x="262" y="158">rows + consumer cursors come back</text>
+
+  <!-- 4 returns metadata -->
+  <path class="arr" d="M414 180 L76 180" style="stroke-dasharray:4 3"/>
+  <path class="arr" d="M76 180 L84 175 M76 180 L84 185"/>
+  <text class="sm" x="90" y="174">digest, group count, mode=authoritative</text>
+
+  <!-- divider -->
+  <path class="arr" d="M16 200 L884 200" style="stroke:var(--orange);stroke-width:1.6;stroke-dasharray:7 4"/>
+  <text class="cursor-lbl" x="16" y="216">TransferQueue is restored before this line. Nothing has touched it yet.</text>
+
+  <!-- 5 build connect-only client -->
+  <text class="sm" x="16" y="242">build connect-only client, then the buffer</text>
+  <path class="arr" d="M70 250 L70 262"/>
+
+  <!-- 6 create actor -->
+  <path class="arr" d="M70 282 L586 282"/>
+  <path class="arr" d="M586 282 L578 277 M586 282 L578 287"/>
+  <text class="sm" x="82" y="276">SingleControllerActor.remote(actor_args + digest)</text>
+
+  <!-- 7 run -->
+  <text class="sm" x="536" y="308">run()</text>
+  <path class="arr" d="M592 314 L592 326"/>
+
+  <!-- 8 load sidecar -->
+  <path class="arr-new" d="M592 346 L754 346"/>
+  <path class="arr-new" d="M754 346 L746 341 M754 346 L746 351"/>
+  <text class="new" x="600" y="340">load_state_dict(sidecar)</text>
+  <text class="sm" x="600" y="362">index only - no writes to TQ</text>
+
+  <!-- 9 validate -->
+  <path class="arr-new" d="M586 390 L426 390"/>
+  <path class="arr-new" d="M426 390 L434 385 M426 390 L434 395"/>
+  <text class="new" x="436" y="384">list_sample_ids(): do the rows match the index?</text>
+
+  <!-- 10 pumps -->
+  <text class="sm" x="536" y="424">start the rollout and train pumps</text>
+  <path class="arr" d="M592 430 L592 442"/>
+</svg>
+
+<p>Two orderings are doing real work here. TransferQueue is restored <em>before</em> the connect-only
+client exists, because a restore is only safe onto an untouched client — the adapter refuses one
+after any read or write. And the index is rebuilt <em>before</em> the pumps start, so no live writer
+can race the inventory check.</p>
+
 <h2>What the barrier is for</h2>
 
 <p>Generation keeps running while a checkpoint is being written, so without something holding them
