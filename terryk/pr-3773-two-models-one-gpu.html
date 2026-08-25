@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>NVIDIA-NeMo/RL #3773 — how one RL step trains two models on the same GPUs</title>
+<title>NVIDIA-NeMo/RL #3773 — which GPUs run the policy, the critic, and generation</title>
 <style>
 :root{
   --bg:#0d1117; --surface:#161b22; --surface2:#1c2128; --border:#30363d;
@@ -20,7 +20,7 @@ body{margin:0;background:var(--bg);color:var(--text);
   font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
 .wrap{max-width:980px;margin:0 auto;padding:28px 20px 70px}
 h1{font-size:22px;margin:0 0 8px;line-height:1.3}
-h2{font-size:18px;margin:32px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+h2{font-size:18px;margin:30px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
 a{color:var(--accent);text-decoration:none}
 a:hover{text-decoration:underline}
 code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;
@@ -34,8 +34,6 @@ code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;
   padding:13px;overflow-x:auto;white-space:pre}
 .warn{border-left:3px solid var(--orange);background:var(--surface);
   padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0}
-.hl{border-left:3px solid var(--accent);background:var(--surface);
-  padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0}
 table{border-collapse:collapse;width:100%;margin:14px 0;font-size:13.5px}
 th,td{border:1px solid var(--border);padding:7px 10px;text-align:left}
 th{background:var(--surface2);font-weight:600}
@@ -46,9 +44,11 @@ svg .note{fill:var(--dim);font:11px -apple-system,sans-serif}
 svg .hdr{fill:var(--accent);font:bold 12.5px -apple-system,sans-serif}
 svg .pol{fill:var(--accent);opacity:.5;stroke:var(--accent);stroke-width:1.2}
 svg .cri{fill:var(--purple);opacity:.55;stroke:var(--purple);stroke-width:1.2}
+svg .gen{fill:var(--green);opacity:.45;stroke:var(--green);stroke-width:1.2}
 svg .idle{fill:var(--dim);opacity:.16;stroke:var(--dim);stroke-width:1}
 svg .tick{stroke:var(--border);stroke-width:1}
 svg .rail{fill:var(--surface2);stroke:var(--border);stroke-width:1}
+svg .node{fill:none;stroke:var(--border);stroke-width:1.4;stroke-dasharray:5 3}
 svg a text{text-decoration:underline;fill:var(--accent);font:11px ui-monospace,Menlo,monospace}
 </style>
 <script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
@@ -64,24 +64,96 @@ svg a text{text-decoration:underline;fill:var(--accent);font:11px ui-monospace,M
   document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
 <div class="wrap">
 
-<h1>How one RL step trains two models on the same GPUs</h1>
+<h1>Which GPUs run the policy, the critic, and generation</h1>
 <p class="sub">Companion illustration for
 <a href="https://github.com/NVIDIA-NeMo/RL/pull/3773">NVIDIA-NeMo/RL #3773</a>
 — PPO on the SingleController path. All permalinks pin the PR head
 <code>90c48c9</code>.</p>
 
-<p>GRPO scores a completion by comparing it to others in its group, so it trains
-one model. PPO instead learns a second model — the <strong>critic</strong>, which
-predicts how much reward a completion will earn — and trains it alongside the
-policy. This PR puts both on the SingleController path, and both land on the
-<em>same</em> training GPUs. They never fit at once, so the step is a hand-off:
-whoever is not working gets copied out to CPU memory. The whole design is that
-sequence of moves.</p>
+<p>PPO runs three GPU jobs at once: <strong>generation</strong> writes completions,
+the <strong>policy</strong> learns from them, and the <strong>critic</strong> — a
+second trained model, new on this path — predicts how much reward each completion
+will earn. Two questions follow, and the code answers them differently. Whether
+generation shares GPUs with training is a config switch. Whether the policy and
+the critic share GPUs is not: <strong>they always do</strong>, which is why a PPO
+step is a sequence of copies to and from CPU memory.</p>
 
-<h2>One RL step, and who owns the GPUs</h2>
+<h2>Where each one runs</h2>
 
-<p>Config for this walkthrough — every number distinct, so you can trace any digit
-back to one source:</p>
+<p><code>_build_clusters</code>
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/90c48c958d77f38e0ee8edb3666ebb88ccb85d79/nemo_rl/algorithms/single_controller_utils/setup.py#L132">setup.py:132</a>)
+returns a training cluster and an inference cluster. The switch is
+<code>policy.generation.colocated.enabled</code>. When it is on, both names point
+at <em>the same</em> cluster
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/90c48c958d77f38e0ee8edb3666ebb88ccb85d79/nemo_rl/algorithms/single_controller_utils/setup.py#L163">:163</a>).
+Either way the critic is added to the training side by one line:
+<code>train_worker_groups = 2 if is_ppo_run(...) else 1</code>
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/90c48c958d77f38e0ee8edb3666ebb88ccb85d79/nemo_rl/algorithms/single_controller_utils/setup.py#L146">:146</a>).</p>
+
+<svg viewBox="0 0 940 268" role="img" aria-label="GPU allocation in colocated and non-colocated mode">
+  <rect class="gen" x="0" y="6" width="14" height="12" rx="2"/>
+  <text class="note" x="20" y="16">generation</text>
+  <rect class="pol" x="108" y="6" width="14" height="12" rx="2"/>
+  <text class="note" x="128" y="16">policy</text>
+  <rect class="cri" x="186" y="6" width="14" height="12" rx="2"/>
+  <text class="note" x="206" y="16">critic</text>
+  <text class="note" x="256" y="16">— a box split between two colors means those two take turns on that GPU.</text>
+
+  <!-- LEFT: colocated -->
+  <text class="hdr" x="0" y="46">colocated.enabled: true — one cluster, everything shares</text>
+  <rect class="node" x="0" y="56" width="430" height="94" rx="6"/>
+  <text class="note" x="10" y="72">one cluster, every GPU</text>
+  <rect class="gen" x="14" y="82" width="132" height="26" rx="4"/>
+  <text class="lbl" x="30" y="99">generation</text>
+  <rect class="pol" x="152" y="82" width="132" height="26" rx="4"/>
+  <text class="lbl" x="182" y="99">policy</text>
+  <rect class="cri" x="290" y="82" width="126" height="26" rx="4"/>
+  <text class="lbl" x="322" y="99">critic</text>
+  <text class="note" x="14" y="128">All three stacked on the same GPUs. With vLLM that is</text>
+  <text class="note" x="14" y="142">3 worker groups per GPU; with Megatron generation, 2.</text>
+
+  <!-- RIGHT: non-colocated -->
+  <text class="hdr" x="480" y="46">colocated.enabled: false — two clusters, no overlap</text>
+  <rect class="node" x="480" y="56" width="204" height="94" rx="6"/>
+  <text class="note" x="490" y="72">inference cluster</text>
+  <rect class="gen" x="494" y="82" width="176" height="26" rx="4"/>
+  <text class="lbl" x="546" y="99">generation</text>
+  <text class="note" x="494" y="128">Its own GPUs. Never</text>
+  <text class="note" x="494" y="142">waits for training.</text>
+
+  <rect class="node" x="700" y="56" width="240" height="94" rx="6"/>
+  <text class="note" x="710" y="72">training cluster</text>
+  <rect class="pol" x="714" y="82" width="106" height="26" rx="4"/>
+  <text class="lbl" x="740" y="99">policy</text>
+  <rect class="cri" x="826" y="82" width="100" height="26" rx="4"/>
+  <text class="lbl" x="852" y="99">critic</text>
+  <text class="note" x="714" y="128">Still share. This is the</text>
+  <text class="note" x="714" y="142">sharing the next figure is about.</text>
+
+  <!-- how the split is chosen -->
+  <text class="lbl-b" x="0" y="180">How the non-colocated split is chosen</text>
+  <text class="note" x="0" y="200">One node: carve GPUs out of it —</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/90c48c958d77f38e0ee8edb3666ebb88ccb85d79/nemo_rl/algorithms/single_controller_utils/setup.py#L179" target="_blank">
+    <text x="212" y="200">train_gpus = gpus_per_node - inference_gpus_per_node  setup.py:179</text></a>
+  <text class="note" x="0" y="220">More than one node: carve whole nodes —</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/90c48c958d77f38e0ee8edb3666ebb88ccb85d79/nemo_rl/algorithms/single_controller_utils/setup.py#L186" target="_blank">
+    <text x="252" y="220">train_nodes = num_nodes - inference_nodes  setup.py:186</text></a>
+  <text class="note" x="0" y="244">Megatron generation cannot be split off — setup asserts against it</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/90c48c958d77f38e0ee8edb3666ebb88ccb85d79/nemo_rl/algorithms/single_controller_utils/setup.py#L166" target="_blank">
+    <text x="370" y="244">setup.py:166</text></a>
+  <text class="note" x="452" y="244">— so colocated is the only choice there.</text>
+</svg>
+
+<p>Both PPO configs this PR ships choose <strong>non-colocated</strong>. The
+small exemplar takes a single 2-GPU node and gives generation one GPU, leaving one
+for policy and critic together. The nightly recipe takes two nodes of 8 GPUs and
+gives generation a whole node, leaving the other node's 8 GPUs to policy and
+critic together.</p>
+
+<h2>One RL step on the training GPUs</h2>
+
+<p>Config for this walkthrough — every number distinct, so any digit traces back
+to one source:</p>
 
 <table>
 <tr><th>setting</th><th>value</th><th>why it matters here</th></tr>
@@ -91,159 +163,146 @@ back to one source:</p>
 <tr><td><code>ppo_epochs</code></td><td>2</td><td>times both models step their optimizer on those same 12 rows</td></tr>
 </table>
 
-<svg viewBox="0 0 940 400" role="img" aria-label="Timeline of one PPO RL step showing which model occupies the training GPUs">
-  <text class="lbl-b" x="0" y="14">Training GPUs across one RL step (12 rows, ppo_epochs = 2)</text>
-
-  <!-- legend -->
-  <rect class="pol" x="0" y="26" width="14" height="12" rx="2"/>
-  <text class="note" x="20" y="36">policy on GPU</text>
-  <rect class="cri" x="120" y="26" width="14" height="12" rx="2"/>
-  <text class="note" x="140" y="36">critic on GPU</text>
-  <rect class="idle" x="238" y="26" width="14" height="12" rx="2"/>
-  <text class="note" x="258" y="36">parked in CPU memory</text>
-  <text class="note" x="410" y="36">— the two colored bars never overlap. That is the point.</text>
+<svg viewBox="0 0 940 396" role="img" aria-label="Timeline of one PPO RL step showing which model occupies the training GPUs, with generation running alongside">
+  <text class="lbl-b" x="0" y="14">One RL step, non-colocated (12 rows, ppo_epochs = 2)</text>
+  <text class="note" x="0" y="32">The policy and critic bars never overlap — that is the hand-off. Generation is on other GPUs, so it just keeps running.</text>
 
   <!-- rails -->
-  <text class="lbl" x="0" y="76">policy</text>
-  <rect class="rail" x="62" y="62" width="878" height="20" rx="4"/>
-  <text class="lbl" x="0" y="112">critic</text>
-  <rect class="rail" x="62" y="98" width="878" height="20" rx="4"/>
+  <text class="lbl" x="0" y="60">generation</text>
+  <rect class="rail" x="86" y="46" width="854" height="20" rx="4"/>
+  <rect class="gen" x="86" y="46" width="854" height="20" rx="4"/>
+  <text class="note" x="330" y="60">never pauses — different GPUs, filling the buffer for later steps</text>
+
+  <text class="lbl" x="0" y="96">policy</text>
+  <rect class="rail" x="86" y="82" width="854" height="20" rx="4"/>
+  <text class="lbl" x="0" y="132">critic</text>
+  <rect class="rail" x="86" y="118" width="854" height="20" rx="4"/>
 
   <!-- policy occupancy -->
-  <rect class="pol" x="62" y="62" width="120" height="20" rx="4"/>
-  <rect class="idle" x="182" y="62" width="300" height="20"/>
-  <rect class="pol" x="482" y="62" width="118" height="20" rx="4"/>
-  <rect class="idle" x="600" y="62" width="182" height="20"/>
-  <rect class="pol" x="782" y="62" width="158" height="20" rx="4"/>
+  <rect class="pol" x="86" y="82" width="118" height="20" rx="4"/>
+  <rect class="idle" x="204" y="82" width="288" height="20"/>
+  <rect class="pol" x="492" y="82" width="114" height="20" rx="4"/>
+  <rect class="idle" x="606" y="82" width="176" height="20"/>
+  <rect class="pol" x="782" y="82" width="158" height="20" rx="4"/>
 
   <!-- critic occupancy -->
-  <rect class="idle" x="62" y="98" width="120" height="20"/>
-  <rect class="cri" x="182" y="98" width="130" height="20" rx="4"/>
-  <rect class="idle" x="312" y="98" width="52" height="20"/>
-  <rect class="cri" x="364" y="98" width="118" height="20" rx="4"/>
-  <rect class="idle" x="482" y="98" width="118" height="20"/>
-  <rect class="cri" x="600" y="98" width="182" height="20" rx="4"/>
-  <rect class="idle" x="782" y="98" width="158" height="20"/>
+  <rect class="idle" x="86" y="118" width="118" height="20"/>
+  <rect class="cri" x="204" y="118" width="126" height="20" rx="4"/>
+  <rect class="idle" x="330" y="118" width="46" height="20"/>
+  <rect class="cri" x="376" y="118" width="116" height="20" rx="4"/>
+  <rect class="idle" x="492" y="118" width="114" height="20"/>
+  <rect class="cri" x="606" y="118" width="176" height="20" rx="4"/>
+  <rect class="idle" x="782" y="118" width="158" height="20"/>
 
-  <!-- phase ticks -->
-  <line class="tick" x1="182" y1="56" x2="182" y2="132"/>
-  <line class="tick" x1="312" y1="56" x2="312" y2="132"/>
-  <line class="tick" x1="364" y1="56" x2="364" y2="132"/>
-  <line class="tick" x1="482" y1="56" x2="482" y2="132"/>
-  <line class="tick" x1="600" y1="56" x2="600" y2="132"/>
-  <line class="tick" x1="782" y1="56" x2="782" y2="132"/>
+  <line class="tick" x1="204" y1="76" x2="204" y2="152"/>
+  <line class="tick" x1="330" y1="76" x2="330" y2="152"/>
+  <line class="tick" x1="376" y1="76" x2="376" y2="152"/>
+  <line class="tick" x1="492" y1="76" x2="492" y2="152"/>
+  <line class="tick" x1="606" y1="76" x2="606" y2="152"/>
+  <line class="tick" x1="782" y1="76" x2="782" y2="152"/>
 
-  <!-- phase labels -->
-  <text class="hdr" x="66" y="150">1. logprobs</text>
-  <text class="note" x="66" y="164">policy scores</text>
-  <text class="note" x="66" y="177">its own rows</text>
+  <text class="hdr" x="90" y="170">1. logprobs</text>
+  <text class="note" x="90" y="184">policy scores</text>
+  <text class="note" x="90" y="197">its own rows</text>
 
-  <text class="hdr" x="186" y="150">2. critic reads</text>
-  <text class="note" x="186" y="164">predicts a value</text>
-  <text class="note" x="186" y="177">for all 12 rows</text>
+  <text class="hdr" x="208" y="170">2. critic reads</text>
+  <text class="note" x="208" y="184">a value for</text>
+  <text class="note" x="208" y="197">all 12 rows</text>
 
-  <text class="hdr" x="316" y="150">3. adv.</text>
-  <text class="note" x="316" y="164">driver</text>
-  <text class="note" x="316" y="177">only</text>
+  <text class="hdr" x="334" y="170">3. adv.</text>
+  <text class="note" x="334" y="184">driver</text>
+  <text class="note" x="334" y="197">only</text>
 
-  <text class="hdr" x="368" y="150">4. critic trains</text>
-  <text class="note" x="368" y="164">epoch 1 of 2</text>
+  <text class="hdr" x="380" y="170">4. critic trains</text>
+  <text class="note" x="380" y="184">epoch 1 of 2</text>
 
-  <text class="hdr" x="486" y="150">5. policy trains</text>
-  <text class="note" x="486" y="164">epoch 1 of 2</text>
+  <text class="hdr" x="496" y="170">5. policy trains</text>
+  <text class="note" x="496" y="184">epoch 1 of 2</text>
 
-  <text class="hdr" x="604" y="150">6. critic trains</text>
-  <text class="note" x="604" y="164">epoch 2 of 2</text>
+  <text class="hdr" x="610" y="170">6. critic trains</text>
+  <text class="note" x="610" y="184">epoch 2 of 2</text>
 
-  <text class="hdr" x="786" y="150">7. policy trains</text>
-  <text class="note" x="786" y="164">epoch 2 of 2</text>
+  <text class="hdr" x="786" y="170">7. policy trains</text>
+  <text class="note" x="786" y="184">epoch 2 of 2</text>
 
-  <!-- the moves -->
-  <text class="lbl-b" x="0" y="212">The moves that make the swap happen</text>
+  <text class="lbl-b" x="0" y="232">The moves that make the swap happen</text>
 
-  <text class="note" x="0" y="234">before 2 — copy policy out:</text>
+  <text class="note" x="0" y="254">before 2 — copy policy out:</text>
   <a href="https://github.com/NVIDIA-NeMo/RL/blob/90c48c958d77f38e0ee8edb3666ebb88ccb85d79/nemo_rl/algorithms/single_controller.py#L1024" target="_blank">
-    <text x="190" y="234">finish_inference()  single_controller.py:1024</text></a>
+    <text x="190" y="254">finish_inference()  single_controller.py:1024</text></a>
 
-  <text class="note" x="0" y="256">2 — critic in, read, out:</text>
+  <text class="note" x="0" y="276">2 — critic in, read, out:</text>
   <a href="https://github.com/NVIDIA-NeMo/RL/blob/90c48c958d77f38e0ee8edb3666ebb88ccb85d79/nemo_rl/algorithms/single_controller.py#L1853" target="_blank">
-    <text x="190" y="256">_value_stage()  :1853</text></a>
+    <text x="190" y="276">_value_stage()  :1853</text></a>
 
-  <text class="note" x="0" y="278">4 and 6 — critic in, step, out:</text>
+  <text class="note" x="0" y="298">4 and 6 — critic in, step, out:</text>
   <a href="https://github.com/NVIDIA-NeMo/RL/blob/90c48c958d77f38e0ee8edb3666ebb88ccb85d79/nemo_rl/algorithms/single_controller.py#L1870" target="_blank">
-    <text x="190" y="278">_value_train()  :1870</text></a>
+    <text x="190" y="298">_value_train()  :1870</text></a>
 
-  <text class="note" x="0" y="300">5 and 7 — copy policy back in:</text>
+  <text class="note" x="0" y="320">5 and 7 — copy policy back in:</text>
   <a href="https://github.com/NVIDIA-NeMo/RL/blob/90c48c958d77f38e0ee8edb3666ebb88ccb85d79/nemo_rl/algorithms/single_controller.py#L1074" target="_blank">
-    <text x="190" y="300">prepare_for_training()  :1074</text></a>
+    <text x="190" y="320">prepare_for_training()  :1074</text></a>
 
-  <text class="note" x="0" y="322">after 5 — copy policy out again,</text>
-  <text class="note" x="0" y="336">so epoch 2's critic gets the GPUs:</text>
+  <text class="note" x="0" y="342">after 5 — copy policy out again,</text>
+  <text class="note" x="0" y="356">so epoch 2's critic gets the GPUs:</text>
   <a href="https://github.com/NVIDIA-NeMo/RL/blob/90c48c958d77f38e0ee8edb3666ebb88ccb85d79/nemo_rl/algorithms/single_controller.py#L1100" target="_blank">
-    <text x="190" y="336">offload_to_cpu()  :1100</text></a>
+    <text x="190" y="356">offload_to_cpu()  :1100</text></a>
 
-  <text class="note" x="0" y="366">after 7 — no copy-out. The last epoch leaves the policy resident, and the next step's</text>
-  <text class="note" x="0" y="380">logprob pass reuses it. That is why phase 1 above starts with the policy already there.</text>
+  <text class="note" x="0" y="386">after 7 — no copy-out. The last epoch leaves the policy resident and the next step's logprob pass reuses it.</text>
 </svg>
 
-<h2>What <code>ppo_epochs</code> actually loops over</h2>
-
 <p>The same 12 rows are used twice. Nothing is re-generated and nothing is
-re-sharded — the loop just steps both optimizers again on the batch already in
-hand. Traced with the numbers above:</p>
+re-sharded — the loop just steps both optimizers again on the batch in hand:</p>
 
-<div class="mono">for epoch in range(2):            # ppo_epochs = 2        :1052
-
-    epoch 0 ─ critic step 1/2       _value_train(12 rows)   :1056
-             policy step 1/2       train + finish_train_step :1093
-             copy policy out        offload_to_cpu()        :1100
-                                    # runs because epoch 0 < 2-1
-
-    epoch 1 ─ critic step 2/2       _value_train(12 rows)   :1056
-             policy step 2/2       train + finish_train_step :1093
-             (no copy-out)          # epoch 1 is not &lt; 2-1
+<div class="mono">for epoch in range(2):          # ppo_epochs = 2                    :1052
+  epoch 0 — critic step 1/2     _value_train(12 rows)               :1056
+            policy step 1/2     train + finish_train_step           :1093
+            copy policy out     offload_to_cpu()   # 0 &lt; 2-1        :1100
+  epoch 1 — critic step 2/2     _value_train(12 rows)               :1056
+            policy step 2/2     train + finish_train_step           :1093
+            (no copy-out)       # 1 is not &lt; 2-1
 
 # per RL step: 2 critic optimizer steps, 2 policy optimizer steps, 12 rows, 1 chunk</div>
 
 <p>Two rules keep that arithmetic honest, both checked before any GPU is
-allocated. One RL step must arrive as a single chunk
+allocated: one RL step must arrive as a single chunk
 (<a href="https://github.com/NVIDIA-NeMo/RL/blob/90c48c958d77f38e0ee8edb3666ebb88ccb85d79/nemo_rl/algorithms/single_controller_utils/config.py#L802">config.py:802</a>),
-and the 12 rows must exactly equal what the critic is configured to train on
+and the 12 rows must equal what the critic is configured to train on
 (<a href="https://github.com/NVIDIA-NeMo/RL/blob/90c48c958d77f38e0ee8edb3666ebb88ccb85d79/nemo_rl/algorithms/single_controller_utils/config.py#L860">:860</a>).
-Without the second rule the critic would quietly step its optimizer once per
-chunk while the policy stepped once per step — two different learning rates from
-one config file, and no error.</p>
+Without the second, the critic would quietly step once per chunk while the policy
+stepped once per step — two different learning rates from one config file, and no
+error.</p>
 
 <h2>Does it work?</h2>
 
-<p>Yes, with a real run. The author posted convergence curves on the PR:
-the legacy PPO path at the same settings, this PR, and a third run resumed from
-a step-20 checkpoint. Reward and <code>token_mult_prob_error</code> track the
-legacy path, and the critic's loss falls cleanly. The run is the 2-node,
-8-GPU-per-node nightly recipe added by this PR, which is also the config that
-exercises everything new here — <code>ppo_epochs: 4</code>, 10 steps of
-critic-only warmup, and the widened generation lookahead.</p>
+<p>Yes, with a real run. The author posted convergence curves on the PR: the
+legacy PPO path at the same settings, this PR, and a third run resumed from a
+step-20 checkpoint. Reward and <code>token_mult_prob_error</code> track the legacy
+path and the critic's loss falls cleanly. The run is the two-node nightly recipe
+added here, which is also the config that exercises everything new —
+<code>ppo_epochs: 4</code>, ten steps of critic-only warmup, and a widened
+generation lookahead during that warmup.</p>
 
 <p>Two honest gaps in that evidence:</p>
 <ul>
 <li><code>train/critic/explained_var</code> is not in the posted panel, even though
-this PR ships a nightly threshold on it. That is the number that separates a
-critic which has learned something from one that has collapsed to predicting the
-batch average — falling loss alone does not tell them apart.</li>
-<li>Throughput here is not comparable to the legacy path: <code>total_flops</code>
-is recorded from the last epoch only, so with <code>ppo_epochs</code> above 1 it
+this PR ships a nightly threshold on it. That is the number separating a critic
+that learned something from one that collapsed to predicting the batch average —
+falling loss alone does not tell them apart.</li>
+<li>Throughput is not comparable to the legacy path: <code>total_flops</code> is
+recorded from the last epoch only, so above <code>ppo_epochs: 1</code> it
 under-reports by that factor. The PR says so plainly.</li>
 </ul>
 
 <div class="warn">
-<strong>What to take away.</strong> PPO now runs on the SingleController path with
-convergence matching the legacy path, and the cost of the second model is paid in
-copies rather than in GPUs — the critic borrows the training GPUs four times per
-step and gives them back. The copies are not free: <code>ppo_epochs: 4</code> means
-four rounds of moving the policy out and back per step, so raising it buys extra
-optimizer steps at the price of extra host-device traffic. If you are porting a
-PPO config, the two settings above (one chunk per step, and critic batch size
-equal to prompts × generations) are the ones setup will reject you for.
+<strong>What to take away.</strong> Generation's placement is yours to choose;
+the policy and critic sharing GPUs is not. That sharing is what the copies pay
+for, and they are not free — <code>ppo_epochs: 4</code> means four rounds of
+moving the policy out and back per step, so raising it buys extra optimizer steps
+at the price of extra host-device traffic. Run non-colocated if you can spare the
+GPUs: generation then never waits on the hand-off. If you are porting a PPO
+config, the two rules above — one chunk per step, and critic batch size equal to
+prompts × generations — are what setup will reject you for.
 </div>
 
 </div>
