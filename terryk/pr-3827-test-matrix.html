@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NVIDIA-NeMo/RL #3827 — six checkpoint cases, three samplers, what survives</title>
+<style>
+:root{
+  --bg:#0d1117; --surface:#161b22; --surface2:#1c2128; --border:#30363d;
+  --text:#e6edf3; --dim:#8b949e; --accent:#58a6ff; --green:#3fb950;
+  --orange:#d29922; --red:#f85149; --purple:#a371f7;
+}
+:root[data-theme="light"]{
+  --bg:#ffffff; --surface:#f6f8fa; --surface2:#eaeef2; --border:#d0d7de;
+  --text:#1f2328; --dim:#59636e; --accent:#0969da; --green:#1a7f37;
+  --orange:#9a6700; --red:#cf222e; --purple:#8250df;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:28px 20px 70px}
+h1{font-size:22px;margin:0 0 8px;line-height:1.3}
+h2{font-size:18px;margin:30px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;
+  font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
+.sub{color:var(--dim);font-size:13.5px;margin:0 0 16px}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);
+  border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;
+  font:13px/1 ui-monospace,Menlo,monospace;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.18)}
+.mono{font:12.5px ui-monospace,SFMono-Regular,Menlo,monospace;
+  background:var(--surface);border:1px solid var(--border);border-radius:8px;
+  padding:13px;overflow-x:auto;white-space:pre;line-height:1.5}
+.hl{border-left:3px solid var(--accent);background:var(--surface);
+  padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0}
+svg{max-width:100%;height:auto;display:block;margin:16px 0}
+svg .hdr{fill:var(--accent);font:bold 12.5px -apple-system,sans-serif}
+svg .name{fill:var(--text);font:bold 12.5px -apple-system,sans-serif}
+svg .sm{fill:var(--dim);font:11px -apple-system,sans-serif}
+svg .mn{fill:var(--dim);font:10.5px ui-monospace,Menlo,monospace}
+svg .cell{stroke-width:1.4}
+svg .c-tr{fill:var(--dim);opacity:.20;stroke:var(--dim)}
+svg .c-cm{fill:var(--accent);opacity:.45;stroke:var(--accent)}
+svg .c-if{fill:var(--orange);opacity:.5;stroke:var(--orange)}
+svg .c-ev{fill:var(--dim);opacity:.10;stroke:var(--dim);stroke-dasharray:4 3}
+svg .ctx{fill:var(--text);font:11px ui-monospace,Menlo,monospace}
+svg .b-fail{fill:var(--red);opacity:.85}
+svg .b-xf{fill:var(--orange);opacity:.85}
+svg .b-pass{fill:var(--green);opacity:.85}
+svg .btx{fill:var(--bg);font:bold 10.5px -apple-system,sans-serif}
+svg .colh{fill:var(--dim);font:bold 10px ui-monospace,Menlo,monospace}
+svg .rule{stroke:var(--border);stroke-width:1}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+  document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head>
+<body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+  function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+  function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
+    b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
+      else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+  document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+<div class="wrap">
+
+<h1>Six ways a run can be paused, three samplers, and what survives the restart</h1>
+<p class="sub">Test matrix for
+<a href="https://github.com/NVIDIA-NeMo/RL/pull/3827">NVIDIA-NeMo/RL #3827</a>,
+which tests <a href="https://github.com/NVIDIA-NeMo/RL/pull/3480">#3480</a> ·
+permalinks pin <code>2245298</code> · background:
+<a href="pr-3480-lost-lookahead.html">what a restart loses</a> ·
+<a href="pr-3480-architecture.html">who owns what</a>.</p>
+
+<p>One prompt group is one prompt with 2 rollouts. Training consumes 3 groups a step. The checkpoint
+lands mid-run, so the buffer holds a mix: some groups trained already, some finished and waiting,
+some still generating. The rule every case is checked against:
+<strong>a group the loader has handed out and the trainer has not used must come back</strong> — it
+sits behind the saved loader position, so nothing will ever produce it again.</p>
+
+<svg viewBox="0 0 900 690" role="img" aria-label="Six checkpoint scenarios as strips of prompt groups, each with three sampler outcomes. Gated samplers fail on five of six; windowed passes two and expect-fails four.">
+  <text class="hdr" x="16" y="18">Each row: the buffer at checkpoint time, then what each sampler gets back</text>
+
+  <!-- legend: cell states -->
+  <rect class="cell c-tr" x="16" y="30" width="13" height="12" rx="2"/>
+  <text class="sm" x="34" y="40">trained</text>
+  <rect class="cell c-cm" x="94" y="30" width="13" height="12" rx="2"/>
+  <text class="sm" x="112" y="40">finished, waiting</text>
+  <rect class="cell c-if" x="226" y="30" width="13" height="12" rx="2"/>
+  <text class="sm" x="244" y="40">still generating</text>
+  <rect class="cell c-ev" x="352" y="30" width="13" height="12" rx="2"/>
+  <text class="sm" x="370" y="40">evicted on purpose</text>
+
+  <!-- legend: outcomes, fail first -->
+  <rect class="b-fail" x="514" y="30" width="44" height="13" rx="3"/>
+  <text class="btx" x="536" y="40" text-anchor="middle">FAIL</text>
+  <text class="sm" x="564" y="40">lost what it kept before</text>
+  <rect class="b-xf" x="712" y="30" width="44" height="13" rx="3"/>
+  <text class="btx" x="734" y="40" text-anchor="middle">XFAIL</text>
+  <text class="sm" x="762" y="40">old gap</text>
+  <rect class="b-pass" x="836" y="30" width="44" height="13" rx="3"/>
+  <text class="btx" x="858" y="40" text-anchor="middle">PASS</text>
+
+  <path class="rule" d="M16 54 L884 54"/>
+
+  <!-- column headers -->
+  <text class="colh" x="690" y="72">windowed</text>
+  <text class="colh" x="762" y="72">in_order</text>
+  <text class="colh" x="828" y="72">wt_fifo</text>
+
+  <!-- ============ 1. all complete ============ -->
+  <text class="name" x="16" y="98">everything finished</text>
+  <text class="sm" x="16" y="114">trained 9-11 · loader at 15</text>
+  <text class="mn" x="16" y="130">needs back 12,13,14</text>
+  <rect class="cell c-tr" x="240" y="88" width="44" height="30" rx="4"/><text class="ctx" x="256" y="108">9</text>
+  <rect class="cell c-tr" x="288" y="88" width="44" height="30" rx="4"/><text class="ctx" x="301" y="108">10</text>
+  <rect class="cell c-tr" x="336" y="88" width="44" height="30" rx="4"/><text class="ctx" x="349" y="108">11</text>
+  <rect class="cell c-cm" x="384" y="88" width="44" height="30" rx="4"/><text class="ctx" x="397" y="108">12</text>
+  <rect class="cell c-cm" x="432" y="88" width="44" height="30" rx="4"/><text class="ctx" x="445" y="108">13</text>
+  <rect class="cell c-cm" x="480" y="88" width="44" height="30" rx="4"/><text class="ctx" x="493" y="108">14</text>
+  <rect class="b-pass" x="686" y="94" width="58" height="16" rx="3"/><text class="btx" x="715" y="106" text-anchor="middle">PASS</text>
+  <rect class="b-fail" x="752" y="94" width="58" height="16" rx="3"/><text class="btx" x="781" y="106" text-anchor="middle">FAIL</text>
+  <rect class="b-fail" x="818" y="94" width="58" height="16" rx="3"/><text class="btx" x="847" y="106" text-anchor="middle">FAIL</text>
+  <text class="mn" x="240" y="136">gated samplers lose all three, and they were fully generated</text>
+
+  <path class="rule" d="M16 150 L884 150"/>
+
+  <!-- ============ 2. stale ============ -->
+  <text class="name" x="16" y="180">one very old group</text>
+  <text class="sm" x="16" y="196">nothing trained · loader at 11</text>
+  <text class="mn" x="16" y="212">needs back 9,10</text>
+  <rect class="cell c-cm" x="240" y="170" width="44" height="30" rx="4"/><text class="ctx" x="256" y="190">9</text>
+  <rect class="cell c-cm" x="288" y="170" width="44" height="30" rx="4"/><text class="ctx" x="301" y="190">10</text>
+  <text class="mn" x="344" y="190">10 is far outside the staleness window</text>
+  <rect class="b-pass" x="686" y="176" width="58" height="16" rx="3"/><text class="btx" x="715" y="188" text-anchor="middle">PASS</text>
+  <rect class="b-fail" x="752" y="176" width="58" height="16" rx="3"/><text class="btx" x="781" y="188" text-anchor="middle">FAIL</text>
+  <rect class="b-fail" x="818" y="176" width="58" height="16" rx="3"/><text class="btx" x="847" y="188" text-anchor="middle">FAIL</text>
+  <text class="mn" x="240" y="218">restore hands it back; evicting it is the sampler's call, not the checkpoint's</text>
+
+  <path class="rule" d="M16 232 L884 232"/>
+
+  <!-- ============ 3. partly done ============ -->
+  <text class="name" x="16" y="262">one batch part-done</text>
+  <text class="sm" x="16" y="278">trained 9-11 · loader at 15</text>
+  <text class="mn" x="16" y="294">needs back 12,13,14</text>
+  <rect class="cell c-tr" x="240" y="252" width="44" height="30" rx="4"/><text class="ctx" x="256" y="272">9</text>
+  <rect class="cell c-tr" x="288" y="252" width="44" height="30" rx="4"/><text class="ctx" x="301" y="272">10</text>
+  <rect class="cell c-tr" x="336" y="252" width="44" height="30" rx="4"/><text class="ctx" x="349" y="272">11</text>
+  <rect class="cell c-if" x="384" y="252" width="44" height="30" rx="4"/><text class="ctx" x="397" y="272">12</text>
+  <rect class="cell c-cm" x="432" y="252" width="44" height="30" rx="4"/><text class="ctx" x="445" y="272">13</text>
+  <rect class="cell c-if" x="480" y="252" width="44" height="30" rx="4"/><text class="ctx" x="493" y="272">14</text>
+  <text class="mn" x="392" y="296">1/2</text>
+  <text class="mn" x="488" y="296">0/2</text>
+  <rect class="b-xf" x="686" y="258" width="58" height="16" rx="3"/><text class="btx" x="715" y="270" text-anchor="middle">XFAIL</text>
+  <rect class="b-fail" x="752" y="258" width="58" height="16" rx="3"/><text class="btx" x="781" y="270" text-anchor="middle">FAIL</text>
+  <rect class="b-fail" x="818" y="258" width="58" height="16" rx="3"/><text class="btx" x="847" y="270" text-anchor="middle">FAIL</text>
+  <text class="mn" x="536" y="272">windowed keeps 13 only</text>
+
+  <path class="rule" d="M16 314 L884 314"/>
+
+  <!-- ============ 4. lag 2 ============ -->
+  <text class="name" x="16" y="344">two batches at once</text>
+  <text class="sm" x="16" y="360">trained 9-11 · loader at 18</text>
+  <text class="mn" x="16" y="376">needs back 12-17</text>
+  <rect class="cell c-tr" x="240" y="334" width="44" height="30" rx="4"/><text class="ctx" x="256" y="354">9</text>
+  <rect class="cell c-tr" x="288" y="334" width="44" height="30" rx="4"/><text class="ctx" x="301" y="354">10</text>
+  <rect class="cell c-tr" x="336" y="334" width="44" height="30" rx="4"/><text class="ctx" x="349" y="354">11</text>
+  <rect class="cell c-if" x="384" y="334" width="44" height="30" rx="4"/><text class="ctx" x="397" y="354">12</text>
+  <rect class="cell c-cm" x="432" y="334" width="44" height="30" rx="4"/><text class="ctx" x="445" y="354">13</text>
+  <rect class="cell c-if" x="480" y="334" width="44" height="30" rx="4"/><text class="ctx" x="493" y="354">14</text>
+  <rect class="cell c-cm" x="528" y="334" width="44" height="30" rx="4"/><text class="ctx" x="541" y="354">15</text>
+  <rect class="cell c-if" x="576" y="334" width="44" height="30" rx="4"/><text class="ctx" x="589" y="354">16</text>
+  <rect class="cell c-if" x="624" y="334" width="44" height="30" rx="4"/><text class="ctx" x="637" y="354">17</text>
+  <text class="mn" x="392" y="378">1/2</text>
+  <text class="mn" x="488" y="378">0/2</text>
+  <text class="mn" x="584" y="378">1/2</text>
+  <text class="mn" x="632" y="378">0/2</text>
+  <rect class="b-xf" x="686" y="340" width="58" height="16" rx="3"/><text class="btx" x="715" y="352" text-anchor="middle">XFAIL</text>
+  <rect class="b-fail" x="752" y="340" width="58" height="16" rx="3"/><text class="btx" x="781" y="352" text-anchor="middle">FAIL</text>
+  <rect class="b-fail" x="818" y="340" width="58" height="16" rx="3"/><text class="btx" x="847" y="352" text-anchor="middle">FAIL</text>
+
+  <path class="rule" d="M16 396 L884 396"/>
+
+  <!-- ============ 5. evicted ============ -->
+  <text class="name" x="16" y="426">one dropped on purpose</text>
+  <text class="sm" x="16" y="442">trained 9,11 · loader at 15</text>
+  <text class="mn" x="16" y="458">needs back 12,13,14</text>
+  <rect class="cell c-tr" x="240" y="416" width="44" height="30" rx="4"/><text class="ctx" x="256" y="436">9</text>
+  <rect class="cell c-ev" x="288" y="416" width="44" height="30" rx="4"/><text class="ctx" x="301" y="436">10</text>
+  <rect class="cell c-tr" x="336" y="416" width="44" height="30" rx="4"/><text class="ctx" x="349" y="436">11</text>
+  <rect class="cell c-if" x="384" y="416" width="44" height="30" rx="4"/><text class="ctx" x="397" y="436">12</text>
+  <rect class="cell c-cm" x="432" y="416" width="44" height="30" rx="4"/><text class="ctx" x="445" y="436">13</text>
+  <rect class="cell c-if" x="480" y="416" width="44" height="30" rx="4"/><text class="ctx" x="493" y="436">14</text>
+  <text class="mn" x="392" y="460">1/2</text>
+  <text class="mn" x="488" y="460">0/2</text>
+  <rect class="b-xf" x="686" y="422" width="58" height="16" rx="3"/><text class="btx" x="715" y="434" text-anchor="middle">XFAIL</text>
+  <rect class="b-fail" x="752" y="422" width="58" height="16" rx="3"/><text class="btx" x="781" y="434" text-anchor="middle">FAIL</text>
+  <rect class="b-fail" x="818" y="422" width="58" height="16" rx="3"/><text class="btx" x="847" y="434" text-anchor="middle">FAIL</text>
+  <text class="mn" x="536" y="436">10 was thrown away on purpose, so it is not owed back</text>
+
+  <path class="rule" d="M16 478 L884 478"/>
+
+  <!-- ============ 6. out of order ============ -->
+  <text class="name" x="16" y="508">trained out of order</text>
+  <text class="sm" x="16" y="524">trained 9,10,11,13 · loader at 15</text>
+  <text class="mn" x="16" y="540">needs back 12,14</text>
+  <rect class="cell c-tr" x="240" y="498" width="44" height="30" rx="4"/><text class="ctx" x="256" y="518">9</text>
+  <rect class="cell c-tr" x="288" y="498" width="44" height="30" rx="4"/><text class="ctx" x="301" y="518">10</text>
+  <rect class="cell c-tr" x="336" y="498" width="44" height="30" rx="4"/><text class="ctx" x="349" y="518">11</text>
+  <rect class="cell c-if" x="384" y="498" width="44" height="30" rx="4"/><text class="ctx" x="397" y="518">12</text>
+  <rect class="cell c-tr" x="432" y="498" width="44" height="30" rx="4"/><text class="ctx" x="445" y="518">13</text>
+  <rect class="cell c-if" x="480" y="498" width="44" height="30" rx="4"/><text class="ctx" x="493" y="518">14</text>
+  <text class="mn" x="392" y="542">1/2</text>
+  <text class="mn" x="488" y="542">0/2</text>
+  <rect class="b-xf" x="686" y="504" width="58" height="16" rx="3"/><text class="btx" x="715" y="516" text-anchor="middle">XFAIL</text>
+  <rect class="b-pass" x="752" y="504" width="58" height="16" rx="3"/><text class="btx" x="781" y="516" text-anchor="middle">PASS</text>
+  <rect class="b-pass" x="818" y="504" width="58" height="16" rx="3"/><text class="btx" x="847" y="516" text-anchor="middle">PASS</text>
+  <text class="mn" x="240" y="562">13 was trained while 12 was still going. The gated samplers pass here because</text>
+  <text class="mn" x="240" y="578">nothing finished-and-waiting was left, so there was nothing for them to lose.</text>
+
+  <path class="rule" d="M16 596 L884 596"/>
+
+  <text class="hdr" x="16" y="622">10 FAIL · 4 XFAIL · 4 PASS</text>
+  <text class="sm" x="16" y="644">FAIL means this change lost a group the old code brought back. Those are plain failures, not</text>
+  <text class="sm" x="16" y="662">expected ones. XFAIL means a gap that was there before too, so it is marked and tracked.</text>
+  <text class="sm" x="16" y="680">Only in_order and weight_fifo ever FAIL, and only where something was finished and waiting.</text>
+</svg>
+
+<h2>Where the two failure lines come from</h2>
+
+<p><strong>FAIL</strong> — <code>in_order</code> and <code>weight_fifo</code> say
+<code>supports_buffer_checkpoint = False</code>, so no index file is written
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/608e9bde376d23604b7c6472e1e1e19a43bf8345/nemo_rl/algorithms/single_controller.py#L981">single_controller.py:981</a>)
+and the restore returns straight away
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/608e9bde376d23604b7c6472e1e1e19a43bf8345/nemo_rl/algorithms/single_controller.py#L322">:322</a>).
+Before this change the buffer was saved every time with no such check
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/7cba25ac3d876f727efbf06bfa9719fd3aa8def5/nemo_rl/algorithms/single_controller.py#L802">merge base :802</a>)
+and restored for any sampler whose name matched
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/7cba25ac3d876f727efbf06bfa9719fd3aa8def5/nemo_rl/algorithms/single_controller.py#L270">:270</a>).</p>
+
+<p><strong>XFAIL</strong> — a group that has not committed is never written down.
+<code>reserve()</code> marks the slot not-ready
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/608e9bde376d23604b7c6472e1e1e19a43bf8345/nemo_rl/algorithms/async_utils/replay_buffer.py#L910">replay_buffer.py:910</a>)
+and the save skips anything not ready
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/608e9bde376d23604b7c6472e1e1e19a43bf8345/nemo_rl/algorithms/async_utils/replay_buffer.py#L1093">:1093</a>).
+A group is either reserved or committed with nothing in between, so <code>1/2</code> and
+<code>0/2</code> are the same thing to a checkpoint. The old code did this too, so it is a gap, not
+a step backwards.</p>
+
+<h2>Does it work?</h2>
+
+<p>These were run, on CPU, in about 12 seconds. Real output:</p>
+
+<div class="mono">10 failed, 19 passed, 4 xfailed in 11.69s
+
+AssertionError: in_order/lag1-next-step-complete: ['g12', 'g13', 'g14'] came back
+before this change and do not now. These groups finished generating and committed,
+so the old save wrote them and the old restore returned them on a same-sampler
+resume. recovered=[]</div>
+
+<p>That is 33 tests: the 18 badges above, plus 15 smaller checks that pin why each line fails.
+Zero XPASS, which is the number that matters: every case marked "expected to fail" really does
+fail, so none of them is quietly passing and hiding a gap. The tests drive the real
+<code>TQReplayBuffer</code>, the real samplers and the real save and load calls — only the tensor
+converter is swapped out, so a case can use empty prompt records.</p>
+
+<div class="hl">
+<strong>What to take from it.</strong> The two PASS badges on the bottom row are the check proving
+itself: there, the old code recovered nothing either, so there is nothing to lose and no failure is
+reported. Everywhere else a gated sampler is used, groups that finished generating no longer come
+back. The rollout tensors are still in TransferQueue after the restore — only the note of which rows
+form which group is missing — so closing this needs an index, not a re-run of the work.
+</div>
+
+</div>
+</body>
+</html>
