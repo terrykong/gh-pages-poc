@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NVIDIA-NeMo/RL #3768 — where teacher inference runs in the SingleController path</title>
+<style>
+:root{
+  --bg:#0d1117; --surface:#161b22; --surface2:#1c2128; --border:#30363d;
+  --text:#e6edf3; --dim:#8b949e; --accent:#58a6ff; --green:#3fb950;
+  --orange:#d29922; --red:#f85149; --purple:#bc8cff;
+}
+:root[data-theme="light"]{
+  --bg:#ffffff; --surface:#f6f8fa; --surface2:#eaeef2; --border:#d0d7de;
+  --text:#1f2328; --dim:#59636e; --accent:#0969da; --green:#1a7f37;
+  --orange:#9a6700; --red:#cf222e; --purple:#8250df;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:28px 20px 70px}
+h1{font-size:22px;margin:0 0 8px;line-height:1.3}
+h2{font-size:18px;margin:32px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;
+  font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
+.sub{color:var(--dim);font-size:13.5px;margin:0 0 16px}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);
+  border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;
+  font:13px/1 ui-monospace,Menlo,monospace;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.18)}
+.mono{font:12.5px ui-monospace,SFMono-Regular,Menlo,monospace;
+  background:var(--surface);border:1px solid var(--border);border-radius:8px;
+  padding:13px;overflow-x:auto;white-space:pre;margin:10px 0 4px}
+.src{font:11.5px ui-monospace,Menlo,monospace;color:var(--dim);margin:0 0 16px}
+.warn{border-left:3px solid var(--orange);background:var(--surface);
+  padding:12px 16px;margin:20px 0;border-radius:0 8px 8px 0}
+.cap{color:var(--dim);font-size:12.5px;margin:2px 0 0}
+table{border-collapse:collapse;width:100%;margin:12px 0;font-size:13.5px}
+th,td{border:1px solid var(--border);padding:7px 10px;text-align:left;vertical-align:top}
+th{background:var(--surface2);font-weight:600}
+td.num{font:12.5px ui-monospace,Menlo,monospace}
+svg{max-width:100%;height:auto;display:block;margin:16px 0 4px}
+svg .lbl{fill:var(--text);font:11px ui-monospace,Menlo,monospace}
+svg .lane{fill:var(--text);font:12px -apple-system,sans-serif}
+svg .note{fill:var(--dim);font:11.5px -apple-system,sans-serif}
+svg .hdr{fill:var(--accent);font:bold 12.5px -apple-system,sans-serif}
+svg .b-roll{fill:var(--dim);opacity:.30;stroke:var(--dim);stroke-width:1.2}
+svg .b-put{fill:var(--orange);opacity:.45;stroke:var(--orange);stroke-width:1.2}
+svg .b-tea{fill:var(--purple);opacity:.45;stroke:var(--purple);stroke-width:1.4}
+svg .b-wait{fill:var(--red);opacity:.22;stroke:var(--red);stroke-width:1.2;stroke-dasharray:3 3}
+svg .rdy{fill:var(--green)}
+svg .rdy-t{fill:var(--green);font:bold 11px -apple-system,sans-serif}
+svg .axis{stroke:var(--border);stroke-width:1.2}
+svg .lk{stroke:var(--red);stroke-width:1.6;stroke-dasharray:4 3;fill:none}
+svg a text{text-decoration:underline;fill:var(--accent);font:11px ui-monospace,Menlo,monospace}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+  document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head>
+<body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+  function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+  function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
+    b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
+      else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+  document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+<div class="wrap">
+
+<h1>Where teacher inference runs in the SingleController distillation path</h1>
+<p class="sub">Companion illustration for
+<a href="https://github.com/NVIDIA-NeMo/RL/pull/3768">NVIDIA-NeMo/RL #3768</a>
+(add multi-teacher on-policy distillation to the SingleController text path).
+All permalinks pin the PR head <code>359c895</code>.</p>
+
+<p>In on-policy distillation, a big frozen <strong>teacher</strong> model scores the tokens a smaller
+<strong>student</strong> just generated. The advantage the student trains on is simply
+<code>teacher_logprob − student_logprob</code>, so every rollout needs a teacher number attached before it
+can be trained on. The SingleController path already runs two loops at once: one generating rollouts,
+one training on them, joined by a replay buffer. So there is a real question of <em>where</em> the
+teacher call goes. This PR puts it in a place that is easy to miss: inside
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/359c895809a32982e700a4a6f80877c36b5cecec/nemo_rl/algorithms/async_utils/replay_buffer.py#L844">the replay buffer's <code>commit()</code></a>,
+after the rollout is written to storage but before that row is allowed to be trained on.</p>
+
+<h2>The teacher runs between the write and the ready flag</h2>
+
+<svg viewBox="0 0 940 424" role="img" aria-label="Timeline showing teacher inference inside commit, between the storage write and the row becoming trainable">
+  <text x="10" y="18" class="hdr">Three prompt groups, 4 rollout rows each, 2 teacher checkpoints — one rollout loop, time flowing right</text>
+
+  <!-- time axis -->
+  <line x1="150" y1="34" x2="890" y2="34" class="axis"/>
+  <text x="150" y="28" class="note">time →</text>
+
+  <!-- ============ group A ============ -->
+  <text x="10" y="85" class="lane">group A → math</text>
+  <rect x="150" y="68" width="170" height="26" rx="4" class="b-roll"/>
+  <text x="235" y="85" class="lbl" text-anchor="middle">generating</text>
+  <rect x="320" y="68" width="40" height="26" rx="4" class="b-put"/>
+  <text x="340" y="85" class="lbl" text-anchor="middle">put</text>
+  <rect x="360" y="68" width="160" height="26" rx="4" class="b-tea"/>
+  <text x="440" y="85" class="lbl" text-anchor="middle">teacher: math</text>
+  <circle cx="527" cy="81" r="5" class="rdy"/>
+  <text x="537" y="85" class="rdy-t">ready</text>
+
+  <!-- ============ group B ============ -->
+  <text x="10" y="131" class="lane">group B → code</text>
+  <rect x="150" y="114" width="185" height="26" rx="4" class="b-roll"/>
+  <text x="242" y="131" class="lbl" text-anchor="middle">generating</text>
+  <rect x="335" y="114" width="40" height="26" rx="4" class="b-put"/>
+  <text x="355" y="131" class="lbl" text-anchor="middle">put</text>
+  <rect x="375" y="114" width="125" height="26" rx="4" class="b-tea"/>
+  <text x="437" y="131" class="lbl" text-anchor="middle">teacher: code</text>
+  <circle cx="507" cy="127" r="5" class="rdy"/>
+  <text x="517" y="131" class="rdy-t">ready</text>
+
+  <!-- ============ group C ============ -->
+  <text x="10" y="177" class="lane">group C → math</text>
+  <rect x="150" y="160" width="200" height="26" rx="4" class="b-roll"/>
+  <text x="250" y="177" class="lbl" text-anchor="middle">generating</text>
+  <rect x="350" y="160" width="40" height="26" rx="4" class="b-put"/>
+  <text x="370" y="177" class="lbl" text-anchor="middle">put</text>
+  <rect x="390" y="160" width="130" height="26" rx="4" class="b-wait"/>
+  <text x="455" y="177" class="lbl" text-anchor="middle">lock wait</text>
+  <rect x="520" y="160" width="180" height="26" rx="4" class="b-tea"/>
+  <text x="610" y="177" class="lbl" text-anchor="middle">teacher: math</text>
+  <circle cx="707" cy="173" r="5" class="rdy"/>
+  <text x="717" y="177" class="rdy-t">ready</text>
+
+  <!-- lock dependency arrow A -> C -->
+  <path d="M520 94 L520 158" class="lk"/>
+  <text x="528" y="150" class="note">same teacher, so C starts only when A lets go</text>
+
+  <!-- B vs A overlap marker -->
+  <path d="M375 106 L500 106" class="lk" style="stroke:var(--green)"/>
+  <text x="383" y="103" class="note" style="fill:var(--green)">B overlaps A — different teacher, different lock</text>
+
+  <!-- ============ what training can see ============ -->
+  <line x1="150" y1="208" x2="890" y2="208" class="axis"/>
+  <text x="10" y="234" class="lane">train loop sees</text>
+  <rect x="150" y="217" width="357" height="26" rx="4" class="b-roll"/>
+  <text x="328" y="234" class="lbl" text-anchor="middle">nothing trainable yet</text>
+  <rect x="507" y="217" width="200" height="26" rx="4" style="fill:var(--green);opacity:.28;stroke:var(--green);stroke-width:1.2"/>
+  <text x="607" y="234" class="lbl" text-anchor="middle">B, then A</text>
+  <rect x="707" y="217" width="183" height="26" rx="4" style="fill:var(--green);opacity:.45;stroke:var(--green);stroke-width:1.2"/>
+  <text x="798" y="234" class="lbl" text-anchor="middle">B, A, C</text>
+
+  <!-- ============ legend ============ -->
+  <rect x="150" y="264" width="18" height="13" rx="3" class="b-roll"/>
+  <text x="174" y="275" class="note">generating</text>
+  <rect x="250" y="264" width="18" height="13" rx="3" class="b-put"/>
+  <text x="274" y="275" class="note">written, not trainable</text>
+  <rect x="425" y="264" width="18" height="13" rx="3" class="b-tea"/>
+  <text x="449" y="275" class="note">teacher inference</text>
+  <rect x="570" y="264" width="18" height="13" rx="3" class="b-wait"/>
+  <text x="594" y="275" class="note">waiting on lock</text>
+  <circle cx="705" cy="270" r="5" class="rdy"/>
+  <text x="716" y="275" class="note">trainable</text>
+
+  <!-- ============ notes under the chart ============ -->
+  <text x="10" y="312" class="note">A row is written during "put", but training cannot pick it up until the teacher column lands.</text>
+  <text x="10" y="332" class="note">One lock per physical teacher, not per routing name — two names sharing a checkpoint share one queue.</text>
+  <text x="10" y="352" class="note">If teacher inference fails, the 4 rows are deleted and the rollout is NOT regenerated.</text>
+
+  <text x="10" y="384" class="note">code:</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/359c895809a32982e700a4a6f80877c36b5cecec/nemo_rl/algorithms/async_utils/replay_buffer.py#L825-L831"><text x="52" y="384">put_samples</text></a>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/359c895809a32982e700a4a6f80877c36b5cecec/nemo_rl/algorithms/async_utils/replay_buffer.py#L844-L850"><text x="146" y="384">enrichment hook</text></a>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/359c895809a32982e700a4a6f80877c36b5cecec/nemo_rl/algorithms/opd.py#L386"><text x="272" y="384">per-teacher lock</text></a>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/359c895809a32982e700a4a6f80877c36b5cecec/nemo_rl/algorithms/async_utils/replay_buffer.py#L852-L856"><text x="404" y="384">ready flag</text></a>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/359c895809a32982e700a4a6f80877c36b5cecec/nemo_rl/experience/rollout_manager.py#L1303-L1307"><text x="490" y="384">no-retry rule</text></a>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/359c895809a32982e700a4a6f80877c36b5cecec/nemo_rl/data_plane/worker_mixin.py#L530-L561"><text x="596" y="384">teacher worker entry</text></a>
+</svg>
+<p class="cap">Times are illustrative; the shapes are not. Real steady-state teacher cost from the author's run is 0.90–1.23&nbsp;s per group.</p>
+
+<h2>Following group A through the code</h2>
+
+<p>Same numbers as the figure: group A has <strong>4</strong> rollout rows and routes to the
+<code>math</code> teacher, whose data-parallel width is <strong>4</strong>.</p>
+
+<div class="mono">put_samples(sample_ids=["A_0","A_1","A_2","A_3"], partition_id="rollout_data")
+# 4 rows now exist in storage.  ready_list[A] is still False —
+# the training loop's sampler only picks rows whose flag is True.</div>
+<p class="src">→ <a href="https://github.com/NVIDIA-NeMo/RL/blob/359c895809a32982e700a4a6f80877c36b5cecec/nemo_rl/algorithms/async_utils/replay_buffer.py#L825-L831">replay_buffer.py:825-831</a></p>
+
+<div class="mono">meta = await self._post_write_enricher(meta, record)   # &lt;-- the teacher call
+# One optional callback, installed once at startup. It is awaited INSIDE
+# commit()'s existing try/except, so it inherits the rollback path for free.</div>
+<p class="src">→ <a href="https://github.com/NVIDIA-NeMo/RL/blob/359c895809a32982e700a4a6f80877c36b5cecec/nemo_rl/algorithms/async_utils/replay_buffer.py#L844-L850">replay_buffer.py:844-850</a>,
+installed at <a href="https://github.com/NVIDIA-NeMo/RL/blob/359c895809a32982e700a4a6f80877c36b5cecec/nemo_rl/algorithms/single_controller.py#L191">single_controller.py:191</a></p>
+
+<div class="mono">agent_ref   = record.extra_env_info["agent_ref"]   # {"name": "math"}
+alias       = "math"                              # which teacher this prompt wants
+group_alias = alias_to_group_alias["math"]         # which checkpoint actually serves it
+# Two different names can point at one checkpoint, so they share one lock.</div>
+<p class="src">→ <a href="https://github.com/NVIDIA-NeMo/RL/blob/359c895809a32982e700a4a6f80877c36b5cecec/nemo_rl/algorithms/opd.py#L255-L288">opd.py:255-288</a></p>
+
+<div class="mono">async with self._teacher_locks[group_alias]:        # group C waits here; group B does not
+    await asyncio.shield(asyncio.to_thread(self._enrich_sync, meta, group_alias))
+# to_thread: the teacher call ends in a blocking Ray get, so running it inline
+#            would freeze the whole controller.
+# shield:    a thread cannot be cancelled. On cancel, wait for it to finish first,
+#            so cleanup never deletes rows the teacher is still reading.</div>
+<p class="src">→ <a href="https://github.com/NVIDIA-NeMo/RL/blob/359c895809a32982e700a4a6f80877c36b5cecec/nemo_rl/algorithms/opd.py#L386-L403">opd.py:386-403</a></p>
+
+<div class="mono">dp_size   = 4          # the math teacher is split across 4 data-parallel ranks
+remainder = 4 % 4      # 0  -> every rank gets exactly one row, no padding needed
+teacher.get_logprobs_from_meta(meta)
+# Only the row IDs are sent. Each teacher rank reads ITS OWN rows out of storage
+# and writes teacher_reference_logprobs back onto those same 4 IDs.</div>
+<p class="src">→ <a href="https://github.com/NVIDIA-NeMo/RL/blob/359c895809a32982e700a4a6f80877c36b5cecec/nemo_rl/algorithms/opd.py#L296-L352">opd.py:296-352</a>,
+worker side <a href="https://github.com/NVIDIA-NeMo/RL/blob/359c895809a32982e700a4a6f80877c36b5cecec/nemo_rl/data_plane/worker_mixin.py#L530-L561">worker_mixin.py:530-561</a></p>
+
+<div class="mono">ready_list[A] = True   # only now can the training loop pick group A up</div>
+<p class="src">→ <a href="https://github.com/NVIDIA-NeMo/RL/blob/359c895809a32982e700a4a6f80877c36b5cecec/nemo_rl/algorithms/async_utils/replay_buffer.py#L852-L856">replay_buffer.py:852-856</a></p>
+
+<p>The older code path did the same job in a different order, and the differences all follow from
+that one change:</p>
+
+<table>
+<tr><th></th><th>Older path</th><th>This PR</th></tr>
+<tr><td>When the teacher runs</td><td>after the rollout, <em>before</em> the row is handed to the buffer</td><td>after the row is written to storage, before it becomes trainable</td></tr>
+<tr><td>What crosses the network</td><td>the token tensors, through the driver and back</td><td>only row IDs — each teacher rank reads and writes storage itself</td></tr>
+<tr><td>Uneven batch sizes</td><td>copy the last row in memory, trim the answer afterwards</td><td>write real temporary rows, delete them after</td></tr>
+<tr><td>If the teacher fails</td><td>the row was never handed over, so nothing to undo</td><td>the rows already exist, so they must be deleted and the rollout must not be re-run</td></tr>
+</table>
+
+<h2>Does it work?</h2>
+
+<p>The author ran the same 5-step recipe on both paths — same Qwen3-1.7B student and teacher, same
+dataset, same seed, same batch sizes, 3 nodes of 8 GPUs. Student and teacher are the <em>same</em>
+checkpoint, so a correct run must produce an advantage of essentially zero; any misrouted or
+misaligned teacher column would show up immediately as a non-zero gap.</p>
+
+<table>
+<tr><th>Steps 1–5</th><th>Older path</th><th>This PR</th></tr>
+<tr><td>training loss</td><td class="num">[0, 0, 0, -1.22e-14, 0]</td><td class="num">[0, 0, 0, 0, 0]</td></tr>
+<tr><td>teacher/student gap</td><td class="num">0, except 4.51e-12 at step 4</td><td class="num">all zero</td></tr>
+<tr><td>advantage spread</td><td class="num">0, except 9.74e-10 at step 4</td><td class="num">all zero</td></tr>
+<tr><td>token probability error (median)</td><td class="num">1.020450</td><td class="num">1.020543</td></tr>
+</table>
+
+<p>The two medians differ by <code>9.4e-5</code>. These were independent rollouts, so the generated
+tokens are not identical token-for-token even with a shared seed — this shows the two paths
+<em>behave</em> the same, not that they produced the same text. Both jobs finished with exit code 0.</p>
+
+<p>Teacher cost is charged to whichever step it lands on, which makes the per-step numbers look
+uneven: <code>teacher_samples</code> came out as <code>[64, 0, 32, 32, 32]</code> across the five steps.
+The first bucket reads 22.57&nbsp;s, but 16.44&nbsp;s of that is one group waiting on another for the
+same teacher. Steady-state cost is 0.90–1.23&nbsp;s.</p>
+
+<div class="warn">
+<strong>What this costs you.</strong> A prompt group sitting in teacher inference still holds its
+in-flight slot and its buffer slot, so slow teachers throttle rollout generation directly, and
+starve training a moment later. With a single teacher the lock makes this strictly one-at-a-time —
+the 16.44&nbsp;s of lock wait above is exactly that. Adding a second <em>physical</em> teacher is what
+buys parallelism; adding a second <em>name</em> for the same checkpoint does not, because both names
+share one lock. Worth watching <code>teacher_lock_wait_time_s</code> if rollout throughput drops.
+</div>
+
+</div>
+</body>
+</html>
