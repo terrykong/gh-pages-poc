@@ -215,6 +215,80 @@ if not self._sampler.supports_buffer_checkpoint:
 nothing, it fires once, and it fires while the user can still switch to
 <code>async_rl.sampler.name=windowed</code> or turn checkpointing off.</p>
 
+<h2>What about rollouts that were still running?</h2>
+
+<p><strong>They are lost too, and this one hits every sampler — <code>windowed</code> included.</strong>
+It is not a hidden bug: the PR says so itself, listing "in-flight reservations that have not committed
+canonical TQ rows" under what it does not yet recover, with
+<a href="https://github.com/NVIDIA-NeMo/RL/pull/3456">#3456</a> named as the work that would close it.
+Worth drawing anyway, because it stacks on top of the loss above.</p>
+
+<p>The first figure kept things simple by showing 15, 16 and 17 as unread. In a real run the pump has
+usually handed some of them out already — that is what <code>max_inflight_prompts</code> allows — so
+the cursor sits further along. Same save, same step, just drawn with the in-flight prompts included.</p>
+
+<svg viewBox="0 0 900 215" role="img" aria-label="The same run at save time. Prompts 12 to 14 are committed and waiting. Prompts 15, 16 and 17 are still generating, at 1 of 2, 2 of 2 and 0 of 2 generations done. The cursor sits at 18. None of the in-flight prompts are saved.">
+  <text class="hdr" x="16" y="20">The same run, with the in-flight prompts drawn in. Each prompt needs 2 generations.</text>
+
+  <text class="lbl-b" x="16" y="64">at save</text>
+  <text class="note" x="16" y="80">step 4 done</text>
+
+  <rect class="cell c-buf"  x="150" y="42" width="48" height="34" rx="5"/><text class="c-txt" x="164" y="64">12</text>
+  <rect class="cell c-buf"  x="206" y="42" width="48" height="34" rx="5"/><text class="c-txt" x="220" y="64">13</text>
+  <rect class="cell c-buf"  x="262" y="42" width="48" height="34" rx="5"/><text class="c-txt" x="276" y="64">14</text>
+  <rect class="cell c-lost" x="318" y="42" width="48" height="34" rx="5"/><text class="c-txt" x="332" y="64">15</text>
+  <rect class="cell c-lost" x="374" y="42" width="48" height="34" rx="5"/><text class="c-txt" x="388" y="64">16</text>
+  <rect class="cell c-lost" x="430" y="42" width="48" height="34" rx="5"/><text class="c-txt" x="444" y="64">17</text>
+  <rect class="cell c-und"  x="486" y="42" width="48" height="34" rx="5"/><text class="c-txt" x="500" y="64">18</text>
+  <rect class="cell c-und"  x="542" y="42" width="48" height="34" rx="5"/><text class="c-txt" x="556" y="64">19</text>
+  <rect class="cell c-und"  x="598" y="42" width="48" height="34" rx="5"/><text class="c-txt" x="612" y="64">20</text>
+
+  <text class="note" x="342" y="90" text-anchor="middle">1/2</text>
+  <text class="note" x="398" y="90" text-anchor="middle">2/2</text>
+  <text class="note" x="454" y="90" text-anchor="middle">0/2</text>
+
+  <path class="cursor" d="M482 32 L482 84"/>
+  <text class="cursor-lbl" x="482" y="26" text-anchor="middle">cursor = 18</text>
+
+  <rect class="cell c-buf"  x="150" y="112" width="14" height="12" rx="2"/>
+  <text class="note" x="170" y="122">committed, waiting for step 5</text>
+  <rect class="cell c-lost" x="380" y="112" width="14" height="12" rx="2"/>
+  <text class="note" x="400" y="122">still generating — never saved</text>
+  <rect class="cell c-und"  x="615" y="112" width="14" height="12" rx="2"/>
+  <text class="note" x="635" y="122">not read yet</text>
+
+  <text class="note" x="150" y="150">The three red prompts were handed out and are part-way through. 16 has even finished both of its</text>
+  <text class="note" x="150" y="166">generations, but has not committed yet. None of them is in the saved index, and the cursor is</text>
+  <text class="note" x="150" y="182">already past them, so a restart never hands them out again. Every sampler behaves this way.</text>
+</svg>
+
+<p>The reason is a single flag. When the pump hands a prompt out it books a slot marked not-ready
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/608e9bde376d23604b7c6472e1e1e19a43bf8345/nemo_rl/algorithms/async_utils/replay_buffer.py#L910"><code>ready_list.append(False)</code></a>),
+and the slot only flips to ready once every generation is done and written
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/608e9bde376d23604b7c6472e1e1e19a43bf8345/nemo_rl/algorithms/async_utils/replay_buffer.py#L986"><code>ready_list[idx] = True</code></a>).
+The save walks that list and skips anything not ready
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/608e9bde376d23604b7c6472e1e1e19a43bf8345/nemo_rl/algorithms/async_utils/replay_buffer.py#L1093">metadata_state_dict</a>);
+its docstring puts it plainly — "In-flight reservations are intentionally omitted." So prompt 16 above,
+fully generated but not yet committed, is skipped exactly like prompt 17 that has barely started.</p>
+
+<p>Nothing compensates for that on the loader side. The cursor is written down exactly where it stands
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/608e9bde376d23604b7c6472e1e1e19a43bf8345/nemo_rl/algorithms/single_controller.py#L932"><code>self._dataloader.state_dict()</code></a>),
+and <code>_save_checkpoint</code> never looks at the in-flight bookkeeping it already keeps in
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/608e9bde376d23604b7c6472e1e1e19a43bf8345/nemo_rl/algorithms/single_controller.py#L227"><code>_inflight_by_group_id</code></a>.
+It does not wait for those prompts, does not record them, and does not move the cursor back before
+them.</p>
+
+<div class="hl">
+<strong>How this differs from <a href="pr-3599-inflight-loss.html">the same question on #3599</a>.</strong>
+That one is about async GRPO, which <em>does</em> try to protect in-flight prompts: it saves the loader's
+place from before the oldest unfinished one. The gap there is narrow — a tolerated failure lets a step be
+refilled from later prompts and pushes the saved place past prompts still being answered, and it needs
+several settings lined up to happen. SingleController has no such protection to defeat. There is no
+rewind, so every in-flight prompt at save time is lost, every time, on any config. Simpler to reason
+about, and much easier to fix later: the information needed is already sitting in
+<code>_inflight_by_group_id</code>.
+</div>
+
 <h2>Does it work?</h2>
 
 <p><strong>Nobody has run it.</strong> There is no resumed-run link, no before-and-after count of
