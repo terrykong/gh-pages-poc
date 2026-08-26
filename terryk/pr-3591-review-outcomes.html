@@ -107,9 +107,14 @@ better than the comment suggested.
   fixed in <code>1e4d5fc8c</code>, then <code>2f762b8d8</code> reverted by <code>02b7dd0d6</code>
 </p>
 
-<p><strong>The ask.</strong> On a refit abort where no shard is DEAD, the code raised and ended the
-run. The comment argued the ledger already knows the culprit — a wedged engine is sitting in
-SUSPECT from its timed-out generations — so condemn it, rebuild smaller, and retry.</p>
+<p><strong>Which case this is.</strong> Not the crash case. A crash <em>makes</em> a shard DEAD — Ray
+reports the dead process and the probe confirms it — so the group can be rebuilt without it and the
+refit retried. This is the <strong>hang</strong> case: every process is still alive, nothing is
+DEAD, so there is nobody to drop and the code raised and ended the run.</p>
+
+<p><strong>The ask.</strong> The ledger already knows the culprit — a wedged engine has been
+timing out its own generations and is sitting in SUSPECT the whole time. So condemn that shard,
+rebuild smaller, and retry.</p>
 
 <p><strong>What landed, and stayed.</strong> Exactly that, including the "exactly one suspect, or
 not at all" rule:</p>
@@ -120,21 +125,37 @@ if len(suspects) == 1:
     culprit = suspects[0]
     ... <span class="cm">"condemning it as the silent participant and retrying"</span></pre>
 
-<p><strong>What was added on top, and then reverted.</strong> The author went further in
-<code>2f762b8d8</code> — actually <code>ray.kill</code>ing the written-off shard rather than just
-relabelling it. An experiment then disproved it, and it was reverted:</p>
+<p><strong>Then he went further — and this part is worth understanding, because the reasoning was
+good.</strong> Condemning a shard only changed bookkeeping: <em>"the fleet said DEAD while the
+process sat there."</em> A py-spy dump from job 6521181 showed both trainers stuck in
+<code>init_nccl_communicator</code> — building the <em>new</em> group — while their old
+<code>ncclCommAbort</code> threads were still in native code 25 minutes later. His read:</p>
 <div class="quote">
-"job 6523731 is the disproof: <code>ray.kill</code> reached the victim before the rebuild was
-dispatched, in the right order, and both trainers wedged in <code>init_nccl_communicator</code>
-exactly as they had without it."
+"NCCL cannot bootstrap a new communicator on a device while a previous one there is wedged
+mid-abort, and that abort cannot finish while the frozen peer holds its sockets open and idle."
+</div>
+<p>And the asymmetry the tests had been circling for weeks fit it perfectly: <strong>SIGKILL closes
+sockets, SIGSTOP does not</strong> — and the SIGKILL variant of this same reshard test had always
+passed. So <code>2f762b8d8</code> made the verdict true: <code>ray.kill</code> every worker of a
+shard that goes absent while its process is still up, <em>before</em> the rebuild is dispatched.
+Its sockets close, the peers' pending aborts retire, the rebuild proceeds.</p>
+
+<p><strong>Why it was reverted: the experiment refuted it.</strong> Job 6523731 ran the kill in
+exactly the intended order —</p>
+<div class="quote">
+"<code>ray.kill</code> reached the victim before the rebuild was dispatched, in the right order,
+and both trainers wedged in <code>init_nccl_communicator</code> exactly as they had without it."
 </div>
 
-<p><strong>Why killing the shard cannot help.</strong> Aborting a communicator does not retire CUDA
-work already queued on a stream — and those orphaned kernels are on the <em>trainers'</em> devices,
-not the victim's. So nothing done to the remote rank retires them. A py-spy dump from job 6521181
-shows both trainers inside <code>init_nccl_communicator</code>, threads still in
-<code>ncclCommAbort</code> 25 minutes later, unable to bootstrap a new communicator on a device
-holding a half-aborted one.</p>
+<p>So the sockets were never the blockage. The real cause is <strong>local to the trainers</strong>:
+aborting a communicator does not retire CUDA work already enqueued on a stream, and those orphaned
+kernels sit on the <em>trainers' own</em> devices. Nothing done to the remote rank — killing it,
+closing its sockets, anything — can retire them. The kill changed product behaviour and bought
+nothing, so it went:</p>
+<div class="quote">
+"A product behaviour change that kills a live worker has no business staying in on the strength of
+a theory its own experiment refuted."
+</div>
 
 <p><strong>Where it leaves the behaviour</strong> — now split by transport, which is more precise
 than the comment had it:</p>
