@@ -63,11 +63,23 @@ svg a text{text-decoration:underline;fill:var(--accent);font:11px ui-monospace,M
   document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
 <div class="wrap">
 
-<h1>Why deferring the Megatron engine start leaves NeMo-Gym with no server URL</h1>
-<p class="sub">Two PRs that are each correct alone and break together:
+<h1>Move the NeMo-Gym address check to after the first refit</h1>
+<p class="sub">Two PRs that are each fine alone and break together:
 <a href="https://github.com/NVIDIA-NeMo/RL/pull/3731">#3731</a> (open, head <code>da7bee9</code>)
 and <a href="https://github.com/NVIDIA-NeMo/RL/pull/3569">#3569</a> (merged).
 Links marked <em>main</em> pin <code>eaf02ef</code>.</p>
+
+<div class="hl">
+<strong>The change being asked for.</strong> Move these six lines from setup
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/eaf02ef6baab63eee51886c7cbd85a83fe23d7d2/nemo_rl/algorithms/grpo.py#L1394-L1398">main <code>grpo.py:1394</code></a>)
+to just after
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/eaf02ef6baab63eee51886c7cbd85a83fe23d7d2/nemo_rl/algorithms/grpo.py#L1669"><code>sync_weights()</code> (main <code>grpo.py:1669</code>)</a>:
+<div class="mono" style="margin-top:10px">served_urls = policy_generation.dp_openai_server_base_urls
+if served_urls != [reserved_url]:
+    raise RuntimeError(...)</div>
+<p style="margin:10px 0 0">No config change. No new assert. No change to #3731's own code — those
+lines live in <code>grpo.py</code>, which #3731 does not touch. The rest of this page is why.</p>
+</div>
 
 <p>When generation does not share GPUs with training, one Megatron worker (rank 0) runs an
 OpenAI-style HTTP server, and NeMo-Gym sends its rollout requests to that address. The list of
@@ -75,13 +87,12 @@ addresses,
 <a href="https://github.com/NVIDIA-NeMo/RL/blob/da7bee9dee8b2c78943f6cd506a012cd0eee4b52/nemo_rl/models/generation/megatron/megatron_generation.py#L133"><code>dp_openai_server_base_urls</code></a>,
 starts empty and is filled in exactly one place:
 <a href="https://github.com/NVIDIA-NeMo/RL/blob/da7bee9dee8b2c78943f6cd506a012cd0eee4b52/nemo_rl/models/generation/megatron/megatron_generation.py#L252-L261"><code>prepare_for_generation()</code></a>.
-#3731 stops calling that during construction when the weights will arrive later by refit, so that
-CUDA graphs capture the final weight buffers instead of buffers that are about to be replaced.
-#3569 reserves the server address <em>before</em> any worker exists, hands it to NeMo-Gym, and then
-checks that the engine really came up there. Put one on top of the other and that check reads an
-empty list.</p>
+#3731 waits before calling that, when the weights will arrive later by refit, so CUDA graphs capture
+the real weight buffers instead of ones that are about to be swapped out. #3569 reserves the server
+address <em>before</em> any worker exists, hands it to NeMo-Gym, then checks the engine really came
+up there. That check now runs before the engine has started.</p>
 
-<svg viewBox="0 0 940 452" role="img" aria-label="Five setup steps on main versus after rebasing #3731">
+<svg viewBox="0 0 940 474" role="img" aria-label="Five setup steps on main versus after rebasing #3731">
   <text class="hdr" x="24" y="26">main today (#3569 merged)</text>
   <text class="hdr" x="486" y="26">after rebasing #3731 onto main</text>
 
@@ -138,7 +149,8 @@ empty list.</p>
   <text class="note" x="310" y="391">fails</text>
 
   <text class="note" x="24" y="422">Step 3 is the only place that fills the address list, so skipping it leaves step 5 comparing</text>
-  <text class="note" x="24" y="440">the reserved address against an empty list. Steps 1, 2 and 4 behave identically on both sides.</text>
+  <text class="note" x="24" y="440">the reserved address against an empty list. Steps 1, 2 and 4 behave the same on both sides.</text>
+  <text class="g"    x="24" y="462">The fix: run step 5 later — after the first refit, which is where step 3 now happens.</text>
 </svg>
 
 <h2>Opening the port is not the same as answering on it</h2>
@@ -155,25 +167,20 @@ server is up. It is not. Nothing accepts connections on that socket until step 3
 <a href="https://github.com/NVIDIA-NeMo/RL/blob/eaf02ef6baab63eee51886c7cbd85a83fe23d7d2/nemo_rl/models/generation/megatron/megatron_worker.py#L446">main megatron_worker.py:446</a> ·
 <a href="https://github.com/NVIDIA-NeMo/RL/blob/eaf02ef6baab63eee51886c7cbd85a83fe23d7d2/nemo_rl/models/generation/megatron/megatron_worker.py#L465">main megatron_worker.py:465</a></p>
 
-<p>So there are two problems after the rebase, not one. The loud one is step 5 raising. The quiet one
-is that even if you deleted that check, NeMo-Gym would be pointed at a port that accepts the TCP
-connection and then never replies — requests would sit and wait rather than fail fast — until the
-first refit finally runs step 3. Either way the two designs disagree about <em>when</em> the server
-starts: #3569 assumes construction, #3731 moves it to the first refit.</p>
+<p>This is why moving the check is the fix, rather than changing either PR's behaviour. The engine
+does come up at the reserved address — just later, at the first refit. Run the check there and it
+passes for the right reason. The reserved port is held the whole time, and NeMo-Gym already has the
+address, so nothing else has to move.</p>
 
-<p>That leaves two ways to reconcile them, and they pull in opposite directions:</p>
+<p>The alternative would be to start the HTTP server during construction and let only the CUDA graph
+capture wait. That is a bigger change and a worse trade: the server needs a live coordinator, and the
+coordinator is part of the engine that #3731 is deliberately waiting to build. Moving one check is
+cheaper than splitting the engine in half.</p>
 
-<div class="mono">A. serve during construction, capture graphs later
-   rank 0 adopts the socket AND starts serving in step 2;
-   only the CUDA graph capture waits for the refit buffers.
-   -> keeps #3569's promise, needs #3731 to split "start serving"
-      away from "build the engine"
-
-B. teach step 5 that the address may not be live yet
-   the check tolerates an empty list when weights arrive by refit,
-   and re-runs after the first refit.
-   -> smaller change, but Gym can send requests into a port
-      nobody is answering yet</div>
+<p>One thing to check rather than assume: whether NeMo-Gym sends anything to that address before the
+first refit. There is no health check in <code>_spinup_nemo_gym</code>, and rollouts start after the
+refit, so it looks safe — but until the engine starts, that port accepts connections and never
+answers, so a request in that window would wait instead of failing.</p>
 
 <h2>Has anyone run the two together?</h2>
 
@@ -190,10 +197,10 @@ that one lane. It takes about 13 minutes and it either reproduces the
 <code>RuntimeError</code> or proves this page wrong.</p>
 
 <div class="warn">
-<strong>What to do.</strong> Do not merge #3731 on a green check that predates #3569. The green
-came from a branch where the conflicting code does not exist. Rebase first, re-run
-<code>Megatron_4</code>, and decide between option A and option B above — the choice matters,
-because option B leaves NeMo-Gym able to send requests to a port that is open but silent.
+<strong>What to do.</strong> Do not merge #3731 on a green check that predates #3569 — that green
+came from a branch where the conflicting code does not exist. Rebase, move the six lines to after
+<code>sync_weights()</code>, and re-run <code>Megatron_4</code>. If the check stays where it is, every
+non-colocated run with NeMo-Gym stops at setup with <code>serving []</code>.
 </div>
 
 </div>
