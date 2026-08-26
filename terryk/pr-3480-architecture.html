@@ -139,31 +139,36 @@ later. TransferQueue is the only place rollout tensors are ever stored.</p>
   <text class="sm" x="668" y="272">the only place rollout</text>
   <text class="sm" x="668" y="288">tensors are stored</text>
 
-  <!-- ============ arrows ============ -->
-  <!-- 1 driver -> actor -->
+  <!-- ============ arrows: numbered in the order they happen ============ -->
+  <!-- 1 TQPolicy -> TQ (restore) : first, during setup -->
+  <path class="arr-new" d="M608 145 L632 145 L632 208 L654 208"/>
+  <path class="arr-new" d="M654 208 L646 203 M654 208 L646 213"/>
+  <text class="num" x="614" y="138">1</text>
+
+  <!-- 2 driver -> actor -->
   <path class="arr" d="M120 182 L120 200"/>
   <path class="arr" d="M120 200 L114 192 M120 200 L126 192"/>
-  <text class="num" x="132" y="196">1</text>
+  <text class="num" x="132" y="196">2</text>
 
-  <!-- 2 TQPolicy -> TQ (restore) -->
-  <path class="arr-new" d="M608 145 L632 145 L632 210 L654 210"/>
-  <path class="arr-new" d="M654 210 L646 205 M654 210 L646 215"/>
-  <text class="num" x="614" y="138">2</text>
-
-  <!-- 3 buffer -> TQ (live writes) -->
-  <path class="arr" d="M608 247 L640 247 L640 226 L654 226"/>
-  <path class="arr" d="M654 226 L646 221 M654 226 L646 231"/>
+  <!-- 3 buffer -> TQ (commit / drop) -->
+  <path class="arr" d="M608 247 L640 247 L640 224 L654 224"/>
+  <path class="arr" d="M654 224 L646 219 M654 224 L646 229"/>
   <text class="num" x="614" y="242">3</text>
 
-  <!-- 4 SC checkpoint calls -> TQ -->
-  <path class="arr-new" d="M608 339 L628 339 L628 246 L654 246"/>
-  <path class="arr-new" d="M654 246 L646 241 M654 246 L646 251"/>
-  <text class="num" x="612" y="334">4</text>
+  <!-- 4 advantage stage: read rows, write advantages back -->
+  <path class="arr" d="M608 295 L636 295 L636 238 L654 238"/>
+  <path class="arr" d="M654 238 L646 233 M654 238 L646 243"/>
+  <text class="num" x="614" y="290">4</text>
 
-  <!-- 5 down to disk -->
+  <!-- 5 SC checkpoint calls -> TQ -->
+  <path class="arr-new" d="M608 339 L628 339 L628 250 L654 250"/>
+  <path class="arr-new" d="M654 250 L646 245 M654 250 L646 255"/>
+  <text class="num" x="612" y="334">5</text>
+
+  <!-- 6 down to disk -->
   <path class="arr-new" d="M320 370 L320 396"/>
   <path class="arr-new" d="M320 396 L314 388 M320 396 L326 388"/>
-  <text class="num" x="330" y="392">5</text>
+  <text class="num" x="330" y="392">6</text>
 
   <!-- ============ disk band ============ -->
   <rect class="band" x="16" y="398" width="868" height="112" rx="9"/>
@@ -184,19 +189,14 @@ later. TransferQueue is the only place rollout tensors are ever stored.</p>
   <text class="sm" x="32" y="502">replay_buffer_metadata.pt holds only which rows belong to which group — no tensors.</text>
 </svg>
 
-<h2>The five flows, and which are new</h2>
+<h2>The six flows, in the order they happen</h2>
+
+<p>These are every data-plane call the controller and the trainer make. Numbered by time, so <strong>1 really does come before 2</strong> — the restore finishes before the actor is created. Not drawn: weight sync from trainer to generation, and generation traffic, neither of which touches TransferQueue.</p>
 
 <table>
 <tr><th style="width:34px"></th><th style="width:210px">What moves</th><th>Detail</th></tr>
 
 <tr><td><span class="n">1</span></td>
-<td>Driver → controller actor</td>
-<td>Everything the actor needs, cloudpickled as one
-<a href="https://github.com/NVIDIA-NeMo/RL/blob/608e9bde376d23604b7c6472e1e1e19a43bf8345/nemo_rl/algorithms/single_controller_utils/setup.py#L92"><code>SingleControllerActorArgs</code></a>.
-This PR adds one field to it — <code>data_plane_checkpoint_metadata</code>, the metadata the driver
-read back during restore, which the actor later checks its own sidecar against.</td></tr>
-
-<tr><td><span class="n">2</span></td>
 <td><strong style="color:var(--green)">New.</strong> Trainer's client → TransferQueue: restore</td>
 <td><a href="https://github.com/NVIDIA-NeMo/RL/blob/608e9bde376d23604b7c6472e1e1e19a43bf8345/nemo_rl/models/policy/tq_policy.py#L138"><code>TQPolicy.load_data_plane_checkpoint()</code></a>
 → <code>dp_client.load_checkpoint()</code> → <code>tq.load_checkpoint()</code>. This runs on the
@@ -207,12 +207,28 @@ can only be restored while it is still untouched, and the adapter refuses a rest
 write through that client
 (<a href="https://github.com/NVIDIA-NeMo/RL/blob/608e9bde376d23604b7c6472e1e1e19a43bf8345/nemo_rl/data_plane/adapters/transfer_queue.py#L492"><code>_require_clean_for_load</code></a>).</td></tr>
 
+<tr><td><span class="n">2</span></td>
+<td>Driver → controller actor</td>
+<td>Everything the actor needs, cloudpickled as one
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/608e9bde376d23604b7c6472e1e1e19a43bf8345/nemo_rl/algorithms/single_controller_utils/setup.py#L92"><code>SingleControllerActorArgs</code></a>.
+This PR adds one field to it — <code>data_plane_checkpoint_metadata</code>, the metadata the driver
+read back during restore, which the actor later checks its own sidecar against.</td></tr>
+
 <tr><td><span class="n">3</span></td>
-<td>Replay buffer → TransferQueue: live rollouts</td>
+<td>Replay buffer → TransferQueue: finished rollouts</td>
 <td>Unchanged in shape — <code>put_samples</code> on commit, <code>clear_samples</code> when a group
 is dropped. What is new is that both now run inside the barrier, so they cannot overlap a snapshot.</td></tr>
 
 <tr><td><span class="n">4</span></td>
+<td>Controller → TransferQueue: the advantage stage</td>
+<td>Unchanged, and easy to miss. Before a batch trains, the controller reads its rows back
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/608e9bde376d23604b7c6472e1e1e19a43bf8345/nemo_rl/algorithms/single_controller.py#L1089"><code>get_samples</code></a>) and writes the computed advantages onto the
+same rows (<a href="https://github.com/NVIDIA-NeMo/RL/blob/608e9bde376d23604b7c6472e1e1e19a43bf8345/nemo_rl/algorithms/single_controller.py#L1140"><code>put_samples</code></a>). It only overwrites fields on keys
+that already exist, so it never changes which rows are there — which is why the checkpoint's
+inventory check is unaffected by it. It takes no barrier slot; it is safe because it runs in the
+same task as the save.</td></tr>
+
+<tr><td><span class="n">5</span></td>
 <td><strong style="color:var(--green)">New.</strong> Controller → TransferQueue: snapshot</td>
 <td>Three new client methods:
 <a href="https://github.com/NVIDIA-NeMo/RL/blob/608e9bde376d23604b7c6472e1e1e19a43bf8345/nemo_rl/data_plane/interfaces.py#L427"><code>list_sample_ids()</code></a>
@@ -221,7 +237,7 @@ to check the stored rows match the index,
 and <code>load_checkpoint()</code>. All three are on the abstract client, so every adapter implements
 them.</td></tr>
 
-<tr><td><span class="n">5</span></td>
+<tr><td><span class="n">6</span></td>
 <td><strong style="color:var(--green)">New.</strong> Controller → disk: the index file</td>
 <td>The controller writes <code>replay_buffer_metadata.pt</code> itself from
 <a href="https://github.com/NVIDIA-NeMo/RL/blob/608e9bde376d23604b7c6472e1e1e19a43bf8345/nemo_rl/algorithms/async_utils/replay_buffer.py#L1078"><code>metadata_state_dict()</code></a>.
