@@ -49,6 +49,8 @@ svg .new{fill:var(--green);font:bold 10.5px -apple-system,sans-serif}
 svg .arr{stroke:var(--dim);stroke-width:1.6;fill:none}
 svg .arr-new{stroke:var(--green);stroke-width:2;fill:none}
 svg .num{fill:var(--accent);font:bold 12px -apple-system,sans-serif}
+svg .barrier{fill:var(--orange);opacity:.09}
+svg .cursor-lbl{fill:var(--orange);font:bold 11.5px -apple-system,sans-serif}
 svg a text{text-decoration:underline;fill:var(--accent);font:11.5px ui-monospace,Menlo,monospace}
 </style>
 <script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
@@ -245,84 +247,132 @@ TransferQueue writes <code>data_plane/</code> separately. A digest ties the two 
 mismatched pair is caught on resume.</td></tr>
 </table>
 
-<h2>Recovery, in order</h2>
+<h2>Save and restore, in order</h2>
 
-<p>The ordering is the part that is easy to get wrong, so here it is as a sequence. Note where the
-line is drawn: everything above it happens on the driver, before the controller actor is created.</p>
+<p>This change touches both halves, so here are both. Ordering is the part that is easy to get
+wrong in each: on save, the index is captured and checked <em>before</em> the snapshot is written,
+all inside one exclusive window. On restore, TransferQueue is loaded before the controller actor
+exists at all.</p>
 
-<svg viewBox="0 0 900 466" role="img" aria-label="Sequence diagram of recovery. On the driver, setup reads the trainer checkpoint, TQPolicy loads the TransferQueue snapshot through its bootstrap client, and only then is the connect-only client built and the actor created. Inside the actor, run() loads the sidecar, rebuilds the index without writing to TransferQueue, validates the inventory, and starts the pumps.">
-  <text class="hdr" x="16" y="18">Restart: what happens, in order</text>
+<svg viewBox="0 0 900 812" role="img" aria-label="Two sequence diagrams. Save: the train pump writes the trainer state, then takes the exclusive barrier to capture the replay index, check it against TransferQueue and write the snapshot, then writes the sidecar and renames the bundle. Restore: setup reads the trainer checkpoint, TQPolicy loads the TransferQueue snapshot, and only then is the actor created, which rebuilds the index and validates it before the pumps start.">
 
-  <!-- lifelines -->
-  <text class="bandlbl" x="24" y="46">setup (driver)</text>
-  <text class="bandlbl" x="222" y="46">TQPolicy</text>
-  <text class="bandlbl" x="372" y="46">TransferQueue</text>
-  <text class="bandlbl" x="560" y="46">SC actor</text>
-  <text class="bandlbl" x="712" y="46">replay buffer</text>
-  <path class="arr" d="M70 54 L70 442" style="stroke-dasharray:3 4"/>
-  <path class="arr" d="M252 54 L252 442" style="stroke-dasharray:3 4"/>
-  <path class="arr" d="M420 54 L420 442" style="stroke-dasharray:3 4"/>
-  <path class="arr" d="M592 54 L592 442" style="stroke-dasharray:3 4"/>
-  <path class="arr" d="M760 54 L760 442" style="stroke-dasharray:3 4"/>
+  <!-- ==================== PANEL A : SAVE ==================== -->
+  <text class="hdr" x="16" y="18">SAVE — runs every save_period steps, inside the controller actor</text>
 
-  <!-- 1 -->
-  <text class="sm" x="16" y="76">read step_N/</text>
-  <path class="arr" d="M70 84 L70 96"/>
-  <text class="sm" x="82" y="94">trainer state, dataloader cursor</text>
+  <text class="bandlbl" x="24" y="44">train pump</text>
+  <text class="bandlbl" x="196" y="44">replay buffer</text>
+  <text class="bandlbl" x="372" y="44">TransferQueue</text>
+  <text class="bandlbl" x="580" y="44">step_N/ on disk</text>
+  <path class="arr" d="M70 52 L70 320" style="stroke-dasharray:3 4"/>
+  <path class="arr" d="M250 52 L250 320" style="stroke-dasharray:3 4"/>
+  <path class="arr" d="M430 52 L430 320" style="stroke-dasharray:3 4"/>
+  <path class="arr" d="M640 52 L640 320" style="stroke-dasharray:3 4"/>
 
-  <!-- 2 -->
-  <path class="arr-new" d="M70 116 L246 116"/>
-  <path class="arr-new" d="M246 116 L238 111 M246 116 L238 121"/>
-  <text class="new" x="82" y="110">load_data_plane_checkpoint()</text>
+  <text class="sm" x="16" y="72">note the loader place</text>
+  <path class="arr" d="M70 78 L70 90"/>
 
-  <!-- 3 -->
-  <path class="arr-new" d="M252 142 L414 142"/>
-  <path class="arr-new" d="M414 142 L406 137 M414 142 L406 147"/>
-  <text class="new" x="262" y="136">bootstrap client: load_checkpoint()</text>
-  <text class="sm" x="262" y="158">rows + consumer cursors come back</text>
+  <path class="arr" d="M70 104 L634 104"/>
+  <path class="arr" d="M634 104 L626 99 M634 104 L626 109"/>
+  <text class="sm" x="82" y="98">make tmp_step_N/</text>
 
-  <!-- 4 returns metadata -->
-  <path class="arr" d="M414 180 L76 180" style="stroke-dasharray:4 3"/>
-  <path class="arr" d="M76 180 L84 175 M76 180 L84 185"/>
-  <text class="sm" x="90" y="174">digest, group count, mode=authoritative</text>
+  <path class="arr" d="M70 130 L634 130"/>
+  <path class="arr" d="M634 130 L626 125 M634 130 L626 135"/>
+  <text class="sm" x="82" y="124">policy weights + optimizer</text>
 
-  <!-- divider -->
-  <path class="arr" d="M16 200 L884 200" style="stroke:var(--orange);stroke-width:1.6;stroke-dasharray:7 4"/>
-  <text class="cursor-lbl" x="16" y="216">TransferQueue is restored before this line. Nothing has touched it yet.</text>
+  <path class="arr" d="M70 156 L634 156"/>
+  <path class="arr" d="M634 156 L626 151 M634 156 L626 161"/>
+  <text class="sm" x="82" y="150">train_dataloader.pt — the loader place</text>
 
-  <!-- 5 build connect-only client -->
-  <text class="sm" x="16" y="242">build connect-only client, then the buffer</text>
-  <path class="arr" d="M70 250 L70 262"/>
+  <!-- exclusive barrier window -->
+  <rect class="barrier" x="16" y="172" width="868" height="86" rx="6"/>
+  <text class="cursor-lbl" x="24" y="188">barrier held: finished rollouts queue at commit until this window closes</text>
 
-  <!-- 6 create actor -->
-  <path class="arr" d="M70 282 L586 282"/>
-  <path class="arr" d="M586 282 L578 277 M586 282 L578 287"/>
-  <text class="sm" x="82" y="276">SingleControllerActor.remote(actor_args + digest)</text>
+  <path class="arr-new" d="M70 210 L244 210"/>
+  <path class="arr-new" d="M244 210 L236 205 M244 210 L236 215"/>
+  <text class="new" x="82" y="204">metadata_state_dict() — which rows form which group</text>
 
-  <!-- 7 run -->
-  <text class="sm" x="536" y="308">run()</text>
-  <path class="arr" d="M592 314 L592 326"/>
+  <path class="arr-new" d="M70 236 L424 236"/>
+  <path class="arr-new" d="M424 236 L416 231 M424 236 L416 241"/>
+  <text class="new" x="82" y="230">list_sample_ids() — do the stored rows match that index?</text>
 
-  <!-- 8 load sidecar -->
-  <path class="arr-new" d="M592 346 L754 346"/>
-  <path class="arr-new" d="M754 346 L746 341 M754 346 L746 351"/>
-  <text class="new" x="600" y="340">load_state_dict(sidecar)</text>
-  <text class="sm" x="600" y="362">index only - no writes to TQ</text>
+  <path class="arr-new" d="M70 274 L424 274"/>
+  <path class="arr-new" d="M424 274 L416 269 M424 274 L416 279"/>
+  <text class="new" x="82" y="268">save_checkpoint() — TransferQueue writes data_plane/ itself</text>
 
-  <!-- 9 validate -->
-  <path class="arr-new" d="M586 390 L426 390"/>
-  <path class="arr-new" d="M426 390 L434 385 M426 390 L434 395"/>
-  <text class="new" x="436" y="384">list_sample_ids(): do the rows match the index?</text>
+  <path class="arr-new" d="M70 298 L634 298"/>
+  <path class="arr-new" d="M634 298 L626 293 M634 298 L626 303"/>
+  <text class="new" x="82" y="292">replay_buffer_metadata.pt — the index, no tensors</text>
 
-  <!-- 10 pumps -->
-  <text class="sm" x="536" y="424">start the rollout and train pumps</text>
-  <path class="arr" d="M592 430 L592 442"/>
+  <text class="sm" x="82" y="316">rename tmp_step_N/ to step_N/ — nothing is resumable until this happens</text>
+
+  <path class="arr" d="M16 336 L884 336" style="stroke:var(--border);stroke-width:1"/>
+
+  <!-- ==================== PANEL B : RESTORE ==================== -->
+  <text class="hdr" x="16" y="362">RESTORE — runs once, at startup</text>
+
+  <text class="bandlbl" x="24" y="388">setup (driver)</text>
+  <text class="bandlbl" x="222" y="388">TQPolicy</text>
+  <text class="bandlbl" x="372" y="388">TransferQueue</text>
+  <text class="bandlbl" x="560" y="388">SC actor</text>
+  <text class="bandlbl" x="712" y="388">replay buffer</text>
+  <path class="arr" d="M70 396 L70 788" style="stroke-dasharray:3 4"/>
+  <path class="arr" d="M252 396 L252 788" style="stroke-dasharray:3 4"/>
+  <path class="arr" d="M420 396 L420 788" style="stroke-dasharray:3 4"/>
+  <path class="arr" d="M592 396 L592 788" style="stroke-dasharray:3 4"/>
+  <path class="arr" d="M760 396 L760 788" style="stroke-dasharray:3 4"/>
+
+  <text class="sm" x="16" y="418">read step_N/</text>
+  <path class="arr" d="M70 426 L70 438"/>
+  <text class="sm" x="82" y="436">trainer state, loader place</text>
+
+  <path class="arr-new" d="M70 458 L246 458"/>
+  <path class="arr-new" d="M246 458 L238 453 M246 458 L238 463"/>
+  <text class="new" x="82" y="452">load_data_plane_checkpoint()</text>
+
+  <path class="arr-new" d="M252 484 L414 484"/>
+  <path class="arr-new" d="M414 484 L406 479 M414 484 L406 489"/>
+  <text class="new" x="262" y="478">bootstrap client: load_checkpoint()</text>
+  <text class="sm" x="262" y="500">rows and consumer places come back</text>
+
+  <path class="arr" d="M414 522 L76 522" style="stroke-dasharray:4 3"/>
+  <path class="arr" d="M76 522 L84 517 M76 522 L84 527"/>
+  <text class="sm" x="90" y="516">digest, group count, mode=authoritative</text>
+
+  <path class="arr" d="M16 542 L884 542" style="stroke:var(--orange);stroke-width:1.6;stroke-dasharray:7 4"/>
+  <text class="cursor-lbl" x="16" y="558">TransferQueue is restored above this line. Nothing has touched it yet.</text>
+
+  <text class="sm" x="16" y="584">build connect-only client, then the buffer</text>
+  <path class="arr" d="M70 592 L70 604"/>
+
+  <path class="arr" d="M70 624 L586 624"/>
+  <path class="arr" d="M586 624 L578 619 M586 624 L578 629"/>
+  <text class="sm" x="82" y="618">SingleControllerActor.remote(actor_args + digest)</text>
+
+  <text class="sm" x="536" y="650">run()</text>
+  <path class="arr" d="M592 656 L592 668"/>
+
+  <path class="arr-new" d="M592 688 L754 688"/>
+  <path class="arr-new" d="M754 688 L746 683 M754 688 L746 693"/>
+  <text class="new" x="600" y="682">load_state_dict(sidecar)</text>
+  <text class="sm" x="600" y="704">index only - no writes to TQ</text>
+
+  <path class="arr-new" d="M586 732 L426 732"/>
+  <path class="arr-new" d="M426 732 L434 727 M426 732 L434 737"/>
+  <text class="new" x="436" y="726">list_sample_ids(): do the rows match the index?</text>
+
+  <text class="sm" x="536" y="768">start the rollout and train pumps</text>
+  <path class="arr" d="M592 774 L592 786"/>
 </svg>
 
-<p>Two orderings are doing real work here. TransferQueue is restored <em>before</em> the connect-only
-client exists, because a restore is only safe onto an untouched client — the adapter refuses one
-after any read or write. And the index is rebuilt <em>before</em> the pumps start, so no live writer
-can race the inventory check.</p>
+<p>Three orderings are doing real work. On save, the replay index is captured and checked against
+the stored rows <em>before</em> the snapshot is written — so a mismatch stops the checkpoint instead
+of producing a bundle that looks fine and cannot be resumed. On restore, TransferQueue is loaded
+<em>before</em> the connect-only client exists, because a restore is only safe onto an untouched
+client; the adapter refuses one after any read or write. And the index is rebuilt <em>before</em>
+the pumps start, so no live writer can race the check.</p>
+
+<p>The shaded band on the save side is the one thing with a run-time cost: while it is held,
+finished rollouts wait at commit. Generation keeps going — only the hand-off pauses.</p>
 
 <h2>What the barrier is for</h2>
 
