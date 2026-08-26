@@ -47,6 +47,12 @@ td.n{text-align:center;font-weight:700;color:var(--dim);width:34px}
   color:var(--dim);font-size:13.5px}
 .hl{background:var(--surface);border:1px solid var(--border);border-left:3px solid var(--accent);
   border-radius:6px;padding:12px 14px;margin:16px 0}
+.cold{background:var(--bg);border:1px dashed var(--border);border-radius:6px;
+  padding:12px 14px;margin:12px 0 16px}
+.cold h4{margin:0 0 8px;font-size:12.5px;letter-spacing:.05em;text-transform:uppercase;color:var(--dim)}
+.cold p{margin:8px 0}
+table.mini{width:auto;margin:12px 0;font-size:13px}
+table.mini td,table.mini th{padding:3px 16px 3px 0;text-align:left}
 #theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);
   border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;
   font:13px/1 ui-monospace,SFMono-Regular,Menlo,monospace;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.18)}
@@ -177,57 +183,131 @@ stated the ask as universal; it was right for one transport and wrong for the ot
 </div>
 
 <div class="card">
-<h3><span class="badge b-read">read this</span> &nbsp;#14 · Rank double-count at the initial build</h3>
+<h3><span class="badge b-read">read this</span> &nbsp;#14 &middot; The same GPU gets numbered twice</h3>
 <p class="meta">
-  <code>vllm_backend.py:288</code> ·
-  <a href="https://github.com/NVIDIA-NeMo/RL/pull/3591#discussion_r3839852362">the comment</a> ·
+  <code>vllm_backend.py:288</code> &middot;
+  <a href="https://github.com/NVIDIA-NeMo/RL/pull/3591#discussion_r3839852362">the comment</a> &middot;
   fixed in <code>1847b135b</code>
 </p>
 
-<p><strong>The ask.</strong> With <code>expert_parallel_size &gt; tensor_parallel_size</code>,
-<code>init_nccl_reshard_comm_group</code> added the shard offset twice, putting the higher shards'
-NCCL ranks past the end of the group — at the initial build, before anything dies. The comment
-asked for the setup guard (comment #12) and said explicitly:</p>
+<div class="cold">
+<h4>Start here &mdash; what this is about</h4>
+<p>To send new weights from the trainer to the vLLM engines, every process involved joins one
+NCCL group. Each process needs a number in that group: 0, 1, 2, &hellip; up to one less than the
+group size. No gaps, no duplicates, nothing past the end. If two processes pick the same number,
+or one picks a number past the end, the group never forms and everyone waits forever.</p>
+<p>This finding is about the code that picks those numbers getting them wrong for one particular
+config. It has nothing to do with a shard dying &mdash; it happens at the very first weight sync
+of the run.</p>
+<p><strong>Is this on main?</strong> Yes &mdash; this one is not the PR&rsquo;s fault. The bad line is
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/ab0ffe2f83e64ace988c8ef604996b8100b2b46c/nemo_rl/models/generation/vllm/vllm_backend.py#L286"><code>gen_rank_in_group = train_ranks_per_stage + rank_prefix + local_rank</code></a>, which is on
+<code>main</code> today, and the SingleController setup that reaches it is on <code>main</code>
+too. I raised it on this PR because the fix is the same one-line guard as comment #12, and this
+PR is where all the other refit-path guards are going in.</p>
+</div>
+
+<p><strong>What goes wrong.</strong> There are two different things <code>get_rank()</code> can
+mean inside a vLLM engine, and the line above assumes the first one:</p>
+<ul>
+<li><strong>Normally</strong>, each engine is its own little world of <code>tp &times; pp</code>
+processes. <code>get_rank()</code> returns the position <em>inside that engine</em> &mdash; 0, 1, 2
+&mdash; and <code>rank_prefix</code> is what slides the engine into the right slot of the big
+group. Adding the two is correct.</li>
+<li><strong>When <code>expert_parallel_size &gt; tensor_parallel_size</code></strong>, NeMo-RL
+switches vLLM into its own data-parallel mode by setting <code>VLLM_DP_SIZE</code>
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/02b7dd0d60affccf966e125f48698760f331bcc1/nemo_rl/models/generation/vllm/vllm_generation.py#L236"><code>vllm_generation.py:236</code></a>). vLLM then makes <code>get_rank()</code> global across all
+the engines. The offset is now <em>already inside</em> that number, and adding
+<code>rank_prefix</code> counts it a second time.</li>
+</ul>
+
+<p>Worked case: <code>tp=1, pp=1, ep=8</code>, eight generation GPUs, <code>T</code> training
+ranks, nothing dead.</p>
+
+<table class="mini">
+<tr><th>shard</th><th>should be</th><th>actually computed</th><th>group size</th></tr>
+<tr><td>0</td><td>T+0</td><td>T+0</td><td>T+8</td></tr>
+<tr><td>1</td><td>T+1</td><td>T+2</td><td>T+8</td></tr>
+<tr><td>4</td><td>T+4</td><td>T+8</td><td>T+8 &nbsp;&larr; past the end</td></tr>
+<tr><td>7</td><td>T+7</td><td>T+14</td><td>T+8 &nbsp;&larr; past the end</td></tr>
+</table>
+
+<p>Shards 4 through 7 land outside the group. Some ranks raise, the rest sit in communicator setup
+waiting for ranks that will never show up.</p>
+
+<div class="hl">
+<p><strong>The part you asked about: is the fix a new restriction on EP? No.</strong></p>
+<p>&ldquo;<code>expert_parallel_size</code> must be 1 or equal to
+<code>tensor_parallel_size</code>&rdquo; is <em>already</em> the rule for the
+<code>nccl_reshard</code> weight-sync path, and has been. It is written down in
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/02b7dd0d60affccf966e125f48698760f331bcc1/nemo_rl/weight_sync/nccl_reshard_utils.py#L746"><code>check_nccl_reshard_refit_support</code></a>, with a comment saying why: the vLLM backend splits
+experts by index across its TP ranks, so gen-side EP is either 1 or exactly TP. That check already
+runs on the regular GRPO path. It was simply never wired into the SingleController path.</p>
+<p>So the ask was <strong>&ldquo;call the check you already have&rdquo;</strong>, not &ldquo;add a
+new limit&rdquo;. The set of configs that actually work does not shrink by one. What changes is
+what a user sees when they pick one that never worked: today a silent hang inside NCCL, after the
+fix a startup error naming the bad field. It also only applies to <code>nccl_reshard</code>
+&mdash; the other refit transports are untouched.</p>
+<p>If you want <code>ep &gt; tp</code> to genuinely work on the reshard path, that is a real
+feature request, and it needs the arithmetic fixed. Removing the guard would not give you that
+&mdash; it would just give you the hang back.</p>
+</div>
+
+<p><strong>What landed.</strong> Comment #12&rsquo;s guard landed, so
+<code>check_nccl_reshard_refit_support</code> <a href="https://github.com/NVIDIA-NeMo/RL/blob/02b7dd0d60affccf966e125f48698760f331bcc1/nemo_rl/algorithms/single_controller_utils/setup.py#L550">now runs from <code>setup_single_controller</code></a>
+and rejects the config before any rank arithmetic. The author also <a href="https://github.com/NVIDIA-NeMo/RL/blob/02b7dd0d60affccf966e125f48698760f331bcc1/nemo_rl/models/generation/vllm/vllm_backend.py#L314">routed <code>:285</code> through <code>resolve_rollout_rank</code></a>, which the comment asked him not to do:</p>
 <div class="quote">
 "<strong>Please do not fix this by routing <code>:285</code> through
 <code>resolve_rollout_rank</code>.</strong> That helper decides 'am I in external DP?' by testing
 <code>get_world_size() == rollout_world_size</code>, and this PR is what made
-<code>rollout_world_size</code> change under it — so that route would fix the initial build and
-leave a quieter version of the same bug on the rebuild path."
+<code>rollout_world_size</code> change under it &mdash; so that route would fix the initial build
+and leave a quieter version of the same bug on the rebuild path."
 </div>
 
-<p><strong>What landed.</strong> That route:</p>
-<pre>gen_rank_in_group = train_ranks_per_stage + resolve_rollout_rank(...)</pre>
+<p><strong>Safe today anyway</strong>, because the guard means data-parallel vLLM can never reach
+the reshard path on SingleController, so the branch that would misfire never runs.</p>
 
-<p><strong>Why it is nonetheless safe today.</strong> Comment #12 also landed —
-<code>check_nccl_reshard_refit_support</code> is now called from
-<code>setup_single_controller</code>, and it rejects <code>expert_parallel_size</code> outside
-<code>{1, tensor_parallel_size}</code>. So external data parallelism cannot reach the reshard path
-on SingleController at all, and the branch that would flip never flips.</p>
-
-<p><strong>What to watch.</strong> The correctness now rests on the guard rather than on the
-arithmetic. If that precondition is ever relaxed — and the config check is a list of restrictions
-people do relax over time — the latent form of this bug returns on the rebuild path, where it is
-quieter than it was at setup. Worth a comment at the call site saying so, if you want it pinned.</p>
+<p><strong>What to watch.</strong> Correctness now rests on the guard rather than on the
+arithmetic. A config check is a list of restrictions people relax over time; if this one is ever
+relaxed, the bug comes back on the rebuild path, where it is quieter than it was at setup. Worth
+one comment at the call site saying so.</p>
 </div>
 
 <div class="card">
-<h3><span class="badge b-read">read this</span> &nbsp;#10 · The split children are never aborted</h3>
+<h3><span class="badge b-read">read this</span> &nbsp;#10 &middot; The abort misses the smaller groups</h3>
 <p class="meta">
-  <code>stateless_process_group.py:133</code> ·
-  <a href="https://github.com/NVIDIA-NeMo/RL/pull/3591#discussion_r3839669832">the comment</a> ·
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/02b7dd0d60affccf966e125f48698760f331bcc1/nemo_rl/distributed/stateless_process_group.py#L115"><code>stateless_process_group.py:133</code></a> &middot;
+  <a href="https://github.com/NVIDIA-NeMo/RL/pull/3591#discussion_r3839669832">the comment</a> &middot;
   fixed in <code>1ce2cadc3</code>
 </p>
 
-<p><strong>The ask.</strong> The Python reshard path splits the communicator per replica group and
-caches the children. NCCL gives a split child its own abort flag unless <code>splitShare</code> is
-set, and it defaults to 0 — so aborting the parent never reaches them. A rank blocked on a child is
-never released, the guarded block never returns, and <code>__exit__</code> never runs. No
-exception-translation fix can reach a hang. The comment proposed calling the existing
-<code>clear_xferdtensor_python_caches</code> before the parent abort.</p>
+<div class="cold">
+<h4>Start here &mdash; what this is about</h4>
+<p>A <em>communicator</em> is NCCL&rsquo;s handle for a set of GPUs that talk to each other. Weight
+sync builds one big communicator holding the trainers and the generation shards.</p>
+<p>NCCL also lets you carve a smaller group out of a bigger one with <code>split()</code>. The
+piece you get back is a full communicator in its own right &mdash; the parent is not its boss. The
+Python weight-transfer path does exactly this: it splits the big group into one child per replica
+group and keeps the children in a cache, so it does not rebuild them every step. So at any moment
+three families of communicators are alive, and only two of them were being tracked.</p>
+<p>Why that matters for recovery: when a shard dies, the survivors are stuck inside an NCCL call
+waiting for it. The one way to get them out is <code>abort()</code>, which flips a &ldquo;give
+up&rdquo; flag so every call in flight on that communicator returns instead of waiting. This whole
+PR is built on that working.</p>
+</div>
 
-<p><strong>What landed — better than the ask.</strong> A new helper that
-<em>aborts</em> the children rather than running the cleanup path:</p>
+<p><strong>The ask.</strong> <code>abort()</code> was called on the parent only. NCCL gives each
+split child <em>its own</em> flag &mdash; unless you set
+<code>NCCL_COMM_SPLIT_SHARE_RESOURCES=1</code>, which nothing in this repo does. So aborting the
+parent flips the parent&rsquo;s flag and reaches nothing else. A rank stuck in a call on a child is
+never woken up.</p>
+
+<p>That is worse than getting the wrong error type back. The call never returns at all, so the
+<code>with</code> block never exits, so the line that would ask &ldquo;did the watchdog
+fire?&rdquo; is never reached. The timeout goes off and the run hangs anyway &mdash; the exact
+outcome this PR exists to remove, on a path it did not cover. The comment proposed calling the
+existing <a href="https://github.com/NVIDIA-NeMo/RL/blob/02b7dd0d60affccf966e125f48698760f331bcc1/nemo_rl/weight_sync/xferdtensor_python.py#L482"><code>clear_xferdtensor_python_caches</code></a> before the parent abort.</p>
+
+<p><strong>What landed &mdash; better than the ask.</strong> A <a href="https://github.com/NVIDIA-NeMo/RL/blob/02b7dd0d60affccf966e125f48698760f331bcc1/nemo_rl/weight_sync/xferdtensor_python.py#L355">new helper that <em>aborts</em> the children</a> rather than running the cleanup path:</p>
 <pre><span class="cm"># Before the parent: once nccl_communicator is None the cache keys derived</span>
 <span class="cm"># from it cannot be recovered, and the children would be stranded as well</span>
 <span class="cm"># as un-aborted.</span>
@@ -236,11 +316,12 @@ from nemo_rl.weight_sync.xferdtensor_python import (
 )
 abort_xferdtensor_python_subcommunicators(self)</pre>
 
-<p>Abort is the right teardown here for the same reason the parent uses it —
-<code>finalize</code>/<code>destroy</code> are collectives a dead rank cannot join. The comment
-suggested the cleanup helper, which would have run that unsafe teardown. This is the better fix,
-and the docstring now carries the <code>splitShare</code> reasoning so the next reader does not
-have to rediscover it.</p>
+<p>The helper I suggested tears children down with <code>finalize()</code>/<code>destroy()</code>,
+and those are collective &mdash; every rank in the group has to call them, in the same order. A
+dead rank cannot. So my version would have moved the hang rather than removed it. Abort is
+one-sided, which is the whole reason the parent uses it too. The new function&rsquo;s docstring now
+carries that reasoning and the <code>splitShare</code> detail, so the next reader does not have to
+rediscover either.</p>
 </div>
 
 <h2>The fourteen fixed cleanly</h2>
