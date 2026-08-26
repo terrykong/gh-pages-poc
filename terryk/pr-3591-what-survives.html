@@ -94,6 +94,16 @@ There is no separate state for the refit. Its fate is written entirely in the sh
 one hard rule — <strong>recover at most once per sync</strong>. Below is every combination.
 </p>
 
+<div class="hl">
+<strong>The rule that explains most of the grid: the retry only happens if someone can be named.</strong>
+Recovery is two steps in order — work out which shard to drop, rebuild the group without it, and
+only then retry the refit. If the first step cannot name anyone, it raises and the retry is never
+reached. So a <em>crash</em> recovers because it identifies itself: Ray reports the dead process and
+the probe confirms it. A <em>hang</em> identifies nobody, and only recovers if the ledger already
+held a suspect. Retrying without shrinking would be worse than not retrying — the same full fleet,
+the same silent rank, the same hang.
+</div>
+
 <figure>
 <svg viewBox="0 0 980 396" role="img" aria-label="Shard state before the refit crossed with how the refit went">
   <text x="0" y="15" class="t" font-size="13.5" font-weight="600">Shard state before the sync  ×  how the sync went</text>
@@ -118,8 +128,8 @@ one hard rule — <strong>recover at most once per sync</strong>. Below is every
   <text x="482" y="90" class="r" font-size="11.5" font-weight="600">run ends</text>
   <text x="482" y="108" class="d" font-size="10.5">Abort fires, but nobody is</text>
   <text x="482" y="122" class="d" font-size="10.5">absent and nobody was</text>
-  <text x="482" y="136" class="d" font-size="10.5">suspect — nothing to</text>
-  <text x="482" y="150" class="d" font-size="10.5">attribute it to.</text>
+  <text x="482" y="136" class="d" font-size="10.5">suspect. Nobody to drop,</text>
+  <text x="482" y="150" class="d" font-size="10.5">so no rebuild, so no retry.</text>
 
   <rect x="728" y="68" width="248" height="96" rx="5" fill="var(--green)" opacity="0.12"/>
   <text x="740" y="90" class="g" font-size="11.5" font-weight="600">recovers</text>
@@ -179,7 +189,7 @@ one hard rule — <strong>recover at most once per sync</strong>. Below is every
 <td>The ordinary step. The reconcile at the top is a comparison, not a rebuild — each synchronizer remembers the membership it last built with.</td></tr>
 
 <tr><td>HEALTHY</td><td>hangs</td><td class="no">run ends</td>
-<td>The watchdog aborts, but the probe finds every process alive and the ledger holds no suspect. The code deliberately refuses to guess: <em>"condemning the wrong one costs a healthy shard and leaves the real culprit in the rebuilt communicator — the same hang, one shard smaller."</em> The error names the suspect list so you can see why it gave up.</td></tr>
+<td>The watchdog aborts, but the probe finds every process alive and the ledger holds no suspect — so there is nobody to drop, no smaller group to rebuild, and <strong>the retry is never reached</strong>: recovery raises first. The code deliberately refuses to guess: <em>"condemning the wrong one costs a healthy shard and leaves the real culprit in the rebuilt communicator — the same hang, one shard smaller."</em> The error names the suspect list so you can see why it gave up.</td></tr>
 
 <tr><td>HEALTHY</td><td>crashes</td><td class="ok">recovers</td>
 <td><code>RayActorError</code>, then the post-abort probe sees the dead process, <code>record_actor_death</code> marks it DEAD, the group is rebuilt without it, and the refit is retried once.</td></tr>
