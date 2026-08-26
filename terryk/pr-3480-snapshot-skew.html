@@ -1,0 +1,332 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>How a checkpoint can silently drop a batch of prompts on resume</title>
+<style>
+:root{
+  --bg:#0d1117; --surface:#161b22; --border:#30363d; --text:#e6edf3; --dim:#8b949e;
+  --accent:#58a6ff; --green:#3fb950; --red:#f85149; --amber:#d29922; --purple:#bc8cff;
+}
+:root[data-theme="light"]{
+  --bg:#ffffff; --surface:#f6f8fa; --border:#d0d7de; --text:#1f2328; --dim:#59636e;
+  --accent:#0969da; --green:#1a7f37; --red:#cf222e; --amber:#9a6700; --purple:#8250df;
+}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--text);margin:0;
+  font:16px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:32px 20px 80px}
+h1{font-size:29px;line-height:1.25;margin:0 0 8px;letter-spacing:-.3px}
+h2{font-size:21px;margin:44px 0 14px;padding-bottom:7px;border-bottom:1px solid var(--border)}
+h3{font-size:16px;margin:26px 0 8px;color:var(--text)}
+p{margin:13px 0}
+.sub{color:var(--dim);font-size:14px;margin:0 0 26px}
+.sub a{color:var(--accent)}
+a{color:var(--accent)}
+code{font-family:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+  font-size:13px;background:var(--surface);border:1px solid var(--border);
+  border-radius:5px;padding:1px 5px}
+pre{background:var(--surface);border:1px solid var(--border);border-radius:8px;
+  padding:14px 16px;overflow-x:auto;margin:14px 0}
+pre code{background:none;border:none;padding:0;font-size:12.5px;line-height:1.6}
+figure{margin:22px 0}
+figcaption{color:var(--dim);font-size:13px;margin-top:9px}
+table{border-collapse:collapse;width:100%;margin:14px 0;font-size:14px}
+th,td{border:1px solid var(--border);padding:7px 11px;text-align:left;vertical-align:top}
+th{background:var(--surface);font-weight:600}
+.warn{background:var(--surface);border:1px solid var(--border);
+  border-left:3px solid var(--red);border-radius:7px;padding:14px 18px;margin:22px 0}
+.hl{background:var(--surface);border:1px solid var(--border);
+  border-left:3px solid var(--accent);border-radius:7px;padding:14px 18px;margin:22px 0}
+.ok{border-left-color:var(--green)}
+svg a text{text-decoration:underline}
+svg text{font-family:"JetBrains Mono",ui-monospace,Menlo,monospace}
+.t{fill:var(--text)} .d{fill:var(--dim)} .g{fill:var(--green)}
+.r{fill:var(--red)} .a{fill:var(--amber)} .p{fill:var(--purple)} .ac{fill:var(--accent)}
+.sbox{fill:var(--surface);stroke:var(--border)}
+.line{stroke:var(--border)} .gl{stroke:var(--green)} .rl{stroke:var(--red)}
+.al{stroke:var(--amber)} .pl{stroke:var(--purple)}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);
+  border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;
+  font:13px/1 "JetBrains Mono",monospace;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.18)}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+  document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head>
+<body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+  function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+  function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
+    b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
+      else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+  document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+
+<div class="wrap">
+
+<h1>How a checkpoint can silently drop a batch of prompts on resume</h1>
+<p class="sub">
+NVIDIA-NeMo/RL <a href="https://github.com/NVIDIA-NeMo/RL/pull/3480">PR #3480</a> —
+recovering the replay buffer from native TransferQueue checkpoints.
+All links pinned to <code>1c33a9a1</code>.
+</p>
+
+<p>
+This PR teaches a paused run to come back with its finished-but-not-yet-trained rollouts
+intact. To do that it now saves two new things: the <b>replay buffer index</b> (which
+groups are waiting, and which training step each is stamped for) and the <b>sampler
+cursor</b> (how many batches have been handed out so far). On resume both are restored
+exactly.
+</p>
+<p>
+They have to agree. The cursor decides what step the <i>next</i> batch is stamped for, and
+the buffer says which steps are <i>already</i> covered. The problem is that the two are
+read about a hundred lines apart, with roughly fifteen <code>await</code> points between
+them — and the rollout pump keeps running through every one of those awaits.
+</p>
+
+<h2>Where the two reads happen, and what it costs</h2>
+
+<figure>
+<svg viewBox="0 0 940 470" width="100%" role="img" aria-label="Timeline of a checkpoint save showing the cursor read and the buffer read separated by awaits">
+  <text x="0" y="16" class="t" font-size="13" font-weight="bold">_train_pump  —  one checkpoint save</text>
+
+  <!-- train pump lane -->
+  <line x1="0" y1="60" x2="940" y2="60" class="line" stroke-width="1.5"/>
+  <text x="0" y="46" class="d" font-size="11">train pump (holds the save)</text>
+
+  <!-- t0 marker -->
+  <circle cx="120" cy="60" r="6" class="g"/>
+  <text x="120" y="86" class="g" font-size="11.5" text-anchor="middle">t0</text>
+  <rect x="24" y="96" width="196" height="56" rx="6" class="sbox"/>
+  <text x="34" y="115" class="t" font-size="11">reads the cursor</text>
+  <text x="34" y="131" class="ac" font-size="10.5">dispatch_index = 6</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/1c33a9a13608b5cf7520979cacdd6e7293f24589/nemo_rl/algorithms/single_controller.py#L1872" target="_blank">
+    <text x="34" y="146" class="d" font-size="10">single_controller.py:1872</text></a>
+
+  <!-- awaits -->
+  <rect x="240" y="42" width="404" height="36" rx="6" class="sbox"/>
+  <text x="442" y="65" class="a" font-size="11.5" text-anchor="middle">~15 awaits — model save, optimizer save, dataloader save</text>
+
+  <!-- t3 marker -->
+  <circle cx="700" cy="60" r="6" class="r"/>
+  <text x="700" y="86" class="r" font-size="11.5" text-anchor="middle">t3</text>
+  <rect x="604" y="96" width="212" height="56" rx="6" class="sbox"/>
+  <text x="614" y="115" class="t" font-size="11">reads the buffer</text>
+  <text x="614" y="131" class="ac" font-size="10.5">groups stamped for step 7</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/1c33a9a13608b5cf7520979cacdd6e7293f24589/nemo_rl/algorithms/single_controller.py#L1981" target="_blank">
+    <text x="614" y="146" class="d" font-size="10">single_controller.py:1981</text></a>
+
+  <!-- rollout pump lane -->
+  <line x1="0" y1="248" x2="940" y2="248" class="line" stroke-width="1.5"/>
+  <text x="0" y="234" class="d" font-size="11">rollout pump (never pauses — admit() takes no lock)</text>
+
+  <!-- t1 -->
+  <circle cx="330" cy="248" r="6" class="p"/>
+  <text x="330" y="272" class="p" font-size="11.5" text-anchor="middle">t1</text>
+  <rect x="234" y="284" width="212" height="70" rx="6" class="sbox"/>
+  <text x="244" y="303" class="t" font-size="11">admit() — gate is open</text>
+  <text x="244" y="319" class="p" font-size="10.5">dispatch_index → 7</text>
+  <text x="244" y="335" class="p" font-size="10.5">stamps target_step = 7</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/1c33a9a13608b5cf7520979cacdd6e7293f24589/nemo_rl/algorithms/async_utils/staleness_sampler.py#L381" target="_blank">
+    <text x="244" y="350" class="d" font-size="10">staleness_sampler.py:381</text></a>
+
+  <!-- t2 -->
+  <circle cx="560" cy="248" r="6" class="p"/>
+  <text x="560" y="272" class="p" font-size="11.5" text-anchor="middle">t2</text>
+  <rect x="466" y="284" width="200" height="54" rx="6" class="sbox"/>
+  <text x="476" y="303" class="t" font-size="11">its 4 rollouts finish</text>
+  <text x="476" y="319" class="g" font-size="10.5">commit() → now in the buffer</text>
+
+  <!-- vertical guides -->
+  <line x1="120" y1="60" x2="120" y2="248" class="gl" stroke-width="1" stroke-dasharray="3 3"/>
+  <line x1="330" y1="248" x2="330" y2="60" class="pl" stroke-width="1" stroke-dasharray="3 3"/>
+  <line x1="560" y1="248" x2="560" y2="60" class="pl" stroke-width="1" stroke-dasharray="3 3"/>
+  <line x1="700" y1="60" x2="700" y2="248" class="rl" stroke-width="1" stroke-dasharray="3 3"/>
+
+  <!-- result -->
+  <rect x="24" y="386" width="892" height="66" rx="7" class="sbox" stroke-dasharray="4 3"/>
+  <text x="40" y="408" class="t" font-size="12" font-weight="bold">What lands on disk</text>
+  <text x="40" y="428" class="t" font-size="11.5">cursor says <tspan class="r">6</tspan> — “the last batch I handed out was step 6”</text>
+  <text x="40" y="445" class="t" font-size="11.5">buffer says <tspan class="g">step 7 is already generated</tspan> — 4 groups, ready and waiting</text>
+  <text x="560" y="428" class="a" font-size="11.5">The pair disagrees by exactly one step.</text>
+  <text x="560" y="445" class="d" font-size="11">Nothing on the restore side reconciles them.</text>
+</svg>
+<figcaption>
+The cursor is read at t0 and the buffer at t3. Everything the rollout pump does in between
+(t1, t2) lands in the second read but not the first.
+</figcaption>
+</figure>
+
+<p>
+The cursor <i>is</i> snapshotted carefully — it sits in an await-free window with the
+dataloader position and the spare-prompt pool, and there is a comment saying exactly
+that. The buffer is snapshotted carefully too, inside the exclusive checkpoint barrier so
+no commit can tear it. Each half is correct on its own. The two were just never made
+atomic <i>with each other</i>, and <code>admit()</code> takes no barrier, so it is free to
+run in the gap.
+</p>
+
+<h3>What that costs on resume</h3>
+
+<p>Config for the walkthrough — every number distinct so you can trace each one:</p>
+
+<table>
+<tr><th>quantity</th><th>value</th><th></th></tr>
+<tr><td><code>max_lookahead_versions</code> (the gate)</td><td>1</td><td>generation may run one step ahead</td></tr>
+<tr><td><code>num_prompts_per_step</code></td><td>4</td><td>groups needed to close a step</td></tr>
+<tr><td>trainer version at save</td><td>7</td><td>the step about to be trained</td></tr>
+<tr><td>saved cursor</td><td>6</td><td>read at t0, before the pump moved</td></tr>
+<tr><td>stamp the pump assigned at t1</td><td>7</td><td>collides with the trainer version — that is the bug</td></tr>
+</table>
+
+<p>On restart the controller restores the cursor to 6 and the buffer with its 4 groups
+stamped for step 7. Then the rollout pump starts:</p>
+
+<pre><code>rollout pump                                     trainer
+────────────────────────────────────────────     ──────────────────────────
+reads a fresh batch of 4 prompts
+  from the dataloader                            waiting for step 7
+admit() → cursor 6 becomes 7
+  stamps target_step = 7   ← already covered!
+count_for_target_step(7) = 4                     select() finds the 4
+  → dispatches 0 of 4 prompts                      RESTORED groups
+  → "dropping the rest"                          step 7 closes normally
+                                                 ✓ training looks healthy
+</code></pre>
+
+<p>
+The guard at
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/1c33a9a13608b5cf7520979cacdd6e7293f24589/nemo_rl/algorithms/single_controller.py#L819">single_controller.py:819-831</a>
+notices that step 7 is already covered and refuses to double-generate. That part is right.
+But the four fresh prompts it declined to dispatch were <b>already pulled off the
+dataloader</b>, and the dataloader does not rewind. They are gone — never generated, never
+trained, not in any checkpoint.
+</p>
+
+<div class="warn">
+<b>The failure is invisible.</b> The step closes with a full batch of 4 groups, the loss
+curve is unremarkable, and no counter records a loss. The only trace is one
+<code>print</code> saying <i>“dropping the rest”</i> — which reads like the deliberate
+anti-duplication message it also is. One batch per affected resume, silently missing from
+the training stream.
+</div>
+
+<h3>The other direction is fine</h3>
+<p>
+If the pump admits at t1 but its rollouts are <i>still generating</i> at t3, the buffer
+saves nothing for step 7 while the cursor says 6. On restart the pump re-stamps step 7,
+sees <code>count_for_target_step(7) == 0</code>, and dispatches a full fresh batch. It
+self-heals. The in-flight rollouts are still lost, but that is the already-known,
+deliberately-deferred in-flight drop — not this bug.
+</p>
+
+<h2>The fix</h2>
+
+<p>
+The invariant to restore is one sentence: <b>the cursor, the dataloader position and the
+buffer index must all describe the same instant.</b> Two changes, both using the barrier
+that already exists.
+</p>
+
+<h3>1. Let <code>admit()</code> participate in the barrier</h3>
+<p>
+The gate poll must stay <i>outside</i> the barrier — it waits for the trainer to advance,
+which cannot happen mid-checkpoint, so holding a slot across it would deadlock. Only the
+increment and the stamp need protecting:
+</p>
+<pre><code><span style="color:var(--dim)"># staleness_sampler.py:381  _GatedSampler.admit</span>
+  async def admit(self, *, trainer_version_fn):
+      while self._dispatch_index &gt;= trainer_version_fn() + self._gate_window:
+          await asyncio.sleep(_GATE_POLL_SECONDS)     <span style="color:var(--dim)"># stays outside</span>
+<span style="color:var(--green)">+     async with self._buffer.checkpoint_barrier.mutation():</span>
+<span style="color:var(--green)">+         self._dispatch_index += 1</span>
+<span style="color:var(--green)">+         return self._stamp()</span>
+<span style="color:var(--red)">-     self._dispatch_index += 1</span>
+<span style="color:var(--red)">-     return self._stamp()</span>
+</code></pre>
+<p>
+<code>mutation()</code> is the shared side of the same
+<code>DataPlaneCheckpointBarrier</code> that <code>commit()</code> already takes, so a save
+in progress blocks the increment instead of racing it.
+</p>
+
+<h3>2. Read the cursor inside the exclusive section</h3>
+<p>
+The dataloader and spare pool must move with it — the batch at the saved dataloader
+position is the one the next stamp applies to, so all three have to be captured together:
+</p>
+<pre><code><span style="color:var(--dim)"># single_controller.py:1872  _save_checkpoint</span>
+<span style="color:var(--red)">-     save_state.sampler_dispatch_index = self._sampler.dispatch_index</span>
+<span style="color:var(--red)">-     dataloader_state = self._dataloader.state_dict()</span>
+<span style="color:var(--red)">-     reserve_state = list(self._replacement_reserve)</span>
+      ...
+<span style="color:var(--dim)"># single_controller.py:1979  — the exclusive window that already exists</span>
+      async with self._data_plane_checkpoint_barrier.checkpoint():
+<span style="color:var(--green)">+         # No admit, no commit, no dataloader read can interleave here,</span>
+<span style="color:var(--green)">+         # so these four describe one instant.</span>
+<span style="color:var(--green)">+         save_state.sampler_dispatch_index = self._sampler.dispatch_index</span>
+<span style="color:var(--green)">+         dataloader_state = self._dataloader.state_dict()</span>
+<span style="color:var(--green)">+         reserve_state = list(self._replacement_reserve)</span>
+          if self._sampler.supports_buffer_checkpoint:
+              replay_metadata = self._buffer.metadata_state_dict(...)
+</code></pre>
+
+<div class="hl ok">
+<b>A cheaper alternative, if reshaping the save is too invasive:</b> reconcile on the
+restore side instead. After loading the buffer, advance the restored cursor to
+<code>max(saved_cursor, max(target_step in restored groups))</code>. That cannot fix a
+torn dataloader position, but it does close the drop shown here, and it is a three-line
+change in <code>__init__</code>.
+</div>
+
+<h2>Does it reproduce?</h2>
+
+<p>
+<b>Not on hardware — nobody has run this.</b> The functional test that would exercise it
+(<code>grpo_dp_single_controller_tq_recovery.sh</code>) checkpoints on a one-second timeout
+at step 1, where the pipeline is not yet warm, so it does not reach the state above.
+</p>
+<p>
+What does exist is an executable model of the two functions involved. It reimplements
+<code>_GatedSampler.admit</code> and the ready-only filter in
+<code>metadata_state_dict</code> line-for-line from the source, and drives them through
+seven warm steps and a checkpoint. It is a model, not the real classes — importing those
+pulls in torch and Ray:
+</p>
+
+<pre><code>steady state: trainer_version=7 dispatch_index=6
+
+[t0] save_state.sampler_dispatch_index = 6   (single_controller.py:1872)
+[t1] rollout pump admits during the save -> dispatch_index=7, stamps target_step=7
+[t2] its 4 rollouts COMMIT before the snapshot
+[t3] metadata_state_dict() -> 4 group(s), target_step(s)=[7]
+
+--- restart ---
+restored: trainer_version=7, dispatch_index=6, buffer target_step(s)=[7]
+rollout pump: admits, stamps target_step=7; count_for_target_step(7) = 4
+  -> single_controller.py:822 drops 4 of 4 prompts (0 dispatched)
+trainer at step 7: select() finds 4 of 4 group(s) needed
+</code></pre>
+
+<p>
+The honest ask before merging: a test that saves with a warm pipeline and a group already
+stamped for the upcoming step, restores, and asserts the resumed run dispatches a full
+batch rather than dropping one. No such test exists today — the drop branch of that guard
+is never exercised, and the sampler cursor and the buffer are never checked against each
+other.
+</p>
+
+<div class="warn">
+<b>So what.</b> The whole point of this PR is that pausing a run and resuming it should
+train on the same data as never pausing. This is a path where it does not, and it fails
+quietly: a full batch of prompts leaves the dataloader and never reaches training. It only
+bites when the rollout pump admits during a save — likely, since a save follows a train
+step, which is exactly when the gate reopens and the pump moves. Worth fixing before merge,
+because once resumed runs are common the missing prompts are indistinguishable from noise.
+</div>
+
+</div>
+</body>
+</html>
