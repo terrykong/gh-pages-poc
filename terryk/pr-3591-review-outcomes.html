@@ -134,11 +134,18 @@ process sat there."</em> A py-spy dump from job 6521181 showed both trainers stu
 "NCCL cannot bootstrap a new communicator on a device while a previous one there is wedged
 mid-abort, and that abort cannot finish while the frozen peer holds its sockets open and idle."
 </div>
-<p>And the asymmetry the tests had been circling for weeks fit it perfectly: <strong>SIGKILL closes
-sockets, SIGSTOP does not</strong> — and the SIGKILL variant of this same reshard test had always
-passed. So <code>2f762b8d8</code> made the verdict true: <code>ray.kill</code> every worker of a
-shard that goes absent while its process is still up, <em>before</em> the rebuild is dispatched.
-Its sockets close, the peers' pending aborts retire, the rebuild proceeds.</p>
+<p>An asymmetry in the tests fit that perfectly. The harness breaks a shard two ways:
+<strong>SIGKILL</strong> it (process dies, sockets close) or <strong>SIGSTOP</strong> it (alive but
+frozen, sockets stay open). The SIGKILL variant of this same reshard test had <em>always</em>
+passed; only the frozen one wedged.</p>
+
+<p>So <code>2f762b8d8</code> tried to turn the frozen case into the killed case.
+<code>ray.kill</code> is the forceful one — it terminates the worker's process, the same outcome
+SIGKILL produces in the test — so the fix killed every worker of a shard the fleet had condemned
+while its process was still up, <em>before</em> dispatching the rebuild. Sockets close, the peers'
+pending aborts retire, the rebuild proceeds down the path the killed variants already prove. Note
+this is <em>terminating a process</em>, not aborting a communicator — two different things that
+both get called "killing the shard".</p>
 
 <p><strong>Why it was reverted: the experiment refuted it.</strong> Job 6523731 ran the kill in
 exactly the intended order —</p>
