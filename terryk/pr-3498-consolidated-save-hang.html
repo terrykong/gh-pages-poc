@@ -86,9 +86,25 @@ while training is still using it.</p>
 
 <h2>Two threads, one channel, different order on each GPU</h2>
 
-<p>A NCCL channel is an ordered queue. Every GPU must call the same operations in the same
-order — the 1st call on GPU 0 is matched with the 1st call on GPU 1, whatever those calls
-actually are. Nothing checks that they agree.</p>
+<p>Two fair questions first, because the answer is not obvious.</p>
+
+<p><strong>Where does the training traffic come from?</strong> FSDP2, not from anything NeMo-RL
+writes. Every backward pass reduce-scatters gradients across GPUs, and every forward pass
+all-gathers parameters. That happens on every single training step.</p>
+
+<p><strong>Isn't training stopped while the checkpoint is written?</strong> No — and that is what
+makes this reachable. There are three separate hops, none of which blocks the training loop:
+<code>is_async=True</code> hands the state to
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/7b5e3a0fb5631e5d3ded5584c57c5d2437717dc6/nemo_rl/models/automodel/checkpoint.py#L276-L292"><code>dcp.async_save</code></a>,
+which stages it and returns; the HF consolidation is then pushed onto a background thread inside
+the worker; and even the <em>waiting</em> for those to finish runs on
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/7b5e3a0fb5631e5d3ded5584c57c5d2437717dc6/nemo_rl/utils/checkpoint.py#L327-L354">another
+background thread on the controller</a>. The join only happens at the <strong>next</strong> save,
+or at shutdown. So the background thread stays alive across many training steps.</p>
+
+<p>Now the collision. A NCCL channel is an ordered queue. Every GPU must call the same operations
+in the same order — the 1st call on GPU 0 is matched with the 1st call on GPU 1, whatever those
+calls actually are. Nothing checks that they agree.</p>
 
 <svg viewBox="0 0 940 372" role="img" aria-label="Timeline showing training and consolidation collectives interleaving differently on two GPUs">
   <text x="14" y="18" class="lbl-b">Both GPUs are issuing into the SAME default NCCL channel</text>
@@ -103,7 +119,7 @@ actually are. Nothing checks that they agree.</p>
   <text x="14" y="88" class="lbl">GPU 0</text>
   <line x1="76" y1="80" x2="906" y2="80" class="ar"/>
   <rect x="150" y="64" width="176" height="32" rx="5" class="train"/>
-  <text x="162" y="84" class="t-txt">all_reduce (step 8)</text>
+  <text x="162" y="84" class="t-txt">reduce_scatter (FSDP)</text>
   <rect x="470" y="64" width="212" height="32" rx="5" class="cons"/>
   <text x="482" y="84" class="t-txt">all_gather_object</text>
 
@@ -116,7 +132,7 @@ actually are. Nothing checks that they agree.</p>
   <rect x="150" y="172" width="212" height="32" rx="5" class="cons"/>
   <text x="162" y="192" class="t-txt">all_gather_object</text>
   <rect x="506" y="172" width="176" height="32" rx="5" class="train"/>
-  <text x="518" y="192" class="t-txt">all_reduce (step 8)</text>
+  <text x="518" y="192" class="t-txt">reduce_scatter (FSDP)</text>
 
   <text x="150" y="222" class="note">1st call issued</text>
   <text x="506" y="222" class="note">2nd call issued</text>
@@ -130,7 +146,7 @@ actually are. Nothing checks that they agree.</p>
   <text x="590" y="140" class="badt">and these two</text>
 
   <text x="14" y="262" class="badt">The two GPUs disagree about what is happening on the channel.</text>
-  <text x="14" y="284" class="note">GPU 0 waits to finish a training all-reduce. GPU 1 waits to finish a consolidation all-gather. Neither can complete.</text>
+  <text x="14" y="284" class="note">GPU 0 waits to finish an FSDP reduce-scatter. GPU 1 waits to finish a consolidation all-gather. Neither can complete.</text>
   <text x="14" y="302" class="note">The run stops making progress until the watchdog fires: Watchdog caught collective operation timeout.</text>
 
   <rect x="14" y="318" width="912" height="42" rx="6" class="box"/>
@@ -169,6 +185,34 @@ already made at the start.</p>
 <p>Nothing joins that thread before training continues. The join happens inside
 <code>finalize_async_save</code>, which is itself called from a background thread on the
 controller at checkpoint-promotion time — many training steps later.</p>
+
+<p style="margin-top:22px"><strong>When is it literally the same channel?</strong> Worth being
+precise, because the answer depends on your parallelism settings.</p>
+
+<p>Consolidation always ends up on the default (world) channel, because
+<code>process_group</code> is <code>None</code>. FSDP2 runs on whichever mesh axis it shards
+over — <code>dp_shard</code>. PyTorch reuses the default channel for a mesh axis that spans
+every GPU: in
+<a href="https://github.com/pytorch/pytorch/blob/v2.11.0/torch/distributed/device_mesh.py#L522-L539"><code>device_mesh.py</code></a>,
+when a mesh dimension covers the whole world and no backend override is given, it returns
+<code>default_group</code> itself. Automodel relies on that too — its own mesh code
+<a href="https://github.com/NVIDIA-NeMo/Automodel/blob/94387e4318bfd04cb21ff57782061864e0c7bcec/nemo_automodel/components/distributed/mesh_utils.py#L226-L233">skips
+the override for world-sized axes</a> so it does not allocate a second channel.</p>
+
+<table style="border-collapse:collapse;width:100%;margin:14px 0;font-size:13.5px">
+<tr><th style="border:1px solid var(--border);padding:7px 10px;background:var(--surface2);text-align:left">Config</th><th style="border:1px solid var(--border);padding:7px 10px;background:var(--surface2);text-align:left">What happens</th></tr>
+<tr>
+  <td style="border:1px solid var(--border);padding:7px 10px"><code>tp=1, cp=1</code><br><span class="cap">FSDP shards over every GPU</span></td>
+  <td style="border:1px solid var(--border);padding:7px 10px"><span class="r">Same channel.</span> This is the picture above: two different operations matched against each other, so the run stalls or a reduction returns wrong values.</td>
+</tr>
+<tr>
+  <td style="border:1px solid var(--border);padding:7px 10px"><code>tp&gt;1</code> or <code>cp&gt;1</code><br><span class="cap">FSDP shards over a subset</span></td>
+  <td style="border:1px solid var(--border);padding:7px 10px">Two <em>different</em> channels driven at once from two threads. Weaker, but still unsafe: GPUs can enter the two channels in different orders and deadlock.</td>
+</tr>
+</table>
+
+<p>So the worst and clearest case is the plain one — no tensor parallel, no context parallel,
+which is what most small-model recipes run.</p>
 
 <h2>Does it happen today, and what to do</h2>
 
