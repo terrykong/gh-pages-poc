@@ -211,81 +211,109 @@ published a good copy, and steps aside if so.</p>
 <h2>Where two jobs can still collide</h2>
 
 <p>That <code>raise</code> is the one exit that does not re-check. To reach it you need two things at
-once: a <strong>stale partial</strong> conversion sitting in the final path (so the rename fails and
-the "shove aside" path runs at all), and a <strong>second job</strong> converting the same model at
-the same time. Then the loser can die even though a perfectly good conversion just appeared.</p>
+once. First, <strong>two jobs converting the same model at the same time</strong> — each one does the
+whole conversion on its own GPUs, into its own hidden directory, and then both try to publish into
+the same final path. Second, a <strong>stale partial</strong> conversion already sitting in that final
+path, left by an earlier run that was killed. The stale partial is what makes both renames fail and
+sends both jobs down the "move the occupant aside" path — which is where they can trip over each
+other.</p>
 
-<svg viewBox="0 0 900 470" role="img" aria-label="Five step trace of two jobs racing over a stale partial conversion, ending with job B raising OSError while a complete conversion sits in the final path">
-  <text class="hdr" x="14" y="18">Two jobs convert the same model. The final path holds a stale partial from a killed run.</text>
+<p>Below, <strong>both A and B have already finished converting</strong> and are racing to publish.
+Neither is a reader; both are writers.</p>
 
-  <text class="lbl-b" x="14" y="44">step</text>
-  <text class="lbl-b" x="66" y="44">Job A</text>
-  <text class="lbl-b" x="330" y="44">the shared path  model/</text>
-  <text class="lbl-b" x="640" y="44">Job B</text>
-  <line x1="14" y1="52" x2="884" y2="52" stroke="var(--border)" stroke-width="1.2"/>
+<svg viewBox="0 0 900 545" role="img" aria-label="Two jobs each finished converting the model and both try to publish over a stale partial. Job B does its second check during the gap where the path is absent, then fails its rename and raises.">
+  <text class="hdr" x="14" y="18">Two jobs each converted the model themselves. Both now want to publish into the same path.</text>
+
+  <text class="lbl-b" x="14" y="42">Starting state — nobody has published yet</text>
+
+  <rect class="idle" x="66" y="52" width="248" height="46" rx="5"/>
+  <text class="lbl-b" x="76" y="69">Job A — conversion done</text>
+  <text class="lbl" x="76" y="88">.staging-a1b2c3d4/</text>
+
+  <rect class="bad" x="330" y="52" width="290" height="46" rx="5"/>
+  <text class="lbl-b" x="340" y="69">model/ — the shared final path</text>
+  <text class="lbl" x="340" y="88">iter_0000000/  no run_config.yaml</text>
+  <text class="note" x="340" y="45">stale partial, from a run that was killed</text>
+
+  <rect class="idle" x="640" y="52" width="244" height="46" rx="5"/>
+  <text class="lbl-b" x="650" y="69">Job B — conversion done</text>
+  <text class="lbl" x="650" y="88">.staging-e5f6a7b8/</text>
+
+  <text class="lbl-b" x="14" y="128">step</text>
+  <text class="lbl-b" x="66" y="128">Job A publishes</text>
+  <text class="lbl-b" x="330" y="128">what is on disk at model/</text>
+  <text class="lbl-b" x="640" y="128">Job B publishes</text>
+  <line x1="14" y1="136" x2="884" y2="136" stroke="var(--border)" stroke-width="1.2"/>
+
+  <!-- gap band behind steps 3-4 in the middle column -->
+  <rect x="330" y="222" width="290" height="86" rx="5" fill="var(--orange)" opacity="0.16"/>
+  <rect x="330" y="222" width="290" height="86" rx="5" fill="none" stroke="var(--orange)" stroke-width="1.6" stroke-dasharray="5 4"/>
 
   <!-- step 1 -->
-  <text class="lbl" x="20" y="80">1</text>
-  <rect class="idle" x="66" y="62" width="248" height="30" rx="5"/>
-  <text class="lbl" x="76" y="81">check: not complete</text>
-  <rect class="bad" x="330" y="62" width="290" height="30" rx="5"/>
-  <text class="lbl" x="340" y="81">iter_0000000/  (no run_config.yaml)</text>
-  <rect class="idle" x="640" y="62" width="244" height="30" rx="5"/>
-  <text class="lbl" x="650" y="81">check: not complete</text>
+  <text class="lbl" x="20" y="164">1</text>
+  <rect class="idle" x="66" y="146" width="248" height="30" rx="5"/>
+  <text class="lbl" x="76" y="165">checks: not complete</text>
+  <text class="lbl" x="340" y="165">the stale partial sits here</text>
+  <rect class="idle" x="640" y="146" width="244" height="30" rx="5"/>
+  <text class="lbl" x="650" y="165">checks: not complete</text>
 
   <!-- step 2 -->
-  <text class="lbl" x="20" y="120">2</text>
-  <rect class="idle" x="66" y="102" width="248" height="30" rx="5"/>
-  <text class="lbl" x="76" y="121">rename → fails, not empty</text>
-  <rect class="bad" x="330" y="102" width="290" height="30" rx="5"/>
-  <text class="lbl" x="340" y="121">unchanged</text>
-  <rect class="idle" x="640" y="102" width="244" height="30" rx="5"/>
-  <text class="lbl" x="650" y="121">rename → fails too</text>
+  <text class="lbl" x="20" y="203">2</text>
+  <rect class="idle" x="66" y="185" width="248" height="30" rx="5"/>
+  <text class="lbl" x="76" y="204">rename → ENOTEMPTY</text>
+  <text class="lbl" x="340" y="204">unchanged</text>
+  <rect class="idle" x="640" y="185" width="244" height="30" rx="5"/>
+  <text class="lbl" x="650" y="204">rename → ENOTEMPTY</text>
 
   <!-- step 3 -->
-  <text class="lbl" x="20" y="160">3</text>
-  <rect class="ok" x="66" y="142" width="248" height="30" rx="5"/>
-  <text class="lbl" x="76" y="161">shoves the partial aside</text>
-  <rect class="idle" x="330" y="142" width="290" height="30" rx="5"/>
-  <text class="lbl" x="340" y="161">now ABSENT</text>
-  <rect class="idle" x="640" y="142" width="244" height="30" rx="5"/>
-  <text class="lbl" x="650" y="161">tried too, already gone</text>
+  <text class="lbl" x="20" y="245">3</text>
+  <rect class="ok" x="66" y="227" width="248" height="30" rx="5"/>
+  <text class="lbl" x="76" y="246">moves the partial aside</text>
+  <text class="lbl" x="340" y="246">now ABSENT</text>
+  <rect class="idle" x="640" y="227" width="244" height="30" rx="5"/>
+  <text class="lbl" x="650" y="246">tries to move it — gone</text>
 
   <!-- step 4 -->
-  <text class="lbl" x="20" y="205">4</text>
-  <rect class="idle" x="66" y="182" width="248" height="42" rx="5"/>
-  <text class="lbl" x="76" y="199">about to rename</text>
-  <rect class="idle" x="330" y="182" width="290" height="42" rx="5"/>
-  <text class="lbl" x="340" y="199">still absent</text>
-  <rect class="bad" x="640" y="182" width="244" height="42" rx="5"/>
-  <text class="lbl" x="650" y="199">2nd try: checks — absent,</text>
-  <text class="lbl" x="650" y="215">so "not complete" → proceeds</text>
+  <text class="lbl" x="20" y="288">4</text>
+  <rect class="idle" x="66" y="266" width="248" height="38" rx="5"/>
+  <text class="lbl" x="76" y="289">has not renamed yet</text>
+  <text class="lbl" x="340" y="283">still ABSENT</text>
+  <rect class="bad" x="640" y="266" width="244" height="38" rx="5"/>
+  <text class="lbl" x="650" y="283">2nd check lands HERE:</text>
+  <text class="lbl" x="650" y="298">absent, so "not complete"</text>
+  <path class="arr-r" d="M636 285 L624 285"/>
+  <path class="arr-r" d="M624 285 L631 280 M624 285 L631 290"/>
 
   <!-- step 5 -->
-  <text class="lbl" x="20" y="252">5</text>
-  <rect class="ok" x="66" y="234" width="248" height="42" rx="5"/>
-  <text class="lbl" x="76" y="251">renames — WINS</text>
-  <text class="note" x="76" y="267">A is happy and moves on</text>
-  <rect class="ok" x="330" y="234" width="290" height="42" rx="5"/>
-  <text class="lbl" x="340" y="251">iter_0000000/run_config.yaml</text>
-  <text class="note" x="340" y="267">a complete, correct conversion</text>
-  <rect class="bad" x="640" y="234" width="244" height="42" rx="5"/>
-  <text class="lbl" x="650" y="251">renames — not empty again</text>
-  <text class="lbl" x="650" y="267">attempt == 1 → raise</text>
+  <text class="lbl" x="20" y="333">5</text>
+  <rect class="ok" x="66" y="315" width="248" height="38" rx="5"/>
+  <text class="lbl" x="76" y="332">renames — A WINS</text>
+  <text class="note" x="76" y="347">A carries on happily</text>
+  <rect class="ok" x="330" y="315" width="290" height="38" rx="5"/>
+  <text class="lbl" x="340" y="332">iter_0000000/run_config.yaml</text>
+  <text class="note" x="340" y="347">complete and correct</text>
+  <rect class="bad" x="640" y="315" width="244" height="38" rx="5"/>
+  <text class="lbl" x="650" y="332">rename → ENOTEMPTY</text>
+  <text class="lbl" x="650" y="347">attempt == 1 → raise</text>
 
-  <path class="arr-r" d="M762 278 L762 300"/>
-  <path class="arr-r" d="M762 300 L756 293 M762 300 L768 293"/>
+  <path class="arr-r" d="M762 356 L762 376"/>
+  <path class="arr-r" d="M762 376 L756 369 M762 376 L768 369"/>
 
-  <rect class="bad" x="330" y="306" width="554" height="52" rx="6"/>
-  <text class="lbl" x="342" y="326">OSError: [Errno 39] Directory not empty</text>
-  <text class="note" x="342" y="345">Job B dies at startup — the finished conversion it needed is sitting right there.</text>
+  <rect class="bad" x="330" y="382" width="554" height="50" rx="6"/>
+  <text class="lbl" x="342" y="402">OSError: [Errno 39] Directory not empty</text>
+  <text class="note" x="342" y="421">Job B dies at startup — the finished conversion it needed is sitting right there.</text>
 
-  <text class="note" x="14" y="384">Step 4 is the crux: B re-checks, but at that instant the path is ABSENT (A shoved the partial</text>
-  <text class="note" x="14" y="399">aside and has not renamed yet). "Absent" is not "complete", so B walks into the failing rename.</text>
-  <text class="note" x="14" y="414">The same raise also leaves A's shoved-aside copy on disk, because the cleanup sits after the loop.</text>
-  <a href="https://github.com/NVIDIA-NeMo/RL/blob/7463c341c9e93f198848ba1913d94bd7cfbb2606/nemo_rl/models/megatron/community_import.py#L104-L106"><text x="14" y="438">community_import.py:104-106 — the raise</text></a>
-  <a href="https://github.com/NVIDIA-NeMo/RL/blob/7463c341c9e93f198848ba1913d94bd7cfbb2606/nemo_rl/models/megatron/community_import.py#L87"><text x="330" y="438">:87 — the check that says "absent ≠ complete"</text></a>
-  <a href="https://github.com/NVIDIA-NeMo/RL/blob/7463c341c9e93f198848ba1913d94bd7cfbb2606/nemo_rl/models/megatron/community_import.py#L119-L126"><text x="640" y="438">:119-126 — cleanup that gets skipped</text></a>
+  <text class="t-bad" x="14" y="402">The dashed orange band</text>
+  <text class="note" x="14" y="419">is the gap: A has taken</text>
+  <text class="note" x="14" y="433">the partial out but not</text>
+  <text class="note" x="14" y="447">put its own copy in.</text>
+
+  <text class="note" x="14" y="478">B is not checking late — it checks inside that gap. The check only asks "is a COMPLETE conversion</text>
+  <text class="note" x="14" y="493">there?", and an absent path is not complete, so B is waved through into a rename that then fails.</text>
+  <text class="note" x="14" y="508">The same raise also leaves A's moved-aside copy on disk: the cleanup sits after the loop.</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/7463c341c9e93f198848ba1913d94bd7cfbb2606/nemo_rl/models/megatron/community_import.py#L104-L106"><text x="14" y="532">community_import.py:104-106 — the raise</text></a>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/7463c341c9e93f198848ba1913d94bd7cfbb2606/nemo_rl/models/megatron/community_import.py#L87"><text x="330" y="532">:87 — the check B does in the gap</text></a>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/7463c341c9e93f198848ba1913d94bd7cfbb2606/nemo_rl/models/megatron/community_import.py#L119-L126"><text x="640" y="532">:119-126 — cleanup that gets skipped</text></a>
 </svg>
 
 <p>The fix is to make that last exit behave like all the others — look once more before giving up:</p>
