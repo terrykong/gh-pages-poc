@@ -219,7 +219,8 @@ writing into; the second stops ranks 1-7 reading the final path before the renam
 <p>Step 4 is not just one <code>rename</code>, because the destination may already be occupied — by a
 <em>partial</em> conversion an earlier run was killed halfway through. Renaming a directory onto a
 non-empty directory fails, so <code>publish_megatron_conversion</code> gets two attempts, and between
-them it moves the occupant aside:</p>
+them it moves the occupant aside. Shortened for reading — the real deletes happen on background
+threads, not inline:</p>
 
 <div class="mono">for attempt in range(2):
     if megatron_conversion_is_complete(output_path):   <span class="c"># someone else already published?</span>
@@ -350,15 +351,29 @@ between A evicting the old occupant and A moving its own copy in.</p>
 </svg>
 
 
-<p>The fix is to make that last exit behave like all the others — look once more before giving up:</p>
+<p>The fix is to make that last exit behave like all the others — look once more before giving up,
+and step aside the same way the concede path at
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/7463c341c9e93f198848ba1913d94bd7cfbb2606/nemo_rl/models/megatron/community_import.py#L94-L99">:94-99</a>
+already does:</p>
 
 <div class="mono">        except OSError:
             if attempt == 1:
 <span class="g">                if not overwrite and megatron_conversion_is_complete(pretrained_path):
-                    rmtree(staging_path)   # a peer filled the slot we freed; use theirs
+                    # A peer published into the slot we freed; use its artifact.
+                    threading.Thread(
+                        target=shutil.rmtree,
+                        args=(staging_path,),
+                        kwargs={"ignore_errors": True},
+                        daemon=True,
+                    ).start()
                     break</span>
                 raise
 </div>
+<p class="src">The delete has to be the background <code>daemon=True</code> thread, not a plain
+<code>shutil.rmtree(...)</code>, for two reasons. It is a full-size checkpoint, so deleting it inline
+would stall worker startup — which is why the existing concede path already does it this way. And a
+bare <code>rmtree</code> here sits inside an <code>except OSError:</code> block, so if it raised it
+would bury the original error; <code>ignore_errors=True</code> stops that.</p>
 
 <h2>Does it work?</h2>
 
