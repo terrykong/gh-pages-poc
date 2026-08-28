@@ -73,7 +73,7 @@ p.chainnote{color:var(--dim);font-size:12px;margin:0 0 18px}
 <h1>Which generation failures the run survives, and which end it</h1>
 <p class="sub">
   <a href="https://github.com/NVIDIA-NeMo/RL/pull/3591">PR #3591</a> ·
-  checked against <code>02b7dd0d</code> ·
+  checked against <code>3d9ce210</code> ·
   see also <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-3591-review-outcomes.html">what the review changed</a>
 </p>
 
@@ -102,6 +102,12 @@ reached. So a <em>crash</em> recovers because it identifies itself: Ray reports 
 the probe confirms it. A <em>hang</em> identifies nobody, and only recovers if the ledger already
 held a suspect. Retrying without shrinking would be worse than not retrying — the same full fleet,
 the same silent rank, the same hang.
+<br><br>
+<strong>On <code>nccl_reshard</code> there is a second requirement: the fault must land outside the
+bulk transfer.</strong> An abort mid-transfer orphans work on the <em>trainers'</em> own devices, and
+no rebuild on a device in that state can succeed — so naming the shard no longer helps. Since
+<code>9a87c0123</code> the run detects this and ends in seconds with a named cause instead of
+wedging. That turns both crash cells below into transport splits, not just the hang cell.
 </div>
 
 <figure>
@@ -131,11 +137,12 @@ the same silent rank, the same hang.
   <text x="482" y="136" class="d" font-size="10.5">suspect. Nobody to drop,</text>
   <text x="482" y="150" class="d" font-size="10.5">so no rebuild, so no retry.</text>
 
-  <rect x="728" y="68" width="248" height="96" rx="5" fill="var(--green)" opacity="0.12"/>
-  <text x="740" y="90" class="g" font-size="11.5" font-weight="600">recovers</text>
-  <text x="740" y="108" class="d" font-size="10.5">The crash names the shard.</text>
-  <text x="740" y="122" class="d" font-size="10.5">Probe confirms, mark DEAD,</text>
-  <text x="740" y="136" class="d" font-size="10.5">shrink, retry once.</text>
+  <rect x="728" y="68" width="248" height="96" rx="5" fill="var(--orange)" opacity="0.14"/>
+  <text x="740" y="90" class="o" font-size="11.5" font-weight="600">depends on transport</text>
+  <text x="740" y="108" class="d" font-size="10.5">The crash names the shard —</text>
+  <text x="740" y="122" class="d" font-size="10.5">but see the reshard caveat.</text>
+  <text x="740" y="140" class="g" font-size="10.5">broadcast → recovers</text>
+  <text x="740" y="156" class="r" font-size="10.5">reshard mid-refit → ends</text>
 
   <rect x="0" y="172" width="204" height="110" rx="5" class="sf"/>
   <text x="12" y="194" class="o" font-size="12" font-weight="600">SUSPECT</text>
@@ -158,11 +165,13 @@ the same silent rank, the same hang.
   <text x="482" y="246" class="g" font-size="10.5">broadcast → continues</text>
   <text x="482" y="262" class="r" font-size="10.5">reshard → ends (see below)</text>
 
-  <rect x="728" y="172" width="248" height="110" rx="5" fill="var(--green)" opacity="0.12"/>
-  <text x="740" y="194" class="g" font-size="11.5" font-weight="600">recovers</text>
-  <text x="740" y="212" class="d" font-size="10.5">Same as above. The dead</text>
-  <text x="740" y="226" class="d" font-size="10.5">process is visible to the</text>
-  <text x="740" y="240" class="d" font-size="10.5">probe, so no guessing.</text>
+  <rect x="728" y="172" width="248" height="110" rx="5" fill="var(--orange)" opacity="0.14"/>
+  <text x="740" y="194" class="o" font-size="11.5" font-weight="600">depends on transport</text>
+  <text x="740" y="212" class="d" font-size="10.5">The dead process is visible,</text>
+  <text x="740" y="226" class="d" font-size="10.5">so no guessing — same</text>
+  <text x="740" y="240" class="d" font-size="10.5">split as the row above:</text>
+  <text x="740" y="258" class="g" font-size="10.5">broadcast → recovers</text>
+  <text x="740" y="274" class="r" font-size="10.5">reshard mid-refit → ends</text>
 
   <rect x="0" y="290" width="204" height="94" rx="5" class="sf"/>
   <text x="12" y="312" class="r" font-size="12" font-weight="600">DEAD</text>
@@ -191,8 +200,8 @@ the same silent rank, the same hang.
 <tr><td>HEALTHY</td><td>hangs</td><td class="no">run ends</td>
 <td>The watchdog aborts, but the probe finds every process alive and the ledger holds no suspect — so there is nobody to drop, no smaller group to rebuild, and <strong>the retry is never reached</strong>: recovery raises first. The code deliberately refuses to guess: <em>"condemning the wrong one costs a healthy shard and leaves the real culprit in the rebuilt communicator — the same hang, one shard smaller."</em> The error names the suspect list so you can see why it gave up.</td></tr>
 
-<tr><td>HEALTHY</td><td>crashes</td><td class="ok">recovers</td>
-<td><code>RayActorError</code>, then the post-abort probe sees the dead process, <code>record_actor_death</code> marks it DEAD, the group is rebuilt without it, and the refit is retried once.</td></tr>
+<tr><td>HEALTHY</td><td>crashes</td><td class="mid">transport</td>
+<td><code>RayActorError</code>, then the post-abort probe sees the dead process, <code>record_actor_death</code> marks it DEAD, the group is rebuilt without it, and the refit is retried once. <strong>On packed broadcast that recovery completes. On <code>nccl_reshard</code> it never gets that far</strong>: the aborted bulk transfer has already orphaned work on the trainers' devices, <code>sync_stream_within</code> tags the abort, and the controller refuses the recovery and ends the run in seconds — see the box below. A death that lands <em>between</em> syncs recovers on both transports, because the shard is dropped before the next collective starts (the DEAD row).</td></tr>
 
 <tr><td>SUSPECT</td><td>succeeds</td><td class="ok">continues</td>
 <td>Common and harmless. A wedged engine can still take part in a collective; it just cannot generate. It keeps timing out requests and reaches DEAD on its own, after which it lands in the DEAD row.</td></tr>
@@ -200,8 +209,8 @@ the same silent rank, the same hang.
 <tr><td>SUSPECT</td><td>hangs</td><td class="mid">transport</td>
 <td>The abort is evidence that something stopped participating; SUSPECT says which. Exactly one suspect and <code>condemn_silent_participant</code> marks it DEAD, then <code>reconcile(force=True)</code> shrinks the group and retries. <strong>Works on packed broadcast; ends the run on <code>nccl_reshard</code></strong> — see the box below. With two or more suspects, or none, it refuses and ends.</td></tr>
 
-<tr><td>SUSPECT</td><td>crashes</td><td class="ok">recovers</td>
-<td>The process death is visible, so no attribution is needed. Same as HEALTHY × crashes.</td></tr>
+<tr><td>SUSPECT</td><td>crashes</td><td class="mid">transport</td>
+<td>The process death is visible, so no attribution is needed. Same split as HEALTHY × crashes: broadcast recovers, reshard mid-refit ends the run.</td></tr>
 
 <tr><td>DEAD</td><td>any</td><td class="ok">continues</td>
 <td>Excluded before the collective started, so it cannot affect this refit at all. Stays out until #3592 restarts it.</td></tr>
@@ -219,16 +228,21 @@ the same silent rank, the same hang.
 </table>
 
 <div class="warn">
-<strong>Why a wedged shard is recoverable on broadcast but not on <code>nccl_reshard</code>.</strong>
+<strong>Why a mid-refit fault — wedged <em>or</em> dead — is recoverable on broadcast but not on
+<code>nccl_reshard</code>.</strong>
 Aborting a communicator does not retire work already sitting on a CUDA stream — and on the reshard
-path those orphaned sends are on the <em>trainers'</em> devices, not the wedged shard's. So nothing
+path those orphaned sends are on the <em>trainers'</em> devices, not the failed shard's. So nothing
 you do to the remote rank retires them, and <code>torch.cuda.synchronize()</code> never returns.
 Job 6485245 measured it on 4×GB200: both policy workers parked in <code>synchronize</code>
-<strong>1801 s</strong> after their own abort had already logged. <code>sync_stream_within</code> now
-bounds that wait, but bounding it is all it can do — the CUDA context cannot be trusted afterwards,
-so the run ends attributably in seconds instead of stalling for half an hour. The author tried
-killing the shard outright to escape this, and reverted it when job 6523731 showed the trainers
-wedged anyway.
+<strong>1801 s</strong> after their own abort had already logged. The author eliminated every
+alternative by measurement: killing the shard outright (job 6523731 — trainers wedged anyway),
+pinning the release to the caller's CUDA device (job 6582457 — still stuck, with a SIGKILLed peer),
+and standing the deadline down on a confirmed death (lost the race). What landed instead
+(<code>9a87c0123</code>): <code>sync_stream_within</code> tags its abort with a second marker,
+the controller refuses to enter the recovery on that tag, and the run ends with a message saying
+this is the known limit of the transport — exit in ~10 s for a killed shard, ~90 s for a frozen
+one, against 1800 s wedges before. A plain abort without the tag still recovers, and a unit test
+pins that boundary.
 </div>
 
 <h2>Does it work?</h2>
