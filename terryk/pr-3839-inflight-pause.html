@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NVIDIA-NeMo/RL #3839 — how a half-finished request survives a weight update</title>
+<style>
+:root{
+  --bg:#0d1117; --surface:#161b22; --surface2:#1c2128; --border:#30363d;
+  --text:#e6edf3; --dim:#8b949e; --accent:#58a6ff; --green:#3fb950;
+  --orange:#d29922; --red:#f85149; --blue:#6e9fff;
+}
+:root[data-theme="light"]{
+  --bg:#ffffff; --surface:#f6f8fa; --surface2:#eaeef2; --border:#d0d7de;
+  --text:#1f2328; --dim:#59636e; --accent:#0969da; --green:#1a7f37;
+  --orange:#9a6700; --red:#cf222e; --blue:#0550ae;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:28px 20px 70px}
+h1{font-size:22px;margin:0 0 8px;line-height:1.3}
+h2{font-size:18px;margin:32px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;
+  font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
+.sub{color:var(--dim);font-size:13.5px;margin:0 0 16px}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);
+  border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;
+  font:13px/1 ui-monospace,Menlo,monospace;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.18)}
+.mono{font:12.5px ui-monospace,SFMono-Regular,Menlo,monospace;
+  background:var(--surface);border:1px solid var(--border);border-radius:8px;
+  padding:13px;overflow-x:auto;white-space:pre;margin:10px 0}
+.mono .c{color:var(--dim)}
+.mono .k{color:var(--blue)}
+.mono .v{color:var(--green)}
+.warn{border-left:3px solid var(--orange);background:var(--surface);
+  padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0}
+.hl{border-left:3px solid var(--accent);background:var(--surface);
+  padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0}
+table{border-collapse:collapse;margin:12px 0;font-size:13.5px;width:100%}
+th,td{border:1px solid var(--border);padding:6px 10px;text-align:left}
+th{background:var(--surface2)}
+.src{font-size:12.5px;color:var(--dim);margin:2px 0 14px}
+svg{max-width:100%;height:auto;display:block;margin:16px 0}
+svg .box{fill:var(--surface);stroke:var(--border);stroke-width:1.4}
+svg .lbl{fill:var(--text);font:12.5px ui-monospace,Menlo,monospace}
+svg .lbl-b{fill:var(--text);font:bold 13px -apple-system,sans-serif}
+svg .note{fill:var(--dim);font:11.5px -apple-system,sans-serif}
+svg .hdr{fill:var(--accent);font:bold 12.5px -apple-system,sans-serif}
+svg .ok{fill:var(--green);opacity:.45;stroke:var(--green);stroke-width:1.2}
+svg .bad{fill:var(--red);opacity:.45;stroke:var(--red);stroke-width:1.2}
+svg .froz{fill:var(--blue);opacity:.30;stroke:var(--blue);stroke-width:1.2}
+svg .xfer{fill:var(--orange);opacity:.35;stroke:var(--orange);stroke-width:1.2}
+svg .tick{stroke:var(--border);stroke-width:1;stroke-dasharray:3 3}
+svg .ax{stroke:var(--dim);stroke-width:1.2}
+svg a text{text-decoration:underline;fill:var(--accent);font:11.5px ui-monospace,Menlo,monospace}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+  document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head>
+<body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+  function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+  function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
+    b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
+      else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+  document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+<div class="wrap">
+
+<h1>How a half-finished request survives a weight update in async GRPO</h1>
+<p class="sub">Companion illustration for
+<a href="https://github.com/NVIDIA-NeMo/RL/pull/3839">NVIDIA-NeMo/RL #3839</a>
+— <em>pause generation during in-flight refit</em>.
+All permalinks pin the PR head <code>cb8948d3</code>.</p>
+
+<p>In async GRPO the generation engine and the trainer run at the same time. When a training
+step finishes, the new weights are copied into the vLLM engine — that copy is called a
+<strong>refit</strong>. Setting
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/cb8948d375e943962467a5b9e82584b00987d5c6/nemo_rl/algorithms/grpo.py#L253"><code>in_flight_weight_updates: true</code></a>
+tells the trainer not to wait for the slowest request to finish first, which is where most of
+the speedup comes from. But before this PR nothing stopped the engine while the copy happened:
+the new weight tensors were written into a model that was still running forward passes.
+This PR pauses the engine for the copy, and — this is the part that matters — pauses it in a
+mode that <em>keeps</em> the half-finished requests instead of throwing them away.</p>
+
+<h2>The window where weights change under a running forward pass</h2>
+
+<svg viewBox="0 0 900 430" role="img" aria-label="Timeline comparing refit before and after this PR">
+  <!-- ================= BEFORE ================= -->
+  <text class="hdr" x="0" y="16">BEFORE — the engine keeps decoding while the weights are overwritten</text>
+
+  <text class="lbl" x="0" y="52">trainer</text>
+  <text class="lbl" x="0" y="90">engine</text>
+
+  <!-- trainer lane before -->
+  <rect class="box" x="110" y="36" width="230" height="22" rx="4"/>
+  <text class="lbl" x="150" y="52">train step</text>
+  <rect class="xfer" x="340" y="36" width="180" height="22" rx="4"/>
+  <text class="lbl" x="352" y="52">copy weights v7 → v8</text>
+
+  <!-- engine lane before -->
+  <rect class="ok" x="110" y="74" width="230" height="22" rx="4"/>
+  <text class="lbl" x="150" y="90">decoding @ v7</text>
+  <rect class="bad" x="340" y="74" width="180" height="22" rx="4"/>
+  <text class="lbl" x="356" y="90">still decoding</text>
+  <rect class="ok" x="520" y="74" width="340" height="22" rx="4"/>
+  <text class="lbl" x="640" y="90">decoding @ v8</text>
+
+  <!-- danger bracket -->
+  <line class="tick" x1="340" y1="30" x2="340" y2="126"/>
+  <line class="tick" x1="520" y1="30" x2="520" y2="126"/>
+  <text class="note" x="110" y="118">R1 is 5 tokens in, R2 is 3 tokens in. A forward pass running now can read</text>
+  <text class="note" x="110" y="133">some layers at v7 and some at v8 — one token from two different models.</text>
+
+  <!-- ================= AFTER ================= -->
+  <text class="hdr" x="0" y="196">AFTER — the engine is frozen for the copy, and the requests are kept</text>
+
+  <text class="lbl" x="0" y="232">trainer</text>
+  <text class="lbl" x="0" y="270">engine</text>
+
+  <!-- trainer lane after -->
+  <rect class="box" x="110" y="216" width="230" height="22" rx="4"/>
+  <text class="lbl" x="150" y="232">train step</text>
+  <rect class="xfer" x="340" y="216" width="180" height="22" rx="4"/>
+  <text class="lbl" x="352" y="232">copy weights v7 → v8</text>
+
+  <!-- engine lane after -->
+  <rect class="ok" x="110" y="254" width="230" height="22" rx="4"/>
+  <text class="lbl" x="150" y="270">decoding @ v7</text>
+  <rect class="froz" x="340" y="254" width="180" height="22" rx="4"/>
+  <text class="lbl" x="368" y="270">frozen</text>
+  <rect class="ok" x="520" y="254" width="340" height="22" rx="4"/>
+  <text class="lbl" x="640" y="270">decoding @ v8</text>
+
+  <line class="ax" x1="340" y1="290" x2="340" y2="306"/>
+  <line class="ax" x1="520" y1="290" x2="520" y2="306"/>
+  <text class="note" x="344" y="320">pause</text>
+  <text class="note" x="470" y="320">resume</text>
+  <text class="note" x="110" y="303">R1 and R2 are kept, not dropped. They carry on from token 5 and token 3.</text>
+
+  <!-- permalinks -->
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/cb8948d375e943962467a5b9e82584b00987d5c6/nemo_rl/algorithms/async_utils/trajectory_collector.py#L976" target="_blank">
+    <text x="110" y="345">trajectory_collector.py:976 — asks for the pause</text></a>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/cb8948d375e943962467a5b9e82584b00987d5c6/nemo_rl/models/generation/vllm/vllm_worker_async.py#L1582" target="_blank">
+    <text x="110" y="364">vllm_worker_async.py:1582 — pause_generation(mode=&quot;keep&quot;)</text></a>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/cb8948d375e943962467a5b9e82584b00987d5c6/nemo_rl/algorithms/async_utils/trajectory_collector.py#L1006" target="_blank">
+    <text x="110" y="383">trajectory_collector.py:1006 — asks for the resume</text></a>
+
+  <!-- legend -->
+  <rect class="ok"   x="600" y="336" width="14" height="12" rx="2"/>
+  <text class="note" x="620" y="346">running, one weight version</text>
+  <rect class="bad"  x="600" y="355" width="14" height="12" rx="2"/>
+  <text class="note" x="620" y="365">running while weights change</text>
+  <rect class="froz" x="600" y="374" width="14" height="12" rx="2"/>
+  <text class="note" x="620" y="384">frozen, requests kept</text>
+  <rect class="xfer" x="600" y="393" width="14" height="12" rx="2"/>
+  <text class="note" x="620" y="403">weight copy</text>
+</svg>
+
+<p>The mode is the whole trick. vLLM's pause takes a <code>mode</code> argument with three
+choices — <code>"abort"</code> throws in-flight requests away, <code>"wait"</code> lets them
+finish first, and <code>"keep"</code> freezes them where they are and picks them up on resume.
+This PR asks for <code>"keep"</code>, so a request that is 5 tokens in stays 5 tokens in and
+finishes under the new weights.</p>
+<p class="src">Upstream:
+<a href="https://github.com/vllm-project/vllm/blob/v0.25.1/vllm/v1/engine/async_llm.py#L750-L797">
+<code>AsyncLLM.pause_generation</code>, vLLM v0.25.1</a> — the version this repo pins.</p>
+
+<h2>What the code actually does</h2>
+
+<p>Four steps, running on the same two requests as the figure. The trainer has just finished
+the step that produces weight version 8.</p>
+
+<div class="mono"><span class="c"># 1. Trainer is ready to hand over weights. Collector stops admitting new work.</span>
+<span class="c">#    prepare_for_refit(), trajectory_collector.py:938</span>
+self._refit_pause_cleared.clear()          <span class="c"># no new rollout batches start</span>
+clear_cache = <span class="v">False</span>                       <span class="c"># recompute_kv_cache_after_weight_updates</span>
+paused = self.policy_generation.pause_generation_for_refit(clear_cache=clear_cache)
+<span class="c">#    -> paused = True   (vLLM implements the hook; other backends return False)</span></div>
+<p class="src"><a href="https://github.com/NVIDIA-NeMo/RL/blob/cb8948d375e943962467a5b9e82584b00987d5c6/nemo_rl/algorithms/async_utils/trajectory_collector.py#L971-L981">trajectory_collector.py:971-981</a></p>
+
+<div class="mono"><span class="c"># 2. Fan out to every engine. One call per engine leader, not per GPU.</span>
+<span class="c">#    VllmGeneration.pause_generation_for_refit, vllm_generation.py:1282</span>
+futures = self.worker_group.run_all_workers_single_data(
+    <span class="v">"pause_generation_async"</span>, clear_cache=clear_cache,
+    run_rank_0_only_axes=[<span class="v">"tensor_parallel"</span>, <span class="v">"pipeline_parallel"</span>])
+<span class="k">if not</span> all(ray.get(futures)):                <span class="c"># every engine must confirm</span>
+    <span class="k">raise</span> RuntimeError(<span class="v">"Failed to pause every async vLLM engine"</span>)</div>
+<p class="src"><a href="https://github.com/NVIDIA-NeMo/RL/blob/cb8948d375e943962467a5b9e82584b00987d5c6/nemo_rl/models/generation/vllm/vllm_generation.py#L1282-L1296">vllm_generation.py:1282-1296</a>
+— the two skipped axes are the ranks that do not own the engine object.</p>
+
+<div class="mono"><span class="c"># 3. Each engine freezes. R1 keeps its 5 tokens and its KV cache; R2 keeps its 3.</span>
+<span class="c">#    vllm_worker_async.py:1571</span>
+<span class="k">await</span> self.llm.pause_generation(mode=<span class="v">"keep"</span>, clear_cache=clear_cache)
+<span class="c">#    The call only returns once the engine is idle, so the weight copy that</span>
+<span class="c">#    follows cannot overlap a forward pass. That is the fix.</span></div>
+<p class="src"><a href="https://github.com/NVIDIA-NeMo/RL/blob/cb8948d375e943962467a5b9e82584b00987d5c6/nemo_rl/models/generation/vllm/vllm_worker_async.py#L1571-L1582">vllm_worker_async.py:1571-1582</a></p>
+
+<div class="mono"><span class="c"># 4. Weights are copied (v7 -> v8). Then unfreeze, then admit new work again.</span>
+<span class="c">#    resume_after_refit(), trajectory_collector.py:1000</span>
+resumed = self.policy_generation.resume_generation_after_refit()
+<span class="k">if</span> self._generation_paused_for_refit <span class="k">and not</span> resumed:
+    <span class="k">raise</span> RuntimeError(<span class="v">"Failed to resume ... after successful pause"</span>)
+self._refit_pause_cleared.set()            <span class="c"># R1 resumes at token 6, under v8</span></div>
+<p class="src"><a href="https://github.com/NVIDIA-NeMo/RL/blob/cb8948d375e943962467a5b9e82584b00987d5c6/nemo_rl/algorithms/async_utils/trajectory_collector.py#L1000-L1016">trajectory_collector.py:1000-1016</a>
+— if a pause worked but the resume did not, the collector refuses to admit new work rather
+than quietly carrying on.</p>
+
+<p>One detail worth knowing about <code>clear_cache</code>. It is set from
+<code>recompute_kv_cache_after_weight_updates</code>. When it is on, the cache is wiped
+<em>while the engine is frozen</em>, which kicks every kept request back to the waiting queue so
+it recomputes its KV under the new weights. That is stronger than what it replaced: the old
+post-refit call used vLLM's default, which quietly does nothing while running requests still
+hold KV blocks.</p>
+
+<h2>Does it work?</h2>
+
+<p>Yes — there is a real run, not just green CI. The author ran the unchanged 30B-parameter
+async performance recipe for 10 steps on 32×H100 (4 nodes, 64 prompts/step × 32 generations,
+global batch 2048, async vLLM with in-flight updates), and reported it in the PR:</p>
+
+<table>
+<tr><th>What was checked</th><th>Result</th></tr>
+<tr><td>Training steps completed</td><td>10 / 10, then the step-10 validation (256 samples, accuracy 0.5508)</td></tr>
+<tr><td>Pause/resume cycles</td><td>10 pauses, 10 matching resumes — no unpaired call</td></tr>
+<tr><td>Requests actually preserved</td><td>9 of the 10 pauses reported <code>1 ongoing generation batches paused</code>; the first had none in flight yet</td></tr>
+<tr><td>Errors in the driver log</td><td>none</td></tr>
+</table>
+<p class="src">Run: <a href="https://wandb.ai/nvidia/async-grpo-pr-validation/runs/hm6vr3e8">W&amp;B <code>hm6vr3e8</code></a>, linked from the PR.</p>
+
+<p>Two honest caveats. That run was on an earlier commit
+(<code>abf3b2a3</code>); the later commits changed how the pause is dispatched, though for vLLM
+specifically the old and new code paths resolve identically, so the engine behaviour in that run
+is the behaviour being merged. And <strong>no before/after throughput comparison has been
+posted</strong> — the engines now sit idle for the transfer window, which is a real cost that
+the run above does not measure. If you care about the speed trade-off, that number is the one
+to ask for.</p>
+
+<div class="warn">
+<strong>So what.</strong> If you run async GRPO with <code>in_flight_weight_updates: true</code>
+on async vLLM, your rollouts were previously being generated across a weight swap — some tokens
+produced by a model that was half old and half new. After this PR the engine stops for the copy
+and picks the same requests back up, so every token comes from one weight version. You pay for
+it with a short stall at each refit, and that stall has not been measured yet.
+</div>
+
+</div>
+</body>
+</html>
