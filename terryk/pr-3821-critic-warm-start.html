@@ -80,23 +80,25 @@ worse than not training it at all. Today the only cure is
 <a href="https://github.com/NVIDIA-NeMo/RL/blob/6e8790cf9f7746fbee021a8e29183f3feba6cbf4/nemo_rl/algorithms/ppo.py#L190"><code>ppo.policy_training_start_step: N</code></a>:
 for the first N steps, skip the policy update
 (<a href="https://github.com/NVIDIA-NeMo/RL/blob/6e8790cf9f7746fbee021a8e29183f3feba6cbf4/nemo_rl/algorithms/ppo.py#L1617">ppo.py:1617</a>)
-and train only the critic. The catch is that generation and environment scoring — the expensive
-part of a step — still run every one of those N steps. This PR adds
+and train only the critic. The catch is that those N steps still do the slow part in full:
+<strong>generation</strong>, where the policy writes out an answer for every prompt in the batch one
+token at a time, and then <strong>scoring</strong>, where the environment grades those answers. That
+work takes the same wall-clock time whether or not the policy learns anything from it. This PR adds
 <a href="https://github.com/NVIDIA-NeMo/RL/blob/6e8790cf9f7746fbee021a8e29183f3feba6cbf4/nemo_rl/algorithms/ppo.py#L194"><code>ppo.warm_start_value_checkpoint</code></a>,
 which points a fresh run at a critic somebody already trained.</p>
 
 <h2>What the N warmup steps actually buy you</h2>
 
 <svg viewBox="0 0 900 430" role="img" aria-label="Two run timelines over 5 steps. Cold start with policy_training_start_step 3 pays for generation and scoring on steps 0, 1 and 2 while the policy update is skipped. Warm start trains the policy from step 0.">
-  <text class="hdr" x="16" y="20">5 steps of a PPO run, drawn twice. Same generation cost per step both times.</text>
+  <text class="hdr" x="16" y="20">5 steps of a PPO run, drawn twice. Each step does the same amount of work both times.</text>
 
   <!-- legend -->
   <rect class="c-ok" x="16" y="34" width="16" height="13" rx="2"/>
-  <text class="note" x="38" y="45">runs, and the policy learns from it</text>
-  <rect class="c-bad" x="252" y="34" width="16" height="13" rx="2"/>
-  <text class="note" x="274" y="45">runs, full cost, policy frozen</text>
-  <rect class="c-off" x="474" y="34" width="16" height="13" rx="2"/>
-  <text class="note" x="496" y="45">skipped</text>
+  <text class="note" x="38" y="45">runs normally</text>
+  <rect class="c-bad" x="230" y="34" width="16" height="13" rx="2"/>
+  <text class="note" x="252" y="45">runs, takes just as long — but the policy is frozen</text>
+  <rect class="c-off" x="600" y="34" width="16" height="13" rx="2"/>
+  <text class="note" x="622" y="45">skipped</text>
 
   <!-- ============ BLOCK A: cold ============ -->
   <text class="lbl-b" x="16" y="78">Today — cold critic, <tspan style="font-family:ui-monospace,Menlo,monospace">policy_training_start_step: 3</tspan></text>
@@ -108,29 +110,29 @@ which points a fresh run at a critic somebody already trained.</p>
   <text class="step" x="732" y="100">step 4</text>
 
   <text class="lbl" x="16" y="126">generate + score</text>
-  <rect class="c-bad" x="200" y="110" width="116" height="22" rx="3"/><text class="c-txt" x="243" y="126">paid</text>
-  <rect class="c-bad" x="330" y="110" width="116" height="22" rx="3"/><text class="c-txt" x="373" y="126">paid</text>
-  <rect class="c-bad" x="460" y="110" width="116" height="22" rx="3"/><text class="c-txt" x="503" y="126">paid</text>
-  <rect class="c-ok"  x="590" y="110" width="116" height="22" rx="3"/><text class="c-txt" x="633" y="126">paid</text>
-  <rect class="c-ok"  x="720" y="110" width="116" height="22" rx="3"/><text class="c-txt" x="763" y="126">paid</text>
+  <rect class="c-bad" x="200" y="110" width="116" height="22" rx="3"/><text class="c-txt" x="243" y="126">runs</text>
+  <rect class="c-bad" x="330" y="110" width="116" height="22" rx="3"/><text class="c-txt" x="373" y="126">runs</text>
+  <rect class="c-bad" x="460" y="110" width="116" height="22" rx="3"/><text class="c-txt" x="503" y="126">runs</text>
+  <rect class="c-ok"  x="590" y="110" width="116" height="22" rx="3"/><text class="c-txt" x="633" y="126">runs</text>
+  <rect class="c-ok"  x="720" y="110" width="116" height="22" rx="3"/><text class="c-txt" x="763" y="126">runs</text>
 
   <text class="lbl" x="16" y="156">critic update</text>
-  <rect class="c-ok" x="200" y="140" width="116" height="22" rx="3"/><text class="c-txt" x="252" y="156">yes</text>
-  <rect class="c-ok" x="330" y="140" width="116" height="22" rx="3"/><text class="c-txt" x="382" y="156">yes</text>
-  <rect class="c-ok" x="460" y="140" width="116" height="22" rx="3"/><text class="c-txt" x="512" y="156">yes</text>
-  <rect class="c-ok" x="590" y="140" width="116" height="22" rx="3"/><text class="c-txt" x="642" y="156">yes</text>
-  <rect class="c-ok" x="720" y="140" width="116" height="22" rx="3"/><text class="c-txt" x="772" y="156">yes</text>
+  <rect class="c-ok" x="200" y="140" width="116" height="22" rx="3"/><text class="c-txt" x="252" y="156">runs</text>
+  <rect class="c-ok" x="330" y="140" width="116" height="22" rx="3"/><text class="c-txt" x="382" y="156">runs</text>
+  <rect class="c-ok" x="460" y="140" width="116" height="22" rx="3"/><text class="c-txt" x="512" y="156">runs</text>
+  <rect class="c-ok" x="590" y="140" width="116" height="22" rx="3"/><text class="c-txt" x="642" y="156">runs</text>
+  <rect class="c-ok" x="720" y="140" width="116" height="22" rx="3"/><text class="c-txt" x="772" y="156">runs</text>
 
   <text class="lbl" x="16" y="186">policy update</text>
-  <rect class="c-off" x="200" y="170" width="116" height="22" rx="3"/><text class="c-txt" x="243" y="186">skip</text>
-  <rect class="c-off" x="330" y="170" width="116" height="22" rx="3"/><text class="c-txt" x="373" y="186">skip</text>
-  <rect class="c-off" x="460" y="170" width="116" height="22" rx="3"/><text class="c-txt" x="503" y="186">skip</text>
-  <rect class="c-ok"  x="590" y="170" width="116" height="22" rx="3"/><text class="c-txt" x="644" y="186">yes</text>
-  <rect class="c-ok"  x="720" y="170" width="116" height="22" rx="3"/><text class="c-txt" x="774" y="186">yes</text>
+  <rect class="c-off" x="200" y="170" width="116" height="22" rx="3"/><text class="c-txt" x="243" y="186">skipped</text>
+  <rect class="c-off" x="330" y="170" width="116" height="22" rx="3"/><text class="c-txt" x="373" y="186">skipped</text>
+  <rect class="c-off" x="460" y="170" width="116" height="22" rx="3"/><text class="c-txt" x="503" y="186">skipped</text>
+  <rect class="c-ok"  x="590" y="170" width="116" height="22" rx="3"/><text class="c-txt" x="644" y="186">runs</text>
+  <rect class="c-ok"  x="720" y="170" width="116" height="22" rx="3"/><text class="c-txt" x="774" y="186">runs</text>
 
   <a href="https://github.com/NVIDIA-NeMo/RL/blob/6e8790cf9f7746fbee021a8e29183f3feba6cbf4/nemo_rl/algorithms/ppo.py#L1617"><text x="16" y="212">ppo.py:1617</text></a>
-  <text class="note" x="200" y="212">3 full rounds of generation bought only a trained critic.</text>
-  <text class="note" x="200" y="228">Where generation dominates the step, that is most of the bill.</text>
+  <text class="note" x="200" y="212">Steps 0-2 write and grade a full batch of answers, same as any other step.</text>
+  <text class="note" x="200" y="228">The only thing that gets better is the critic.</text>
 
   <line class="divider" x1="16" y1="252" x2="884" y2="252"/>
 
@@ -144,29 +146,34 @@ which points a fresh run at a critic somebody already trained.</p>
   <text class="step" x="732" y="306">step 4</text>
 
   <text class="lbl" x="16" y="332">generate + score</text>
-  <rect class="c-ok" x="200" y="316" width="116" height="22" rx="3"/><text class="c-txt" x="243" y="332">paid</text>
-  <rect class="c-ok" x="330" y="316" width="116" height="22" rx="3"/><text class="c-txt" x="373" y="332">paid</text>
-  <rect class="c-ok" x="460" y="316" width="116" height="22" rx="3"/><text class="c-txt" x="503" y="332">paid</text>
-  <rect class="c-ok" x="590" y="316" width="116" height="22" rx="3"/><text class="c-txt" x="633" y="332">paid</text>
-  <rect class="c-ok" x="720" y="316" width="116" height="22" rx="3"/><text class="c-txt" x="763" y="332">paid</text>
+  <rect class="c-ok" x="200" y="316" width="116" height="22" rx="3"/><text class="c-txt" x="243" y="332">runs</text>
+  <rect class="c-ok" x="330" y="316" width="116" height="22" rx="3"/><text class="c-txt" x="373" y="332">runs</text>
+  <rect class="c-ok" x="460" y="316" width="116" height="22" rx="3"/><text class="c-txt" x="503" y="332">runs</text>
+  <rect class="c-ok" x="590" y="316" width="116" height="22" rx="3"/><text class="c-txt" x="633" y="332">runs</text>
+  <rect class="c-ok" x="720" y="316" width="116" height="22" rx="3"/><text class="c-txt" x="763" y="332">runs</text>
 
   <text class="lbl" x="16" y="362">critic update</text>
-  <rect class="c-ok" x="200" y="346" width="116" height="22" rx="3"/><text class="c-txt" x="252" y="362">yes</text>
-  <rect class="c-ok" x="330" y="346" width="116" height="22" rx="3"/><text class="c-txt" x="382" y="362">yes</text>
-  <rect class="c-ok" x="460" y="346" width="116" height="22" rx="3"/><text class="c-txt" x="512" y="362">yes</text>
-  <rect class="c-ok" x="590" y="346" width="116" height="22" rx="3"/><text class="c-txt" x="642" y="362">yes</text>
-  <rect class="c-ok" x="720" y="346" width="116" height="22" rx="3"/><text class="c-txt" x="772" y="362">yes</text>
+  <rect class="c-ok" x="200" y="346" width="116" height="22" rx="3"/><text class="c-txt" x="252" y="362">runs</text>
+  <rect class="c-ok" x="330" y="346" width="116" height="22" rx="3"/><text class="c-txt" x="382" y="362">runs</text>
+  <rect class="c-ok" x="460" y="346" width="116" height="22" rx="3"/><text class="c-txt" x="512" y="362">runs</text>
+  <rect class="c-ok" x="590" y="346" width="116" height="22" rx="3"/><text class="c-txt" x="642" y="362">runs</text>
+  <rect class="c-ok" x="720" y="346" width="116" height="22" rx="3"/><text class="c-txt" x="772" y="362">runs</text>
 
   <text class="lbl" x="16" y="392">policy update</text>
-  <rect class="c-ok" x="200" y="376" width="116" height="22" rx="3"/><text class="c-txt" x="252" y="392">yes</text>
-  <rect class="c-ok" x="330" y="376" width="116" height="22" rx="3"/><text class="c-txt" x="382" y="392">yes</text>
-  <rect class="c-ok" x="460" y="376" width="116" height="22" rx="3"/><text class="c-txt" x="512" y="392">yes</text>
-  <rect class="c-ok" x="590" y="376" width="116" height="22" rx="3"/><text class="c-txt" x="642" y="392">yes</text>
-  <rect class="c-ok" x="720" y="376" width="116" height="22" rx="3"/><text class="c-txt" x="772" y="392">yes</text>
+  <rect class="c-ok" x="200" y="376" width="116" height="22" rx="3"/><text class="c-txt" x="252" y="392">runs</text>
+  <rect class="c-ok" x="330" y="376" width="116" height="22" rx="3"/><text class="c-txt" x="382" y="392">runs</text>
+  <rect class="c-ok" x="460" y="376" width="116" height="22" rx="3"/><text class="c-txt" x="512" y="392">runs</text>
+  <rect class="c-ok" x="590" y="376" width="116" height="22" rx="3"/><text class="c-txt" x="642" y="392">runs</text>
+  <rect class="c-ok" x="720" y="376" width="116" height="22" rx="3"/><text class="c-txt" x="772" y="392">runs</text>
 
   <a href="https://github.com/NVIDIA-NeMo/RL/blob/6e8790cf9f7746fbee021a8e29183f3feba6cbf4/nemo_rl/algorithms/ppo.py#L717"><text x="16" y="418">ppo.py:717</text></a>
   <text class="note" x="200" y="418">Critic seeded from critic_pretrain/step_370, so every step improves the policy.</text>
 </svg>
+
+<p>How much those three steps hurt depends on how much of a step generation takes. The PR argues it
+hurts most on SWE and long agentic tasks, where the model writes a lot of tokens per prompt and
+scoring means actually running something. No timings are given, so treat that as the author's
+reasoning rather than a measurement.</p>
 
 <h2>How the seeding works</h2>
 
