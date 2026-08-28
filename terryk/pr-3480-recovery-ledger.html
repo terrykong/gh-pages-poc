@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>How an unfinished prompt now survives a checkpoint</title>
+<style>
+:root{
+  --bg:#0d1117; --surface:#161b22; --border:#30363d; --text:#e6edf3; --dim:#8b949e;
+  --accent:#58a6ff; --green:#3fb950; --red:#f85149; --amber:#d29922; --purple:#bc8cff;
+}
+:root[data-theme="light"]{
+  --bg:#ffffff; --surface:#f6f8fa; --border:#d0d7de; --text:#1f2328; --dim:#59636e;
+  --accent:#0969da; --green:#1a7f37; --red:#cf222e; --amber:#9a6700; --purple:#8250df;
+}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--text);margin:0;
+  font:16px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:32px 20px 80px}
+h1{font-size:28px;line-height:1.25;margin:0 0 8px;letter-spacing:-.3px}
+h2{font-size:21px;margin:44px 0 14px;padding-bottom:7px;border-bottom:1px solid var(--border)}
+h3{font-size:16px;margin:26px 0 8px}
+p{margin:13px 0}
+.sub{color:var(--dim);font-size:14px;margin:0 0 26px}
+a{color:var(--accent)}
+code{font-family:"JetBrains Mono",ui-monospace,Menlo,monospace;font-size:13px;
+  background:var(--surface);border:1px solid var(--border);border-radius:5px;padding:1px 5px}
+pre{background:var(--surface);border:1px solid var(--border);border-radius:8px;
+  padding:14px 16px;overflow-x:auto;margin:14px 0}
+pre code{background:none;border:none;padding:0;font-size:12.5px;line-height:1.6}
+figure{margin:22px 0}
+figcaption{color:var(--dim);font-size:13px;margin-top:9px}
+table{border-collapse:collapse;width:100%;margin:14px 0;font-size:14px}
+th,td{border:1px solid var(--border);padding:7px 11px;text-align:left;vertical-align:top}
+th{background:var(--surface);font-weight:600}
+.warn{background:var(--surface);border:1px solid var(--border);
+  border-left:3px solid var(--red);border-radius:7px;padding:14px 18px;margin:22px 0}
+.hl{background:var(--surface);border:1px solid var(--border);
+  border-left:3px solid var(--accent);border-radius:7px;padding:14px 18px;margin:22px 0}
+svg a text{text-decoration:underline}
+svg text{font-family:"JetBrains Mono",ui-monospace,Menlo,monospace}
+.t{fill:var(--text)} .d{fill:var(--dim)} .g{fill:var(--green)}
+.r{fill:var(--red)} .a{fill:var(--amber)} .p{fill:var(--purple)} .ac{fill:var(--accent)}
+.sbox{fill:var(--surface);stroke:var(--border)}
+.gbox{fill:var(--surface);stroke:var(--green)}
+.pbox{fill:var(--surface);stroke:var(--purple)}
+.abox{fill:var(--surface);stroke:var(--amber)}
+.line{stroke:var(--border)} .gl{stroke:var(--green)} .rl{stroke:var(--red)}
+.pl{stroke:var(--purple)} .al{stroke:var(--amber)}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);
+  border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;
+  font:13px/1 "JetBrains Mono",monospace;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.18)}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+  document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head>
+<body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+  function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+  function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
+    b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
+      else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+  document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+
+<div class="wrap">
+
+<h1>How an unfinished prompt now survives a checkpoint</h1>
+<p class="sub">
+NVIDIA-NeMo/RL <a href="https://github.com/NVIDIA-NeMo/RL/pull/3480">PR #3480</a>, new since the last review round —
+the rollout recovery ledger. Links pinned to <code>bca9a721</code>.
+Part 1 of 3 · <a href="pr-3480-one-cut.html">the atomic cut</a> · <a href="pr-3480-recovery-proof.html">the proof</a>
+</p>
+
+<p>
+The last review round ended with a known gap: a rollout still generating when a checkpoint
+lands was dropped, and its prompt with it — the dataloader had already moved past it and
+never rewinds. The author's answer is a new file,
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/bca9a721034845998aa1146c5c46cb919949c063/nemo_rl/experience/rollout_recovery.py"><code>rollout_recovery.py</code></a>,
+built around one rule: <b>at any instant, every prompt has exactly one durable owner.</b>
+Either the dataloader has not handed it out yet, or the new ledger owns it (handed out,
+rollouts not finished), or the replay buffer owns it (finished, waiting to be trained on).
+A checkpoint saves all three owners in one atomic cut, so a restart can rebuild exactly
+the in-flight work it interrupted.
+</p>
+
+<h2>One prompt, three owners</h2>
+
+<figure>
+<svg viewBox="0 0 940 500" width="100%" role="img" aria-label="Prompt ownership flow from dataloader through ledger to replay buffer">
+  <!-- owner boxes -->
+  <rect x="10" y="40" width="200" height="86" rx="8" class="sbox" stroke-width="1.5"/>
+  <text x="110" y="66" class="t" font-size="13" font-weight="bold" text-anchor="middle">dataloader</text>
+  <text x="110" y="86" class="d" font-size="11" text-anchor="middle">prompt 41 not yet taken</text>
+  <text x="110" y="104" class="d" font-size="10.5" text-anchor="middle">saved: train_dataloader.pt</text>
+
+  <rect x="300" y="40" width="300" height="86" rx="8" class="pbox" stroke-width="1.5"/>
+  <text x="450" y="62" class="p" font-size="13" font-weight="bold" text-anchor="middle">recovery ledger (NEW)</text>
+  <text x="450" y="82" class="d" font-size="11" text-anchor="middle">taken, rollouts not finished</text>
+  <text x="450" y="100" class="d" font-size="10.5" text-anchor="middle">RESERVED → ADMITTED</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/bca9a721034845998aa1146c5c46cb919949c063/nemo_rl/experience/rollout_recovery.py#L29">
+    <text x="450" y="118" class="ac" font-size="10.5" text-anchor="middle">saved: rollout_recovery.pt</text></a>
+
+  <rect x="690" y="40" width="240" height="86" rx="8" class="gbox" stroke-width="1.5"/>
+  <text x="810" y="62" class="g" font-size="13" font-weight="bold" text-anchor="middle">replay buffer</text>
+  <text x="810" y="82" class="d" font-size="11" text-anchor="middle">all rollouts finished</text>
+  <text x="810" y="100" class="d" font-size="10.5" text-anchor="middle">rows live in TransferQueue;</text>
+  <text x="810" y="115" class="d" font-size="10.5" text-anchor="middle">saved: replay_buffer_metadata.pt</text>
+
+  <!-- arrows between owners -->
+  <line x1="210" y1="83" x2="296" y2="83" class="pl" stroke-width="2"/>
+  <path d="M296 83 l-9 -5 v10 z" class="p"/>
+  <text x="253" y="72" class="p" font-size="10.5" text-anchor="middle">reserve_group</text>
+
+  <line x1="600" y1="83" x2="686" y2="83" class="gl" stroke-width="2"/>
+  <path d="M686 83 l-9 -5 v10 z" class="g"/>
+  <text x="643" y="72" class="g" font-size="10.5" text-anchor="middle">TQ commit</text>
+  <text x="643" y="100" class="d" font-size="9.5" text-anchor="middle">then discard_group</text>
+
+  <!-- side pool -->
+  <rect x="10" y="170" width="200" height="72" rx="8" class="abox" stroke-width="1.5" stroke-dasharray="5 3"/>
+  <text x="110" y="192" class="a" font-size="12" font-weight="bold" text-anchor="middle">spare pool</text>
+  <text x="110" y="209" class="d" font-size="10.5" text-anchor="middle">whole batches set aside to</text>
+  <text x="110" y="223" class="d" font-size="10.5" text-anchor="middle">replace failed rollouts</text>
+  <line x1="110" y1="126" x2="110" y2="166" class="al" stroke-width="1.5"/>
+  <path d="M110 166 l-5 -9 h10 z" class="a"/>
+  <text x="120" y="150" class="a" font-size="10">divert</text>
+  <line x1="210" y1="206" x2="330" y2="130" class="al" stroke-width="1.5" stroke-dasharray="4 3"/>
+  <path d="M330 130 l-10 1 l4 9 z" class="a"/>
+  <text x="290" y="185" class="a" font-size="10">substitute →</text>
+  <text x="110" y="256" class="d" font-size="10">saved: replacement_reserve.pt</text>
+
+  <!-- ledger phases detail -->
+  <rect x="300" y="170" width="630" height="130" rx="8" class="sbox"/>
+  <text x="316" y="194" class="t" font-size="12" font-weight="bold">inside the ledger — two phases</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/bca9a721034845998aa1146c5c46cb919949c063/nemo_rl/experience/rollout_recovery.py#L32">
+    <text x="316" y="218" class="p" font-size="11.5">RESERVED</text></a>
+  <text x="400" y="218" class="d" font-size="11">dataloader advanced past it; the sampler has not stamped a step yet</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/bca9a721034845998aa1146c5c46cb919949c063/nemo_rl/experience/rollout_recovery.py#L36">
+    <text x="316" y="242" class="p" font-size="11.5">ADMITTED</text></a>
+  <text x="400" y="242" class="d" font-size="11">step assigned (target_step); rollouts dispatched, still generating</text>
+  <text x="316" y="272" class="d" font-size="11">On restart: ADMITTED groups redispatch as-is; RESERVED batches go through</text>
+  <text x="316" y="288" class="d" font-size="11">sampler admission again. Each record keeps its group_id, so the same TQ slot is reused.</text>
+
+  <!-- checkpoint band -->
+  <rect x="10" y="340" width="920" height="140" rx="8" class="sbox" stroke-dasharray="4 3"/>
+  <text x="26" y="364" class="t" font-size="12" font-weight="bold">what one checkpoint contains (all captured in a single atomic cut — see part 2)</text>
+  <text x="26" y="390" class="t" font-size="11">train_dataloader.pt <tspan class="d">— where the loader stopped</tspan></text>
+  <text x="26" y="410" class="t" font-size="11">replacement_reserve.pt <tspan class="d">— the spare pool (only when non-empty)</tspan></text>
+  <text x="26" y="430" class="t" font-size="11">rollout_recovery.pt <tspan class="d">— unfinished groups: locators only, no prompt text, no tensors</tspan></text>
+  <text x="26" y="450" class="t" font-size="11">replay_buffer_metadata.pt + data_plane/ <tspan class="d">— finished groups: index + the TQ rows themselves</tspan></text>
+  <text x="530" y="390" class="a" font-size="11">sha256 of rollout_recovery.pt, its schema version,</text>
+  <text x="530" y="406" class="a" font-size="11">and its group count are written into the TQ</text>
+  <text x="530" y="422" class="a" font-size="11">checkpoint metadata — a torn or stale pair is</text>
+  <text x="530" y="438" class="a" font-size="11">rejected at load, never silently redispatched.</text>
+</svg>
+<figcaption>
+Ownership moves left to right. The ledger covers exactly the window that used to lose
+prompts: after the dataloader moved on, before the rollouts finished. The spare pool is a
+side store for batches deliberately set aside to replace failed rollouts.
+</figcaption>
+</figure>
+
+<p>Worked example — all numbers distinct. Config: 4 rollouts per prompt group, gate lets
+generation run 1 step ahead, trainer at step 7:</p>
+
+<table>
+<tr><th>prompt group</th><th>state when the checkpoint lands</th><th>owner saved</th><th>on restart</th></tr>
+<tr><td>g20 (step 7)</td><td>all 4 rollouts finished, in TQ</td><td>replay buffer</td><td>trained on directly — nothing regenerates</td></tr>
+<tr><td>g21 (step 8)</td><td>2 of 4 rollouts still generating</td><td>ledger, <code>ADMITTED</code>, target_step=8</td><td>redispatched for step 8; all 4 regenerate</td></tr>
+<tr><td>g22 (no step yet)</td><td>taken from the loader, waiting at the gate</td><td>ledger, <code>RESERVED</code></td><td>goes through admission again, then dispatches</td></tr>
+<tr><td>g23</td><td>still in the dataset</td><td>dataloader position</td><td>served normally when the loader reaches it</td></tr>
+</table>
+
+<p>
+Before this change, g21 and g22 were simply gone: the loader was saved past them and no
+file held them. <a href="pr-3480-lost-lookahead.html">The earlier review round</a> got the
+<i>finished</i> case (g20) recovered; this round closes the unfinished ones.
+</p>
+
+<h2>What the ledger saves — and how restore trusts it</h2>
+
+<p>
+The in-memory record keeps the live prompt by reference, but
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/bca9a721034845998aa1146c5c46cb919949c063/nemo_rl/experience/rollout_recovery.py#L312"><code>state_dict()</code></a>
+persists only a <b>locator</b>: the dataset row number (<code>idx</code>) and
+<code>task_name</code>. No prompt text, no tensors — the file stays tiny regardless of
+prompt length. Restore rebuilds each prompt by reading
+<code>dataset[idx]</code> again and re-running the same one-row
+<code>collate_fn</code> the original dispatch used
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/bca9a721034845998aa1146c5c46cb919949c063/nemo_rl/algorithms/single_controller.py#L701"><code>_rehydrate_rollout_recovery_prompts</code></a>).
+This is safe under shuffling: shuffle changes the <i>order</i> rows are visited, not which
+row an <code>idx</code> names.
+</p>
+
+<p>Restore refuses to guess. The chain, each step a hard error on mismatch:</p>
+
+<pre><code>1  TQ metadata advertises the file    → file missing?               error
+2  file exists, metadata silent?      → orphan from another run     error
+3  sha256(file) vs metadata           → torn/stale pair             error   <a href="https://github.com/NVIDIA-NeMo/RL/blob/bca9a721034845998aa1146c5c46cb919949c063/nemo_rl/algorithms/single_controller.py#L624">single_controller.py:624</a>
+4  schema_version == 1                → written by other code       error
+5  group count vs metadata            → truncated file              error
+6  per-group field validation         → corrupt record              error   <a href="https://github.com/NVIDIA-NeMo/RL/blob/bca9a721034845998aa1146c5c46cb919949c063/nemo_rl/experience/rollout_recovery.py#L347">rollout_recovery.py:347</a>
+7  drop groups the replay buffer owns → never two owners            <a href="https://github.com/NVIDIA-NeMo/RL/blob/bca9a721034845998aa1146c5c46cb919949c063/nemo_rl/experience/rollout_recovery.py#L303">discard_canonical_groups</a>
+8  rebuild each prompt, check idx + task_name match                 error on mismatch</code></pre>
+
+<div class="warn">
+<b>The one thing restore cannot detect:</b> a dataset whose row <i>content</i> changed
+under the same <code>idx</code>. The author removed content fingerprints deliberately
+(commit <code>fd1e424e5</code>) and pinned the behavior with a test — a reordered or
+shrunk dataset is caught, an edited row is not. Resuming across a dataset edit silently
+trains the recovered groups on the new content.
+</div>
+
+<div class="hl">
+<b>So what.</b> With this in place, stopping a run mid-step and resuming it trains on the
+same prompts as never stopping: finished work is reused, unfinished work is regenerated
+from the same dataset rows, and nothing the loader handed out can fall between the files.
+The regenerated rollouts are new samples (different tokens, same prompt) — the data
+stream is preserved, not the exact trajectories.
+</div>
+
+</div>
+</body>
+</html>

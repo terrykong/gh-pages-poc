@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>What actually proves the recovery works</title>
+<style>
+:root{
+  --bg:#0d1117; --surface:#161b22; --border:#30363d; --text:#e6edf3; --dim:#8b949e;
+  --accent:#58a6ff; --green:#3fb950; --red:#f85149; --amber:#d29922; --purple:#bc8cff;
+}
+:root[data-theme="light"]{
+  --bg:#ffffff; --surface:#f6f8fa; --border:#d0d7de; --text:#1f2328; --dim:#59636e;
+  --accent:#0969da; --green:#1a7f37; --red:#cf222e; --amber:#9a6700; --purple:#8250df;
+}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--text);margin:0;
+  font:16px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:32px 20px 80px}
+h1{font-size:28px;line-height:1.25;margin:0 0 8px;letter-spacing:-.3px}
+h2{font-size:21px;margin:44px 0 14px;padding-bottom:7px;border-bottom:1px solid var(--border)}
+p{margin:13px 0}
+.sub{color:var(--dim);font-size:14px;margin:0 0 26px}
+a{color:var(--accent)}
+code{font-family:"JetBrains Mono",ui-monospace,Menlo,monospace;font-size:13px;
+  background:var(--surface);border:1px solid var(--border);border-radius:5px;padding:1px 5px}
+pre{background:var(--surface);border:1px solid var(--border);border-radius:8px;
+  padding:14px 16px;overflow-x:auto;margin:14px 0}
+pre code{background:none;border:none;padding:0;font-size:12.5px;line-height:1.6}
+figure{margin:22px 0}
+figcaption{color:var(--dim);font-size:13px;margin-top:9px}
+table{border-collapse:collapse;width:100%;margin:14px 0;font-size:14px}
+th,td{border:1px solid var(--border);padding:7px 11px;text-align:left;vertical-align:top}
+th{background:var(--surface);font-weight:600}
+.warn{background:var(--surface);border:1px solid var(--border);
+  border-left:3px solid var(--amber);border-radius:7px;padding:14px 18px;margin:22px 0}
+.hl{background:var(--surface);border:1px solid var(--border);
+  border-left:3px solid var(--accent);border-radius:7px;padding:14px 18px;margin:22px 0}
+.ok{border-left-color:var(--green)}
+svg a text{text-decoration:underline}
+svg text{font-family:"JetBrains Mono",ui-monospace,Menlo,monospace}
+.t{fill:var(--text)} .d{fill:var(--dim)} .g{fill:var(--green)}
+.r{fill:var(--red)} .a{fill:var(--amber)} .p{fill:var(--purple)} .ac{fill:var(--accent)}
+.sbox{fill:var(--surface);stroke:var(--border)}
+.line{stroke:var(--border)} .gl{stroke:var(--green)} .rl{stroke:var(--red)}
+.pl{stroke:var(--purple)} .al{stroke:var(--amber)}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);
+  border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;
+  font:13px/1 "JetBrains Mono",monospace;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.18)}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+  document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head>
+<body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+  function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+  function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
+    b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
+      else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+  document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+
+<div class="wrap">
+
+<h1>What actually proves the recovery works</h1>
+<p class="sub">
+NVIDIA-NeMo/RL <a href="https://github.com/NVIDIA-NeMo/RL/pull/3480">PR #3480</a> — the test evidence
+behind the recovery ledger, independently re-run for this review. Links pinned to <code>bca9a721</code>.
+Part 3 of 3 · <a href="pr-3480-recovery-ledger.html">the ledger</a> · <a href="pr-3480-one-cut.html">the atomic cut</a>
+</p>
+
+<p>
+The standing worry with checkpoint tests is mocks: a "round trip" where the buffer or the
+sampler is a stub proves the wiring, not the recovery. This page is the audit — which
+pieces of the PR's test pyramid run the real code, what each layer proves, what we
+re-ran locally for this review, and the one assertion still missing.
+</p>
+
+<h2>Three layers, and what is real in each</h2>
+
+<figure>
+<svg viewBox="0 0 940 478" width="100%" role="img" aria-label="Test pyramid showing three layers and which components are real in each">
+  <!-- layer 3 functional -->
+  <rect x="130" y="30" width="680" height="112" rx="8" class="sbox" stroke-width="1.5"/>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/bca9a721034845998aa1146c5c46cb919949c063/tests/functional/grpo_dp_single_controller_unfinished_recovery.sh">
+  <text x="470" y="54" class="g" font-size="12.5" font-weight="bold" text-anchor="middle">functional: two real training runs, 2 GPUs</text></a>
+  <text x="470" y="76" class="t" font-size="11" text-anchor="middle">a hook parks one rollout before its TQ commit; a timeout checkpoint cuts it deterministically;</text>
+  <text x="470" y="94" class="t" font-size="11" text-anchor="middle">run 2 must show THAT group id redispatched exactly once, committed exactly once,</text>
+  <text x="470" y="112" class="t" font-size="11" text-anchor="middle">and absent from the next checkpoint's ledger</text>
+  <text x="470" y="132" class="d" font-size="10.5" text-anchor="middle">everything real: TransferQueue backend, vLLM, trainer — registered run_test fast (runs in both CI lanes)</text>
+
+  <!-- layer 2 races -->
+  <rect x="65" y="162" width="810" height="112" rx="8" class="sbox" stroke-width="1.5"/>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/bca9a721034845998aa1146c5c46cb919949c063/tests/unit/single_controller/test_checkpoint_dispatch_races.py">
+  <text x="470" y="186" class="p" font-size="12.5" font-weight="bold" text-anchor="middle">race suite: the real controller, cut at exact instants (17 tests)</text></a>
+  <text x="470" y="208" class="t" font-size="11" text-anchor="middle">drives the real _save_checkpoint, _rollout_pump, redispatch and restore methods; blocks a save</text>
+  <text x="470" y="226" class="t" font-size="11" text-anchor="middle">mid-write, fires a real commit against it, asserts exactly one owner lands on disk;</text>
+  <text x="470" y="244" class="t" font-size="11" text-anchor="middle">covers the cursor-skew cuts, corrupt/missing sidecar, capacity, redispatch ordering</text>
+  <text x="470" y="264" class="d" font-size="10.5" text-anchor="middle">real: controller, barrier, buffer, samplers, ledger · stubbed: trainer, generation, rollout manager</text>
+
+  <!-- layer 1 matrix -->
+  <rect x="0" y="294" width="940" height="130" rx="8" class="sbox" stroke-width="1.5"/>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/bca9a721034845998aa1146c5c46cb919949c063/tests/unit/single_controller/test_checkpoint_recovery_matrix.py">
+  <text x="470" y="318" class="ac" font-size="12.5" font-weight="bold" text-anchor="middle">round-trip matrix: 4 samplers × 6 buffer states = 56 tests</text></a>
+  <text x="470" y="340" class="t" font-size="11" text-anchor="middle">save to disk, then a genuine restart: brand-new data-plane client loads the files, brand-new buffer,</text>
+  <text x="470" y="358" class="t" font-size="11" text-anchor="middle">brand-new sampler, brand-new ledger; asserts finished groups return without re-writing tensor rows,</text>
+  <text x="470" y="376" class="t" font-size="11" text-anchor="middle">unfinished groups re-commit through the ledger, evicted groups stay gone</text>
+  <text x="470" y="398" class="d" font-size="10.5" text-anchor="middle">real: TQReplayBuffer, all 4 samplers via create_sampler, barrier, ledger, disk round trip</text>
+  <text x="470" y="414" class="d" font-size="10.5" text-anchor="middle">stubbed: the tensor converter (fixed tensors) · absent: trainer/generation — neither is on the save/restore path</text>
+
+  <text x="0" y="446" class="d" font-size="11">scenarios: all-complete · partly generated · two-batches-in-flight (lag 2)</text>
+  <text x="0" y="463" class="d" font-size="11">· evicted group · trained-out-of-order hole · stale-only (weight gap 0 vs 7)</text>
+</svg>
+<figcaption>
+Each layer trades scope for realism. The matrix proves state survives the disk; the race
+suite proves the cut is atomic in the real controller; the functional test proves a real
+interrupted run recovers a specific parked prompt.
+</figcaption>
+</figure>
+
+<p>
+Two details worth trust. The functional hook is injected through a test-only entrypoint —
+no environment-variable hooks in production code — and its assertions are about a
+<i>specific group id</i>, not "the run finished". And the matrix restart is honest: the
+restored side shares no objects with the saving side, down to a fresh data-plane client
+that must load everything from the files.
+</p>
+
+<h2>Re-run for this review, and the one missing assertion</h2>
+
+<p>All in-scope suites were re-run locally on CPU for this review (macOS, hand-built venv):</p>
+
+<pre><code>test_checkpoint_recovery_matrix + test_checkpoint_dispatch_races
+  + test_rollout_recovery + test_checkpointing            147 passed, 14.45s
+test_rollout_pump + test_tq_replay_buffer
+  + test_sampler_interface                                 140 passed, 12.90s
+                                                           0 failed, 0 skipped</code></pre>
+
+<p>
+<b>The gap:</b> the matrix proves restored groups are <i>present</i> — it checks the
+buffer's group ids and ready flags after restore — but nothing ever asks a restored
+sampler to <b>select</b> them. The harness even says so:
+ready/pending counts are "reported separately for diagnosis only; nothing asserts on them"
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/bca9a721034845998aa1146c5c46cb919949c063/tests/unit/single_controller/_checkpoint_scenarios.py#L263">_checkpoint_scenarios.py:263</a>).
+Selection is per-sampler logic — one keys on the stamped step, the others on weight
+windows — so presence does not imply selectability, and only <code>in_order</code> gets an
+end-to-end restore-then-train proof from the functional test.
+</p>
+
+<p>
+To check whether this hides a bug, we wrote the missing test against the PR's own harness
+and ran it: save the all-complete scenario, restore into a fresh buffer, real
+<code>sampler.select()</code>, assert the three restored groups come back. <b>All four
+samplers pass.</b> So the product code is fine — this is a missing assertion, and the
+review asks the author to fold it into the matrix (the harness already builds the restored
+sampler; the assertion is a few lines).
+</p>
+
+<div class="warn">
+<b>Also asked for, not yet present:</b> a lag=0 row in the matrix, and any overhead number
+for the wider exclusive checkpoint window (<a href="pr-3480-one-cut.html">part 2</a>).
+Neither blocks the feature; both keep the next regression from hiding.
+</div>
+
+<div class="hl ok">
+<b>So what.</b> This is the rare checkpoint feature where the tests genuinely restart the
+world: real buffer, real samplers, real barrier, real files, plus a race suite that cuts
+the real controller mid-write and a functional run that recovers a deliberately parked
+prompt. With the select() assertion added, the round trip is covered end to end for all
+four samplers.
+</div>
+
+</div>
+</body>
+</html>

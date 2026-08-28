@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>How the checkpoint became one atomic cut</title>
+<style>
+:root{
+  --bg:#0d1117; --surface:#161b22; --border:#30363d; --text:#e6edf3; --dim:#8b949e;
+  --accent:#58a6ff; --green:#3fb950; --red:#f85149; --amber:#d29922; --purple:#bc8cff;
+}
+:root[data-theme="light"]{
+  --bg:#ffffff; --surface:#f6f8fa; --border:#d0d7de; --text:#1f2328; --dim:#59636e;
+  --accent:#0969da; --green:#1a7f37; --red:#cf222e; --amber:#9a6700; --purple:#8250df;
+}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--text);margin:0;
+  font:16px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:32px 20px 80px}
+h1{font-size:28px;line-height:1.25;margin:0 0 8px;letter-spacing:-.3px}
+h2{font-size:21px;margin:44px 0 14px;padding-bottom:7px;border-bottom:1px solid var(--border)}
+p{margin:13px 0}
+.sub{color:var(--dim);font-size:14px;margin:0 0 26px}
+a{color:var(--accent)}
+code{font-family:"JetBrains Mono",ui-monospace,Menlo,monospace;font-size:13px;
+  background:var(--surface);border:1px solid var(--border);border-radius:5px;padding:1px 5px}
+pre{background:var(--surface);border:1px solid var(--border);border-radius:8px;
+  padding:14px 16px;overflow-x:auto;margin:14px 0}
+pre code{background:none;border:none;padding:0;font-size:12.5px;line-height:1.6}
+figure{margin:22px 0}
+figcaption{color:var(--dim);font-size:13px;margin-top:9px}
+table{border-collapse:collapse;width:100%;margin:14px 0;font-size:14px}
+th,td{border:1px solid var(--border);padding:7px 11px;text-align:left;vertical-align:top}
+th{background:var(--surface);font-weight:600}
+.warn{background:var(--surface);border:1px solid var(--border);
+  border-left:3px solid var(--red);border-radius:7px;padding:14px 18px;margin:22px 0}
+.hl{background:var(--surface);border:1px solid var(--border);
+  border-left:3px solid var(--accent);border-radius:7px;padding:14px 18px;margin:22px 0}
+.ok{border-left-color:var(--green)}
+svg a text{text-decoration:underline}
+svg text{font-family:"JetBrains Mono",ui-monospace,Menlo,monospace}
+.t{fill:var(--text)} .d{fill:var(--dim)} .g{fill:var(--green)}
+.r{fill:var(--red)} .a{fill:var(--amber)} .p{fill:var(--purple)} .ac{fill:var(--accent)}
+.sbox{fill:var(--surface);stroke:var(--border)}
+.gband{fill:var(--surface);stroke:var(--green);stroke-width:1.5}
+.line{stroke:var(--border)} .gl{stroke:var(--green)} .rl{stroke:var(--red)}
+.pl{stroke:var(--purple)}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);
+  border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;
+  font:13px/1 "JetBrains Mono",monospace;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.18)}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+  document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head>
+<body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+  function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+  function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
+    b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
+      else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+  document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+
+<div class="wrap">
+
+<h1>How the checkpoint became one atomic cut</h1>
+<p class="sub">
+NVIDIA-NeMo/RL <a href="https://github.com/NVIDIA-NeMo/RL/pull/3480">PR #3480</a> — the fix for
+<a href="pr-3480-snapshot-skew.html">the snapshot-skew bug from the last round</a>. Links pinned to <code>bca9a721</code>.
+Part 2 of 3 · <a href="pr-3480-recovery-ledger.html">the ledger</a> · <a href="pr-3480-recovery-proof.html">the proof</a>
+</p>
+
+<p>
+Last round's bug: the save read the sampler's dispatch cursor, then did ~15 <code>await</code>s
+of model and optimizer writing, then snapshotted the replay buffer — and the rollout pump
+kept running in the gap, so the two reads could disagree by one step. On resume the
+anti-duplication guard then silently dropped a full batch of prompts. The fix is not a
+patch on that one pair — the author made <b>every</b> restart-facing read happen inside one
+exclusive window, and split sampler admission so its cursor advance takes part in the same
+locking. Nothing that moves a prompt can run while the checkpoint looks.
+</p>
+
+<h2>Every writer takes a ticket; the checkpoint closes the booth</h2>
+
+<figure>
+<svg viewBox="0 0 940 560" width="100%" role="img" aria-label="Barrier diagram: mutation slots for writers, exclusive checkpoint cut for the save">
+  <text x="0" y="18" class="t" font-size="13" font-weight="bold">the shared barrier (DataPlaneCheckpointBarrier)</text>
+
+  <!-- writers column -->
+  <text x="0" y="52" class="d" font-size="11">writers — each takes a shared mutation() slot; slots run concurrently:</text>
+
+  <rect x="0" y="64" width="450" height="30" rx="6" class="sbox"/>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/bca9a721034845998aa1146c5c46cb919949c063/nemo_rl/algorithms/single_controller.py#L1299">
+    <text x="12" y="84" class="ac" font-size="11">dataloader advance + ledger reserve_group</text></a>
+  <text x="462" y="84" class="d" font-size="10.5">one cut: cursor never saved past an unowned prompt</text>
+
+  <rect x="0" y="102" width="450" height="30" rx="6" class="sbox"/>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/bca9a721034845998aa1146c5c46cb919949c063/nemo_rl/algorithms/single_controller.py#L816">
+    <text x="12" y="122" class="ac" font-size="11">sampler commit_admission + mark ADMITTED</text></a>
+  <text x="462" y="122" class="d" font-size="10.5">cursor advance and phase flip in one cut (see below)</text>
+
+  <rect x="0" y="140" width="450" height="30" rx="6" class="sbox"/>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/bca9a721034845998aa1146c5c46cb919949c063/nemo_rl/algorithms/async_utils/replay_buffer.py#L1078">
+    <text x="12" y="160" class="ac" font-size="11">TQ commit (rollouts finished → replay buffer)</text></a>
+  <text x="462" y="160" class="d" font-size="10.5">groups join the replay buffer only between cuts</text>
+
+  <rect x="0" y="178" width="450" height="30" rx="6" class="sbox"/>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/bca9a721034845998aa1146c5c46cb919949c063/nemo_rl/algorithms/single_controller.py#L1146">
+    <text x="12" y="198" class="ac" font-size="11">drop / substitute-from-spare-pool decision</text></a>
+  <text x="462" y="198" class="d" font-size="10.5">old owner out, new owner in — atomically</text>
+
+  <rect x="0" y="216" width="450" height="30" rx="6" class="sbox"/>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/bca9a721034845998aa1146c5c46cb919949c063/nemo_rl/algorithms/single_controller.py#L2393">
+    <text x="12" y="236" class="ac" font-size="11">watchdog abort of a stale rollout</text></a>
+  <text x="462" y="236" class="d" font-size="10.5">the one intentional drop; also a single cut</text>
+
+  <!-- exclusive band -->
+  <rect x="0" y="286" width="940" height="196" rx="8" class="gband"/>
+  <text x="16" y="312" class="g" font-size="12.5" font-weight="bold">the exclusive cut — barrier.checkpoint(): new mutations wait, active ones drain first</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/bca9a721034845998aa1146c5c46cb919949c063/nemo_rl/algorithms/single_controller.py#L2485">
+    <text x="16" y="332" class="d" font-size="10.5">single_controller.py:2485-2554 — everything below reads one consistent instant</text></a>
+  <text x="30" y="358" class="t" font-size="11">1  sampler dispatch cursor          <tspan class="d">(the read that used to happen 15 awaits too early)</tspan></text>
+  <text x="30" y="378" class="t" font-size="11">2  dataloader position</text>
+  <text x="30" y="398" class="t" font-size="11">3  spare pool snapshot               <tspan class="d">(replacement_reserve.pt contents)</tspan></text>
+  <text x="30" y="418" class="t" font-size="11">4  replay buffer index               <tspan class="d">(finished groups)</tspan></text>
+  <text x="30" y="438" class="t" font-size="11">5  ledger snapshot − groups already in 4   <tspan class="a">← the subtraction: never two owners on disk</tspan></text>
+  <text x="30" y="458" class="t" font-size="11">6  TQ data-plane snapshot + sha256/count of 5 stamped into its metadata</text>
+
+  <!-- arrow from writers to band -->
+  <line x1="225" y1="246" x2="225" y2="282" class="line" stroke-width="1.5"/>
+  <path d="M225 282 l-5 -9 h10 z" class="d"/>
+  <text x="240" y="268" class="d" font-size="10.5">all blocked while the cut is open</text>
+
+  <text x="0" y="516" class="d" font-size="11">Consistency between the train pump's own counters and the cut is free: _save_checkpoint runs in the train</text>
+  <text x="0" y="534" class="d" font-size="11">pump task, so trainer_version / step counters cannot move while it executes.</text>
+</svg>
+<figcaption>
+Six restart-facing artifacts, one instant. Last round only item 4 was inside the window;
+items 1–3 were read early and item 5 did not exist.
+</figcaption>
+</figure>
+
+<h2>The admission split — locking the cursor without deadlocking the gate</h2>
+
+<p>
+The subtle part. Sampler admission does two things: it <b>waits</b> at a gate until the
+trainer catches up, then it <b>advances the dispatch cursor</b> and stamps the batch's
+step. Wrapping both in a mutation slot would be wrong: the gate wait can only end when the
+trainer advances, and the trainer's own save is what waits for mutation slots to drain —
+lock held across the wait means the two sides wait for each other. So the PR splits the
+old <code>admit()</code> into a two-step protocol,
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/bca9a721034845998aa1146c5c46cb919949c063/nemo_rl/algorithms/async_utils/staleness_sampler.py#L135"><code>TransactionalAdmissionSampler</code></a>:
+</p>
+
+<pre><code># single_controller.py:816-822 — the dispatch path
+await sampler.wait_until_admissible(...)      # the gate wait — OUTSIDE the barrier,
+                                              # a checkpoint can run while this polls
+async with barrier.mutation():                # then the short part takes a slot:
+    target_step = sampler.commit_admission()  #   cursor += 1, stamp the step
+    ledger.mark_group_admitted(...)           #   RESERVED → ADMITTED, same cut
+    # already-buffered duplicate check + dispatch bookkeeping, same cut</code></pre>
+
+<p>
+Between the wait ending and the slot being taken, nothing can regress the gate: the
+rollout pump is the only admitter and runs these two lines back to back, and the trainer
+version only grows. All four built-in samplers implement the split. A custom sampler that
+does not gets its whole <code>admit()</code> wrapped in a slot as a
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/bca9a721034845998aa1146c5c46cb919949c063/nemo_rl/algorithms/single_controller.py#L824">fallback</a>
+— correct, at the cost of the checkpoint waiting out that sampler's gate.
+</p>
+
+<p>Same tiny numbers as last round's bug page — gate window 1, 4 prompts per step, trainer at step 7, cursor at 6:</p>
+
+<table>
+<tr><th></th><th>last round (bug)</th><th>this round (fixed)</th></tr>
+<tr><td>cursor read</td><td>before the save's ~15 awaits</td><td>inside the exclusive cut</td></tr>
+<tr><td>pump admits during the save?</td><td>yes — stamps step 7 mid-save</td><td>cannot — <code>commit_admission</code> needs a slot, slots wait</td></tr>
+<tr><td>what disk says</td><td>cursor 6, buffer already has step 7</td><td>cursor and buffer agree by construction of the cut</td></tr>
+<tr><td>resume</td><td>guard sees step 7 covered → silently drops a fresh batch of 4</td><td>nothing to reconcile</td></tr>
+</table>
+
+<div class="hl ok">
+<b>Does it hold up?</b> Two agents in this review independently attacked the cut and found
+no interleaving that breaks it. The one ledger write outside any slot — dropping a group's
+ledger entry right after its TQ commit — is safe in every position relative to the cut,
+because the save subtracts buffer-owned groups from the ledger snapshot and restore
+subtracts again — the buffer's copy always wins. And it is tested with the real code: the races suite blocks a real save
+mid-write, fires a real commit, and asserts exactly one owner lands on disk
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/bca9a721034845998aa1146c5c46cb919949c063/tests/unit/single_controller/test_checkpoint_dispatch_races.py">test_checkpoint_dispatch_races.py</a>).
+</div>
+
+<div class="warn">
+<b>The cost, honestly.</b> The exclusive window got wider: checkpoint-directory setup and
+the sidecar write now happen inside it, and every commit, admission, and dataloader
+advance waits for the whole window. On a slow shared filesystem that is real time, and the
+PR posts no before/after number for it. The review asks for one — a per-checkpoint
+"exclusive window duration" with recovery on vs off would settle whether this matters.
+</div>
+
+</div>
+</body>
+</html>
