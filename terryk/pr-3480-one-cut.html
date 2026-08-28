@@ -82,12 +82,25 @@ locking. Nothing that moves a prompt can run while the checkpoint looks.
 
 <h2>Every writer takes a ticket; the checkpoint closes the booth</h2>
 
+<p>
+The lock is a shared <code>DataPlaneCheckpointBarrier</code>
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/bca9a721034845998aa1146c5c46cb919949c063/nemo_rl/algorithms/async_utils/replay_buffer.py#L196">replay_buffer.py:196</a>)
+with two sides. <code>mutation()</code> — the "ticket" — just counts you in as an
+in-progress writer: it blocks only while a checkpoint is open, and writers never block
+each other. <code>checkpoint()</code> is the exclusive side: it stops new writers from
+entering, waits for the counted ones to finish, and only then reads. Note the inversion —
+the code that <i>writes</i> state takes the shared side; the snapshot <i>reader</i> takes
+the exclusive one. Exclusivity is between the group of writers and the save, not among
+writers.
+</p>
+
 <figure>
 <svg viewBox="0 0 940 560" width="100%" role="img" aria-label="Barrier diagram: mutation slots for writers, exclusive checkpoint cut for the save">
   <text x="0" y="18" class="t" font-size="13" font-weight="bold">the shared barrier (DataPlaneCheckpointBarrier)</text>
 
   <!-- writers column -->
-  <text x="0" y="52" class="d" font-size="11">writers — each takes a shared mutation() slot; slots run concurrently:</text>
+  <text x="0" y="40" class="d" font-size="11">mutation() = register as an in-progress writer: writers never block each other,</text>
+  <text x="0" y="56" class="d" font-size="11">they only wait while a checkpoint is open. Each box below is one such write:</text>
 
   <rect x="0" y="64" width="450" height="30" rx="6" class="sbox"/>
   <a href="https://github.com/NVIDIA-NeMo/RL/blob/bca9a721034845998aa1146c5c46cb919949c063/nemo_rl/algorithms/single_controller.py#L1299">
@@ -95,7 +108,7 @@ locking. Nothing that moves a prompt can run while the checkpoint looks.
   <text x="462" y="84" class="d" font-size="10.5">one cut: cursor never saved past an unowned prompt</text>
 
   <rect x="0" y="102" width="450" height="30" rx="6" class="sbox"/>
-  <a href="https://github.com/NVIDIA-NeMo/RL/blob/bca9a721034845998aa1146c5c46cb919949c063/nemo_rl/algorithms/single_controller.py#L816">
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/bca9a721034845998aa1146c5c46cb919949c063/nemo_rl/algorithms/single_controller.py#L820">
     <text x="12" y="122" class="ac" font-size="11">sampler commit_admission + mark ADMITTED</text></a>
   <text x="462" y="122" class="d" font-size="10.5">cursor advance and phase flip in one cut (see below)</text>
 
