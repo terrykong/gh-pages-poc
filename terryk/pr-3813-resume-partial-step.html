@@ -35,6 +35,12 @@ code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;
 .src{font-size:12px;color:var(--dim);margin:0 0 18px}
 .warn{border-left:3px solid var(--orange);background:var(--surface);
   padding:12px 16px;margin:20px 0;border-radius:0 8px 8px 0}
+.hl{border-left:3px solid var(--accent);background:var(--surface);
+  padding:12px 16px;margin:18px 0;border-radius:0 8px 8px 0}
+table.ba{border-collapse:collapse;margin:10px 0 4px;font-size:13.5px}
+table.ba th,table.ba td{border:1px solid var(--border);padding:7px 11px;text-align:left;vertical-align:top}
+table.ba th{background:var(--surface2);font-weight:600}
+table.ba td:first-child{color:var(--dim);white-space:nowrap}
 figure{margin:14px 0 6px}
 figure img{max-width:100%;border:1px solid var(--border);border-radius:8px;display:block}
 figcaption{color:var(--dim);font-size:12.5px;margin-top:8px}
@@ -79,8 +85,27 @@ meant for — the sampler hands out that number when it lets a batch in
 A step is ready when it holds <code>num_prompts_per_step</code> groups. But a checkpoint only saves
 groups that have <em>finished</em> generating
 (<a href="https://github.com/NVIDIA-NeMo/RL/blob/7b09c833e58333e216568163648fa3029154ad62/nemo_rl/algorithms/async_utils/replay_buffer.py#L971-L973">replay_buffer.py:971</a>) —
-so if you checkpoint while a step is still filling, it comes back short. This PR adds a flag that
-decides what to do about that.</p>
+so if you checkpoint while a step is still filling, it comes back short.</p>
+
+<div class="hl">
+<strong>What this PR changes.</strong> Nothing about how a resume works today. SingleController has
+always had exactly one answer for a short step — top it up with fresh prompts — and no way to ask
+for anything else. The older v1 async PPO path has had that choice for a while
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/7b09c833e58333e216568163648fa3029154ad62/nemo_rl/algorithms/ppo.py#L132">ppo.py:132</a>;
+v1 async GRPO is hard-wired off at
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/7b09c833e58333e216568163648fa3029154ad62/nemo_rl/algorithms/grpo.py#L4344">grpo.py:4344</a>).
+This PR gives SingleController the same choice, as
+<code>async_rl.drop_incomplete_targets_on_restore</code>
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/7b09c833e58333e216568163648fa3029154ad62/nemo_rl/algorithms/single_controller_utils/config.py#L423">config.py:423</a>).
+It defaults to <code>false</code>, so every existing run behaves exactly as before.
+</div>
+
+<table class="ba">
+<tr><th>&nbsp;</th><th>before this PR</th><th>after this PR</th></tr>
+<tr><td>SingleController</td><td>always tops the step up. No setting exists.</td>
+    <td>same by default; you can now ask it to throw the step out and redo it.</td></tr>
+<tr><td>v1 async PPO</td><td>already had the choice</td><td>untouched</td></tr>
+</table>
 
 <h2>A step comes back short, and there are two ways to finish it</h2>
 
@@ -122,10 +147,10 @@ decides what to do about that.</p>
   <text class="note" x="590" y="172">not saved — that work is lost</text>
 
   <line x1="16" y1="200" x2="884" y2="200" stroke="var(--border)" stroke-width="1"/>
-  <text class="hdr" x="16" y="222">on resume, the flag decides what happens to those 4</text>
+  <text class="hdr" x="16" y="222">on resume — before this PR only the top path existed; the PR adds the bottom one</text>
 
   <text class="lbl-b" x="16" y="260">flag off (default)</text>
-  <text class="note" x="16" y="276">patch the hole</text>
+  <text class="note" x="16" y="276">what SC does today</text>
   <a href="https://github.com/NVIDIA-NeMo/RL/blob/7b09c833e58333e216568163648fa3029154ad62/nemo_rl/algorithms/single_controller.py#L628-L638"><text class="lnk" x="16" y="291">single_controller.py:632</text></a>
   <rect class="s-done" x="210" y="244" width="52" height="28" rx="4"/><text class="s-txt" x="230" y="263">g1</text>
   <rect class="s-done" x="270" y="244" width="52" height="28" rx="4"/><text class="s-txt" x="290" y="263">g2</text>
@@ -136,7 +161,7 @@ decides what to do about that.</p>
   <text class="note" x="590" y="256">4 old + 2 new in one step</text>
   <text class="note" x="590" y="270">2 prompts used from the batch</text>
 
-  <text class="lbl-b" x="16" y="330">flag on</text>
+  <text class="lbl-b" x="16" y="330">flag on — NEW</text>
   <text class="note" x="16" y="346">throw it out, redo it</text>
   <a href="https://github.com/NVIDIA-NeMo/RL/blob/7b09c833e58333e216568163648fa3029154ad62/nemo_rl/algorithms/async_utils/replay_buffer.py#L1112-L1139"><text class="lnk" x="16" y="361">replay_buffer.py:1112</text></a>
   <rect class="s-gone" x="210" y="310" width="52" height="28" rx="4"/>
@@ -170,10 +195,11 @@ away. It discards as many as it restored — 4 — and that is not a coincidence
 
 <h2>How the flag makes the pump fill the step whole</h2>
 
-<p>Two small pieces of code do it, and the second one is the neat part — the flag never talks to
-the rollout pump at all. It just makes the pump's count come out zero.</p>
+<p>Only the first of these two blocks is new. The second is the rollout pump, which this PR does not
+touch at all — and that is the neat part. The flag never talks to the pump. It just makes the
+pump's count come out zero, and the pump then does what it already did on a fresh run.</p>
 
-<div class="mono">Step 1 — at load, with drop_incomplete_targets_on_restore = True
+<div class="mono">Step 1 — NEW in this PR. At load, with drop_incomplete_targets_on_restore = True
 
 target_counts = Counter(g["target_step"] for g in groups
                         if g["target_step"] is not None)   # {7: 4}
@@ -188,7 +214,7 @@ That return value is also how many buffer slots the resume takes
 (<a href="https://github.com/NVIDIA-NeMo/RL/blob/7b09c833e58333e216568163648fa3029154ad62/nemo_rl/algorithms/single_controller.py#L420">single_controller.py:420</a>),
 so dropping groups frees their slots too.</p>
 
-<div class="mono">Step 2 — the rollout pump, first batch after the resume
+<div class="mono">Step 2 — UNCHANGED code. The rollout pump, first batch after the resume
 
 target_step = 7
 buffered    = self._buffer.count_for_target_step(7)   # 0   (would be 4 with the flag off)
@@ -215,9 +241,9 @@ dropping first can bring the checkpoint back under the cap.</p>
 <p>Yes — the author ran it. Four PPO runs to step 40, same settings:
 <span style="color:var(--orange)">yellow</span> is the old async path as a baseline,
 <span style="color:var(--red)">red</span> is SingleController run straight through,
-<span style="color:var(--blue)">blue</span> is SingleController resumed from checkpoint 20 with the
-flag <em>off</em>, and <span style="color:var(--green)">green</span> is resumed from checkpoint 20
-with the flag <em>on</em>.</p>
+<span style="color:var(--blue)">blue</span> is SingleController resumed from checkpoint 20 the way it
+behaves today, and <span style="color:var(--green)">green</span> is the same resume with the new
+flag turned on. So blue is the status quo and green is the path this PR adds.</p>
 
 <figure>
 <img src="https://github.com/user-attachments/assets/0023febf-0778-4492-a673-b5b91e98246c"
