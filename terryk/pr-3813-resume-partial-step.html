@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NVIDIA-NeMo/RL #3813 — what happens to a half-finished training step when a run resumes</title>
+<style>
+:root{
+  --bg:#0d1117; --surface:#161b22; --surface2:#1c2128; --border:#30363d;
+  --text:#e6edf3; --dim:#8b949e; --accent:#58a6ff; --green:#3fb950;
+  --orange:#d29922; --red:#f85149; --blue:#6ea8fe;
+}
+:root[data-theme="light"]{
+  --bg:#ffffff; --surface:#f6f8fa; --surface2:#eaeef2; --border:#d0d7de;
+  --text:#1f2328; --dim:#59636e; --accent:#0969da; --green:#1a7f37;
+  --orange:#9a6700; --red:#cf222e; --blue:#0550ae;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:28px 20px 70px}
+h1{font-size:22px;margin:0 0 8px;line-height:1.3}
+h2{font-size:18px;margin:32px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;
+  font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
+.sub{color:var(--dim);font-size:13.5px;margin:0 0 16px}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);
+  border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;
+  font:13px/1 ui-monospace,Menlo,monospace;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.18)}
+.mono{font:12.5px ui-monospace,SFMono-Regular,Menlo,monospace;
+  background:var(--surface);border:1px solid var(--border);border-radius:8px;
+  padding:13px;overflow-x:auto;white-space:pre;margin:10px 0 4px}
+.src{font-size:12px;color:var(--dim);margin:0 0 18px}
+.warn{border-left:3px solid var(--orange);background:var(--surface);
+  padding:12px 16px;margin:20px 0;border-radius:0 8px 8px 0}
+figure{margin:14px 0 6px}
+figure img{max-width:100%;border:1px solid var(--border);border-radius:8px;display:block}
+figcaption{color:var(--dim);font-size:12.5px;margin-top:8px}
+svg{max-width:100%;height:auto;display:block;margin:16px 0}
+svg .lbl{fill:var(--text);font:12.5px ui-monospace,Menlo,monospace}
+svg .lbl-b{fill:var(--text);font:bold 13px -apple-system,sans-serif}
+svg .note{fill:var(--dim);font:11.5px -apple-system,sans-serif}
+svg .hdr{fill:var(--accent);font:bold 12.5px -apple-system,sans-serif}
+svg .s-done{fill:var(--green);opacity:.55;stroke:var(--green);stroke-width:1.3}
+svg .s-fly{fill:var(--red);opacity:.42;stroke:var(--red);stroke-width:1.3}
+svg .s-new{fill:var(--blue);opacity:.5;stroke:var(--blue);stroke-width:1.3}
+svg .s-gone{fill:none;stroke:var(--dim);stroke-width:1.2;stroke-dasharray:4 3;opacity:.65}
+svg .s-txt{fill:var(--text);font:11px ui-monospace,Menlo,monospace}
+svg .xmark{stroke:var(--red);stroke-width:1.8;opacity:.8}
+svg .arr{stroke:var(--dim);stroke-width:1.4;fill:none}
+svg a text{text-decoration:underline;fill:var(--accent);font:11.5px ui-monospace,Menlo,monospace}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+  document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head>
+<body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+  function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+  function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
+    b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
+      else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+  document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+<div class="wrap">
+
+<h1>What happens to a half-finished training step when an async RL run resumes</h1>
+<p class="sub">Companion illustration for
+<a href="https://github.com/NVIDIA-NeMo/RL/pull/3813">NVIDIA-NeMo/RL #3813</a>
+(<code>drop_incomplete_targets_on_restore</code> on the SingleController path).
+All permalinks pin the PR head <code>7b09c83</code>.</p>
+
+<p>In async RL, two loops run at once: a <strong>rollout pump</strong> that generates completions,
+and a <strong>train pump</strong> that trains on them. They are joined by a buffer. Under the
+<code>in_order</code> sampler each group of completions is stamped with the training step it is
+meant for — the sampler hands out that number when it lets a batch in
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/7b09c833e58333e216568163648fa3029154ad62/nemo_rl/algorithms/single_controller.py#L622-L624">single_controller.py:622-624</a>).
+A step is ready when it holds <code>num_prompts_per_step</code> groups. But a checkpoint only saves
+groups that have <em>finished</em> generating
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/7b09c833e58333e216568163648fa3029154ad62/nemo_rl/algorithms/async_utils/replay_buffer.py#L971-L973">replay_buffer.py:971</a>) —
+so if you checkpoint while a step is still filling, it comes back short. This PR adds a flag that
+decides what to do about that.</p>
+
+<h2>A step comes back short, and there are two ways to finish it</h2>
+
+<svg viewBox="0 0 900 434" role="img" aria-label="Target step 7 needs 6 groups. Four finished before the checkpoint and two were still generating, so only four are saved. On resume the default patches the step with 2 fresh prompts, mixing old and new; the new flag throws the 4 away and regenerates all 6.">
+  <text class="hdr" x="16" y="20">One training step, step 7. It needs 6 groups. The checkpoint catches it holding 4.</text>
+
+  <rect class="s-done" x="16" y="34" width="13" height="13" rx="2"/>
+  <text class="note" x="34" y="45">finished before the save</text>
+  <rect class="s-fly" x="200" y="34" width="13" height="13" rx="2"/>
+  <text class="note" x="218" y="45">still generating</text>
+  <rect class="s-new" x="336" y="34" width="13" height="13" rx="2"/>
+  <text class="note" x="354" y="45">made after the resume</text>
+  <rect class="s-gone" x="502" y="34" width="13" height="13" rx="2"/>
+  <text class="note" x="520" y="45">thrown away</text>
+
+  <line x1="16" y1="60" x2="884" y2="60" stroke="var(--border)" stroke-width="1"/>
+
+  <text class="lbl-b" x="16" y="92">while running</text>
+  <text class="note" x="16" y="108">step 7 is filling</text>
+  <rect class="s-done" x="210" y="76" width="52" height="28" rx="4"/><text class="s-txt" x="230" y="95">g1</text>
+  <rect class="s-done" x="270" y="76" width="52" height="28" rx="4"/><text class="s-txt" x="290" y="95">g2</text>
+  <rect class="s-done" x="330" y="76" width="52" height="28" rx="4"/><text class="s-txt" x="350" y="95">g3</text>
+  <rect class="s-done" x="390" y="76" width="52" height="28" rx="4"/><text class="s-txt" x="410" y="95">g4</text>
+  <rect class="s-fly" x="450" y="76" width="52" height="28" rx="4"/><text class="s-txt" x="470" y="95">g5</text>
+  <rect class="s-fly" x="510" y="76" width="52" height="28" rx="4"/><text class="s-txt" x="530" y="95">g6</text>
+  <text class="note" x="590" y="88">4 done, 2 rollouts still</text>
+  <text class="note" x="590" y="102">running when the save fires</text>
+
+  <text class="lbl-b" x="16" y="162">in the checkpoint</text>
+  <text class="note" x="16" y="178">only finished groups</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/7b09c833e58333e216568163648fa3029154ad62/nemo_rl/algorithms/async_utils/replay_buffer.py#L971-L973"><text class="lnk" x="16" y="193">replay_buffer.py:971</text></a>
+  <rect class="s-done" x="210" y="146" width="52" height="28" rx="4"/><text class="s-txt" x="230" y="165">g1</text>
+  <rect class="s-done" x="270" y="146" width="52" height="28" rx="4"/><text class="s-txt" x="290" y="165">g2</text>
+  <rect class="s-done" x="330" y="146" width="52" height="28" rx="4"/><text class="s-txt" x="350" y="165">g3</text>
+  <rect class="s-done" x="390" y="146" width="52" height="28" rx="4"/><text class="s-txt" x="410" y="165">g4</text>
+  <rect class="s-gone" x="450" y="146" width="52" height="28" rx="4"/>
+  <rect class="s-gone" x="510" y="146" width="52" height="28" rx="4"/>
+  <text class="note" x="590" y="158">the 2 unfinished ones are</text>
+  <text class="note" x="590" y="172">not saved — that work is lost</text>
+
+  <line x1="16" y1="200" x2="884" y2="200" stroke="var(--border)" stroke-width="1"/>
+  <text class="hdr" x="16" y="222">on resume, the flag decides what happens to those 4</text>
+
+  <text class="lbl-b" x="16" y="260">flag off (default)</text>
+  <text class="note" x="16" y="276">patch the hole</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/7b09c833e58333e216568163648fa3029154ad62/nemo_rl/algorithms/single_controller.py#L628-L638"><text class="lnk" x="16" y="291">single_controller.py:632</text></a>
+  <rect class="s-done" x="210" y="244" width="52" height="28" rx="4"/><text class="s-txt" x="230" y="263">g1</text>
+  <rect class="s-done" x="270" y="244" width="52" height="28" rx="4"/><text class="s-txt" x="290" y="263">g2</text>
+  <rect class="s-done" x="330" y="244" width="52" height="28" rx="4"/><text class="s-txt" x="350" y="263">g3</text>
+  <rect class="s-done" x="390" y="244" width="52" height="28" rx="4"/><text class="s-txt" x="410" y="263">g4</text>
+  <rect class="s-new" x="450" y="244" width="52" height="28" rx="4"/><text class="s-txt" x="470" y="263">n1</text>
+  <rect class="s-new" x="510" y="244" width="52" height="28" rx="4"/><text class="s-txt" x="530" y="263">n2</text>
+  <text class="note" x="590" y="256">4 old + 2 new in one step</text>
+  <text class="note" x="590" y="270">2 prompts used from the batch</text>
+
+  <text class="lbl-b" x="16" y="330">flag on</text>
+  <text class="note" x="16" y="346">throw it out, redo it</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/7b09c833e58333e216568163648fa3029154ad62/nemo_rl/algorithms/async_utils/replay_buffer.py#L1112-L1139"><text class="lnk" x="16" y="361">replay_buffer.py:1112</text></a>
+  <rect class="s-gone" x="210" y="310" width="52" height="28" rx="4"/>
+  <line class="xmark" x1="222" y1="318" x2="250" y2="330"/><line class="xmark" x1="250" y1="318" x2="222" y2="330"/>
+  <rect class="s-gone" x="270" y="310" width="52" height="28" rx="4"/>
+  <line class="xmark" x1="282" y1="318" x2="310" y2="330"/><line class="xmark" x1="310" y1="318" x2="282" y2="330"/>
+  <rect class="s-gone" x="330" y="310" width="52" height="28" rx="4"/>
+  <line class="xmark" x1="342" y1="318" x2="370" y2="330"/><line class="xmark" x1="370" y1="318" x2="342" y2="330"/>
+  <rect class="s-gone" x="390" y="310" width="52" height="28" rx="4"/>
+  <line class="xmark" x1="402" y1="318" x2="430" y2="330"/><line class="xmark" x1="430" y1="318" x2="402" y2="330"/>
+  <text class="note" x="590" y="328">the 4 restored ones are dropped</text>
+
+  <rect class="s-new" x="210" y="356" width="52" height="28" rx="4"/><text class="s-txt" x="230" y="375">n1</text>
+  <rect class="s-new" x="270" y="356" width="52" height="28" rx="4"/><text class="s-txt" x="290" y="375">n2</text>
+  <rect class="s-new" x="330" y="356" width="52" height="28" rx="4"/><text class="s-txt" x="350" y="375">n3</text>
+  <rect class="s-new" x="390" y="356" width="52" height="28" rx="4"/><text class="s-txt" x="410" y="375">n4</text>
+  <rect class="s-new" x="450" y="356" width="52" height="28" rx="4"/><text class="s-txt" x="470" y="375">n5</text>
+  <rect class="s-new" x="510" y="356" width="52" height="28" rx="4"/><text class="s-txt" x="530" y="375">n6</text>
+  <text class="note" x="590" y="368">all 6 made after the resume</text>
+  <text class="note" x="590" y="382">whole batch used</text>
+
+  <text class="note" x="16" y="414">Neither one regenerates the original prompts. Both use exactly one dataloader batch for step 7.</text>
+</svg>
+
+<p>The prompts come from a dataloader whose batch size <em>is</em> one step's worth
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/7b09c833e58333e216568163648fa3029154ad62/nemo_rl/algorithms/single_controller_utils/setup.py#L682-L685">setup.py:682-685</a>,
+with <code>drop_last=True</code>, so every batch holds exactly 6). That is why the default wastes
+prompts: it needs only 2, takes them from the front of a 6-prompt batch, and throws the other 4
+away. It discards as many as it restored — 4 — and that is not a coincidence, it is
+<code>6 − 2</code>.</p>
+
+<h2>How the flag makes the pump fill the step whole</h2>
+
+<p>Two small pieces of code do it, and the second one is the neat part — the flag never talks to
+the rollout pump at all. It just makes the pump's count come out zero.</p>
+
+<div class="mono">Step 1 — at load, with drop_incomplete_targets_on_restore = True
+
+target_counts = Counter(g["target_step"] for g in groups
+                        if g["target_step"] is not None)   # {7: 4}
+incomplete    = {t for t, c in target_counts.items()
+                 if c &lt; groups_per_step}                   # {7}   because 4 &lt; 6
+kept          = [g for g in groups
+                 if g["target_step"] not in incomplete]    # []    all 4 dropped
+return len(kept)                                           # 0</div>
+<p class="src"><a href="https://github.com/NVIDIA-NeMo/RL/blob/7b09c833e58333e216568163648fa3029154ad62/nemo_rl/algorithms/async_utils/replay_buffer.py#L1112-L1139">replay_buffer.py:1112-1139</a>,
+returning at <a href="https://github.com/NVIDIA-NeMo/RL/blob/7b09c833e58333e216568163648fa3029154ad62/nemo_rl/algorithms/async_utils/replay_buffer.py#L1193">:1193</a>.
+That return value is also how many buffer slots the resume takes
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/7b09c833e58333e216568163648fa3029154ad62/nemo_rl/algorithms/single_controller.py#L420">single_controller.py:420</a>),
+so dropping groups frees their slots too.</p>
+
+<div class="mono">Step 2 — the rollout pump, first batch after the resume
+
+target_step = 7
+buffered    = self._buffer.count_for_target_step(7)   # 0   (would be 4 with the flag off)
+
+if buffered:                        # 0 is falsy, so this whole branch is skipped
+    num_prompts = max(0, 6 - buffered)               # never runs
+
+num_prompts = prompt_batch.size     # 6  -> dispatch all 6 prompts</div>
+<p class="src"><a href="https://github.com/NVIDIA-NeMo/RL/blob/7b09c833e58333e216568163648fa3029154ad62/nemo_rl/algorithms/single_controller.py#L628-L638">single_controller.py:628-638</a>.
+After the drop the pump takes the same path it takes on a fresh run — it never learns that a
+resume happened.</p>
+
+<p>Two guard rails come with it. The flag is rejected unless the sampler stamps a target step —
+<code>in_order</code>, or a custom sampler that stamps
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/7b09c833e58333e216568163648fa3029154ad62/nemo_rl/algorithms/single_controller_utils/config.py#L946-L955">config.py:946-955</a>) —
+because with no stamps there is no step that could be short, and the flag would quietly do nothing.
+And the drop runs <em>before</em> the buffer trims an over-full checkpoint, because trimming a
+step-stamped checkpoint raises instead
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/7b09c833e58333e216568163648fa3029154ad62/nemo_rl/algorithms/async_utils/replay_buffer.py#L1147-L1160">replay_buffer.py:1147-1160</a>);
+dropping first can bring the checkpoint back under the cap.</p>
+
+<h2>Does it work?</h2>
+
+<p>Yes — the author ran it. Four PPO runs to step 40, same settings:
+<span style="color:var(--orange)">yellow</span> is the old async path as a baseline,
+<span style="color:var(--red)">red</span> is SingleController run straight through,
+<span style="color:var(--blue)">blue</span> is SingleController resumed from checkpoint 20 with the
+flag <em>off</em>, and <span style="color:var(--green)">green</span> is resumed from checkpoint 20
+with the flag <em>on</em>.</p>
+
+<figure>
+<img src="https://github.com/user-attachments/assets/0023febf-0778-4492-a673-b5b91e98246c"
+     alt="Six metric panels over 40 training steps with four overlapping runs: reward rises from about 0.5 to about 0.8, training loss and critic loss fall, and explained variance rises toward 1. The two resumed runs begin near step 21 and stay inside the spread of the two uninterrupted runs.">
+<figcaption>The two resumed runs (blue, green) start at step 21. Reward climbs from ~0.5 to ~0.8 in
+all four, and the resumed runs sit inside the run-to-run spread of the two that were never
+interrupted. Critic loss and explained variance land in the same place too.
+<a href="https://github.com/NVIDIA-NeMo/RL/pull/3813">Source: the PR description.</a></figcaption>
+</figure>
+
+<p>Read it for what it is: this shows the flag <strong>does no harm</strong> — you can turn it on,
+resume, and training carries on normally. It does not show a measurable <em>win</em> over the
+default, because blue and green both converge fine. The spike in step time near step 21 is just the
+cost of restarting, and it shows up for both resumed runs.</p>
+
+<div class="warn">
+<strong>What to know before turning it on.</strong> It is off by default, so nothing changes unless
+you ask for it. Turn it on when you would rather a resumed step be generated all at once than be
+half old and half new — the default leaves 4 groups made before the crash sitting in the same step
+as 2 made after it. The cost is extra rollout work: those 4 groups are thrown away and made again.
+One catch the author calls out — on GRPO, a step that was deliberately shortened by a dropped
+prompt looks "incomplete" after a resume, so the flag regenerates it in full. That is wasted work,
+not a stall, and PPO is unaffected.
+</div>
+
+</div>
+</body>
+</html>
