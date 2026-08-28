@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NVIDIA-NeMo/RL #3821 — how a fresh PPO run starts with an already-trained critic</title>
+<style>
+:root{
+  --bg:#0d1117; --surface:#161b22; --surface2:#1c2128; --border:#30363d;
+  --text:#e6edf3; --dim:#8b949e; --accent:#58a6ff; --green:#3fb950;
+  --orange:#d29922; --red:#f85149;
+}
+:root[data-theme="light"]{
+  --bg:#ffffff; --surface:#f6f8fa; --surface2:#eaeef2; --border:#d0d7de;
+  --text:#1f2328; --dim:#59636e; --accent:#0969da; --green:#1a7f37;
+  --orange:#9a6700; --red:#cf222e;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:28px 20px 70px}
+h1{font-size:22px;margin:0 0 8px;line-height:1.3}
+h2{font-size:18px;margin:32px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;
+  font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
+.sub{color:var(--dim);font-size:13.5px;margin:0 0 16px}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);
+  border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;
+  font:13px/1 ui-monospace,Menlo,monospace;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.18)}
+.mono{font:12.5px ui-monospace,SFMono-Regular,Menlo,monospace;
+  background:var(--surface);border:1px solid var(--border);border-radius:8px;
+  padding:13px;overflow-x:auto;white-space:pre}
+.mono .c{color:var(--dim)}
+.mono .k{color:var(--green)}
+.mono .r{color:var(--red)}
+.warn{border-left:3px solid var(--orange);background:var(--surface);
+  padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0}
+.hl{border-left:3px solid var(--accent);background:var(--surface);
+  padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0}
+svg{max-width:100%;height:auto;display:block;margin:16px 0}
+svg .box{fill:var(--surface);stroke:var(--border);stroke-width:1.4}
+svg .lbl{fill:var(--text);font:12.5px ui-monospace,Menlo,monospace}
+svg .lbl-b{fill:var(--text);font:bold 13px -apple-system,sans-serif}
+svg .note{fill:var(--dim);font:11.5px -apple-system,sans-serif}
+svg .hdr{fill:var(--accent);font:bold 12.5px -apple-system,sans-serif}
+svg .step{fill:var(--dim);font:11.5px ui-monospace,Menlo,monospace}
+svg .c-ok{fill:var(--green);opacity:.5;stroke:var(--green);stroke-width:1.2}
+svg .c-bad{fill:var(--red);opacity:.45;stroke:var(--red);stroke-width:1.2}
+svg .c-off{fill:var(--dim);opacity:.16;stroke:var(--dim);stroke-width:1.2;stroke-dasharray:4 3}
+svg .c-txt{fill:var(--text);font:11px ui-monospace,Menlo,monospace}
+svg .divider{stroke:var(--border);stroke-width:1}
+svg .arrow{stroke:var(--accent);stroke-width:2;fill:none}
+svg a text{text-decoration:underline;fill:var(--accent);font:11.5px ui-monospace,Menlo,monospace}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+  document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head>
+<body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+  function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+  function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
+    b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
+      else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+  document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+<div class="wrap">
+
+<h1>How a fresh PPO run starts with an already-trained critic</h1>
+<p class="sub">Companion illustration for
+<a href="https://github.com/NVIDIA-NeMo/RL/pull/3821">NVIDIA-NeMo/RL #3821</a>
+(stacked on <a href="https://github.com/NVIDIA-NeMo/RL/pull/3813">#3813</a>, not <code>main</code>).
+All permalinks pin the PR head <code>6e8790c</code>.</p>
+
+<p>PPO trains two models: the <strong>policy</strong> that writes the answer, and the
+<strong>critic</strong> (value model) that guesses how good a state is. A fresh run starts the critic
+from random weights, so its guesses are noise — and training the policy on noisy advantages is
+worse than not training it at all. Today the only cure is
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/6e8790cf9f7746fbee021a8e29183f3feba6cbf4/nemo_rl/algorithms/ppo.py#L190"><code>ppo.policy_training_start_step: N</code></a>:
+for the first N steps, skip the policy update
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/6e8790cf9f7746fbee021a8e29183f3feba6cbf4/nemo_rl/algorithms/ppo.py#L1617">ppo.py:1617</a>)
+and train only the critic. The catch is that generation and environment scoring — the expensive
+part of a step — still run every one of those N steps. This PR adds
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/6e8790cf9f7746fbee021a8e29183f3feba6cbf4/nemo_rl/algorithms/ppo.py#L194"><code>ppo.warm_start_value_checkpoint</code></a>,
+which points a fresh run at a critic somebody already trained.</p>
+
+<h2>What the N warmup steps actually buy you</h2>
+
+<svg viewBox="0 0 900 430" role="img" aria-label="Two run timelines over 5 steps. Cold start with policy_training_start_step 3 pays for generation and scoring on steps 0, 1 and 2 while the policy update is skipped. Warm start trains the policy from step 0.">
+  <text class="hdr" x="16" y="20">5 steps of a PPO run, drawn twice. Same generation cost per step both times.</text>
+
+  <!-- legend -->
+  <rect class="c-ok" x="16" y="34" width="16" height="13" rx="2"/>
+  <text class="note" x="38" y="45">runs, and the policy learns from it</text>
+  <rect class="c-bad" x="252" y="34" width="16" height="13" rx="2"/>
+  <text class="note" x="274" y="45">runs, full cost, policy frozen</text>
+  <rect class="c-off" x="474" y="34" width="16" height="13" rx="2"/>
+  <text class="note" x="496" y="45">skipped</text>
+
+  <!-- ============ BLOCK A: cold ============ -->
+  <text class="lbl-b" x="16" y="78">Today — cold critic, <tspan style="font-family:ui-monospace,Menlo,monospace">policy_training_start_step: 3</tspan></text>
+
+  <text class="step" x="212" y="100">step 0</text>
+  <text class="step" x="342" y="100">step 1</text>
+  <text class="step" x="472" y="100">step 2</text>
+  <text class="step" x="602" y="100">step 3</text>
+  <text class="step" x="732" y="100">step 4</text>
+
+  <text class="lbl" x="16" y="126">generate + score</text>
+  <rect class="c-bad" x="200" y="110" width="116" height="22" rx="3"/><text class="c-txt" x="243" y="126">paid</text>
+  <rect class="c-bad" x="330" y="110" width="116" height="22" rx="3"/><text class="c-txt" x="373" y="126">paid</text>
+  <rect class="c-bad" x="460" y="110" width="116" height="22" rx="3"/><text class="c-txt" x="503" y="126">paid</text>
+  <rect class="c-ok"  x="590" y="110" width="116" height="22" rx="3"/><text class="c-txt" x="633" y="126">paid</text>
+  <rect class="c-ok"  x="720" y="110" width="116" height="22" rx="3"/><text class="c-txt" x="763" y="126">paid</text>
+
+  <text class="lbl" x="16" y="156">critic update</text>
+  <rect class="c-ok" x="200" y="140" width="116" height="22" rx="3"/><text class="c-txt" x="252" y="156">yes</text>
+  <rect class="c-ok" x="330" y="140" width="116" height="22" rx="3"/><text class="c-txt" x="382" y="156">yes</text>
+  <rect class="c-ok" x="460" y="140" width="116" height="22" rx="3"/><text class="c-txt" x="512" y="156">yes</text>
+  <rect class="c-ok" x="590" y="140" width="116" height="22" rx="3"/><text class="c-txt" x="642" y="156">yes</text>
+  <rect class="c-ok" x="720" y="140" width="116" height="22" rx="3"/><text class="c-txt" x="772" y="156">yes</text>
+
+  <text class="lbl" x="16" y="186">policy update</text>
+  <rect class="c-off" x="200" y="170" width="116" height="22" rx="3"/><text class="c-txt" x="243" y="186">skip</text>
+  <rect class="c-off" x="330" y="170" width="116" height="22" rx="3"/><text class="c-txt" x="373" y="186">skip</text>
+  <rect class="c-off" x="460" y="170" width="116" height="22" rx="3"/><text class="c-txt" x="503" y="186">skip</text>
+  <rect class="c-ok"  x="590" y="170" width="116" height="22" rx="3"/><text class="c-txt" x="644" y="186">yes</text>
+  <rect class="c-ok"  x="720" y="170" width="116" height="22" rx="3"/><text class="c-txt" x="774" y="186">yes</text>
+
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/6e8790cf9f7746fbee021a8e29183f3feba6cbf4/nemo_rl/algorithms/ppo.py#L1617"><text x="16" y="212">ppo.py:1617</text></a>
+  <text class="note" x="200" y="212">3 full rounds of generation bought only a trained critic.</text>
+  <text class="note" x="200" y="228">Where generation dominates the step, that is most of the bill.</text>
+
+  <line class="divider" x1="16" y1="252" x2="884" y2="252"/>
+
+  <!-- ============ BLOCK B: warm ============ -->
+  <text class="lbl-b" x="16" y="284">With this PR — seeded critic, <tspan style="font-family:ui-monospace,Menlo,monospace">policy_training_start_step: 0</tspan></text>
+
+  <text class="step" x="212" y="306">step 0</text>
+  <text class="step" x="342" y="306">step 1</text>
+  <text class="step" x="472" y="306">step 2</text>
+  <text class="step" x="602" y="306">step 3</text>
+  <text class="step" x="732" y="306">step 4</text>
+
+  <text class="lbl" x="16" y="332">generate + score</text>
+  <rect class="c-ok" x="200" y="316" width="116" height="22" rx="3"/><text class="c-txt" x="243" y="332">paid</text>
+  <rect class="c-ok" x="330" y="316" width="116" height="22" rx="3"/><text class="c-txt" x="373" y="332">paid</text>
+  <rect class="c-ok" x="460" y="316" width="116" height="22" rx="3"/><text class="c-txt" x="503" y="332">paid</text>
+  <rect class="c-ok" x="590" y="316" width="116" height="22" rx="3"/><text class="c-txt" x="633" y="332">paid</text>
+  <rect class="c-ok" x="720" y="316" width="116" height="22" rx="3"/><text class="c-txt" x="763" y="332">paid</text>
+
+  <text class="lbl" x="16" y="362">critic update</text>
+  <rect class="c-ok" x="200" y="346" width="116" height="22" rx="3"/><text class="c-txt" x="252" y="362">yes</text>
+  <rect class="c-ok" x="330" y="346" width="116" height="22" rx="3"/><text class="c-txt" x="382" y="362">yes</text>
+  <rect class="c-ok" x="460" y="346" width="116" height="22" rx="3"/><text class="c-txt" x="512" y="362">yes</text>
+  <rect class="c-ok" x="590" y="346" width="116" height="22" rx="3"/><text class="c-txt" x="642" y="362">yes</text>
+  <rect class="c-ok" x="720" y="346" width="116" height="22" rx="3"/><text class="c-txt" x="772" y="362">yes</text>
+
+  <text class="lbl" x="16" y="392">policy update</text>
+  <rect class="c-ok" x="200" y="376" width="116" height="22" rx="3"/><text class="c-txt" x="252" y="392">yes</text>
+  <rect class="c-ok" x="330" y="376" width="116" height="22" rx="3"/><text class="c-txt" x="382" y="392">yes</text>
+  <rect class="c-ok" x="460" y="376" width="116" height="22" rx="3"/><text class="c-txt" x="512" y="392">yes</text>
+  <rect class="c-ok" x="590" y="376" width="116" height="22" rx="3"/><text class="c-txt" x="642" y="392">yes</text>
+  <rect class="c-ok" x="720" y="376" width="116" height="22" rx="3"/><text class="c-txt" x="772" y="392">yes</text>
+
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/6e8790cf9f7746fbee021a8e29183f3feba6cbf4/nemo_rl/algorithms/ppo.py#L717"><text x="16" y="418">ppo.py:717</text></a>
+  <text class="note" x="200" y="418">Critic seeded from critic_pretrain/step_370, so every step improves the policy.</text>
+</svg>
+
+<h2>How the seeding works</h2>
+
+<p>The whole feature is a choice of which directory one call reads. PPO already resolves the
+critic's restore paths on their own, separately from the policy's
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/6e8790cf9f7746fbee021a8e29183f3feba6cbf4/nemo_rl/utils/checkpoint.py#L221"><code>get_resume_paths(..., model_component="value")</code></a>),
+so seeding the critic means handing that call a different path.</p>
+
+<div class="mono"><span class="c"># nemo_rl/algorithms/ppo.py:717-723   (the SingleController copy is setup.py:658-664)</span>
+warm_start = ppo_config.warm_start_value_checkpoint
+<span class="c"># Only a fresh run reads it. On a resume, last_checkpoint_path is set and wins.</span>
+if last_checkpoint_path is None and warm_start is not None:
+    validate_warm_start_checkpoint(warm_start)      <span class="c"># raise now if the path is wrong</span>
+    print(f"🔥 Warm-starting the value model from {warm_start}")
+
+value_weights_path, value_optimizer_path = checkpointer.get_resume_paths(
+    <span class="k">last_checkpoint_path or warm_start</span>,            <span class="c"># &lt;- the entire feature</span>
+    model_component="value",
+)</div>
+
+<p>Run it on the warm-started run from the figure above. Its seed is
+<code>critic_pretrain/step_370</code>; once it has been going a while, its own latest checkpoint is
+<code>my_run/step_12</code>.</p>
+
+<div class="mono"><span class="c">--- fresh run, key set -------------------------------------------------</span>
+last_checkpoint_path = None
+warm_start           = "critic_pretrain/step_370"
+None or "critic_pretrain/step_370"  ->  <span class="k">"critic_pretrain/step_370"</span>
+  value weights   &lt;- critic_pretrain/step_370/value/weights
+  value optimizer &lt;- critic_pretrain/step_370/value/optimizer
+  policy weights  &lt;- <span class="c">None</span>   <span class="c"># policy still starts from the base model</span>
+
+<span class="c">--- the same run, resumed after a crash --------------------------------</span>
+last_checkpoint_path = "my_run/step_12"
+warm_start           = "critic_pretrain/step_370"     <span class="c"># still in the config</span>
+"my_run/step_12" or "critic_pretrain/step_370"  ->  <span class="k">"my_run/step_12"</span>
+  value weights   &lt;- my_run/step_12/value/weights     <span class="c"># its own critic, 12 steps of progress kept</span></div>
+
+<p>That ordering is what lets the key stay in the config forever. If the warm start won instead,
+every resume would throw away the critic's progress and re-seed from the old checkpoint. Only the
+<code>value/</code> subtree is read — the policy starts from the base model, the dataloader from the
+beginning, and the step counter at 0.</p>
+
+<p>The seed directory is the ordinary layout any PPO run writes, so a previous run's checkpoint
+works as-is:</p>
+
+<div class="mono">critic_pretrain/step_370/
+├── policy/          <span class="c">not read</span>
+└── value/
+    ├── weights/     <span class="k">-> critic weights</span>
+    └── optimizer/   <span class="k">-> optimizer moments + where the LR schedule had got to</span></div>
+
+<p>A path with no <code>value/weights</code> inside it is rejected at setup
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/6e8790cf9f7746fbee021a8e29183f3feba6cbf4/nemo_rl/utils/checkpoint.py#L79">checkpoint.py:79</a>).
+Without that check a typo would print the 🔥 line and then train a random critic, because
+<code>get_resume_paths</code> never checks that the path exists.</p>
+
+<h2>Does it work?</h2>
+
+<p><strong>Nobody has posted a run.</strong> There is no W&amp;B link, no critic-loss curve, and no
+before-and-after wall-clock number on the PR. The tests that ship with it are unit tests with mocked
+workers — they check that the seeded paths reach the critic and that a resume ignores the key, which
+is the plumbing, not the claim.</p>
+
+<p>The PR is straight about why it has no end-to-end test: two runs that do not share the same
+rollouts cannot be compared exactly, because asynchronous vLLM generation is not reproducible even
+at a fixed seed. That is a fair argument against an <em>identity</em> test. It is not an argument
+against showing a chart.</p>
+
+<div class="warn">
+<strong>What to ask for before merging.</strong> One side-by-side chart from a real pair of runs:
+critic loss (or explained variance) and task reward for (a) a cold run with
+<code>policy_training_start_step: N</code> and (b) a warm-started run with
+<code>policy_training_start_step: 0</code>, plus the wall-clock the second one skipped. The feature
+rests on the claim that an offline-trained critic is a good enough substitute for online warmup, and
+right now nothing on the PR tests that claim.
+</div>
+
+<div class="hl">
+<p><strong>One catch worth knowing before you turn it on.</strong>
+The seed is restored through the normal resume path, so on a Megatron critic, Megatron compares
+the seed's learning-rate schedule against the one your run builds and <strong>fails at startup on the
+first field that differs</strong>. Nine fields are compared. The two checked first are
+<code>max_lr</code> and <code>min_lr</code>, and those come from
+<code>value.megatron_cfg.optimizer</code> — not from the scheduler block. Three more are step counts
+that get multiplied by <code>value.train_global_batch_size</code> and derived from the total step
+budget, which PPO clamps to <code>min(max_num_steps, max_num_epochs × batches-per-epoch) ×
+ppo_epochs</code>.</p>
+<p>In plain terms: <strong>pretraining the critic at a different learning rate, a different batch
+size, or on a different-sized dataset will stop your PPO run from starting.</strong> The failure is
+loud and immediate, not silent — but the message is a raw assertion from deep inside Megatron, so it
+is worth knowing what it means before you see it. Set
+<code>value.megatron_cfg.scheduler.override_opt_param_scheduler: true</code> if you would rather your
+run's schedule win; note that this replaces the schedule's settings but still restarts from the
+seed's position in it. None of this applies if your critic runs on the DTensor backend rather than
+Megatron — that path takes the seed's schedule without checking it at all.</p>
+</div>
+
+</div>
+</body>
+</html>
