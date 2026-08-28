@@ -86,6 +86,40 @@ into place</strong>. A rename is a single step, so anyone looking sees either no
 finished conversion — never something in between. That is what lets the training policy and the
 inference policy start at the same time instead of one after the other.</p>
 
+<p>First, the layout on disk, because everything below is a <code>rename</code> between these paths.
+The staging directory is <strong>not inside</strong> the destination — it is a <strong>sibling</strong>,
+in the same parent. That is what makes the rename atomic: moving a directory within one parent is
+a single filesystem operation.</p>
+
+<div class="mono">$NEMO_RL_MEGATRON_CHECKPOINT_DIR/
+├── Qwen2.5-1.5B/                          <span class="g">← the destination. code calls it output_path</span>
+│   └── iter_0000000/
+│       ├── ... weight shards ...
+│       └── run_config.yaml                <span class="g">← written LAST. if this exists, it is finished</span>
+│
+├── .Qwen2.5-1.5B.staging-a1b2c3d4/        <span class="c">← job A builds its copy here  (staging_path)</span>
+├── .Qwen2.5-1.5B.staging-e5f6a7b8/        <span class="c">← job B builds its copy here  (staging_path)</span>
+└── Qwen2.5-1.5B.displaced-9f8e7d6c/       <span class="c">← where an old occupant gets shoved  (displaced)</span>
+</div>
+<p class="src">All four are siblings. The two <code>.staging-</code> ones start with a dot, so a plain
+<code>ls</code> does not show them. Path construction:
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/7463c341c9e93f198848ba1913d94bd7cfbb2606/nemo_rl/models/megatron/community_import.py#L309-L311">community_import.py:309-311</a>.</p>
+
+<p>And "is it finished?" is exactly one <code>os.path.exists</code> call — there is no lock, no
+manifest, no state file:</p>
+
+<div class="mono">def megatron_conversion_is_complete(path):
+    return os.path.exists(os.path.join(path, "iter_0000000", "run_config.yaml"))
+
+<span class="c"># so "is the destination complete?" means, literally:</span>
+<span class="c">#   os.path.exists("$NEMO_RL_MEGATRON_CHECKPOINT_DIR/Qwen2.5-1.5B/iter_0000000/run_config.yaml")</span>
+</div>
+<p class="src"><a href="https://github.com/NVIDIA-NeMo/RL/blob/7463c341c9e93f198848ba1913d94bd7cfbb2606/nemo_rl/models/megatron/community_import.py#L68-L72">community_import.py:68-72</a>.
+Three answers are possible, and the difference between the last two is the whole bug:
+<strong>complete</strong> (the file is there), <strong>partial</strong> (the directory exists but the
+file does not), and <strong>absent</strong> (no directory at all). The function returns
+<code>False</code> for both partial and absent — it cannot tell them apart.</p>
+
 <h2>Writing somewhere else first, then renaming</h2>
 
 <svg viewBox="0 0 900 400" role="img" aria-label="Before this PR a second job could see a half-written conversion and use it; after this PR the half-written copy lives under a hidden name and the final path appears complete in one step">
@@ -144,20 +178,18 @@ inference policy start at the same time instead of one after the other.</p>
   <text class="note" x="596" y="197">os.rename()</text>
 
   <!-- legend -->
-  <rect x="14" y="272" width="870" height="112" rx="8" fill="var(--surface)" stroke="var(--border)" stroke-width="1.2"/>
-  <text class="lbl-b" x="26" y="292">What "ready" means now</text>
-  <rect class="ok" x="26" y="302" width="16" height="14" rx="3"/>
-  <text class="note" x="50" y="314">safe to use</text>
-  <rect class="bad" x="150" y="302" width="16" height="14" rx="3"/>
-  <text class="note" x="174" y="314">used but broken</text>
-  <rect class="idle" x="300" y="302" width="16" height="14" rx="3"/>
-  <text class="note" x="324" y="314">invisible to other jobs</text>
-  <text class="note" x="26" y="338">The old check was "does iter_0000000/ exist". The new check is "does</text>
-  <text class="note" x="26" y="353">iter_0000000/run_config.yaml exist" — and the conversion writes that file last,</text>
-  <text class="note" x="26" y="368">after every weight shard. So its presence really does mean finished.</text>
-  <a href="https://github.com/NVIDIA-NeMo/RL/blob/7463c341c9e93f198848ba1913d94bd7cfbb2606/nemo_rl/models/megatron/community_import.py#L68"><text x="520" y="338">community_import.py:68 — the new check</text></a>
-  <a href="https://github.com/NVIDIA-NeMo/RL/blob/7463c341c9e93f198848ba1913d94bd7cfbb2606/nemo_rl/models/megatron/setup.py#L591"><text x="520" y="353">setup.py:591 — where callers ask</text></a>
-  <a href="https://github.com/NVIDIA-NeMo/RL/blob/7463c341c9e93f198848ba1913d94bd7cfbb2606/nemo_rl/models/megatron/community_import.py#L295"><text x="520" y="368">community_import.py:295 — staging + rename</text></a>
+  <rect x="14" y="272" width="870" height="96" rx="8" fill="var(--surface)" stroke="var(--border)" stroke-width="1.2"/>
+  <rect class="ok" x="26" y="288" width="16" height="14" rx="3"/>
+  <text class="note" x="50" y="300">safe to use</text>
+  <rect class="bad" x="150" y="288" width="16" height="14" rx="3"/>
+  <text class="note" x="174" y="300">used but broken</text>
+  <rect class="idle" x="300" y="288" width="16" height="14" rx="3"/>
+  <text class="note" x="324" y="300">invisible to other jobs</text>
+  <text class="note" x="26" y="326">Old check: "does iter_0000000/ exist". New check: "does iter_0000000/run_config.yaml</text>
+  <text class="note" x="26" y="341">exist" — and that file is written last, after every weight shard, so it really does</text>
+  <text class="note" x="26" y="356">mean finished. The staging directory is a sibling of model/, not inside it.</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/7463c341c9e93f198848ba1913d94bd7cfbb2606/nemo_rl/models/megatron/setup.py#L591"><text x="600" y="341">setup.py:591 — where callers ask</text></a>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/7463c341c9e93f198848ba1913d94bd7cfbb2606/nemo_rl/models/megatron/community_import.py#L295"><text x="600" y="356">community_import.py:295 — the rename</text></a>
 </svg>
 
 <p>The four steps, with the values for one job converting <code>Qwen2.5-1.5B</code> on 8 GPUs:</p>
@@ -184,7 +216,7 @@ torch.distributed.barrier()
 Both barriers matter: the first stops rank 0 renaming a directory that ranks 1-7 are still
 writing into; the second stops ranks 1-7 reading the final path before the rename lands.</p>
 
-<p>Step 4 is not just one <code>rename</code>, because the final path may already be occupied — by a
+<p>Step 4 is not just one <code>rename</code>, because the destination may already be occupied — by a
 <em>partial</em> conversion an earlier run was killed halfway through. Renaming a directory onto a
 non-empty directory fails, so <code>publish_megatron_conversion</code> gets two attempts, and between
 them it moves the occupant aside:</p>
@@ -205,8 +237,8 @@ rmtree(displaced)                                      <span class="c"># delete 
 </div>
 <p class="src">Real code:
 <a href="https://github.com/NVIDIA-NeMo/RL/blob/7463c341c9e93f198848ba1913d94bd7cfbb2606/nemo_rl/models/megatron/community_import.py#L75-L126">community_import.py:75-126</a>.
-Note every exit except the <code class="r">raise</code> first re-checks whether someone else already
-published a good copy, and steps aside if so.</p>
+Every exit except the <code>raise</code> first re-checks whether someone else already published a
+good copy, and steps aside if so.</p>
 
 <h2>Where two jobs can still collide</h2>
 
@@ -221,125 +253,102 @@ other.</p>
 <p>Below, <strong>both A and B have already finished converting</strong> and are racing to publish.
 Neither is a reader; both are writers.</p>
 
-<p>One thing to hold on to, because it is the easiest part to misread: the loop does
-<strong>two different renames</strong>, and they move opposite things.</p>
+<p>The loop does <strong>two different renames</strong>, and they move opposite things. This is the
+easiest part to misread:</p>
 
-<div class="mono"><span class="g">publish</span>  os.rename(my_staging_dir, model/)      <span class="c"># move MY finished copy onto the destination</span>
-<span class="c">                                              # this is the one that can collide with the other job</span>
+<div class="mono"><span class="g">publish</span>  os.rename(staging_path, output_path)   <span class="c"># MY copy  →  the destination</span>
+<span class="c">                                              # both jobs do this, so they collide</span>
 
-<span class="g">evict</span>    os.rename(model/, model.displaced-…)   <span class="c"># move whatever is SQUATTING in the destination</span>
-<span class="c">                                              # out of the way, so the publish can be retried</span>
+<span class="g">evict</span>    os.rename(output_path, displaced)      <span class="c"># whatever is IN the destination  →  aside</span>
+<span class="c">                                              # both jobs also do this, to the SAME occupant</span>
 </div>
 <p class="src"><a href="https://github.com/NVIDIA-NeMo/RL/blob/7463c341c9e93f198848ba1913d94bd7cfbb2606/nemo_rl/models/megatron/community_import.py#L102">community_import.py:102 — publish</a> ·
 <a href="https://github.com/NVIDIA-NeMo/RL/blob/7463c341c9e93f198848ba1913d94bd7cfbb2606/nemo_rl/models/megatron/community_import.py#L115">:115 — evict</a>.
-Both jobs need the stale partial evicted before either can publish, so in step 3 below they both
-try to evict <em>the same squatter</em> — not their own directories. A wins that; B's evict then
-fails with <code>FileNotFoundError</code> because <code>model/</code> is already gone.</p>
+Neither job's own staging directory ever disappears. In step 3 both jobs try to evict the
+<em>stale partial</em>; A gets there first, so B's evict fails with <code>FileNotFoundError</code>
+because the occupant is already gone.</p>
 
-<svg viewBox="0 0 900 610" role="img" aria-label="Two jobs each finished converting and both try to publish over a stale partial. Every row names the source and destination of its rename. Job B checks during the gap where the destination is absent, then its publish collides with A's and raises.">
-  <text class="hdr" x="14" y="18">Two jobs each converted the model themselves. Both now want to publish into the same path.</text>
+<p>Here is the whole race as a trace, in time order, with real paths. <code>A</code> and
+<code>B</code> are the two jobs; every line is one filesystem call:</p>
 
-  <text class="lbl-b" x="14" y="42">Starting state — nobody has published yet</text>
+<div class="mono"><span class="c"># on disk at the start:</span>
+<span class="c">#   Qwen2.5-1.5B/iter_0000000/          exists, but NO run_config.yaml   → partial</span>
+<span class="c">#   .Qwen2.5-1.5B.staging-a1b2c3d4/     A's finished copy</span>
+<span class="c">#   .Qwen2.5-1.5B.staging-e5f6a7b8/     B's finished copy</span>
 
-  <rect class="idle" x="66" y="52" width="248" height="56" rx="5"/>
-  <text class="lbl-b" x="76" y="69">Job A — conversion done</text>
-  <text class="lbl" x="76" y="87">.model.staging-a1b2c3d4/</text>
-  <text class="note" x="76" y="102">called stage-A below</text>
+A  exists("Qwen2.5-1.5B/iter_0000000/run_config.yaml")   <span class="r">→ False</span>   <span class="c"># partial, not complete</span>
+B  exists("Qwen2.5-1.5B/iter_0000000/run_config.yaml")   <span class="r">→ False</span>   <span class="c"># same answer</span>
 
-  <rect class="bad" x="330" y="52" width="290" height="56" rx="5"/>
-  <text class="lbl-b" x="340" y="69">model/ — the shared destination</text>
-  <text class="lbl" x="340" y="87">iter_0000000/  no run_config.yaml</text>
-  <text class="note" x="340" y="102">a stale partial from a run that was killed</text>
+A  rename(".Qwen…staging-a1b2c3d4"  →  "Qwen2.5-1.5B")   <span class="r">→ ENOTEMPTY</span>
+B  rename(".Qwen…staging-e5f6a7b8"  →  "Qwen2.5-1.5B")   <span class="r">→ ENOTEMPTY</span>
+<span class="c">                                        # destination is occupied by the partial</span>
 
-  <rect class="idle" x="640" y="52" width="244" height="56" rx="5"/>
-  <text class="lbl-b" x="650" y="69">Job B — conversion done</text>
-  <text class="lbl" x="650" y="87">.model.staging-e5f6a7b8/</text>
-  <text class="note" x="650" y="102">called stage-B below</text>
+A  rename("Qwen2.5-1.5B"  →  "Qwen2.5-1.5B.displaced-9f8e7d6c")  <span class="g">→ ok</span>
+<span class="c">                                        # A evicts the partial. destination now ABSENT</span>
+B  rename("Qwen2.5-1.5B"  →  "Qwen2.5-1.5B.displaced-3c2d1e0f")  <span class="r">→ FileNotFoundError</span>
+<span class="c">                                        # B tried to evict the same partial. already gone.</span>
 
-  <text class="lbl-b" x="14" y="136">step</text>
-  <text class="lbl-b" x="66" y="136">Job A</text>
-  <text class="lbl-b" x="330" y="136">what is on disk at model/</text>
-  <text class="lbl-b" x="640" y="136">Job B</text>
-  <line x1="14" y1="144" x2="884" y2="144" stroke="var(--border)" stroke-width="1.2"/>
+<span class="r">B  exists("Qwen2.5-1.5B/iter_0000000/run_config.yaml")   → False</span>   <span class="c"># ← THE BUG</span>
+<span class="c">                                        # destination is ABSENT, not complete.</span>
+<span class="c">                                        # "absent" and "partial" give the same False,</span>
+<span class="c">                                        # so B carries on as if nothing had changed.</span>
 
-  <!-- gap band behind steps 3-4 in the middle column -->
-  <rect x="330" y="248" width="290" height="94" rx="5" fill="var(--orange)" opacity="0.16"/>
-  <rect x="330" y="248" width="290" height="94" rx="5" fill="none" stroke="var(--orange)" stroke-width="1.6" stroke-dasharray="5 4"/>
+A  rename(".Qwen…staging-a1b2c3d4"  →  "Qwen2.5-1.5B")   <span class="g">→ ok, A WINS</span>
+<span class="c">                                        # destination now holds a COMPLETE conversion</span>
 
-  <!-- step 1 -->
-  <text class="lbl" x="20" y="175">1</text>
-  <rect class="idle" x="66" y="152" width="248" height="40" rx="5"/>
-  <text class="lbl" x="76" y="170">check: is model/ complete?</text>
-  <text class="note" x="76" y="185">no — it is only a partial</text>
-  <text class="lbl" x="340" y="170">the stale partial sits here</text>
-  <rect class="idle" x="640" y="152" width="244" height="40" rx="5"/>
-  <text class="lbl" x="650" y="170">check: is model/ complete?</text>
-  <text class="note" x="650" y="185">no — it is only a partial</text>
+B  rename(".Qwen…staging-e5f6a7b8"  →  "Qwen2.5-1.5B")   <span class="r">→ ENOTEMPTY</span>
+<span class="c">                                        # second attempt → raise. B dies.</span>
+</div>
+<p class="src">If B's <code>exists(...)</code> had landed one line later — after A's winning rename — it
+would have seen the finished conversion and stepped aside cleanly. The window is exactly the gap
+between A evicting the old occupant and A moving its own copy in.</p>
 
-  <!-- step 2 -->
-  <text class="lbl" x="20" y="221">2</text>
-  <rect class="idle" x="66" y="198" width="248" height="40" rx="5"/>
-  <text class="lbl" x="76" y="216">publish: stage-A → model/</text>
-  <text class="t-bad" x="76" y="231">✗ ENOTEMPTY</text>
-  <text class="lbl" x="340" y="216">unchanged</text>
-  <rect class="idle" x="640" y="198" width="244" height="40" rx="5"/>
-  <text class="lbl" x="650" y="216">publish: stage-B → model/</text>
-  <text class="t-bad" x="650" y="231">✗ ENOTEMPTY</text>
+<svg viewBox="0 0 900 250" role="img" aria-label="Timeline of the destination directory. It is a stale partial, then absent during the gap after A evicts it, then complete after A publishes. Job B's second check lands inside the absent gap, so it reads False and walks into a failing rename.">
+  <text class="hdr" x="14" y="18">What the destination directory is, moment by moment — and where B looks</text>
 
-  <!-- step 3 -->
-  <text class="lbl" x="20" y="277">3</text>
-  <rect class="ok" x="66" y="254" width="248" height="40" rx="5"/>
-  <text class="lbl" x="76" y="272">evict: model/ → displaced/</text>
-  <text class="t-ok" x="76" y="287">✓ squatter is out of the way</text>
-  <text class="lbl" x="340" y="272">now ABSENT</text>
-  <rect class="idle" x="640" y="254" width="244" height="40" rx="5"/>
-  <text class="lbl" x="650" y="272">evict: model/ → displaced/</text>
-  <text class="t-bad" x="650" y="287">✗ FileNotFoundError — A won</text>
+  <text class="lbl-b" x="14" y="52">Job A</text>
+  <text class="lbl-b" x="14" y="132">dest</text>
+  <text class="lbl-b" x="14" y="200">Job B</text>
 
-  <!-- step 4 -->
-  <text class="lbl" x="20" y="323">4</text>
-  <rect class="idle" x="66" y="300" width="248" height="40" rx="5"/>
-  <text class="note" x="76" y="324">(has not published yet)</text>
-  <text class="lbl" x="340" y="318">still ABSENT</text>
-  <rect class="bad" x="640" y="300" width="244" height="40" rx="5"/>
-  <text class="lbl" x="650" y="318">check: is model/ complete?</text>
-  <text class="note" x="650" y="333">no — it is ABSENT → go on</text>
-  <path class="arr-r" d="M636 320 L624 320"/>
-  <path class="arr-r" d="M624 320 L631 315 M624 320 L631 325"/>
+  <!-- A markers -->
+  <text class="lbl" x="230" y="52">rename in</text>
+  <text class="t-bad" x="230" y="67">✗ ENOTEMPTY</text>
+  <text class="lbl" x="392" y="52">evict out</text>
+  <text class="t-ok" x="392" y="67">✓ done</text>
+  <text class="lbl" x="712" y="52">rename in</text>
+  <text class="t-ok" x="712" y="67">✓ A WINS</text>
 
-  <!-- step 5 -->
-  <text class="lbl" x="20" y="369">5</text>
-  <rect class="ok" x="66" y="346" width="248" height="40" rx="5"/>
-  <text class="lbl" x="76" y="364">publish: stage-A → model/</text>
-  <text class="t-ok" x="76" y="379">✓ A WINS</text>
-  <rect class="ok" x="330" y="346" width="290" height="40" rx="5"/>
-  <text class="lbl" x="340" y="364">iter_0000000/run_config.yaml</text>
-  <text class="note" x="340" y="379">complete and correct</text>
-  <rect class="bad" x="640" y="346" width="244" height="40" rx="5"/>
-  <text class="lbl" x="650" y="364">publish: stage-B → model/</text>
-  <text class="t-bad" x="650" y="379">✗ ENOTEMPTY → raise</text>
+  <!-- destination bar -->
+  <rect class="bad" x="60" y="104" width="320" height="42" rx="5"/>
+  <text class="lbl" x="150" y="122">PARTIAL</text>
+  <text class="note" x="76" y="138">iter_0000000/, no run_config.yaml</text>
 
-  <path class="arr-r" d="M762 389 L762 409"/>
-  <path class="arr-r" d="M762 409 L756 402 M762 409 L768 402"/>
+  <rect x="380" y="104" width="320" height="42" rx="5" fill="var(--orange)" opacity="0.18"/>
+  <rect x="380" y="104" width="320" height="42" rx="5" fill="none" stroke="var(--orange)" stroke-width="1.8" stroke-dasharray="5 4"/>
+  <text class="lbl" x="480" y="122">ABSENT — the gap</text>
+  <text class="note" x="396" y="138">A took it out, has not put its own in</text>
 
-  <rect class="bad" x="330" y="415" width="554" height="50" rx="6"/>
-  <text class="lbl" x="342" y="435">OSError: [Errno 39] Directory not empty</text>
-  <text class="note" x="342" y="454">Job B dies at startup — the finished conversion it needed is sitting right there.</text>
+  <rect class="ok" x="700" y="104" width="184" height="42" rx="5"/>
+  <text class="lbl" x="756" y="122">COMPLETE</text>
+  <text class="note" x="716" y="138">run_config.yaml is there</text>
 
-  <text class="t-bad" x="14" y="435">The dashed band is the</text>
-  <text class="note" x="14" y="452">gap: A has taken the</text>
-  <text class="note" x="14" y="466">squatter out but not put</text>
-  <text class="note" x="14" y="480">its own copy in yet.</text>
+  <!-- B markers -->
+  <text class="lbl" x="230" y="180">rename in</text>
+  <text class="t-bad" x="230" y="195">✗ ENOTEMPTY</text>
+  <text class="lbl" x="392" y="180">evict out</text>
+  <text class="t-bad" x="392" y="195">✗ already gone</text>
+  <text class="lbl" x="548" y="180">check dest</text>
+  <text class="t-bad" x="548" y="195">→ False</text>
+  <text class="lbl" x="712" y="180">rename in</text>
+  <text class="t-bad" x="712" y="195">✗ raise</text>
 
-  <text class="note" x="14" y="511">Step 3 is the one to read twice: both jobs evict THE SAME squatter, not their own directories.</text>
-  <text class="note" x="14" y="526">Steps 2 and 5 are the collision you would expect — both moving their own copy onto model/.</text>
-  <text class="note" x="14" y="541">B is not checking late; it checks inside the gap, and "absent" does not count as "complete".</text>
-  <text class="note" x="14" y="556">The raise also leaves A's evicted copy on disk, because the cleanup sits after the loop.</text>
-  <a href="https://github.com/NVIDIA-NeMo/RL/blob/7463c341c9e93f198848ba1913d94bd7cfbb2606/nemo_rl/models/megatron/community_import.py#L104-L106"><text x="14" y="582">community_import.py:104-106 — the raise</text></a>
-  <a href="https://github.com/NVIDIA-NeMo/RL/blob/7463c341c9e93f198848ba1913d94bd7cfbb2606/nemo_rl/models/megatron/community_import.py#L87"><text x="330" y="582">:87 — the check B does in the gap</text></a>
-  <a href="https://github.com/NVIDIA-NeMo/RL/blob/7463c341c9e93f198848ba1913d94bd7cfbb2606/nemo_rl/models/megatron/community_import.py#L115">
-    <text x="640" y="582">:115 — the evict rename</text></a>
+  <path class="arr-r" d="M580 168 L580 150"/>
+  <path class="arr-r" d="M580 150 L575 157 M580 150 L585 157"/>
+
+  <text class="note" x="14" y="226">B's check lands in the gap. exists() says False for ABSENT and for PARTIAL alike, so B cannot tell</text>
+  <text class="note" x="14" y="241">the world moved under it — it reads "still not published" and walks into a rename that then fails.</text>
 </svg>
+
 
 <p>The fix is to make that last exit behave like all the others — look once more before giving up:</p>
 
