@@ -89,8 +89,10 @@ Megatron-Energon loader, and that loader runs <em>inside</em> the policy worker'
 so it replaces the policy worker class rather than adding a new actor. The controller asks the
 replica leaders for a batch and gets back a
 <a href="https://github.com/NVIDIA-NeMo/RL/blob/0a45c45aca9d85e8b2247f1833db6d9834f16a7a/nemo_rl/data/energon/sft_types.py#L23"><code>StepEnvelope</code></a>
-that carries only metadata — token counts, sample ids, a handle. The image and text tensors never
-leave the worker that read them.</p>
+that carries only metadata — token counts, sample ids, a handle. The <code>input_ids</code> and
+<code>pixel_values</code> stay on the GPU side: the reader
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/0a45c45aca9d85e8b2247f1833db6d9834f16a7a/nemo_rl/data_plane/worker_mixin.py#L268">broadcasts them</a>
+to its tensor-parallel copies, but they never travel back to the controller.</p>
 
 <svg viewBox="0 0 940 372" role="img" aria-label="Before and after: where the SFT dataloader runs">
   <defs>
@@ -184,7 +186,7 @@ leave the worker that read them.</p>
   <text class="note" x="340" y="316">data-parallel replica 0</text>
   <text class="note" x="636" y="316">data-parallel replica 1</text>
   <text class="ok-t" x="340" y="336">Rank 0 and rank 4 read. Their tensor-parallel copies get the same batch by NCCL broadcast.</text>
-  <text class="note" x="340" y="354">Green = reads its own shard.  The tensors never leave these two processes.</text>
+  <text class="note" x="340" y="354">Green = reads its own shard.  Tensors move GPU to GPU, never back to the controller.</text>
 </svg>
 
 <h2>What is new</h2>
@@ -290,9 +292,10 @@ this one, so both break.
 
 <div class="hl">
 <strong>What this buys, and what to watch.</strong> Taking the driver out of the data path is the
-point: with the loader next to the GPU that consumes its output, a multimodal batch is decoded once,
-in the process that needs it, instead of being built centrally and copied out. That matters most for
-image and video data, where the batch is large and the driver becomes the bottleneck first.
+point. Decoding is now split across the data-parallel replicas — two loaders here, each doing half
+the work — instead of one driver process doing all of it and then copying the result out to every
+rank. That matters most for image and video data, where decoding is expensive and the batch is big,
+which is exactly where a single central loader becomes the bottleneck first.
 The cost is that a v2 run now has two things to keep in step — which ranks read, and which shard each
 reader takes — and those live in different files. The guards for that are real: a mismatch raises at
 setup rather than training on the wrong data. Worth watching as more backends arrive in stage 2,
