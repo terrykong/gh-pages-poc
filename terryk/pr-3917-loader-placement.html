@@ -1,0 +1,305 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NVIDIA-NeMo/RL #3917 — SFT v2 moves the dataloader off the driver and into the GPU workers</title>
+<style>
+:root{
+  --bg:#0d1117; --surface:#161b22; --surface2:#1c2128; --border:#30363d;
+  --text:#e6edf3; --dim:#8b949e; --accent:#58a6ff; --green:#3fb950;
+  --orange:#d29922; --red:#f85149;
+}
+:root[data-theme="light"]{
+  --bg:#ffffff; --surface:#f6f8fa; --surface2:#eaeef2; --border:#d0d7de;
+  --text:#1f2328; --dim:#59636e; --accent:#0969da; --green:#1a7f37;
+  --orange:#9a6700; --red:#cf222e;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:28px 20px 70px}
+h1{font-size:22px;margin:0 0 8px;line-height:1.3}
+h2{font-size:18px;margin:34px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;
+  font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
+.sub{color:var(--dim);font-size:13.5px;margin:0 0 16px}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);
+  border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;
+  font:13px/1 ui-monospace,Menlo,monospace;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.18)}
+.mono{font:12.5px ui-monospace,SFMono-Regular,Menlo,monospace;
+  background:var(--surface);border:1px solid var(--border);border-radius:8px;
+  padding:13px;overflow-x:auto;white-space:pre;line-height:1.5}
+.warn{border-left:3px solid var(--red);background:var(--surface);
+  padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0}
+.hl{border-left:3px solid var(--accent);background:var(--surface);
+  padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0}
+table{border-collapse:collapse;width:100%;margin:14px 0;font-size:13.5px}
+th,td{border:1px solid var(--border);padding:7px 10px;text-align:left;vertical-align:top}
+th{background:var(--surface2);font-weight:600}
+.ok{color:var(--green);font-weight:700}
+.no{color:var(--red);font-weight:700}
+.cm{color:var(--dim)}
+svg{max-width:100%;height:auto;display:block;margin:16px 0}
+svg .box{fill:var(--surface);stroke:var(--border);stroke-width:1.4}
+svg .lbl{fill:var(--text);font:11.5px ui-monospace,Menlo,monospace}
+svg .lbl-b{fill:var(--text);font:bold 12px -apple-system,sans-serif}
+svg .rk{fill:var(--text);font:bold 12px ui-monospace,Menlo,monospace}
+svg .note{fill:var(--dim);font:11.5px -apple-system,sans-serif}
+svg .hdr{fill:var(--accent);font:bold 13px -apple-system,sans-serif}
+svg .grp{fill:var(--green);opacity:.13;stroke:var(--green);stroke-width:1.2}
+svg .grp-t{fill:var(--green);font:bold 11px -apple-system,sans-serif}
+svg .ok-t{fill:var(--green);font:11.5px -apple-system,sans-serif}
+svg .bad-t{fill:var(--red);font:11.5px -apple-system,sans-serif}
+svg .lead{fill:var(--green);stroke:var(--green);stroke-width:1.8;opacity:.20}
+svg .arw{stroke:var(--dim);stroke-width:1.8;fill:none}
+svg .arw-r{stroke:var(--red);stroke-width:2;fill:none}
+svg .arw-g{stroke:var(--green);stroke-width:1.8;fill:none}
+svg .dv{stroke:var(--border);stroke-width:1;stroke-dasharray:4 4}
+svg a text{text-decoration:underline;fill:var(--accent);font:11px ui-monospace,Menlo,monospace}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+  document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head>
+<body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+  function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+  function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
+    b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
+      else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+  document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+<div class="wrap">
+
+<h1>SFT v2 moves the dataloader off the driver and into the GPU workers</h1>
+<p class="sub">Companion illustration for
+<a href="https://github.com/NVIDIA-NeMo/RL/pull/3917">NVIDIA-NeMo/RL #3917</a>
+— SFT v2 stage 1 with the Megatron-Energon multimodal data path.
+All permalinks pin the PR head <code>0a45c45</code>.</p>
+
+<p>In today's SFT loop the driver holds the dataloader: it pulls a batch, then hands the whole
+thing to the policy, which ships the tensors out to every GPU worker
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/0a45c45aca9d85e8b2247f1833db6d9834f16a7a/nemo_rl/algorithms/sft.py#L580">sft.py:580</a>).
+This PR adds a second SFT loop that turns that around. Each data-parallel replica gets its own
+Megatron-Energon loader, and that loader runs <em>inside</em> the policy worker's own process —
+<code>SFTMegatronPolicyWorker</code> is passed as
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/0a45c45aca9d85e8b2247f1833db6d9834f16a7a/nemo_rl/algorithms/sft_v2.py#L412"><code>worker_extension_cls_fqn</code></a>,
+so it replaces the policy worker class rather than adding a new actor. The controller asks the
+replica leaders for a batch and gets back a
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/0a45c45aca9d85e8b2247f1833db6d9834f16a7a/nemo_rl/data/energon/sft_types.py#L23"><code>StepEnvelope</code></a>
+that carries only metadata — token counts, sample ids, a handle. The image and text tensors never
+leave the worker that read them.</p>
+
+<svg viewBox="0 0 940 372" role="img" aria-label="Before and after: where the SFT dataloader runs">
+  <defs>
+    <marker id="a" markerWidth="9" markerHeight="9" refX="7.5" refY="3" orient="auto">
+      <path d="M0,0 L0,6 L8,3 z" fill="var(--dim)"/></marker>
+    <marker id="ar" markerWidth="9" markerHeight="9" refX="7.5" refY="3" orient="auto">
+      <path d="M0,0 L0,6 L8,3 z" fill="var(--red)"/></marker>
+    <marker id="ag" markerWidth="9" markerHeight="9" refX="7.5" refY="3" orient="auto">
+      <path d="M0,0 L0,6 L8,3 z" fill="var(--green)"/></marker>
+  </defs>
+
+  <!-- ================= BEFORE ================= -->
+  <text class="hdr" x="14" y="16">BEFORE — v1 SFT, Hugging Face path</text>
+
+  <rect class="box" x="14" y="30" width="200" height="62" rx="7"/>
+  <text class="lbl-b" x="26" y="50">driver process</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/0a45c45aca9d85e8b2247f1833db6d9834f16a7a/nemo_rl/algorithms/sft.py#L580" target="_blank">
+    <text x="26" y="68">train_dataloader</text></a>
+  <text class="note" x="26" y="84">builds the whole batch here</text>
+
+  <path class="arw-r" d="M214,60 L332,60" marker-end="url(#ar)"/>
+  <text class="bad-t" x="224" y="52">batch tensors</text>
+
+  <rect class="box" x="340" y="38" width="66" height="44" rx="6"/>
+  <text class="rk" x="363" y="65">r0</text>
+  <rect class="box" x="414" y="38" width="66" height="44" rx="6"/>
+  <text class="rk" x="437" y="65">r1</text>
+  <rect class="box" x="488" y="38" width="66" height="44" rx="6"/>
+  <text class="rk" x="511" y="65">r2</text>
+  <rect class="box" x="562" y="38" width="66" height="44" rx="6"/>
+  <text class="rk" x="585" y="65">r3</text>
+  <rect class="box" x="636" y="38" width="66" height="44" rx="6"/>
+  <text class="rk" x="659" y="65">r4</text>
+  <rect class="box" x="710" y="38" width="66" height="44" rx="6"/>
+  <text class="rk" x="733" y="65">r5</text>
+  <rect class="box" x="784" y="38" width="66" height="44" rx="6"/>
+  <text class="rk" x="807" y="65">r6</text>
+  <rect class="box" x="858" y="38" width="66" height="44" rx="6"/>
+  <text class="rk" x="881" y="65">r7</text>
+
+  <text class="note" x="340" y="104">Every input_ids and pixel_values tensor is built on the driver, then shipped out.</text>
+  <text class="bad-t" x="340" y="122">The driver sits in the data path on every single step.</text>
+
+  <line class="dv" x1="14" y1="146" x2="926" y2="146"/>
+
+  <!-- ================= AFTER ================= -->
+  <text class="hdr" x="14" y="176">AFTER — v2 SFT, Energon path (this PR)</text>
+
+  <!-- loader bands -->
+  <rect class="grp" x="340" y="192" width="288" height="26" rx="6"/>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/0a45c45aca9d85e8b2247f1833db6d9834f16a7a/nemo_rl/data/energon/sft_worker.py#L117" target="_blank">
+    <text x="352" y="209">Energon loader, in rank 0's process</text></a>
+  <rect class="grp" x="636" y="192" width="288" height="26" rx="6"/>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/0a45c45aca9d85e8b2247f1833db6d9834f16a7a/nemo_rl/data/energon/sft_worker.py#L117" target="_blank">
+    <text x="648" y="209">Energon loader, in rank 4's process</text></a>
+
+  <path class="arw-g" d="M373,218 L373,246" marker-end="url(#ag)"/>
+  <path class="arw-g" d="M669,218 L669,246" marker-end="url(#ag)"/>
+
+  <!-- controller -->
+  <rect class="box" x="14" y="248" width="200" height="62" rx="7"/>
+  <text class="lbl-b" x="26" y="268">SFTSingleControllerActor</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/0a45c45aca9d85e8b2247f1833db6d9834f16a7a/nemo_rl/algorithms/sft_v2.py#L230" target="_blank">
+    <text x="26" y="286">train_placed_microbatches</text></a>
+  <text class="note" x="26" y="302">sees metadata only</text>
+
+  <path class="arw" d="M334,280 L216,280" marker-end="url(#a)"/>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/0a45c45aca9d85e8b2247f1833db6d9834f16a7a/nemo_rl/data/energon/sft_types.py#L23" target="_blank">
+    <text x="230" y="272">StepEnvelope</text></a>
+
+  <!-- ranks, leaders highlighted -->
+  <rect class="lead" x="340" y="252" width="66" height="44" rx="6"/>
+  <rect class="box" x="340" y="252" width="66" height="44" rx="6" fill="none"/>
+  <text class="rk" x="363" y="279">r0</text>
+  <rect class="box" x="414" y="252" width="66" height="44" rx="6"/>
+  <text class="rk" x="437" y="279">r1</text>
+  <rect class="box" x="488" y="252" width="66" height="44" rx="6"/>
+  <text class="rk" x="511" y="279">r2</text>
+  <rect class="box" x="562" y="252" width="66" height="44" rx="6"/>
+  <text class="rk" x="585" y="279">r3</text>
+  <rect class="lead" x="636" y="252" width="66" height="44" rx="6"/>
+  <rect class="box" x="636" y="252" width="66" height="44" rx="6" fill="none"/>
+  <text class="rk" x="659" y="279">r4</text>
+  <rect class="box" x="710" y="252" width="66" height="44" rx="6"/>
+  <text class="rk" x="733" y="279">r5</text>
+  <rect class="box" x="784" y="252" width="66" height="44" rx="6"/>
+  <text class="rk" x="807" y="279">r6</text>
+  <rect class="box" x="858" y="252" width="66" height="44" rx="6"/>
+  <text class="rk" x="881" y="279">r7</text>
+
+  <text class="note" x="340" y="316">data-parallel replica 0</text>
+  <text class="note" x="636" y="316">data-parallel replica 1</text>
+  <text class="ok-t" x="340" y="336">Rank 0 and rank 4 read. Their tensor-parallel copies get the same batch by NCCL broadcast.</text>
+  <text class="note" x="340" y="354">Green = reads its own shard.  The tensors never leave these two processes.</text>
+</svg>
+
+<h2>What is new</h2>
+
+<p>Three separate pieces land together. They are easier to read as three than as one 5,500-line diff.</p>
+
+<table>
+<tr><th>Piece</th><th>What it does</th></tr>
+<tr>
+  <td><a href="https://github.com/NVIDIA-NeMo/RL/blob/0a45c45aca9d85e8b2247f1833db6d9834f16a7a/nemo_rl/algorithms/sft_v2.py"><code>algorithms/sft_v2.py</code></a><br><span class="cm">456 lines</span></td>
+  <td>A second SFT loop that drives <code>TQPolicy</code> from one controller actor, with its own step counting, checkpointing and loader placement. It is <em>not</em> a copy of v1 — the batch masking and padding was pulled out into
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/0a45c45aca9d85e8b2247f1833db6d9834f16a7a/nemo_rl/algorithms/sft.py#L338"><code>prepare_sft_batch</code></a>
+  and is now shared by v1 training, v1 validation and the v2 worker.</td>
+</tr>
+<tr>
+  <td><a href="https://github.com/NVIDIA-NeMo/RL/blob/0a45c45aca9d85e8b2247f1833db6d9834f16a7a/nemo_rl/data/energon/"><code>data/energon/</code></a><br><span class="cm">~1,500 lines</span></td>
+  <td>The multimodal data path: cookers, task encoders, a small registry that imports a component only when it is asked for, a loader that can save and restore its place, and
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/0a45c45aca9d85e8b2247f1833db6d9834f16a7a/nemo_rl/data/energon/topology.py"><code>topology.py</code></a>,
+  which works out which GPU ranks read and which ranks receive.</td>
+</tr>
+<tr>
+  <td><a href="https://github.com/NVIDIA-NeMo/RL/blob/0a45c45aca9d85e8b2247f1833db6d9834f16a7a/nemo_rl/data_plane/adapters/local.py"><code>data_plane/adapters/local.py</code></a><br><span class="cm">545 lines</span></td>
+  <td>A data-plane adapter that keeps a batch in the process that produced it, instead of sending it anywhere. This is what lets the envelope carry a handle rather than the data.</td>
+</tr>
+</table>
+
+<p>The old path is untouched by default: <code>data.backend</code> stays <code>hf</code>, and importing
+<code>nemo_rl.data</code> still does not require <code>megatron.energon</code> — the heavy imports sit
+inside the two builder functions, which we checked by walking the import chain.</p>
+
+<h2>One step, with real numbers</h2>
+
+<p>Take the 8-GPU recipe in this PR: tensor parallel 4, so 2 data-parallel replicas. Set the global
+batch to 6 to keep the arithmetic small.</p>
+
+<div class="mono">world = 8 GPUs,  tensor_parallel = 4   <span class="cm">→  data_parallel = 8 / 4 = 2</span>
+train_global_batch_size = 6           <span class="cm">→  each loader reads 6 / 2 = 3 samples</span>
+
+<span class="cm">── controller ────────────────────────────────────────────────</span>
+run_all_workers_single_data("load_next_sft_batch",
+                            run_rank_0_only_axes=REPLICATED_AXES)
+<span class="cm">only the 2 replica leaders run it:  rank 0, rank 4
+ranks 1,2,3 and 5,6,7 are skipped — they are tensor-parallel copies</span>
+
+<span class="cm">── rank 0 ─────────────────────────────────────────────────────</span>
+batch    = next(self._sft_loader_iterator)   <span class="cm">3 samples, Energon shard 0</span>
+prepared = prepare_sft_batch(batch, ...)     <span class="cm">mask + pad, shared with v1</span>
+return StepEnvelope(meta=..., logical_rank=0, valid_tokens=...)
+
+<span class="cm">── rank 4 ─────────────────────────────────────────────────────</span>
+<span class="cm">same, but Energon shard 1 → logical_rank=1</span>
+
+<span class="cm">── controller ────────────────────────────────────────────────</span>
+logical_ranks == [0, 1]                      <span class="cm">checked, or it raises</span>
+train_placed_microbatches([e.meta for e in envelopes])
+<span class="cm">only meta travels. the 3-sample tensors stayed on rank 0 and rank 4.</span></div>
+
+<p>The dispatch and the sharding are decided in two different places, and they have to agree.
+Which ranks are asked comes from
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/0a45c45aca9d85e8b2247f1833db6d9834f16a7a/nemo_rl/algorithms/sft_v2.py#L186"><code>run_rank_0_only_axes</code></a>;
+which shard each loader reads comes from
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/0a45c45aca9d85e8b2247f1833db6d9834f16a7a/nemo_rl/data/energon/sft_worker.py#L80"><code>parallel_state.get_data_parallel_rank()</code></a>
+inside the worker. We checked this arithmetic against Megatron's own rank layout for both shipped
+recipes and it is right, including the tricky expert-parallel case: with expert parallel 2, the
+expert groups span <em>both</em> replicas, so using the plain data-parallel group is what keeps the
+effective batch from being quietly halved.</p>
+
+<h2>Does it work?</h2>
+
+<p>No training run has been posted — no loss curve, no throughput number, no comparison against the
+v1 loop on the same config and seed. The author says those are still to come. Both new recipes are
+parked in
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/0a45c45aca9d85e8b2247f1833db6d9834f16a7a/tests/test_suites/disabled.txt"><code>disabled.txt</code></a>
+for honest reasons (a 2-GPU recipe fits no nightly tier, and the 30B one costs about 12 GPU-hours
+against a budget that is nearly full), but the effect is that nothing exercises this path end to end
+on any schedule.</p>
+
+<p>CI is currently red on four jobs. These are from the pipeline on the PR head, not from us:</p>
+
+<table>
+<tr><th>Job</th><th>State</th><th>What it says</th></tr>
+<tr><td>Lint check</td><td class="no">fail</td>
+    <td><code>minimize-check</code> rejects <code>vlm_sft-qwen2.5-vl-3b-…-energon.v1.yaml</code> — the only recipe in the repo that fails it. See the warning below; the fix it prints is a trap.</td></tr>
+<tr><td>Lint check <span class="cm">(same job)</span></td><td class="no">fail</td>
+    <td>pyrefly reports 2 errors, both on lines this PR adds: <code>local.py:143</code> (<code>NonTensorData</code> not assignable) and <code>interfaces.py:194</code> (<code>Field(default=2, ge=1)</code> has no matching overload).</td></tr>
+<tr><td>uv lock check</td><td class="no">fail</td><td>The lock file still does not satisfy the check.</td></tr>
+<tr><td>copyright-check</td><td class="no">fail</td><td>Red on the head commit.</td></tr>
+</table>
+
+<p>So the honest summary is: the design is sound and the rank arithmetic checks out, but nothing has
+run it. The thing to ask for before merging is one run of the 2-GPU recipe against the v1 loop on the
+same data and seed, reporting loss at the same step and wall-clock per step.</p>
+
+<div class="warn">
+<strong>One trap worth knowing about.</strong> The lint failure prints a suggested fix:
+<code>tools/config_cli.py minimize … --in-place</code>. Do not run it. That recipe sets
+<code>data._override_: true</code>, which makes the config loader drop the inherited <code>data</code>
+block entirely — so the six keys the minimizer calls redundant have nothing to fall back to. Running
+it deletes <code>max_input_seq_length</code> and <code>shuffle</code>, and the run then dies at config
+validation with <code>data.max_input_seq_length Field required</code>. The second recipe inherits from
+this one, so both break.
+</div>
+
+<div class="hl">
+<strong>What this buys, and what to watch.</strong> Taking the driver out of the data path is the
+point: with the loader next to the GPU that consumes its output, a multimodal batch is decoded once,
+in the process that needs it, instead of being built centrally and copied out. That matters most for
+image and video data, where the batch is large and the driver becomes the bottleneck first.
+The cost is that a v2 run now has two things to keep in step — which ranks read, and which shard each
+reader takes — and those live in different files. The guards for that are real: a mismatch raises at
+setup rather than training on the wrong data. Worth watching as more backends arrive in stage 2,
+because today the only thing keeping those two views aligned is that they are computed from the same
+parallel layout.
+</div>
+
+</div>
+</body>
+</html>
