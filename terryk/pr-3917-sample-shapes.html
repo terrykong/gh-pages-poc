@@ -1,0 +1,436 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Every shape an SFT sample takes, from bytes on disk to the training step</title>
+<style>
+:root{
+  --bg:#0d1117; --surface:#161b22; --border:#30363d; --text:#e6edf3; --dim:#8b949e; --accent:#58a6ff;
+  --e:#d29922; --h:#a371f7; --s:#3fb950; --r:#f85149;
+  --ebg:rgba(210,153,34,.10); --hbg:rgba(163,113,247,.10); --sbg:rgba(63,185,80,.10); --rbg:rgba(248,81,73,.10);
+}
+:root[data-theme="light"]{
+  --bg:#ffffff; --surface:#f6f8fa; --border:#d0d7de; --text:#1f2328; --dim:#59636e; --accent:#0969da;
+  --e:#9a6700; --h:#8250df; --s:#1a7f37; --r:#cf222e;
+  --ebg:rgba(154,103,0,.09); --hbg:rgba(130,80,223,.09); --sbg:rgba(26,127,55,.09); --rbg:rgba(207,34,46,.09);
+}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--text);margin:0;
+  font:15.5px/1.62 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:34px 20px 70px}
+h1{font-size:27px;line-height:1.28;margin:0 0 6px;letter-spacing:-.015em}
+h2{font-size:19px;margin:38px 0 12px;padding-top:14px;border-top:1px solid var(--border)}
+p.sub{color:var(--dim);font-size:13.5px;margin:0 0 22px}
+p{margin:0 0 13px}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+code{font-family:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.88em;
+  background:var(--surface);border:1px solid var(--border);border-radius:5px;padding:1px 5px}
+pre{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:13px 15px;
+  overflow-x:auto;font-family:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,monospace;
+  font-size:12.6px;line-height:1.58;margin:0 0 14px}
+pre code{background:none;border:none;padding:0;font-size:inherit}
+figure{margin:0 0 8px}
+svg{width:100%;height:auto;display:block}
+svg a text{text-decoration:underline}
+figcaption{color:var(--dim);font-size:12.8px;margin-top:9px}
+table{border-collapse:collapse;width:100%;font-size:13.4px;margin:0 0 14px}
+th,td{border:1px solid var(--border);padding:7px 10px;text-align:left;vertical-align:top}
+th{background:var(--surface);font-weight:600}
+td code,th code{font-size:12.3px}
+.warn{background:var(--rbg);border:1px solid var(--r);border-radius:8px;padding:14px 17px;margin:18px 0 0}
+.hl{background:var(--sbg);border:1px solid var(--s);border-radius:8px;padding:14px 17px;margin:18px 0 0}
+.warn p:last-child,.hl p:last-child{margin-bottom:0}
+.dead{color:var(--r);font-weight:600}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);
+  border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;
+  font:13px/1 'JetBrains Mono',ui-monospace,monospace;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.18)}
+/* figure */
+.bxE{fill:var(--ebg);stroke:var(--e)}
+.bxH{fill:var(--hbg);stroke:var(--h)}
+.bxS{fill:var(--sbg);stroke:var(--s)}
+.bxD{fill:var(--surface);stroke:var(--border)}
+rect.bxE,rect.bxH,rect.bxS,rect.bxD{stroke-width:1.5;rx:7}
+text{font-family:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,monospace;fill:var(--text)}
+.ty{font-size:13px;font-weight:600}
+.mod{font-size:9.5px;fill:var(--dim)}
+.fn{font-size:10.5px;fill:var(--dim)}
+.hd{font-size:12.5px;font-weight:700;font-family:-apple-system,BlinkMacSystemFont,sans-serif}
+.lg{font-size:10.5px;fill:var(--dim)}
+.ar{stroke:var(--dim);stroke-width:1.4;fill:none}
+.arS{stroke:var(--s);stroke-width:1.8;fill:none}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+  document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head>
+<body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<div class="wrap">
+
+<h1>Every shape an SFT sample takes, from bytes on disk to the training step</h1>
+<p class="sub">
+  <a href="https://github.com/NVIDIA-NeMo/RL/pull/3917">NVIDIA-NeMo/RL#3917</a> —
+  SFT v2 stage 1 with the Energon multimodal data path.
+  Permalinks pinned to <code>72b7cdb</code>.
+</p>
+
+<p>
+NeMo-RL now has two ways to load SFT data: the old HuggingFace path and the new
+Megatron-Energon one this PR adds. They read different files and build different
+objects, so it looks like two pipelines. It is not. Both funnel into
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/72b7cdb7e113e8f7c722ba821a27e02b706f8e67/nemo_rl/data/llm_message_utils.py#L465"><code>get_formatted_message_log</code></a>,
+which does all the tokenizing, and then into
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/72b7cdb7e113e8f7c722ba821a27e02b706f8e67/nemo_rl/algorithms/sft.py#L338"><code>prepare_sft_batch</code></a>,
+which produces the flat padded tensors the trainer wants.
+Everything between those two points is <em>containers</em> — four different types holding
+the same pair of values.
+</p>
+
+<h2>The nine shapes</h2>
+
+<figure>
+<svg viewBox="0 0 940 806" role="img" aria-label="Diagram of the SFT sample lifecycle on the Energon and HuggingFace paths">
+
+  <!-- column headers -->
+  <text class="hd" x="180" y="20" text-anchor="middle" fill="var(--e)">ENERGON (new in this PR)</text>
+  <text class="hd" x="760" y="20" text-anchor="middle" fill="var(--h)">HUGGINGFACE (unchanged)</text>
+
+  <!-- ================= row 1 : on disk ================= -->
+  <rect class="bxD" x="40"  y="34" width="280" height="40"/>
+  <text class="ty"  x="180" y="52" text-anchor="middle">.tar shards + .nv-meta/</text>
+  <text class="mod" x="180" y="66" text-anchor="middle">webdataset, prepared by energon CLI</text>
+
+  <rect class="bxD" x="620" y="34" width="280" height="40"/>
+  <text class="ty"  x="760" y="52" text-anchor="middle">.jsonl / HF hub</text>
+  <text class="mod" x="760" y="66" text-anchor="middle">datasets.Dataset rows</text>
+
+  <path class="ar" d="M180 74 L180 108" marker-end="url(#a)"/>
+  <path class="ar" d="M760 74 L760 108" marker-end="url(#a)"/>
+  <text class="fn" x="188" y="95">SavableDataLoader</text>
+  <text class="fn" x="768" y="95">StatefulDataLoader</text>
+
+  <!-- ================= row 2 : raw ================= -->
+  <rect class="bxE" x="40"  y="110" width="280" height="40"/>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/72b7cdb7e113e8f7c722ba821a27e02b706f8e67/nemo_rl/data/energon/multimodal/cookers/generic.py#L22">
+    <text class="ty" x="180" y="128" text-anchor="middle">CrudeSample</text></a>
+  <text class="mod" x="180" y="142" text-anchor="middle">megatron.energon &mdash; untyped dict of bytes</text>
+
+  <rect class="bxH" x="620" y="110" width="280" height="40"/>
+  <text class="ty"  x="760" y="128" text-anchor="middle">dict</text>
+  <text class="mod" x="760" y="142" text-anchor="middle">one dataset row: messages, images</text>
+
+  <path class="ar" d="M180 150 L180 190" marker-end="url(#a)"/>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/72b7cdb7e113e8f7c722ba821a27e02b706f8e67/nemo_rl/data/energon/multimodal/cookers/generic.py#L98">
+    <text class="fn" x="188" y="166">cook_conversation()</text></a>
+  <text class="fn" x="188" y="180">cookers/generic.py:98 &mdash; &ldquo;the cooker&rdquo;</text>
+
+  <!-- ================= row 3 : typed per-sample ================= -->
+  <rect class="bxE" x="40" y="192" width="280" height="48"/>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/72b7cdb7e113e8f7c722ba821a27e02b706f8e67/nemo_rl/data/energon/multimodal/types.py#L54">
+    <text class="ty" x="180" y="210" text-anchor="middle">CanonicalSFTSample</text></a>
+  <text class="mod" x="180" y="224" text-anchor="middle">messages, media[MediaRef], tools</text>
+  <text class="mod" x="180" y="235" text-anchor="middle">model-neutral: no tokenizer yet</text>
+
+  <path class="ar" d="M180 240 L180 286" marker-end="url(#a)"/>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/72b7cdb7e113e8f7c722ba821a27e02b706f8e67/nemo_rl/data/energon/multimodal/task_encoders/generic_sft.py#L56">
+    <text class="fn" x="188" y="257">_normalize_messages()</text></a>
+  <text class="fn" x="188" y="270">swaps media_index for decoded bytes,</text>
+  <text class="fn" x="188" y="281">so messages now match HF's shape</text>
+
+  <!-- convergence 1 : shared tokenizer -->
+  <rect class="bxS" x="330" y="288" width="280" height="52"/>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/72b7cdb7e113e8f7c722ba821a27e02b706f8e67/nemo_rl/data/llm_message_utils.py#L465">
+    <text class="ty" x="470" y="307" text-anchor="middle" fill="var(--s)">get_formatted_message_log()</text></a>
+  <text class="mod" x="470" y="321" text-anchor="middle">chat template + tokenizer + processor</text>
+  <text class="mod" x="470" y="333" text-anchor="middle">BOTH PATHS CALL THIS &mdash; tokens agree here</text>
+
+  <path class="arS" d="M180 286 L180 300 Q180 314 200 314 L326 314" marker-end="url(#s)"/>
+  <path class="arS" d="M760 250 L760 300 Q760 314 740 314 L614 314" marker-end="url(#s)"/>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/72b7cdb7e113e8f7c722ba821a27e02b706f8e67/nemo_rl/data/processors.py#L159">
+    <text class="fn" x="628" y="268" text-anchor="start">processors.py:159</text></a>
+
+  <!-- HF row 3 : straight into sft_processor -->
+  <path class="ar" d="M760 150 L760 192" marker-end="url(#a)"/>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/72b7cdb7e113e8f7c722ba821a27e02b706f8e67/nemo_rl/data/processors.py#L140">
+    <text class="fn" x="768" y="176">sft_processor()</text></a>
+  <rect class="bxH" x="620" y="194" width="280" height="40"/>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/72b7cdb7e113e8f7c722ba821a27e02b706f8e67/nemo_rl/data/interfaces.py#L35">
+    <text class="ty" x="760" y="212" text-anchor="middle">DatumSpec</text></a>
+  <text class="mod" x="760" y="226" text-anchor="middle">message_log, length, loss_multiplier, idx</text>
+  <path class="ar" d="M760 234 L760 250"/>
+
+  <!-- back out of shared tokenizer -->
+  <path class="arS" d="M400 340 L400 356 Q400 370 380 370 L184 370" marker-end="url(#s)"/>
+  <path class="arS" d="M540 340 L540 356 Q540 370 560 370 L756 370" marker-end="url(#s)"/>
+  <text class="fn" x="410" y="358">message_log: list of per-message dicts</text>
+
+  <!-- ================= row 4 : per-sample containers ================= -->
+  <rect class="bxE" x="40" y="374" width="280" height="52"/>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/72b7cdb7e113e8f7c722ba821a27e02b706f8e67/nemo_rl/data/energon/multimodal/types.py#L63">
+    <text class="ty" x="180" y="392" text-anchor="middle">EncodedSFTSample</text></a>
+  <text class="mod" x="180" y="406" text-anchor="middle">message_log, length, loss_multiplier,</text>
+  <text class="mod" x="180" y="418" text-anchor="middle">group_key, sample_key, +2 unused</text>
+
+  <text class="mod" x="760" y="392" text-anchor="middle">(DatumSpec, from above &mdash;</text>
+  <text class="mod" x="760" y="406" text-anchor="middle">same two values, different type)</text>
+
+  <path class="ar" d="M180 426 L180 466" marker-end="url(#a)"/>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/72b7cdb7e113e8f7c722ba821a27e02b706f8e67/nemo_rl/data/energon/multimodal/task_encoders/generic_sft.py#L283">
+    <text class="fn" x="188" y="442">GenericSFTTaskEncoder.batch()</text></a>
+  <text class="fn" x="188" y="456">generic_sft.py:283</text>
+
+  <path class="ar" d="M760 420 L760 466" marker-end="url(#a)"/>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/72b7cdb7e113e8f7c722ba821a27e02b706f8e67/nemo_rl/data/collate_fn.py#L29">
+    <text class="fn" x="768" y="442">rl_collate_fn()</text></a>
+  <text class="fn" x="768" y="456">collate_fn.py:29</text>
+
+  <!-- ================= row 5 : batched, still message_log ================= -->
+  <rect class="bxE" x="40" y="468" width="280" height="44"/>
+  <text class="ty"  x="180" y="486" text-anchor="middle">BatchedDataDict</text>
+  <text class="mod" x="180" y="500" text-anchor="middle">message_log, loss_multiplier, source_ids</text>
+
+  <rect class="bxH" x="620" y="468" width="280" height="44"/>
+  <text class="ty"  x="760" y="486" text-anchor="middle">BatchedDataDict</text>
+  <text class="mod" x="760" y="500" text-anchor="middle">message_log, loss_multiplier, idx, +5 more</text>
+
+  <!-- convergence 2 -->
+  <path class="arS" d="M180 512 L180 534 Q180 548 200 548 L326 548" marker-end="url(#s)"/>
+  <path class="arS" d="M760 512 L760 534 Q760 548 740 548 L614 548" marker-end="url(#s)"/>
+
+  <rect class="bxS" x="330" y="524" width="280" height="52"/>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/72b7cdb7e113e8f7c722ba821a27e02b706f8e67/nemo_rl/algorithms/sft.py#L338">
+    <text class="ty" x="470" y="543" text-anchor="middle" fill="var(--s)">prepare_sft_batch()</text></a>
+  <text class="mod" x="470" y="557" text-anchor="middle">loss mask, flatten, pad, then validate</text>
+  <text class="mod" x="470" y="569" text-anchor="middle">BOTH PATHS CALL THIS &mdash; sft.py:338</text>
+
+  <path class="arS" d="M470 576 L470 604" marker-end="url(#s)"/>
+
+  <!-- ================= row 6 : the flat batch ================= -->
+  <rect class="bxS" x="250" y="606" width="440" height="46"/>
+  <text class="ty"  x="470" y="625" text-anchor="middle">BatchedDataDict &mdash; flat padded tensors</text>
+  <text class="mod" x="470" y="640" text-anchor="middle">input_ids [3,16] &nbsp; token_mask [3,16] &nbsp; input_lengths [3] &nbsp; sample_mask [3]</text>
+
+  <!-- split : transport only -->
+  <path class="ar" d="M330 652 L330 668 Q330 682 310 682 L184 682" marker-end="url(#a)"/>
+  <path class="ar" d="M610 652 L610 668 Q610 682 630 682 L756 682" marker-end="url(#a)"/>
+
+  <rect class="bxD" x="40" y="662" width="280" height="44"/>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/72b7cdb7e113e8f7c722ba821a27e02b706f8e67/nemo_rl/algorithms/sft.py#L606">
+    <text class="ty" x="180" y="680" text-anchor="middle">v1: policy.train(batch)</text></a>
+  <text class="mod" x="180" y="694" text-anchor="middle">the dict itself is the argument</text>
+
+  <rect class="bxD" x="620" y="662" width="280" height="44"/>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/72b7cdb7e113e8f7c722ba821a27e02b706f8e67/nemo_rl/data_plane/adapters/local.py#L120">
+    <text class="ty" x="760" y="680" text-anchor="middle">v2: local_batch_to_tensordict</text></a>
+  <text class="mod" x="760" y="694" text-anchor="middle">then put_samples &rarr; KVBatchMeta</text>
+
+  <path class="ar" d="M760 706 L760 738" marker-end="url(#a)"/>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/72b7cdb7e113e8f7c722ba821a27e02b706f8e67/nemo_rl/data/energon/sft_types.py#L24">
+    <text class="fn" x="752" y="717" text-anchor="end">wrapped in StepEnvelope,</text></a>
+  <text class="fn" x="752" y="729" text-anchor="end">sent to the controller</text>
+
+  <rect class="bxD" x="480" y="740" width="420" height="46"/>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/72b7cdb7e113e8f7c722ba821a27e02b706f8e67/nemo_rl/data_plane/worker_mixin.py#L259">
+    <text class="ty" x="690" y="759" text-anchor="middle">back to BatchedDataDict, same shape</text></a>
+  <text class="mod" x="690" y="774" text-anchor="middle">materialize_local() in the worker &mdash; the round trip closes</text>
+
+  <path class="ar" d="M180 706 L180 763 L476 763" marker-end="url(#a)"/>
+
+  <!-- legend -->
+  <rect class="bxD" x="40" y="740" width="120" height="46"/>
+  <text class="lg" x="52" y="756">■ energon only</text>
+  <text class="lg" x="52" y="769">■ hf only</text>
+  <text class="lg" x="52" y="782">■ shared code</text>
+  <rect x="46" y="750" width="7" height="7" fill="var(--e)"/>
+  <rect x="46" y="763" width="7" height="7" fill="var(--h)"/>
+  <rect x="46" y="776" width="7" height="7" fill="var(--s)"/>
+
+  <defs>
+    <marker id="a" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto">
+      <path d="M0,0 L7,3 L0,6 z" fill="var(--dim)"/></marker>
+    <marker id="s" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto">
+      <path d="M0,0 L7,3 L0,6 z" fill="var(--s)"/></marker>
+  </defs>
+</svg>
+<figcaption>
+Green = code both paths run. The two paths meet twice: once per sample, to tokenize, and
+once per batch, to flatten and pad. Between those meetings they carry the same two values
+(<code>message_log</code>, <code>loss_multiplier</code>) in four different container types.
+</figcaption>
+</figure>
+
+<h2>One sample, all the way through</h2>
+
+<p>
+A batch of <strong>3</strong> conversations. Each has <strong>2</strong> messages (a user turn
+with <strong>1</strong> image, then an assistant turn) that tokenize to <strong>7</strong> and
+<strong>5</strong> tokens, so each sample is <strong>12</strong> tokens long.
+<code>max_sequence_length</code> is <strong>32</strong>, and
+<code>make_sequence_length_divisible_by</code> is <strong>8</strong>, so 12 rounds up to a padded
+length of <strong>16</strong>. Here is the same sample at every stage.
+</p>
+
+<pre><code>ENERGON                                     HUGGINGFACE
+─────────────────────────────────────────   ─────────────────────────────────────────
+CrudeSample                                 dict
+  {"json": b'{"messages":[...],              {"messages": [
+    "media":["img.jpg"]}',                      {"role":"user","content":[
+   "jpg": b'\xff\xd8\xff...'}                      {"type":"image","image":&lt;PIL&gt;},
+                                                   {"type":"text","text":"how many?"}]},
+        │ cook_conversation()                   {"role":"assistant","content":"3"}]}
+        ▼
+CanonicalSFTSample                                       │ sft_processor()
+  messages = [...media_index: 0...]                      │
+  media    = [MediaRef(modality="image",                 │
+                       value=b'\xff\xd8...')]            │
+  tools    = None                                        │
+                                                         │
+        │ _normalize_messages()                          │
+        │   media_index: 0  ->  {"type":"image",         │
+        │                        "image": &lt;PIL&gt;}         │
+        ▼                                                │
+   ┌─────────────────────────────────────────────────────┘
+   ▼
+get_formatted_message_log()      ← both paths, same function, same tokens out
+   message_log = [
+     {"role":"user",      "token_ids": tensor([7 ids]), "pixel_values": PackedTensor},
+     {"role":"assistant", "token_ids": tensor([5 ids])},
+   ]
+   │
+   ├──────────────────────────────┐
+   ▼                              ▼
+EncodedSFTSample               DatumSpec
+  message_log      = [...]       message_log      = [...]     ← identical
+  length           = 12          length           = 12        ← identical
+  loss_multiplier  = 1.0         loss_multiplier  = 1.0       ← identical
+  sample_key       = "s0"        idx              = 0
+  group_key        = (fp,)       extra_env_info   = None
+  packing_cost     = 12   DEAD
+  pending_sample   = None  DEAD
+
+   │ GenericSFTTaskEncoder.batch()   │ rl_collate_fn()
+   ▼                                 ▼
+BatchedDataDict                    BatchedDataDict
+  message_log     (3 logs)           message_log     (3 logs)
+  loss_multiplier [3]                loss_multiplier [3]
+  source_ids      (3 strs)           length, idx, task_name, extra_env_info, ...
+   │                                 │
+   └────────────┬────────────────────┘
+                ▼
+        prepare_sft_batch()          ← both paths, second shared function
+                ▼
+BatchedDataDict
+  input_ids      [3, 16]   int64   12 real tokens + 4 pad
+  token_mask     [3, 16]   1 on the 5 assistant tokens, 0 elsewhere
+  input_lengths  [3]       = [12, 12, 12]
+  sample_mask    [3]       = [1., 1., 1.]   (from loss_multiplier)
+  pixel_values             PackedTensor, carried through untouched</code></pre>
+
+<p>
+Inside <code>prepare_sft_batch</code> the work is three calls:
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/72b7cdb7e113e8f7c722ba821a27e02b706f8e67/nemo_rl/algorithms/sft.py#L370"><code>add_loss_mask_to_message_log</code></a>
+marks the assistant tokens,
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/72b7cdb7e113e8f7c722ba821a27e02b706f8e67/nemo_rl/algorithms/sft.py#L377"><code>batched_message_log_to_flat_message</code></a>
+concatenates each conversation and pads the batch to 16, and
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/72b7cdb7e113e8f7c722ba821a27e02b706f8e67/nemo_rl/algorithms/sft.py#L287"><code>_validate_prepared_sft_batch</code></a>
+checks the shapes and zeroes any row that ended up with no trainable token.
+The Energon path can also arrive with <code>loss_mask_mode="precomputed"</code>, which skips
+the first call and validates the supplied mask instead
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/72b7cdb7e113e8f7c722ba821a27e02b706f8e67/nemo_rl/algorithms/sft.py#L348">sft.py:348</a>).
+</p>
+
+<h2>What is carried and never used</h2>
+
+<p>
+You asked whether anything is excessive. Tracing every field to a reader turns up
+<strong>five dead ones</strong> across two of the new types. Each is written on every single
+sample or every single step, and nothing ever reads it back.
+</p>
+
+<table>
+<tr><th>Field</th><th>Written at</th><th>Read by</th></tr>
+<tr>
+  <td><code>EncodedSFTSample.packing_cost</code></td>
+  <td><a href="https://github.com/NVIDIA-NeMo/RL/blob/72b7cdb7e113e8f7c722ba821a27e02b706f8e67/nemo_rl/data/energon/multimodal/task_encoders/generic_sft.py#L239">generic_sft.py:239</a></td>
+  <td class="dead">nothing</td>
+</tr>
+<tr>
+  <td><code>EncodedSFTSample.pending_sample</code></td>
+  <td class="dead">never written either</td>
+  <td class="dead">nothing</td>
+</tr>
+<tr>
+  <td><code>StepEnvelope.field_names</code></td>
+  <td><a href="https://github.com/NVIDIA-NeMo/RL/blob/72b7cdb7e113e8f7c722ba821a27e02b706f8e67/nemo_rl/data/energon/sft_worker.py#L166">sft_worker.py:166</a></td>
+  <td class="dead">nothing &mdash; and it duplicates <code>meta.fields</code></td>
+</tr>
+<tr>
+  <td><code>StepEnvelope.sequence_lengths</code></td>
+  <td><a href="https://github.com/NVIDIA-NeMo/RL/blob/72b7cdb7e113e8f7c722ba821a27e02b706f8e67/nemo_rl/data/energon/sft_worker.py#L167">sft_worker.py:167</a></td>
+  <td class="dead">nothing &mdash; duplicates <code>meta.sequence_lengths</code></td>
+</tr>
+<tr>
+  <td><code>StepEnvelope.field_fingerprints</code></td>
+  <td><a href="https://github.com/NVIDIA-NeMo/RL/blob/72b7cdb7e113e8f7c722ba821a27e02b706f8e67/nemo_rl/data/energon/sft_worker.py#L168">sft_worker.py:168</a></td>
+  <td class="dead">nothing, and it costs a hash per field per step</td>
+</tr>
+</table>
+
+<p>
+The last three matter most. <code>StepEnvelope</code> already wraps a
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/72b7cdb7e113e8f7c722ba821a27e02b706f8e67/nemo_rl/data_plane/interfaces.py#L202"><code>KVBatchMeta</code></a>,
+which carries <code>fields</code> and <code>sequence_lengths</code> already. Copying them onto the
+envelope creates two ways to ask the same question that can disagree. Drop all three and
+<code>StepEnvelope</code> keeps exactly the five fields the controller reads:
+<code>meta</code>, <code>logical_rank</code>, <code>source_ids</code>, <code>load_seconds</code>,
+<code>valid_tokens</code>.
+</p>
+
+<p>
+Everything else earns its place. The two per-sample containers look like duplication —
+<code>EncodedSFTSample</code> and <code>DatumSpec</code> hold the same
+<code>message_log</code> and <code>loss_multiplier</code> — but Energon requires its own
+type: it must subclass <code>Sample</code> so the loader can restore <code>__key__</code> and
+restart mid-shard. That one is forced, not chosen.
+</p>
+
+<h2>Does it work?</h2>
+
+<p>
+The author posted an A/B convergence run: Qwen2.5-VL-3B on CLEVR with 9&times;-larger image
+payloads, DP=8, TP=2, sequence length 8192, with the v1 loss curve and the v2 loss curve
+plotted together. They track. That is the right evidence for this change, because the whole
+claim of the page above is that the two paths produce the same tokens — a matching loss curve
+is what that looks like from the outside.
+</p>
+
+<p>
+What it does not pin down is <em>equality</em>, only closeness at DP=8. There is no test that
+feeds one conversation through both paths and asserts the prepared tensors match, so a future
+edit to either container could drift without the curve visibly moving. That test is cheap to
+write — both encoders are already constructible in
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/72b7cdb7e113e8f7c722ba821a27e02b706f8e67/tests/unit/data/test_energon_sft.py#L229">tests/unit/data/test_energon_sft.py</a>
+— and it is the one thing that would hold the convergence point above in place.
+</p>
+
+<div class="hl">
+<p>
+<strong>If you are reading one thing:</strong> the two loaders are not two pipelines. They
+share the tokenizer call and they share the batch normalizer, so the tokens are identical by
+the time either reaches the trainer. Only the containers differ, and only in the middle. When
+you add a third loader, the job is to reach
+<code>get_formatted_message_log</code> with HF-shaped messages — everything after that is
+already written.
+</p>
+</div>
+
+</div>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+  function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+  function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
+    b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
+      else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+  document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+</body>
+</html>
