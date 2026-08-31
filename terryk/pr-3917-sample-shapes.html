@@ -395,6 +395,72 @@ type: it must subclass <code>Sample</code> so the loader can restore <code>__key
 restart mid-shard. That one is forced, not chosen.
 </p>
 
+<h2>Where the data changes in place</h2>
+
+<p>
+Most of the pipeline copies. <code>cook_conversation</code> and
+<code>_normalize_messages</code> both <code>deepcopy</code> the messages before touching them,
+so the raw sample is never edited. Two steps do not copy, and both of them edit an object the
+caller still holds.
+</p>
+
+<table>
+<tr><th>Where</th><th>What it writes</th><th>Into whose object</th></tr>
+<tr>
+  <td><a href="https://github.com/NVIDIA-NeMo/RL/blob/72b7cdb7e113e8f7c722ba821a27e02b706f8e67/nemo_rl/data/llm_message_utils.py#L184"><code>add_loss_mask_to_message_log</code></a></td>
+  <td><code>message["token_loss_mask"]</code> on every message</td>
+  <td>the caller's <code>batch["message_log"]</code> &mdash; the function returns <code>None</code></td>
+</tr>
+<tr>
+  <td><a href="https://github.com/NVIDIA-NeMo/RL/blob/72b7cdb7e113e8f7c722ba821a27e02b706f8e67/nemo_rl/algorithms/sft.py#L322"><code>_validate_prepared_sft_batch</code></a></td>
+  <td><code>batch["sample_mask"]</code>, zeroing rows with no trainable token</td>
+  <td>the batch it was asked to check</td>
+</tr>
+</table>
+
+<p>
+The second one is the surprising one: a function named <code>_validate_</code> also repairs.
+It is a deliberate choice with a comment explaining it — such a row already contributed zero to
+the loss, so masking it beats killing a run hours in over one bad conversation — but it means
+<code>prepare_sft_batch</code> can hand back a <code>sample_mask</code> that differs from the
+<code>loss_multiplier</code> it was built from.
+</p>
+
+<p>
+Two more edits happen in place but only to objects the function just made, so they are safe:
+the truncation branches in
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/72b7cdb7e113e8f7c722ba821a27e02b706f8e67/nemo_rl/data/energon/multimodal/task_encoders/generic_sft.py#L216">generic_sft.py:216</a>
+and
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/72b7cdb7e113e8f7c722ba821a27e02b706f8e67/nemo_rl/data/processors.py#L172">processors.py:172</a>
+clip <code>token_ids</code> on the log they just built. The token math is the same on both sides
+(<code>min(4, max_seq_length // len(message_log))</code>); only Energon also empties every
+<code>PackedTensor</code>, because dropping the placeholder tokens while keeping the image
+features would leave the vision merge with nothing to scatter into.
+</p>
+
+<div class="warn">
+<p>
+<strong>One name that gets expensive to change: <code>stage3</code>.</strong>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/72b7cdb7e113e8f7c722ba821a27e02b706f8e67/nemo_rl/data/energon/sft_dataloader.py#L302"><code>_v1_loader_projection</code></a>
+adds a dict key literally named <code>"stage3"</code>, holding the model family, cooker and
+task-encoder identities. It only appears when those components are <em>not</em> the defaults,
+which is the point: default setups keep the old fingerprint so existing checkpoints still
+restore, and custom ones get their components hashed in.
+</p>
+<p>
+It is live code, not a leftover &mdash;
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/72b7cdb7e113e8f7c722ba821a27e02b706f8e67/tests/unit/data/test_energon_sft.py#L451"><code>test_v1_identity_identifies_stage3_component_selection</code></a>
+asserts the two configs hash differently. The problem is the name. &ldquo;Stage 3&rdquo; here
+means a future milestone of the SFT v2 rollout, the same way the guards say
+&ldquo;SFTv2 Stage 1 requires data.backend=energon&rdquo;. But this repo already uses
+&ldquo;Stage 1/2/3&rdquo; for real training stages &mdash; in the Nemotron 3 Ultra guide, Stage 1
+is student RLVR, Stage 2 is teacher training, Stage 3 is MOPD. Same words, unrelated meanings.
+And unlike the error strings, this one is hashed into a checkpoint fingerprint, so renaming it
+later invalidates every V1 checkpoint. Rename it now to what it holds, like
+<code>components</code>.
+</p>
+</div>
+
 <h2>Does it work?</h2>
 
 <p>
