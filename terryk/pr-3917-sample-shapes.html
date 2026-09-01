@@ -340,6 +340,128 @@ the first call and validates the supplied mask instead
 (<a href="https://github.com/NVIDIA-NeMo/RL/blob/72b7cdb7e113e8f7c722ba821a27e02b706f8e67/nemo_rl/algorithms/sft.py#L348">sft.py:348</a>).
 </p>
 
+<h2>The last two shapes: KVBatchMeta and StepEnvelope</h2>
+
+<p>
+The figure above ends the v2 path at &ldquo;wrapped in <code>StepEnvelope</code>&rdquo;. Here is
+what that means. The controller that drives training runs in its own Ray actor with no GPUs, and
+it must never touch tensors. So the prepared batch is <strong>split in two</strong>: the tensors
+stay in the worker process that built them, and only a description of them crosses to the
+controller.
+</p>
+
+<figure>
+<svg viewBox="0 0 940 486" role="img" aria-label="How the prepared batch splits into tensors that stay put and metadata that travels to the controller">
+
+  <line x1="470" y1="26" x2="470" y2="470" stroke="var(--border)" stroke-width="1.5" stroke-dasharray="5 4"/>
+  <text class="hd" x="235" y="18" text-anchor="middle" fill="var(--e)">POLICY WORKER (DP shard 0, replica leader)</text>
+  <text class="hd" x="706" y="18" text-anchor="middle" fill="var(--h)">SFT CONTROLLER ACTOR (no GPUs)</text>
+  <text class="lg" x="478" y="466">Ray &mdash; process boundary</text>
+
+  <!-- prepared batch -->
+  <rect class="bxS" x="40" y="34" width="400" height="42"/>
+  <text class="ty"  x="240" y="52" text-anchor="middle">BatchedDataDict &mdash; flat padded tensors</text>
+  <text class="mod" x="240" y="67" text-anchor="middle">the output of prepare_sft_batch(), from the figure above</text>
+
+  <path class="ar" d="M150 76 L150 112" marker-end="url(#a)"/>
+  <path class="ar" d="M340 76 L340 112" marker-end="url(#a)"/>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/72b7cdb7e113e8f7c722ba821a27e02b706f8e67/nemo_rl/data_plane/adapters/local.py#L120">
+    <text class="fn" x="46" y="95">local_batch_to_tensordict()</text></a>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/72b7cdb7e113e8f7c722ba821a27e02b706f8e67/nemo_rl/data_plane/adapters/local.py#L315">
+    <text class="fn" x="348" y="95">put_samples() returns</text></a>
+
+  <!-- tensors branch -->
+  <rect class="bxE" x="40" y="114" width="200" height="56"/>
+  <text class="ty"  x="140" y="132" text-anchor="middle">TensorDict</text>
+  <text class="mod" x="140" y="146" text-anchor="middle">in LocalDataPlaneClient,</text>
+  <text class="mod" x="140" y="158" text-anchor="middle">a plain dict in this process</text>
+
+  <rect class="bxD" x="40" y="182" width="200" height="42"/>
+  <text class="mod" x="140" y="199" text-anchor="middle">STAYS HERE. Never sent to</text>
+  <text class="mod" x="140" y="213" text-anchor="middle">the controller, ever.</text>
+  <path class="ar" d="M140 170 L140 180" marker-end="url(#a)"/>
+
+  <!-- meta branch -->
+  <rect class="bxH" x="256" y="114" width="184" height="56"/>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/72b7cdb7e113e8f7c722ba821a27e02b706f8e67/nemo_rl/data_plane/interfaces.py#L202">
+    <text class="ty" x="348" y="132" text-anchor="middle">KVBatchMeta</text></a>
+  <text class="mod" x="348" y="146" text-anchor="middle">partition_id, sample_ids,</text>
+  <text class="mod" x="348" y="158" text-anchor="middle">fields, sequence_lengths</text>
+
+  <rect class="bxH" x="256" y="182" width="184" height="70"/>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/72b7cdb7e113e8f7c722ba821a27e02b706f8e67/nemo_rl/data/energon/sft_types.py#L24">
+    <text class="ty" x="348" y="200" text-anchor="middle">StepEnvelope</text></a>
+  <text class="mod" x="348" y="214" text-anchor="middle">.meta = the KVBatchMeta</text>
+  <text class="mod" x="348" y="226" text-anchor="middle">+ logical_rank, source_ids,</text>
+  <text class="mod" x="348" y="238" text-anchor="middle">valid_tokens, load_seconds</text>
+  <path class="ar" d="M348 170 L348 180" marker-end="url(#a)"/>
+
+  <!-- cross to controller -->
+  <path class="ar" d="M440 214 L560 214" marker-end="url(#a)"/>
+  <text class="fn" x="448" y="206">returned by</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/72b7cdb7e113e8f7c722ba821a27e02b706f8e67/nemo_rl/data/energon/sft_worker.py#L100">
+    <text class="fn" x="448" y="231">load_next_sft_batch()</text></a>
+
+  <!-- controller side -->
+  <rect class="bxH" x="564" y="112" width="336" height="64"/>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/72b7cdb7e113e8f7c722ba821a27e02b706f8e67/nemo_rl/algorithms/sft_v2.py#L204">
+    <text class="ty" x="732" y="130" text-anchor="middle">list[StepEnvelope]</text></a>
+  <text class="mod" x="732" y="145" text-anchor="middle">one per logical DP shard, collected by</text>
+  <text class="mod" x="732" y="158" text-anchor="middle">_load_envelopes(); it checks the ranks</text>
+  <text class="mod" x="732" y="170" text-anchor="middle">arrive as 0, 1, 2, ... and raises if not</text>
+
+  <rect class="bxD" x="564" y="192" width="336" height="66"/>
+  <text class="mod" x="732" y="210" text-anchor="middle">the controller reads only the small stuff:</text>
+  <text class="mod" x="732" y="224" text-anchor="middle">logical_rank -> ordering &nbsp; source_ids -> sample count</text>
+  <text class="mod" x="732" y="238" text-anchor="middle">valid_tokens -> save state &nbsp; load_seconds -> metrics</text>
+  <text class="mod" x="732" y="252" text-anchor="middle">it never opens .meta.sample_ids to fetch data</text>
+
+  <rect class="bxS" x="564" y="274" width="336" height="46"/>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/72b7cdb7e113e8f7c722ba821a27e02b706f8e67/nemo_rl/algorithms/sft_v2.py#L230">
+    <text class="ty" x="732" y="292" text-anchor="middle">train_placed_microbatches(</text></a>
+  <text class="ty"  x="732" y="308" text-anchor="middle">[e.meta for e in envelopes])</text>
+  <path class="ar" d="M732 258 L732 272" marker-end="url(#a)"/>
+
+  <!-- return path -->
+  <path class="ar" d="M564 297 L500 297 Q470 297 470 322 L470 348 L246 348" marker-end="url(#a)"/>
+  <text class="fn" x="252" y="341">the meta comes back to the worker that made it</text>
+
+  <rect class="bxS" x="40" y="360" width="400" height="86"/>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/72b7cdb7e113e8f7c722ba821a27e02b706f8e67/nemo_rl/data_plane/worker_mixin.py#L259">
+    <text class="ty" x="240" y="379" text-anchor="middle">get_data(meta) then materialize_local()</text></a>
+  <text class="mod" x="240" y="394" text-anchor="middle">looks the tensors up in this process's own store</text>
+  <text class="mod" x="240" y="407" text-anchor="middle">and rebuilds the same BatchedDataDict</text>
+  <text class="mod" x="240" y="424" text-anchor="middle">then broadcasts it over NCCL to this shard's</text>
+  <text class="mod" x="240" y="437" text-anchor="middle">TP/PP/CP peers &mdash; worker_mixin.py:268</text>
+
+  <defs>
+    <marker id="a2" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto">
+      <path d="M0,0 L7,3 L0,6 z" fill="var(--dim)"/></marker>
+  </defs>
+</svg>
+<figcaption>
+The split is the whole point of the data plane: the controller orchestrates a training step
+without ever holding a tensor, so it can run on a CPU-only actor. <code>KVBatchMeta</code> is the
+address; <code>StepEnvelope</code> is that address plus the few numbers the controller needs to
+log and to advance its save state.
+</figcaption>
+</figure>
+
+<p>
+So the two new types are not more containers for the sample &mdash; they are what is left when
+you take the sample <em>out</em>. <code>KVBatchMeta</code> is the general one, shared with the
+TransferQueue path and defined in <code>data_plane/interfaces.py</code>.
+<code>StepEnvelope</code> is the SFT-specific wrapper that adds what
+<code>_run_train_step</code> needs and nothing else.
+</p>
+
+<p>
+One thing this makes precise, because it is easy to get backwards: the tensors are not
+immortal in one process. They stay put while the controller is deciding what to do, and then the
+replica leader broadcasts them over NCCL to the other ranks of its own shard. What never happens
+is a tensor reaching the controller, or crossing between DP shards.
+</p>
+
 <h2>What is carried and never used</h2>
 
 <p>
