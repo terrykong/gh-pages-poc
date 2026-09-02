@@ -35,6 +35,12 @@ code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;
 .mono .cm{color:var(--dim)}
 .mono .ok{color:var(--green)}
 .mono .no{color:var(--red)}
+table.lay{border-collapse:collapse;width:100%;margin:14px 0 6px;font-size:13px}
+table.lay th{text-align:left;font-weight:600;color:var(--accent);border-bottom:1px solid var(--border);padding:7px 10px;vertical-align:bottom}
+table.lay td{border-bottom:1px solid var(--border);padding:7px 10px;vertical-align:top}
+table.lay td.rh{color:var(--dim);white-space:nowrap}
+table.lay td.y{color:var(--green);font-weight:600}
+table.lay td.n{color:var(--red);font-weight:600}
 .src{font-size:12.5px;color:var(--dim);margin:5px 0 20px}
 .warn{border-left:3px solid var(--orange);background:var(--surface);
   padding:12px 16px;margin:20px 0 0;border-radius:0 8px 8px 0}
@@ -131,7 +137,7 @@ only the unfinished one is generated again.</p>
     <text x="472" y="352">abandon_unsealed()</text></a>
 
   <rect class="c-ok"  x="14"  y="382" width="13" height="13" rx="3"/>
-  <text class="note"  x="33"  y="393">finished — its tokens are already saved</text>
+  <text class="note"  x="33"  y="393">finished — tokens staged, receipt saved</text>
   <rect class="c-fly" x="292" y="382" width="13" height="13" rx="3"/>
   <text class="note"  x="311" y="393">still running when the save happened</text>
   <rect class="c-und" x="562" y="382" width="13" height="13" rx="3"/>
@@ -199,6 +205,42 @@ await self.run_rollout(input_sample, generation_indices=pending_indices, ...)</d
 recorded by <a href="https://github.com/NVIDIA-NeMo/RL/blob/0a93f0ffd240f4e987f791648754b3127b1b5deb/nemo_rl/experience/rollout_recovery.py#L517">mark_sibling_sealed()</a>,
 read back as <a href="https://github.com/NVIDIA-NeMo/RL/blob/0a93f0ffd240f4e987f791648754b3127b1b5deb/nemo_rl/experience/rollout_recovery.py#L204">sealed_generation_indices</a>,
 redispatched at <a href="https://github.com/NVIDIA-NeMo/RL/blob/0a93f0ffd240f4e987f791648754b3127b1b5deb/nemo_rl/experience/rollout_manager.py#L1871-L1875">rollout_manager.py:1871-1875</a></p>
+
+
+<p><strong>"Finished" does not mean "ready to train."</strong> A finished generation leaves two
+things behind, and neither is a training sample. The training sample is built later, from them.</p>
+
+<table class="lay">
+<tr><th></th><th>Staged token bytes</th><th>Receipt</th><th>Training row</th></tr>
+<tr><td class="rh">Lives in</td>
+    <td>the queue's staging area</td>
+    <td>the ledger — and <code>rollout_recovery.pt</code></td>
+    <td>the queue's main area</td></tr>
+<tr><td class="rh">Holds</td>
+    <td>the new tokens from <em>one</em> model call</td>
+    <td>which staged pieces, in what order, and how long each is. No tensors.</td>
+    <td>one flat sequence: tokens, mask, logprobs, reward</td></tr>
+<tr><td class="rh">Written</td>
+    <td>while the generation runs</td>
+    <td>the moment that generation finishes</td>
+    <td>only once <em>every</em> generation in the group has finished</td></tr>
+<tr><td class="rh">At the checkpoint,<br>for g0 and g1</td>
+    <td class="y">present</td><td class="y">present</td><td class="n">does not exist yet</td></tr>
+</table>
+
+<p>A rollout that used three tool calls leaves <strong>three</strong> staged pieces, each holding only
+its own new tokens — they chain together, so the next one starts where the previous ended
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/0a93f0ffd240f4e987f791648754b3127b1b5deb/nemo_rl/experience/blackbox_finalizer.py#L117-L120">the check that they line up</a>).
+You cannot train on one of those pieces. Finalization walks the chain, verifies each piece against
+the receipt, flattens it into one sequence, and only then writes a training row
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/0a93f0ffd240f4e987f791648754b3127b1b5deb/nemo_rl/experience/payload.py#L118-L131">pack_payload()</a>). That is why a
+half-finished group has nothing trainable in it, and why the group's slot in the queue stays marked
+not-ready until the last generation lands.</p>
+
+<p>So the side file is small on purpose. It stores <em>no</em> tokens, <em>no</em> logprobs and
+<em>no</em> expert-routing indices — those are exactly the fields the code refuses to send over the
+wire (<a href="https://github.com/NVIDIA-NeMo/RL/blob/0a93f0ffd240f4e987f791648754b3127b1b5deb/nemo_rl/experience/finalizer_actor.py#L27-L40">the forbidden list</a>). It does not
+even store the prompt: it keeps a stable reference and re-reads the dataset row on restore.</p>
 
 <p><strong>You can read it yourself.</strong> The side file is a plain torch save of dicts, lists,
 strings and ints — no NeMo-RL import needed to open it:</p>
