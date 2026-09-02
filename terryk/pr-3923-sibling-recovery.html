@@ -50,6 +50,8 @@ svg .c-fly{fill:var(--red);opacity:.45;stroke:var(--red);stroke-width:1.3}
 svg .c-und{fill:var(--dim);opacity:.25;stroke:var(--dim);stroke-width:1.3}
 svg .c-txt{fill:var(--text);font:11.5px ui-monospace,Menlo,monospace}
 svg .arw{stroke:var(--dim);stroke-width:1.6;fill:none}
+svg .ckpt{stroke:var(--orange);stroke-width:2;stroke-dasharray:5 4}
+svg .ckpt-lbl{fill:var(--orange);font:bold 12px -apple-system,sans-serif}
 svg a text{text-decoration:underline;fill:var(--accent);font:11.5px ui-monospace,Menlo,monospace}
 </style>
 <script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
@@ -138,37 +140,77 @@ only the unfinished one is generated again.</p>
 <p class="cap">Both policies are chosen per prompt group and written into the side file, so
 changing the YAML later never re-interprets a group that is already saved.</p>
 
-<h2>How the code does it</h2>
+<h2>How the code knows which ones finished</h2>
 
-<p>Three steps, on the same prompt idx 7 with 3 generations.</p>
+<p>Gym does not hand back the whole group at the end. It streams one generation at a time, as
+each finishes, and the manager flips that single generation's status in the ledger. So the
+checkpoint never has to ask "how far along is this group?" — the answer is already written down
+when it lands.</p>
 
-<div class="mono"><span class="cm"># 1. While generating: each generation reports in as it lands.</span>
-<span class="cm">#    g0 lands, then g1. g2 is still running when the checkpoint starts.</span>
+<svg viewBox="0 0 900 316" role="img" aria-label="Gym streaming each generation back as it finishes, flipping one ledger status each time">
+  <text class="hdr" x="14" y="22">Each generation reports in on its own; the checkpoint reads whatever the statuses are at that instant</text>
+
+  <text class="note" x="14" y="52">prompt idx 7</text>
+  <line class="arw" x1="120" y1="264" x2="700" y2="264" marker-end="url(#a2)"/>
+  <defs><marker id="a2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7"
+    orient="auto"><path d="M0 0 L10 5 L0 10 z" fill="var(--dim)"/></marker></defs>
+  <text class="note" x="120" y="284">time the group spent generating</text>
+
+  <line class="ckpt" x1="640" y1="62" x2="640" y2="252"/>
+  <text class="ckpt-lbl" x="640" y="54" text-anchor="middle">checkpoint</text>
+
+  <text class="lbl" x="20" y="98">g0</text>
+  <rect class="c-ok" x="120" y="82" width="210" height="24" rx="5"/>
+  <text class="c-txt" x="340" y="98">yields (0, result) → g0 sealed</text>
+
+  <text class="lbl" x="20" y="148">g1</text>
+  <rect class="c-ok" x="120" y="132" width="110" height="24" rx="5"/>
+  <text class="c-txt" x="240" y="148">yields (1, result) → g1 sealed</text>
+
+  <text class="lbl" x="20" y="198">g2</text>
+  <rect class="c-fly" x="120" y="182" width="516" height="24" rx="5"/>
+  <text class="c-txt" x="130" y="198">still generating when the save begins</text>
+
+  <text class="note" x="14" y="234">g1 finished before g0. Order does not matter — every row carries its own index, so it updates its own slot.</text>
+
+  <rect class="c-ok"  x="700" y="82"  width="186" height="24" rx="5"/>
+  <text class="c-txt" x="710" y="98">"sealed"</text>
+  <rect class="c-ok"  x="700" y="132" width="186" height="24" rx="5"/>
+  <text class="c-txt" x="710" y="148">"sealed"</text>
+  <rect class="c-fly" x="700" y="182" width="186" height="24" rx="5"/>
+  <text class="c-txt" x="710" y="198">"dispatched"</text>
+  <text class="note"  x="700" y="72">saved in rollout_recovery.pt</text>
+</svg>
+
+<p>The status is per generation, not a count. That is the point — to restart, the code needs to know
+<em>which</em> ones are missing so it can ask for exactly those.</p>
+
+<div class="mono"><span class="cm"># Every streamed row flips one status. Nothing waits for the group.</span>
 ledger.mark_sibling_sealed(cut, group_id, generation_index=0, receipt=..., reward=0.5)
 ledger.mark_sibling_sealed(cut, group_id, generation_index=1, receipt=..., reward=0.0)
-<span class="cm">#    -> siblings = [sealed, sealed, dispatched]</span></div>
-<p class="src">→ <a href="https://github.com/NVIDIA-NeMo/RL/blob/0a93f0ffd240f4e987f791648754b3127b1b5deb/nemo_rl/experience/rollout_manager.py#L1952">rollout_manager.py:1952</a>
-calls <a href="https://github.com/NVIDIA-NeMo/RL/blob/0a93f0ffd240f4e987f791648754b3127b1b5deb/nemo_rl/experience/rollout_recovery.py#L517">mark_sibling_sealed()</a></p>
 
-<div class="mono"><span class="cm"># 2. On restart: apply the policy that was saved with this group.</span>
-for record in groups:
-    if record.status is GENERATING:
-        if record.recovery_granularity is PROMPT_GROUP:
-            _abandon_entire_group(record)   <span class="no"># all 3 dropped</span>
-        else:
-            abandon_unsealed(cut, ...)      <span class="ok"># g0, g1 skipped; only g2 dropped</span></div>
-<p class="src">→ <a href="https://github.com/NVIDIA-NeMo/RL/blob/0a93f0ffd240f4e987f791648754b3127b1b5deb/nemo_rl/experience/rollout_recovery.py#L374-L383">prepare_for_restart()</a>,
-called from <a href="https://github.com/NVIDIA-NeMo/RL/blob/0a93f0ffd240f4e987f791648754b3127b1b5deb/nemo_rl/algorithms/single_controller.py#L693">single_controller.py:693</a>
-during <a href="https://github.com/NVIDIA-NeMo/RL/blob/0a93f0ffd240f4e987f791648754b3127b1b5deb/nemo_rl/algorithms/single_controller.py#L618">_maybe_restore_rollout_recovery()</a></p>
-
-<div class="mono"><span class="cm"># 3. On redispatch: ask the generator for the missing ones only.</span>
+<span class="cm"># On restart, the redispatch list is just "the ones that aren't sealed".</span>
 pending_indices = [s.generation_index for s in record.siblings
                    if s.current_attempt.status != SEALED]
-<span class="cm">#    "sibling"      -> [2]        one request</span>
-<span class="cm">#    "prompt_group" -> [0, 1, 2]  three requests</span>
+<span class="cm">#    "sibling"      -&gt; [2]        one request to Gym</span>
+<span class="cm">#    "prompt_group" -&gt; [0, 1, 2]  three requests</span>
 await self.run_rollout(input_sample, generation_indices=pending_indices, ...)</div>
-<p class="src">→ <a href="https://github.com/NVIDIA-NeMo/RL/blob/0a93f0ffd240f4e987f791648754b3127b1b5deb/nemo_rl/experience/rollout_manager.py#L1871-L1875">rollout_manager.py:1871-1875</a>
-and <a href="https://github.com/NVIDIA-NeMo/RL/blob/0a93f0ffd240f4e987f791648754b3127b1b5deb/nemo_rl/experience/rollout_manager.py#L1977">:1977</a></p>
+<p class="src">→ streamed in <a href="https://github.com/NVIDIA-NeMo/RL/blob/0a93f0ffd240f4e987f791648754b3127b1b5deb/nemo_rl/experience/rollout_manager.py#L991-L1022">_stream_rows()</a>,
+recorded by <a href="https://github.com/NVIDIA-NeMo/RL/blob/0a93f0ffd240f4e987f791648754b3127b1b5deb/nemo_rl/experience/rollout_recovery.py#L517">mark_sibling_sealed()</a>,
+read back as <a href="https://github.com/NVIDIA-NeMo/RL/blob/0a93f0ffd240f4e987f791648754b3127b1b5deb/nemo_rl/experience/rollout_recovery.py#L204">sealed_generation_indices</a>,
+redispatched at <a href="https://github.com/NVIDIA-NeMo/RL/blob/0a93f0ffd240f4e987f791648754b3127b1b5deb/nemo_rl/experience/rollout_manager.py#L1871-L1875">rollout_manager.py:1871-1875</a></p>
+
+<p><strong>You can read it yourself.</strong> The side file is a plain torch save of dicts, lists,
+strings and ints — no NeMo-RL import needed to open it:</p>
+
+<div class="mono">state = torch.load("step_1/rollout_recovery.pt", weights_only=True)
+for g in state["groups"]:
+    print(g["prompt_id"], [s["attempts"][-1]["status"] for s in g["siblings"]])
+
+<span class="cm"># 7 ['sealed', 'sealed', 'dispatched']</span></div>
+<p class="src">→ the shape written by <a href="https://github.com/NVIDIA-NeMo/RL/blob/0a93f0ffd240f4e987f791648754b3127b1b5deb/nemo_rl/experience/rollout_recovery.py#L752-L804">state_dict()</a>;
+the functional test reads it exactly this way. On restore the run also prints
+<code>Loaded N unfinished rollout group(s)</code> — <a href="https://github.com/NVIDIA-NeMo/RL/blob/0a93f0ffd240f4e987f791648754b3127b1b5deb/nemo_rl/algorithms/single_controller.py#L723">single_controller.py:723</a></p>
 
 <h2>Does it work?</h2>
 
