@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NVIDIA-NeMo/RL #3923 — how a checkpoint keeps the generations that already finished</title>
+<style>
+:root{
+  --bg:#0d1117; --surface:#161b22; --surface2:#1c2128; --border:#30363d;
+  --text:#e6edf3; --dim:#8b949e; --accent:#58a6ff; --green:#3fb950;
+  --orange:#d29922; --red:#f85149;
+}
+:root[data-theme="light"]{
+  --bg:#ffffff; --surface:#f6f8fa; --surface2:#eaeef2; --border:#d0d7de;
+  --text:#1f2328; --dim:#59636e; --accent:#0969da; --green:#1a7f37;
+  --orange:#9a6700; --red:#cf222e;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:28px 20px 70px}
+h1{font-size:22px;margin:0 0 8px;line-height:1.3}
+h2{font-size:18px;margin:32px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;
+  font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
+.sub{color:var(--dim);font-size:13.5px;margin:0 0 16px}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);
+  border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;
+  font:13px/1 ui-monospace,Menlo,monospace;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.18)}
+.mono{font:12.5px/1.6 ui-monospace,SFMono-Regular,Menlo,monospace;
+  background:var(--surface);border:1px solid var(--border);border-radius:8px;
+  padding:13px;overflow-x:auto;white-space:pre}
+.mono .cm{color:var(--dim)}
+.mono .ok{color:var(--green)}
+.mono .no{color:var(--red)}
+.src{font-size:12.5px;color:var(--dim);margin:5px 0 20px}
+.warn{border-left:3px solid var(--orange);background:var(--surface);
+  padding:12px 16px;margin:20px 0 0;border-radius:0 8px 8px 0}
+.cap{color:var(--dim);font-size:12.5px;margin:2px 0 0}
+svg{max-width:100%;height:auto;display:block;margin:16px 0 6px}
+svg .box{fill:var(--surface);stroke:var(--border);stroke-width:1.4}
+svg .lbl{fill:var(--text);font:12.5px ui-monospace,Menlo,monospace}
+svg .lbl-b{fill:var(--text);font:bold 13px -apple-system,sans-serif}
+svg .note{fill:var(--dim);font:11.5px -apple-system,sans-serif}
+svg .hdr{fill:var(--accent);font:bold 12.5px -apple-system,sans-serif}
+svg .c-ok{fill:var(--green);opacity:.5;stroke:var(--green);stroke-width:1.3}
+svg .c-fly{fill:var(--red);opacity:.45;stroke:var(--red);stroke-width:1.3}
+svg .c-und{fill:var(--dim);opacity:.25;stroke:var(--dim);stroke-width:1.3}
+svg .c-txt{fill:var(--text);font:11.5px ui-monospace,Menlo,monospace}
+svg .arw{stroke:var(--dim);stroke-width:1.6;fill:none}
+svg a text{text-decoration:underline;fill:var(--accent);font:11.5px ui-monospace,Menlo,monospace}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+  document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head>
+<body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+  function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+  function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
+    b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
+      else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+  document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+<div class="wrap">
+
+<h1>How a checkpoint keeps the generations that already finished</h1>
+<p class="sub">Companion illustration for
+<a href="https://github.com/NVIDIA-NeMo/RL/pull/3923">NVIDIA-NeMo/RL #3923</a>
+(sibling-level rollout checkpointing). It stacks on
+<a href="https://github.com/NVIDIA-NeMo/RL/pull/3480">#3480</a> and
+<a href="https://github.com/NVIDIA-NeMo/RL/pull/3837">#3837</a>, so its base is a branch, not <code>main</code>.
+All permalinks pin the head <code>0a93f0f</code>.</p>
+
+<p>In GRPO the same prompt is generated several times, and the group is only useful once every
+generation is done. The generations finish at different moments, so a checkpoint can easily land
+while some are finished and some are still running. Before this PR, a restart threw the whole group
+away and generated all of it again. This PR writes a small side file next to the checkpoint,
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/0a93f0ffd240f4e987f791648754b3127b1b5deb/nemo_rl/experience/rollout_recovery.py#L37"><code>rollout_recovery.pt</code></a>,
+that records what each generation was doing at the save — so the finished ones can be reused and
+only the unfinished one is generated again.</p>
+
+<h2>What the save catches, and what each policy does with it</h2>
+
+<svg viewBox="0 0 900 412" role="img" aria-label="A prompt group of three generations at a checkpoint, and the two restart policies">
+  <text class="hdr" x="14" y="20">1 · The checkpoint lands while the prompt group is half done</text>
+  <rect class="box" x="14" y="30" width="872" height="80" rx="8"/>
+  <text class="lbl" x="28" y="52">prompt idx 7 — the same prompt is being generated 3 times</text>
+  <rect class="c-ok"  x="28"  y="62" width="270" height="34" rx="6"/>
+  <rect class="c-ok"  x="310" y="62" width="270" height="34" rx="6"/>
+  <rect class="c-fly" x="592" y="62" width="270" height="34" rx="6"/>
+  <text class="c-txt" x="163" y="84" text-anchor="middle">g0 · finished</text>
+  <text class="c-txt" x="445" y="84" text-anchor="middle">g1 · finished</text>
+  <text class="c-txt" x="727" y="84" text-anchor="middle">g2 · still generating</text>
+
+  <path class="arw" d="M450 110 L450 132" marker-end="url(#a1)"/>
+  <defs><marker id="a1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7"
+    orient="auto"><path d="M0 0 L10 5 L0 10 z" fill="var(--dim)"/></marker></defs>
+
+  <text class="hdr" x="14" y="156">2 · The side file records the status of each generation</text>
+  <rect class="box" x="14" y="164" width="872" height="42" rx="8"/>
+  <text class="lbl" x="28" y="190">siblings: [g0 sealed, g1 sealed, g2 dispatched]   ·   granularity: "sibling"</text>
+
+  <text class="hdr" x="14" y="234">3 · What the restart does with it</text>
+
+  <rect class="box" x="14" y="244" width="428" height="120" rx="8"/>
+  <text class="lbl-b" x="28" y="266">granularity = "prompt_group"</text>
+  <rect class="c-und" x="28"  y="278" width="124" height="30" rx="6"/>
+  <rect class="c-und" x="160" y="278" width="124" height="30" rx="6"/>
+  <rect class="c-und" x="292" y="278" width="124" height="30" rx="6"/>
+  <text class="c-txt" x="90"  y="298" text-anchor="middle">g0 redone</text>
+  <text class="c-txt" x="222" y="298" text-anchor="middle">g1 redone</text>
+  <text class="c-txt" x="354" y="298" text-anchor="middle">g2 redone</text>
+  <text class="lbl" x="28" y="330">3 generations spent again</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/0a93f0ffd240f4e987f791648754b3127b1b5deb/nemo_rl/experience/rollout_recovery.py#L386-L399">
+    <text x="28" y="352">_abandon_entire_group()</text></a>
+
+  <rect class="box" x="458" y="244" width="428" height="120" rx="8"/>
+  <text class="lbl-b" x="472" y="266">granularity = "sibling"  (the default)</text>
+  <rect class="c-ok"  x="472" y="278" width="124" height="30" rx="6"/>
+  <rect class="c-ok"  x="604" y="278" width="124" height="30" rx="6"/>
+  <rect class="c-und" x="736" y="278" width="124" height="30" rx="6"/>
+  <text class="c-txt" x="534" y="298" text-anchor="middle">g0 kept</text>
+  <text class="c-txt" x="666" y="298" text-anchor="middle">g1 kept</text>
+  <text class="c-txt" x="798" y="298" text-anchor="middle">g2 redone</text>
+  <text class="lbl" x="472" y="330">1 generation spent again</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/0a93f0ffd240f4e987f791648754b3127b1b5deb/nemo_rl/experience/rollout_recovery.py#L636">
+    <text x="472" y="352">abandon_unsealed()</text></a>
+
+  <rect class="c-ok"  x="14"  y="382" width="13" height="13" rx="3"/>
+  <text class="note"  x="33"  y="393">finished — its tokens are already saved</text>
+  <rect class="c-fly" x="292" y="382" width="13" height="13" rx="3"/>
+  <text class="note"  x="311" y="393">still running when the save happened</text>
+  <rect class="c-und" x="562" y="382" width="13" height="13" rx="3"/>
+  <text class="note"  x="581" y="393">generated again after the restart</text>
+</svg>
+<p class="cap">Both policies are chosen per prompt group and written into the side file, so
+changing the YAML later never re-interprets a group that is already saved.</p>
+
+<h2>How the code does it</h2>
+
+<p>Three steps, on the same prompt idx 7 with 3 generations.</p>
+
+<div class="mono"><span class="cm"># 1. While generating: each generation reports in as it lands.</span>
+<span class="cm">#    g0 lands, then g1. g2 is still running when the checkpoint starts.</span>
+ledger.mark_sibling_sealed(cut, group_id, generation_index=0, receipt=..., reward=0.5)
+ledger.mark_sibling_sealed(cut, group_id, generation_index=1, receipt=..., reward=0.0)
+<span class="cm">#    -> siblings = [sealed, sealed, dispatched]</span></div>
+<p class="src">→ <a href="https://github.com/NVIDIA-NeMo/RL/blob/0a93f0ffd240f4e987f791648754b3127b1b5deb/nemo_rl/experience/rollout_manager.py#L1952">rollout_manager.py:1952</a>
+calls <a href="https://github.com/NVIDIA-NeMo/RL/blob/0a93f0ffd240f4e987f791648754b3127b1b5deb/nemo_rl/experience/rollout_recovery.py#L517">mark_sibling_sealed()</a></p>
+
+<div class="mono"><span class="cm"># 2. On restart: apply the policy that was saved with this group.</span>
+for record in groups:
+    if record.status is GENERATING:
+        if record.recovery_granularity is PROMPT_GROUP:
+            _abandon_entire_group(record)   <span class="no"># all 3 dropped</span>
+        else:
+            abandon_unsealed(cut, ...)      <span class="ok"># g0, g1 skipped; only g2 dropped</span></div>
+<p class="src">→ <a href="https://github.com/NVIDIA-NeMo/RL/blob/0a93f0ffd240f4e987f791648754b3127b1b5deb/nemo_rl/experience/rollout_recovery.py#L374-L383">prepare_for_restart()</a>,
+called from <a href="https://github.com/NVIDIA-NeMo/RL/blob/0a93f0ffd240f4e987f791648754b3127b1b5deb/nemo_rl/algorithms/single_controller.py#L693">single_controller.py:693</a>
+during <a href="https://github.com/NVIDIA-NeMo/RL/blob/0a93f0ffd240f4e987f791648754b3127b1b5deb/nemo_rl/algorithms/single_controller.py#L618">_maybe_restore_rollout_recovery()</a></p>
+
+<div class="mono"><span class="cm"># 3. On redispatch: ask the generator for the missing ones only.</span>
+pending_indices = [s.generation_index for s in record.siblings
+                   if s.current_attempt.status != SEALED]
+<span class="cm">#    "sibling"      -> [2]        one request</span>
+<span class="cm">#    "prompt_group" -> [0, 1, 2]  three requests</span>
+await self.run_rollout(input_sample, generation_indices=pending_indices, ...)</div>
+<p class="src">→ <a href="https://github.com/NVIDIA-NeMo/RL/blob/0a93f0ffd240f4e987f791648754b3127b1b5deb/nemo_rl/experience/rollout_manager.py#L1871-L1875">rollout_manager.py:1871-1875</a>
+and <a href="https://github.com/NVIDIA-NeMo/RL/blob/0a93f0ffd240f4e987f791648754b3127b1b5deb/nemo_rl/experience/rollout_manager.py#L1977">:1977</a></p>
+
+<h2>Does it work?</h2>
+
+<p><strong>Nobody has posted a run.</strong> There is no throughput number, no wall-clock saving, and
+no before/after count of wasted generations anywhere on the PR. The CI that would exercise this has
+not started either — the pull request is still waiting on the repository's contributor check.</p>
+
+<p>What does exist is one test that pins the exact behaviour the figure shows, and it is worth more
+than the rest of the suite put together because it restarts a real process:
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/0a93f0ffd240f4e987f791648754b3127b1b5deb/tests/functional/grpo_async_gym_single_controller_sibling_recovery.sh">grpo_async_gym_single_controller_sibling_recovery.sh</a>.
+Phase 1 runs training until one generation of a group is finished and its partner is deliberately
+frozen, then checkpoints. Phase 2 starts a fresh process from that checkpoint and
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/0a93f0ffd240f4e987f791648754b3127b1b5deb/tests/functional/grpo_async_gym_single_controller_sibling_recovery.sh#L63">asserts</a>
+that exactly one generation is requested again, that it carries a new id, and that the finished one
+keeps its original id. It is
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/0a93f0ffd240f4e987f791648754b3127b1b5deb/tests/functional/L1_Functional_Tests_SingleController.sh#L186">wired into the L1 suite</a>.</p>
+
+<p>The useful thing to ask for before merging is small: one resumed run with the number of
+generations thrown away at the restart, under both policies. That single pair of numbers is the
+whole argument for the feature, and right now a reader has to take it on faith.</p>
+
+<div class="warn">
+<strong>If you turn this on.</strong> It only works when token capture is on, because a finished
+generation needs a durable receipt to be reusable. Asking for any non-default policy while
+<code>token_capture.enabled</code> is false is
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/0a93f0ffd240f4e987f791648754b3127b1b5deb/nemo_rl/algorithms/single_controller_utils/config.py#L1096-L1106">rejected at startup</a>
+rather than quietly ignored, which is the right call. You can pick the policy
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/0a93f0ffd240f4e987f791648754b3127b1b5deb/nemo_rl/algorithms/single_controller_utils/config.py#L626-L641">per Gym agent or per dataset task</a>,
+and the agent setting wins over the task setting. The default is <code>sibling</code>, so most users
+get the cheaper restart without changing anything.
+</div>
+
+</div>
+</body>
+</html>
