@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NVIDIA-NeMo/RL #3369 — why a shard's port range never reaches Gym</title>
+<style>
+:root{
+  --bg:#0d1117; --surface:#161b22; --surface2:#1c2128; --border:#30363d;
+  --text:#e6edf3; --dim:#8b949e; --accent:#58a6ff; --green:#3fb950;
+  --orange:#d29922; --red:#f85149;
+}
+:root[data-theme="light"]{
+  --bg:#ffffff; --surface:#f6f8fa; --surface2:#eaeef2; --border:#d0d7de;
+  --text:#1f2328; --dim:#59636e; --accent:#0969da; --green:#1a7f37;
+  --orange:#9a6700; --red:#cf222e;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:28px 20px 70px}
+h1{font-size:22px;margin:0 0 8px;line-height:1.3}
+h2{font-size:18px;margin:32px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;
+  font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
+.sub{color:var(--dim);font-size:13.5px;margin:0 0 16px}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);
+  border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;
+  font:13px/1 ui-monospace,Menlo,monospace;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.18)}
+.mono{font:12.5px ui-monospace,SFMono-Regular,Menlo,monospace;
+  background:var(--surface);border:1px solid var(--border);border-radius:8px;
+  padding:13px;overflow-x:auto;white-space:pre;line-height:1.55}
+.warn{border-left:3px solid var(--red);background:var(--surface);
+  padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0}
+.hl{border-left:3px solid var(--accent);background:var(--surface);
+  padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0}
+.cm{color:var(--dim)}
+.ok{color:var(--green);font-weight:700}
+.bad{color:var(--red);font-weight:700}
+svg{max-width:100%;height:auto;display:block;margin:16px 0}
+svg .box{fill:var(--surface);stroke:var(--border);stroke-width:1.4}
+svg .lbl{fill:var(--text);font:12.5px ui-monospace,Menlo,monospace}
+svg .lbl-b{fill:var(--text);font:bold 13px -apple-system,sans-serif}
+svg .note{fill:var(--dim);font:11.5px -apple-system,sans-serif}
+svg .hdr{fill:var(--accent);font:bold 12.5px -apple-system,sans-serif}
+svg .chip-ok{fill:var(--green);opacity:.18;stroke:var(--green);stroke-width:1.3}
+svg .chip-bad{fill:var(--red);opacity:.18;stroke:var(--red);stroke-width:1.3}
+svg .t-ok{fill:var(--green);font:bold 13px ui-monospace,Menlo,monospace}
+svg .t-bad{fill:var(--red);font:bold 13px ui-monospace,Menlo,monospace}
+svg .arr{stroke:var(--dim);stroke-width:1.6;fill:none}
+svg .arr-bad{stroke:var(--red);stroke-width:2.2;fill:none}
+svg a text{text-decoration:underline;fill:var(--accent);font:11.5px ui-monospace,Menlo,monospace}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+  document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head>
+<body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+  function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+  function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
+    b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
+      else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+  document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+<div class="wrap">
+
+<h1>Why a NeMo-Gym shard's port range never reaches Gym</h1>
+<p class="sub">Companion note for
+<a href="https://github.com/NVIDIA-NeMo/RL/pull/3369">NVIDIA-NeMo/RL #3369</a>
+(define shard configuration). All permalinks pin the PR head
+<code>b6bdd33</code>.</p>
+
+<p>#3369 adds a schema for splitting one NeMo-Gym stack across several Ray actors. Each
+shard can ask for its own range of TCP ports, and
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/b6bdd3303070669942e218e7596892c6fe64ef16/nemo_rl/environments/nemo_gym_shards.py#L375">the merge writes that range into the shard's config</a>.
+The value is checked, carried through the merge, and handed to the actor. Then the actor
+throws it away: <a href="https://github.com/NVIDIA-NeMo/RL/blob/b6bdd3303070669942e218e7596892c6fe64ef16/nemo_rl/environments/nemo_gym.py#L605-L606"><code>_spinup</code> overwrites both keys</a>
+with values read from a field that nothing ever fills in. Gym always gets 5000&ndash;5999.
+The same dead path already ignores the port range in a shipped recipe.</p>
+
+<h2>Where the value dies</h2>
+
+<svg viewBox="0 0 940 452" role="img" aria-label="A port range flows through four stages unchanged, then is overwritten at the actor.">
+  <text class="hdr" x="30" y="22">what carries the value</text>
+  <text class="hdr" x="452" y="22">port range at that point</text>
+  <text class="hdr" x="640" y="22">what happens</text>
+
+  <rect class="chip-ok" x="448" y="34" width="150" height="26" rx="6"/>
+  <text class="t-ok" x="458" y="52">15001–20000</text>
+  <text class="note" x="640" y="46">what the recipe asks for</text>
+  <rect class="box" x="30" y="30" width="390" height="34" rx="7"/>
+  <text class="lbl" x="42" y="52">env.nemo_gym in swe_teacher.yaml</text>
+  <path class="arr" d="M225 64 L225 92" marker-end="url(#a)"/>
+
+  <rect class="chip-ok" x="448" y="96" width="150" height="26" rx="6"/>
+  <text class="t-ok" x="458" y="114">15001–20000</text>
+  <text class="note" x="640" y="108">copied into the Gym config dict</text>
+  <rect class="box" x="30" y="92" width="390" height="34" rx="7"/>
+  <text class="lbl" x="42" y="114">build_nemo_gym_config()</text>
+  <path class="arr" d="M225 126 L225 154" marker-end="url(#a)"/>
+
+  <rect class="chip-ok" x="448" y="158" width="150" height="26" rx="6"/>
+  <text class="t-ok" x="458" y="176">15001–20000</text>
+  <text class="note" x="640" y="164">the shard's own range is</text>
+  <text class="note" x="640" y="180">written in here</text>
+  <rect class="box" x="30" y="154" width="390" height="34" rx="7"/>
+  <text class="lbl" x="42" y="176">apply_shard_overlay()</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/b6bdd3303070669942e218e7596892c6fe64ef16/nemo_rl/environments/nemo_gym_shards.py#L375"><text x="300" y="176">shards.py:375</text></a>
+  <path class="arr" d="M225 188 L225 216" marker-end="url(#a)"/>
+
+  <rect class="chip-ok" x="448" y="220" width="150" height="26" rx="6"/>
+  <text class="t-ok" x="458" y="238">15001–20000</text>
+  <text class="note" x="640" y="234">handed to the actor, still intact</text>
+  <rect class="box" x="30" y="216" width="390" height="34" rx="7"/>
+  <text class="lbl" x="42" y="238">initial_global_config_dict</text>
+  <path class="arr-bad" d="M225 250 L225 278" marker-end="url(#b)"/>
+
+  <rect class="chip-bad" x="448" y="282" width="150" height="26" rx="6"/>
+  <text class="t-bad" x="458" y="300">5000–5999</text>
+  <text class="note" x="640" y="288">both keys overwritten from a</text>
+  <text class="note" x="640" y="304">field nothing ever sets</text>
+  <rect class="box" x="30" y="278" width="390" height="34" rx="7"/>
+  <text class="lbl" x="42" y="300">NemoGym._spinup()</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/b6bdd3303070669942e218e7596892c6fe64ef16/nemo_rl/environments/nemo_gym.py#L605-L606"><text x="272" y="300">nemo_gym.py:605</text></a>
+  <path class="arr-bad" d="M225 312 L225 340" marker-end="url(#b)"/>
+
+  <rect class="chip-bad" x="448" y="344" width="150" height="26" rx="6"/>
+  <text class="t-bad" x="458" y="362">5000–5999</text>
+  <text class="note" x="640" y="356">Gym binds every server here</text>
+  <rect class="box" x="30" y="340" width="390" height="34" rx="7"/>
+  <text class="lbl" x="42" y="362">Gym picks a port</text>
+  <a href="https://github.com/NVIDIA-NeMo/Gym/blob/c3bac96314a59f28b896f597eb9845d175bb0252/nemo_gym/global_config.py#L1067"><text x="230" y="362">global_config.py:1067</text></a>
+
+  <rect x="30" y="396" width="14" height="14" rx="3" class="chip-ok"/>
+  <text class="note" x="52" y="407">the range the recipe asked for</text>
+  <rect x="300" y="396" width="14" height="14" rx="3" class="chip-bad"/>
+  <text class="note" x="322" y="407">the range Gym actually uses</text>
+  <text class="note" x="30" y="432">Four stages carry the value correctly. The fifth replaces it, and nothing warns.</text>
+
+  <defs>
+    <marker id="a" markerWidth="9" markerHeight="9" refX="7" refY="3.2" orient="auto">
+      <path d="M0,0 L7,3.2 L0,6.4 z" fill="var(--dim)"/></marker>
+    <marker id="b" markerWidth="9" markerHeight="9" refX="7" refY="3.2" orient="auto">
+      <path d="M0,0 L7,3.2 L0,6.4 z" fill="var(--red)"/></marker>
+  </defs>
+</svg>
+
+<p>The overwrite reads from <code>self.cfg</code>, which is the actor's
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/b6bdd3303070669942e218e7596892c6fe64ef16/nemo_rl/environments/nemo_gym.py#L209"><code>NemoGymConfig</code></a>.
+Its <code>port_range_low</code> is optional, and no code anywhere sets it &mdash;
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/b6bdd3303070669942e218e7596892c6fe64ef16/nemo_rl/environments/nemo_gym.py#L1266-L1277"><code>build_nemo_gym_config</code></a>
+builds the object without it. So the <code>.get()</code> falls back to the default every
+time, for sharded and unsharded jobs alike.</p>
+
+<h2>The fix</h2>
+
+<p>Move the value onto the one object the actor actually reads. Same numbers as above.</p>
+
+<div class="mono"><span class="cm"># today — build_nemo_gym_config()</span>
+nemo_gym_dict = dict(env_configs["nemo_gym"])   <span class="cm"># {"port_range_low": 15001, ...}</span>
+return NemoGymConfig(
+    model_name=model_name,
+    initial_global_config_dict=nemo_gym_dict,   <span class="cm"># 15001 rides along in here ...</span>
+)                                               <span class="cm"># ... but no port_range_low field</span>
+
+<span class="cm"># in the actor — _spinup()</span>
+low = self.cfg.get("port_range_low", 5000)      <span class="cm"># field absent  -> 5000  </span><span class="bad">the value dies here</span>
+initial_global_config_dict["port_range_low"] = low   <span class="cm"># 15001 overwritten by 5000</span>
+</div>
+<p class="sub">Lines above: <a href="https://github.com/NVIDIA-NeMo/RL/blob/b6bdd3303070669942e218e7596892c6fe64ef16/nemo_rl/environments/nemo_gym.py#L1214">nemo_gym.py:1214</a>,
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/b6bdd3303070669942e218e7596892c6fe64ef16/nemo_rl/environments/nemo_gym.py#L1266-L1277">1266&ndash;1277</a>,
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/b6bdd3303070669942e218e7596892c6fe64ef16/nemo_rl/environments/nemo_gym.py#L594-L606">594&ndash;606</a>.</p>
+
+<div class="mono"><span class="cm"># fixed — pop the range and pass it as a real field</span>
+low  = nemo_gym_dict.pop("port_range_low", 5000)    <span class="cm"># 15001</span>
+high = nemo_gym_dict.pop("port_range_high", 5999)   <span class="cm"># 20000</span>
+return NemoGymConfig(
+    model_name=model_name,
+    port_range_low=low,                             <span class="cm"># 15001  </span><span class="ok">now the actor can see it</span>
+    port_range_high=high,                           <span class="cm"># 20000</span>
+    initial_global_config_dict=nemo_gym_dict,
+)
+
+<span class="cm"># in the actor — unchanged code, different answer</span>
+low = self.cfg.get("port_range_low", 5000)          <span class="cm"># -> 15001  </span><span class="ok">survives</span>
+</div>
+
+<p>The per-shard range then works for free: <code>apply_shard_overlay</code> already puts
+each shard's range into that shard's config, so once the actor stops overwriting it, every
+shard gets the ports it asked for.</p>
+
+<h2>Does it work?</h2>
+
+<p><strong>Nobody has run this.</strong> There is no before/after, because the bug was found
+by reading the code, not by a failing job &mdash; and it fails quietly, so no run would have
+flagged it on its own. What exists instead is a victim already in the tree:</p>
+
+<div class="mono">examples/nemo_gym/nemotron-3-ultra/swe_teacher.yaml:413
+    port_range_low:  15001     <span class="cm">what the recipe asks for</span>
+    port_range_high: 20000
+                               <span class="cm">what Gym is given: </span><span class="bad">5000–5999</span>
+</div>
+<p class="sub">That recipe is live &mdash; it has a launch script, a docs guide, and it is in
+the config-validation list. See
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/b6bdd3303070669942e218e7596892c6fe64ef16/examples/nemo_gym/nemotron-3-ultra/swe_teacher.yaml#L413-L414">swe_teacher.yaml:413&ndash;414</a>.
+Every other recipe sets exactly 5000/5999, which is why this went unnoticed: for all of them
+the wrong answer and the right answer are the same number.</p>
+
+<p>The check to ask for before merging is small: launch any Gym job with a port range that is
+not 5000&ndash;5999 and print the ports Gym binds. Today they come back in 5000&ndash;5999.</p>
+
+<div class="warn">
+<strong>So what.</strong> The per-shard port range in #3369 is dead on arrival &mdash; it is
+validated and merged, then discarded, in this PR and in every PR of the stack above it. The
+same is already true of the global <code>env.nemo_gym.port_range_low</code>, so one shipped
+recipe silently runs on the wrong ports. Both are fixed by the same few lines: pass the range
+onto <code>NemoGymConfig</code> so the place the actor reads is actually filled in. Worth doing
+here, while the per-shard knob is still new and nobody depends on its current behaviour.
+</div>
+
+</div>
+</body>
+</html>
