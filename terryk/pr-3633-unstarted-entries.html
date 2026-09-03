@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NVIDIA-NeMo/RL #3633 — which Gym entries list_entries() reports, and which ones actually started</title>
+<style>
+:root{
+  --bg:#0d1117; --surface:#161b22; --surface2:#1c2128; --border:#30363d;
+  --text:#e6edf3; --dim:#8b949e; --accent:#58a6ff; --green:#3fb950;
+  --orange:#d29922; --red:#f85149;
+}
+:root[data-theme="light"]{
+  --bg:#ffffff; --surface:#f6f8fa; --surface2:#eaeef2; --border:#d0d7de;
+  --text:#1f2328; --dim:#59636e; --accent:#0969da; --green:#1a7f37;
+  --orange:#9a6700; --red:#cf222e;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:28px 20px 70px}
+h1{font-size:22px;margin:0 0 8px;line-height:1.3}
+h2{font-size:18px;margin:32px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;
+  font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
+.sub{color:var(--dim);font-size:13.5px;margin:0 0 16px}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);
+  border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;
+  font:13px/1 ui-monospace,Menlo,monospace;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.18)}
+.mono{font:12.5px ui-monospace,SFMono-Regular,Menlo,monospace;
+  background:var(--surface);border:1px solid var(--border);border-radius:8px;
+  padding:13px;overflow-x:auto;white-space:pre}
+.warn{border-left:3px solid var(--red);background:var(--surface);
+  padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0}
+.hl{border-left:3px solid var(--accent);background:var(--surface);
+  padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0}
+table{border-collapse:collapse;width:100%;margin:14px 0;font-size:13.5px}
+th,td{border:1px solid var(--border);padding:7px 10px;text-align:left;vertical-align:top}
+th{background:var(--surface2);font-weight:600}
+svg{max-width:100%;height:auto;display:block;margin:16px 0}
+svg .box{fill:var(--surface);stroke:var(--border);stroke-width:1.4}
+svg .lbl{fill:var(--text);font:12.5px ui-monospace,Menlo,monospace}
+svg .lbl-s{fill:var(--text);font:11px ui-monospace,Menlo,monospace}
+svg .lbl-b{fill:var(--text);font:bold 13px -apple-system,sans-serif}
+svg .note{fill:var(--dim);font:11.5px -apple-system,sans-serif}
+svg .hdr{fill:var(--accent);font:bold 12.5px -apple-system,sans-serif}
+svg .c-ok{fill:var(--green);opacity:.5;stroke:var(--green)}
+svg .c-bad{fill:var(--red);opacity:.45;stroke:var(--red)}
+svg .c-skip{fill:var(--dim);opacity:.25;stroke:var(--dim)}
+svg .t-ok{fill:var(--green);font:bold 11.5px -apple-system,sans-serif}
+svg .t-bad{fill:var(--red);font:bold 11.5px -apple-system,sans-serif}
+svg .t-skip{fill:var(--dim);font:bold 11.5px -apple-system,sans-serif}
+svg .arrow{stroke:var(--dim);stroke-width:1.4;fill:none}
+svg .brace{stroke:var(--orange);stroke-width:2.2;fill:none}
+svg .brace-lbl{fill:var(--orange);font:bold 12px -apple-system,sans-serif}
+svg a text{text-decoration:underline;fill:var(--accent);font:11px ui-monospace,Menlo,monospace}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+  document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head>
+<body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+  function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+  function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
+    b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
+      else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+  document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+<div class="wrap">
+
+<h1>Which Gym entries <code>list_entries()</code> reports — and which ones actually started</h1>
+<p class="sub">Companion page for
+<a href="https://github.com/NVIDIA-NeMo/RL/pull/3633">NVIDIA-NeMo/RL #3633</a>.
+Links pinned to
+<a href="https://github.com/NVIDIA-NeMo/RL/tree/7477f97ce6ee270c1efb595ce2340dc6c4958a6c"><code>7477f97</code></a>,
+and to NeMo-Gym at
+<a href="https://github.com/NVIDIA-NeMo/Gym/tree/c3bac96314a59f28b896f597eb9845d175bb0252"><code>c3bac96</code></a>.</p>
+
+<p>A NeMo-Gym job is described by one YAML config. Part of it is plain settings — ports, hosts.
+The rest is <em>entries</em>: named blocks that each start a server process, such as an agent or a
+tool server. A later PR, <a href="https://github.com/NVIDIA-NeMo/RL/pull/3371">#3371</a>, wants to
+spread those servers over several machines, so it has to ask each machine which entries it has.
+That is what
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/7477f97ce6ee270c1efb595ce2340dc6c4958a6c/nemo_rl/environments/nemo_gym.py#L669"><code>list_entries()</code></a>
+answers. Its first docstring line says it reports the entries the actor
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/7477f97ce6ee270c1efb595ce2340dc6c4958a6c/nemo_rl/environments/nemo_gym.py#L670">"actually spawned"</a>.
+It reports every entry the config declares, started or not — and in recipes shipping today those
+two sets are different.</p>
+
+<h2>Three entries, three fates</h2>
+
+<p>All three are from
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/7477f97ce6ee270c1efb595ce2340dc6c4958a6c/examples/nemo_gym/nemotron-3-ultra/ifbench_teacher.yaml#L415">one real recipe</a>,
+whose <code>config_paths</code> list enables 6 files. An entry starts a server only if something
+gives it an <code>entrypoint</code> — the script to run.</p>
+
+<svg viewBox="0 0 900 384" role="img" aria-label="Three config entries and whether Gym started each one">
+  <defs>
+    <marker id="ah" markerWidth="9" markerHeight="7" refX="8" refY="3.5" orient="auto">
+      <polygon points="0 0, 9 3.5, 0 7" fill="#8b949e"/>
+    </marker>
+  </defs>
+
+  <text class="hdr" x="14" y="20">what the resolved config holds</text>
+  <text class="hdr" x="452" y="20">what Gym started</text>
+
+  <rect class="box" x="14" y="32" width="310" height="72" rx="7"/>
+  <text class="lbl-s" x="24" y="52">abstention:</text>
+  <text class="lbl-s" x="24" y="70">  resources_servers:</text>
+  <text class="lbl-s" x="24" y="88">    abstention: {entrypoint: app.py}</text>
+  <text class="note" x="332" y="62">config path enabled,</text>
+  <text class="note" x="332" y="78">so app.py merged in</text>
+  <path class="arrow" d="M324 68 H444" marker-end="url(#ah)"/>
+  <rect class="box" x="452" y="32" width="212" height="72" rx="7"/>
+  <circle class="c-ok" cx="476" cy="68" r="10"/>
+  <text class="t-ok" x="494" y="65">server running</text>
+  <text class="note" x="494" y="83">a process exists</text>
+
+  <rect class="box" x="14" y="118" width="310" height="72" rx="7"/>
+  <text class="lbl-s" x="24" y="138">math_formal_lean_refinement_agent:</text>
+  <text class="lbl-s" x="24" y="156">  responses_api_agents:</text>
+  <text class="lbl-s" x="24" y="174">    proof_refinement_agent: {}</text>
+  <text class="note" x="332" y="148">no config path,</text>
+  <text class="note" x="332" y="164">so no entrypoint</text>
+  <path class="arrow" d="M324 154 H444" marker-end="url(#ah)"/>
+  <rect class="box" x="452" y="118" width="212" height="72" rx="7"/>
+  <circle class="c-bad" cx="476" cy="154" r="10"/>
+  <text class="t-bad" x="494" y="151">nothing started</text>
+  <text class="note" x="494" y="169">and nothing warned</text>
+
+  <rect class="box" x="14" y="204" width="310" height="54" rx="7"/>
+  <text class="lbl-s" x="24" y="226">port_range_low: 5000</text>
+  <text class="note" x="24" y="246">a plain setting, not an entry</text>
+  <path class="arrow" d="M324 231 H444" marker-end="url(#ah)"/>
+  <rect class="box" x="452" y="204" width="212" height="54" rx="7"/>
+  <circle class="c-skip" cx="476" cy="231" r="10"/>
+  <text class="t-skip" x="494" y="235">not a server</text>
+
+  <path class="brace" d="M682 38 H708 V184 H682"/>
+  <text class="brace-lbl" x="716" y="98">list_entries()</text>
+  <text class="brace-lbl" x="716" y="116">returns both</text>
+  <text class="note" x="716" y="140">including the one</text>
+  <text class="note" x="716" y="156">that never started</text>
+
+  <rect class="box" x="14" y="276" width="650" height="94" rx="7"/>
+  <text class="lbl-b" x="24" y="296">legend</text>
+  <circle class="c-ok" cx="34" cy="316" r="8"/>
+  <text class="note" x="50" y="320">started, and reported — correct</text>
+  <circle class="c-bad" cx="34" cy="340" r="8"/>
+  <text class="note" x="50" y="344">never started, but still reported — the gap on this page</text>
+  <circle class="c-skip" cx="34" cy="362" r="8"/>
+  <text class="note" x="50" y="366">not a server at all, correctly skipped</text>
+  <text class="note" x="404" y="320">the line that decides:</text>
+  <a href="https://github.com/NVIDIA-NeMo/Gym/blob/c3bac96314a59f28b896f597eb9845d175bb0252/nemo_gym/cli/env.py#L407">
+    <text x="404" y="340">Gym cli/env.py:407</text>
+  </a>
+</svg>
+
+<h2>Two rules that look alike and are not</h2>
+
+<p>Gym asks two things before it starts a server. <code>list_entries()</code> asks only the first.</p>
+
+<div class="mono">Gym — does this block name a server type, AND does its leaf have an entrypoint?
+
+    if "entrypoint" not in server_config_dict:
+        continue                    # math_formal_lean_refinement_agent stops here
+
+list_entries() — does this block name a server type?
+
+    types = [key for key in GYM_SERVER_TYPE_KEYS if key in entry]
+                                    # math_formal_lean_refinement_agent passes</div>
+
+<p>Those two lines are
+<a href="https://github.com/NVIDIA-NeMo/Gym/blob/c3bac96314a59f28b896f597eb9845d175bb0252/nemo_gym/cli/env.py#L407">Gym <code>cli/env.py:407</code></a>
+and
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/7477f97ce6ee270c1efb595ce2340dc6c4958a6c/nemo_rl/environments/nemo_gym.py#L697">NeMo-RL <code>nemo_gym.py:697</code></a>.
+Nothing reports the difference at runtime. Gym does have a check for blocks that look like servers
+but are not quite —
+<a href="https://github.com/NVIDIA-NeMo/Gym/blob/c3bac96314a59f28b896f597eb9845d175bb0252/nemo_gym/config_types.py#L708"><code>is_almost_server</code></a>
+— but it returns true only when the leaf already <em>has</em> an entrypoint, so this shape never
+reaches it. The entry resolves, no process starts, and the run says nothing.</p>
+
+<table>
+<tr><th>entry</th><th>Gym starts it?</th><th><code>list_entries()</code> reports it?</th></tr>
+<tr><td><code>abstention</code></td><td>yes</td><td>yes</td></tr>
+<tr><td><code>math_formal_lean_refinement_agent</code></td><td><strong>no</strong></td><td><strong>yes</strong></td></tr>
+<tr><td><code>port_range_low</code></td><td>no</td><td>no</td></tr>
+</table>
+
+<h2>Does it work?</h2>
+
+<p><strong>Nobody has run this, and there is nothing to measure.</strong> The method reads a config
+dictionary that is already in memory — no benchmark, no training curve, no job log applies. The
+PR's three unit tests pass, but that is not evidence here: every fixture leaf in them is
+<code>{}</code>, which is exactly the shape that starts no server. The tests assert that shape
+should be reported, so they pass <em>because</em> of the gap.</p>
+
+<p>What does count is a test that fails on the code as written. It was run both ways —
+<code>1 failed, 3 passed</code> against this PR, and <code>4 passed</code> once
+<code>list_entries()</code> also checks for an entrypoint.</p>
+
+<div class="mono">def test_list_entries_skips_an_entry_that_starts_no_server():
+    resolved = DictConfig({
+        "math_env": {"resources_servers": {"math": {"entrypoint": "app.py"}}},
+        "code_gen": {"resources_servers": {"code": {"host": "10.0.0.1"}}},
+    })
+    with _stub_gym_resolved_config(resolved):
+        entries = _spun_up_actor().list_entries()
+
+    assert entries == {"math_env": ["resources_servers"]}</div>
+
+<p>A sweep of 34 recipe files (141 entries) found 7 of this shape, in 2 files. One is staged on
+purpose:
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/7477f97ce6ee270c1efb595ce2340dc6c4958a6c/examples/nemo_gym/grpo_workplace_assistant_nemotron_nano_v2_9b.yaml#L317">that recipe invites you to uncomment a config path</a>,
+and the override block sits ready for it. The other six look like leftovers from copying a file.
+Three sibling recipes enable the config path <em>and</em> carry the override block —
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/7477f97ce6ee270c1efb595ce2340dc6c4958a6c/examples/nemo_gym/nemotron-3-ultra/student_rlvr1.yaml#L425">student_rlvr1</a>,
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/7477f97ce6ee270c1efb595ce2340dc6c4958a6c/examples/nemo_gym/nemotron-3-ultra/student_rlvr2.yaml#L428">student_rlvr2</a>,
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/7477f97ce6ee270c1efb595ce2340dc6c4958a6c/examples/nemo_gym/nemotron-3-ultra/mopd.yaml#L448">mopd</a>
+— while
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/7477f97ce6ee270c1efb595ce2340dc6c4958a6c/examples/nemo_gym/nemotron-3-ultra/ifbench_teacher.yaml#L644">ifbench_teacher</a>
+carries the block with no path.</p>
+
+<div class="hl">
+<strong>What it costs today: very little.</strong> The only caller,
+<a href="https://github.com/NVIDIA-NeMo/RL/pull/3371">#3371</a>, just stores the map and prints it.
+No code routes work using it yet, so a name that never started produces a wrong log line, not a
+wrong decision. The one real failure needs a name collision: if a never-started entry shares its
+name with a real one on another machine, #3371 reports that an agent lives on two machines when
+only one of them ever ran it.
+</div>
+
+<div class="warn">
+<strong>So what.</strong> The cheap fix is the docstring — say the method reports what the config
+declares, not what started. The stronger fix is to check for an <code>entrypoint</code> as well,
+which makes the original wording true, and costs updating the fixtures in three existing tests.
+Worth settling before the router that reads this map is written: after that, a name in the map is
+a routing decision rather than a log line.
+</div>
+
+</div>
+</body>
+</html>
