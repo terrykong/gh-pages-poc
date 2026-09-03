@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NVIDIA-NeMo/RL #3367 — three copies of the NeMo-Gym actor setup, three different bugs</title>
+<style>
+:root{
+  --bg:#0d1117; --surface:#161b22; --surface2:#1c2128; --border:#30363d;
+  --text:#e6edf3; --dim:#8b949e; --accent:#58a6ff; --green:#3fb950;
+  --orange:#d29922; --red:#f85149;
+}
+:root[data-theme="light"]{
+  --bg:#ffffff; --surface:#f6f8fa; --surface2:#eaeef2; --border:#d0d7de;
+  --text:#1f2328; --dim:#59636e; --accent:#0969da; --green:#1a7f37;
+  --orange:#9a6700; --red:#cf222e;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:28px 20px 70px}
+h1{font-size:22px;margin:0 0 8px;line-height:1.3}
+h2{font-size:18px;margin:32px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;
+  font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
+.sub{color:var(--dim);font-size:13.5px;margin:0 0 16px}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);
+  border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;
+  font:13px/1 ui-monospace,Menlo,monospace;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.18)}
+.mono{font:12.5px ui-monospace,SFMono-Regular,Menlo,monospace;
+  background:var(--surface);border:1px solid var(--border);border-radius:8px;
+  padding:13px;overflow-x:auto;white-space:pre}
+.warn{border-left:3px solid var(--red);background:var(--surface);
+  padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0}
+.hl{border-left:3px solid var(--accent);background:var(--surface);
+  padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0}
+.cmt{color:var(--dim)}
+.ok{color:var(--green);font-weight:700}
+.bad{color:var(--red);font-weight:700}
+svg{max-width:100%;height:auto;display:block;margin:16px 0}
+svg .box{fill:var(--surface);stroke:var(--border);stroke-width:1.4}
+svg .lbl{fill:var(--text);font:12px -apple-system,sans-serif}
+svg .mn{fill:var(--text);font:11.5px ui-monospace,Menlo,monospace}
+svg .lbl-b{fill:var(--text);font:bold 12.5px -apple-system,sans-serif}
+svg .note{fill:var(--dim);font:11px -apple-system,sans-serif}
+svg .hdr{fill:var(--accent);font:bold 12.5px -apple-system,sans-serif}
+svg .cell-ok{fill:var(--green);opacity:.16;stroke:var(--green);stroke-width:1.2}
+svg .cell-bad{fill:var(--red);opacity:.2;stroke:var(--red);stroke-width:1.6}
+svg .cell-dup{fill:var(--orange);opacity:.16;stroke:var(--orange);stroke-width:1.2}
+svg .t-ok{fill:var(--green);font:bold 11.5px ui-monospace,Menlo,monospace}
+svg .t-bad{fill:var(--red);font:bold 11.5px ui-monospace,Menlo,monospace}
+svg .t-dup{fill:var(--orange);font:bold 11.5px ui-monospace,Menlo,monospace}
+svg .rule{stroke:var(--border);stroke-width:1}
+svg .arr{stroke:var(--accent);stroke-width:1.8;fill:none}
+svg a text{text-decoration:underline;fill:var(--accent);font:11px ui-monospace,Menlo,monospace}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+  document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head>
+<body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+  function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+  function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
+    b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
+      else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+  document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+<div class="wrap">
+
+<h1>Three copies of the NeMo-Gym actor setup had three different bugs</h1>
+<p class="sub">Companion illustration for
+<a href="https://github.com/NVIDIA-NeMo/RL/pull/3367">NVIDIA-NeMo/RL #3367</a>
+(centralize NeMo-Gym actor construction).
+Permalinks pin the PR head <code>a77c04e</code>; deleted code is pinned at the base <code>e9a855f</code>.</p>
+
+<p>Three training loops can hand rollouts to <strong>NeMo-Gym</strong>, an external service that runs
+environments and returns completions. Each one has to start the same Ray actor: read the
+<code>env.nemo_gym</code> config block, lift a few keys out of it into top-level fields the actor reads
+directly, leave the rest for Gym, pick a Python environment, and install the tokenizer. Before this PR
+all three wrote that sequence out by hand —
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/e9a855ff4bc0a41967e9491c41de093527e123b6/nemo_rl/algorithms/distillation.py#L529">distillation inline</a>,
+grpo and SingleController through a
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/e9a855ff4bc0a41967e9491c41de093527e123b6/nemo_rl/environments/nemo_gym.py#L1131">shared helper that did it differently</a>.
+They drifted, and not in the same direction.</p>
+
+<h2>Who did what, before the PR</h2>
+
+<svg viewBox="0 0 860 410" role="img" aria-label="Matrix of seven actor-setup steps against the three call sites, showing distillation missing the VLM keys while grpo and SingleController set VIRTUAL_ENV to the wrong path">
+  <text class="hdr" x="14" y="20">Each column wrote the same setup by hand. Red = this copy got it wrong.</text>
+
+  <text class="lbl-b" x="306" y="46">grpo.py</text>
+  <text class="lbl-b" x="452" y="46">distillation.py</text>
+  <text class="lbl-b" x="638" y="46">SC setup.py</text>
+  <line class="rule" x1="14" y1="54" x2="846" y2="54"/>
+
+  <text class="lbl" x="14" y="80">lift tool-call + thinking tags</text>
+  <rect class="cell-ok" x="290" y="64" width="130" height="24" rx="4"/><text class="t-ok" x="342" y="81">yes</text>
+  <rect class="cell-ok" x="430" y="64" width="160" height="24" rx="4"/><text class="t-ok" x="497" y="81">yes</text>
+  <rect class="cell-ok" x="600" y="64" width="130" height="24" rx="4"/><text class="t-ok" x="652" y="81">yes</text>
+
+  <text class="lbl" x="14" y="112">lift tokenizer_config (VLM)</text>
+  <rect class="cell-ok" x="290" y="96" width="130" height="24" rx="4"/><text class="t-ok" x="342" y="113">yes</text>
+  <rect class="cell-bad" x="430" y="96" width="160" height="24" rx="4"/><text class="t-bad" x="463" y="113">no — left in Gym</text>
+  <rect class="cell-ok" x="600" y="96" width="130" height="24" rx="4"/><text class="t-ok" x="652" y="113">yes</text>
+
+  <text class="lbl" x="14" y="144">lift pad_dynamic_image_shapes</text>
+  <rect class="cell-ok" x="290" y="128" width="130" height="24" rx="4"/><text class="t-ok" x="342" y="145">yes</text>
+  <rect class="cell-bad" x="430" y="128" width="160" height="24" rx="4"/><text class="t-bad" x="463" y="145">no — left in Gym</text>
+  <rect class="cell-ok" x="600" y="128" width="130" height="24" rx="4"/><text class="t-ok" x="652" y="145">yes</text>
+
+  <text class="lbl" x="14" y="176">uv cache + venv dirs</text>
+  <rect class="cell-ok" x="290" y="160" width="130" height="24" rx="4"/><text class="t-ok" x="342" y="177">yes</text>
+  <rect class="cell-ok" x="430" y="160" width="160" height="24" rx="4"/><text class="t-ok" x="497" y="177">yes</text>
+  <rect class="cell-ok" x="600" y="160" width="130" height="24" rx="4"/><text class="t-ok" x="652" y="177">yes</text>
+
+  <text class="lbl" x="14" y="208">routed-experts dtype</text>
+  <rect class="cell-dup" x="290" y="192" width="130" height="24" rx="4"/><text class="t-dup" x="320" y="209">own copy</text>
+  <rect class="cell-ok" x="430" y="192" width="160" height="24" rx="4"/><text class="t-ok" x="472" y="209">default is fine</text>
+  <rect class="cell-dup" x="600" y="192" width="130" height="24" rx="4"/><text class="t-dup" x="630" y="209">own copy</text>
+
+  <text class="lbl" x="14" y="240">VIRTUAL_ENV points at…</text>
+  <rect class="cell-bad" x="290" y="224" width="130" height="24" rx="4"/><text class="t-bad" x="304" y="241">the binary</text>
+  <rect class="cell-ok" x="430" y="224" width="160" height="24" rx="4"/><text class="t-ok" x="472" y="241">the venv dir</text>
+  <rect class="cell-bad" x="600" y="224" width="130" height="24" rx="4"/><text class="t-bad" x="614" y="241">the binary</text>
+
+  <text class="lbl" x="14" y="272">node affinity + set_tokenizer</text>
+  <rect class="cell-ok" x="290" y="256" width="130" height="24" rx="4"/><text class="t-ok" x="342" y="273">yes</text>
+  <rect class="cell-ok" x="430" y="256" width="160" height="24" rx="4"/><text class="t-ok" x="497" y="273">yes</text>
+  <rect class="cell-ok" x="600" y="256" width="130" height="24" rx="4"/><text class="t-ok" x="652" y="273">yes</text>
+
+  <line class="rule" x1="14" y1="294" x2="846" y2="294"/>
+  <text class="note" x="14" y="314">Legend:</text>
+  <rect class="cell-ok" x="66" y="303" width="15" height="14" rx="3"/><text class="note" x="87" y="314">correct</text>
+  <rect class="cell-bad" x="146" y="303" width="15" height="14" rx="3"/><text class="note" x="167" y="314">wrong or missing</text>
+  <rect class="cell-dup" x="282" y="303" width="15" height="14" rx="3"/><text class="note" x="303" y="314">works, but written twice</text>
+
+  <text class="note" x="14" y="340">"Left in Gym" means the key stayed inside the config blob forwarded to the Gym service, where nothing reads it.</text>
+  <text class="note" x="14" y="356">The actor looks for it as a top-level field instead, so it saw nothing and skipped building the image processor:</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/a77c04ea30a206b6b6e64fc28065dd0668fd35d7/nemo_rl/environments/nemo_gym.py#L499"><text x="14" y="374">nemo_gym.py:499</text></a>
+  <text class="note" x="122" y="374">— and the wrong VIRTUAL_ENV was a file path where every reader wants a directory:</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/a77c04ea30a206b6b6e64fc28065dd0668fd35d7/nemo_rl/utils/venvs.py#L217"><text x="14" y="392">venvs.py:217</text></a>
+  <text class="note" x="104" y="392">strips the trailing bin/python that the old inline copy left on.</text>
+</svg>
+
+<h2>What the PR does about it</h2>
+
+<p>It splits the sequence into two functions in
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/a77c04ea30a206b6b6e64fc28065dd0668fd35d7/nemo_rl/environments/nemo_gym.py#L1132">one file</a>
+and points all three call sites at them. The split matters: building the config is now pure — no Ray, no
+network — so it can be unit tested on its own, which is where the new tests in the PR live.</p>
+
+<div class="mono"><span class="cmt"># 1. build_nemo_gym_config — pure. Splits one dict into two destinations.</span>
+nemo_gym_dict = dict(env_configs["nemo_gym"])   <span class="cmt"># copy, so the caller's config is untouched</span>
+
+<span class="cmt"># these four come OUT and become top-level fields the actor reads directly</span>
+invalid_tool_call_patterns = nemo_gym_dict.pop("invalid_tool_call_patterns")
+thinking_tags              = nemo_gym_dict.pop("thinking_tags")
+tokenizer_config           = nemo_gym_dict.pop("tokenizer_config")        <span class="bad">&lt;- distillation used to miss these two</span>
+pad_dynamic_image_shapes   = nemo_gym_dict.pop("pad_dynamic_image_shapes") <span class="bad">&lt;-</span>
+
+<span class="cmt"># everything left over is Gym's own config: config_paths, uv_cache_dir, uv_venv_dir, ...</span>
+return NemoGymConfig(..., initial_global_config_dict=nemo_gym_dict)</div>
+<p class="sub"><a href="https://github.com/NVIDIA-NeMo/RL/blob/a77c04ea30a206b6b6e64fc28065dd0668fd35d7/nemo_rl/environments/nemo_gym.py#L1157">nemo_gym.py:1157-1172</a></p>
+
+<div class="mono"><span class="cmt"># 2. spinup_nemo_gym_actor — the Ray half. Now a thin shell.</span>
+cfg  = build_nemo_gym_config(env_configs, base_urls=..., model_name=...)
+opts = {"runtime_env": make_actor_runtime_env(NEMO_GYM_ACTOR_FQN)}  <span class="ok">&lt;- fixes VIRTUAL_ENV for grpo + SC</span>
+if env_configs["nemo_gym"].get("num_gpu_nodes", 0):
+    opts["scheduling_strategy"] = NodeAffinitySchedulingStrategy(...)  <span class="cmt"># land near the GPUs</span>
+
+actor = NemoGym.options(**opts).remote(cfg)
+ray.get(actor._spinup.remote())          <span class="cmt"># start Gym</span>
+ray.get(actor.set_tokenizer.remote(tok)) <span class="cmt"># install once here, not per rollout</span></div>
+<p class="sub"><a href="https://github.com/NVIDIA-NeMo/RL/blob/a77c04ea30a206b6b6e64fc28065dd0668fd35d7/nemo_rl/environments/nemo_gym.py#L1229">nemo_gym.py:1229-1247</a></p>
+
+<p>So both red cells in the figure turn green as a side effect of the merge, for the two columns that had
+them. Neither is mentioned in the PR description.</p>
+
+<h2>Does it work?</h2>
+
+<p><strong>Nobody has posted a run.</strong> There is no W&amp;B link and no before/after number, which is
+reasonable for a refactor with no speed claim — but it means the only thing standing behind the two
+behavior changes above is unit tests. So the useful question is whether those tests would notice if the
+changes were undone. Two of them would not:</p>
+
+<div class="mono">break the VLM key lifting (set tokenizer_config=None, drop the image flags)
+  -> <span class="bad">21 passed</span>   the suite does not notice
+
+drop the enable_router_replay argument on its way to the config builder
+  -> <span class="bad">21 passed</span>   the suite does not notice
+
+run the suite untouched
+  -> <span class="ok">21 passed</span></div>
+
+<p>Both gaps are one small test each, and both are cheap: the fixture the new tests share simply does not
+contain <code>tokenizer_config</code>, so the lifting it was written to prove is never exercised. Those two
+tests are the change worth asking for before merge.</p>
+
+<div class="hl">
+<strong>The takeaway.</strong> Nobody wrote three different bugs on purpose. Each copy was correct when it
+was written, and then a fix landed in one place and not the others — distillation got the Python
+environment right and never learned about the image-model keys; grpo and SingleController learned the
+opposite half. Merging them is what makes the two halves meet, which is why a refactor billed as
+"no behavior change" quietly fixes two things. Both deserve a line in the PR description, so the next
+person reading the history knows when the behavior actually changed.
+</div>
+
+</div>
+</body>
+</html>
