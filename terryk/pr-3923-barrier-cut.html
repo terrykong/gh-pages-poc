@@ -122,8 +122,13 @@ exists to keep apart.</p>
   <text class="note" x="309" y="415">no cut held; no write today, nothing enforcing that</text>
 </svg>
 <p class="cap">The save-side call passes <code>clear_unreferenced=False</code>, so it does not write
-today. That keyword is the only thing standing between an exclusive checkpoint and a live queue
-write, and the signature cannot express which side of the barrier the caller is on.</p>
+today. The flag is not about the barrier &#8212; it tracks whether the caller has just orphaned rows.
+Restore has: <a href="https://github.com/NVIDIA-NeMo/RL/blob/0a93f0ffd240f4e987f791648754b3127b1b5deb/nemo_rl/algorithms/single_controller.py#L693"><code>prepare_for_restart</code></a> applies each group's granularity and
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/0a93f0ffd240f4e987f791648754b3127b1b5deb/nemo_rl/experience/rollout_recovery.py#L386-L399">clears the abandoned attempts' staging keys</a>, then
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/0a93f0ffd240f4e987f791648754b3127b1b5deb/nemo_rl/algorithms/single_controller.py#L701"><code>discard_canonical_groups</code></a> drops ledger groups already covered by a
+canonical row &#8212; both a few lines above, under the same cut. A save orphans nothing, so it has
+nothing to sweep. Keeping the one write off the exclusive path is a side effect of that flag, not its
+purpose.</p>
 
 <h2>Why the obvious fix hangs</h2>
 
@@ -157,9 +162,11 @@ session later.</p>
 <div class="warn">
 <strong>The cheap version.</strong> Give the function a <code>cut: DataPlaneMutationCut</code>
 parameter and call <code>require_live()</code> on it, exactly like the cleanup helpers beside it. The
-restore caller already has a cut to pass. The save caller does not and cannot get one &#8212; which is
-the point: it would no longer compile as a mutator, so split the read-only inventory check from the
-sweep and let the save path call only the read-only half.
+restore caller already has a cut to pass, and the save caller can bind the one
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/0a93f0ffd240f4e987f791648754b3127b1b5deb/nemo_rl/algorithms/async_utils/replay_buffer.py#L258-L274"><code>checkpoint()</code> already yields</a> &#8212;
+<code>async with ...checkpoint() as cut:</code>. That is worth doing rather than working around: the
+exclusive holder is the safest writer there is, so a cut on that path is also what would make the
+sweep safe to switch on during a save, which is the obvious next thing someone will want.
 </div>
 
 </div>
