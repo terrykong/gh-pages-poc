@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>NVIDIA-NeMo/RL #3923 &#8212; why the checkpoint barrier became reentrant</title>
+<title>NVIDIA-NeMo/RL #3923 &#8212; why the checkpoint barrier now allows a nested cut</title>
 <style>
 :root{--bg:#0d1117;--surface:#161b22;--surface2:#1c2128;--border:#30363d;
 --text:#e6edf3;--dim:#8b949e;--accent:#58a6ff;--green:#3fb950;--orange:#d29922;--red:#f85149}
@@ -54,13 +54,13 @@ svg a text{text-decoration:underline;fill:var(--accent);font:11.5px ui-monospace
   document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
 <div class="wrap">
 
-<h1>Why the checkpoint barrier became reentrant, and the one call that required it</h1>
+<h1>Why a task can now take a second cut, and the one call that required it</h1>
 <p class="sub">Companion note for
 <a href="https://github.com/NVIDIA-NeMo/RL/pull/3923">NVIDIA-NeMo/RL #3923</a>, and a sibling of
 <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-3923-barrier-cut.html">the note on the cleanup call that escapes the cut</a>.
 All permalinks pin the head <code>0a93f0f</code>.</p>
 
-<p>Writes to the queue and the save that snapshots it must not overlap. A barrier enforces it: a writer
+<p>Writes to the replay buffer and the save that snapshots it must not overlap. A barrier enforces it: a writer
 holds a <em>cut</em> while it works, and a save waits for every cut to close. Two shapes express
 "my caller already holds one". The older one is a parameter — the method takes the <code>cut</code>
 and works with it. The one this PR adds is invisible: ask for a cut while you already have one, and
@@ -69,7 +69,7 @@ you silently get the same one back.</p>
 <h2>One call site out of four</h2>
 
 <svg viewBox="0 0 900 384" role="img" aria-label="Four buffer methods that take the barrier, and which of their callers already hold it">
-  <text class="hdr" x="14" y="20">Four queue methods take the barrier themselves. Only one is called by someone already holding it.</text>
+  <text class="hdr" x="14" y="20">Four TQReplayBuffer methods take the barrier themselves. Only one is called by someone already holding it.</text>
 
   <text class="note" x="20" y="52">method</text>
   <text class="note" x="330" y="52">called from</text>
@@ -115,7 +115,7 @@ whose own caller <a href="https://github.com/NVIDIA-NeMo/RL/blob/0a93f0ffd240f4e
 
 <h2>What the other three do instead</h2>
 
-<p>The queue already had a way to say this, and it is a parameter, not a property of the call stack.
+<p>The replay buffer already had a way to say this, and it is a parameter, not a property of the call stack.
 A public method takes the barrier; a private twin assumes the caller holds it:</p>
 
 <div class="mono"><span class="cm"># the existing shape -- two of these already shipped before this PR</span>
