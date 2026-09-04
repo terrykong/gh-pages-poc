@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NVIDIA-NeMo/RL #3924 &#8212; how a rollout snapshot survives kill -9</title>
+<style>
+:root{--bg:#0d1117;--surface:#161b22;--surface2:#1c2128;--border:#30363d;
+--text:#e6edf3;--dim:#8b949e;--accent:#58a6ff;--green:#3fb950;--orange:#d29922;--red:#f85149}
+:root[data-theme="light"]{--bg:#fff;--surface:#f6f8fa;--surface2:#eaeef2;--border:#d0d7de;
+--text:#1f2328;--dim:#59636e;--accent:#0969da;--green:#1a7f37;--orange:#9a6700;--red:#cf222e}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:28px 20px 70px}
+h1{font-size:22px;margin:0 0 8px;line-height:1.3}
+h2{font-size:18px;margin:32px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
+code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;
+font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
+.sub{color:var(--dim);font-size:13.5px;margin:0 0 16px}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);
+border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;
+font:13px/1 ui-monospace,Menlo,monospace;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.18)}
+.mono{font:12.5px/1.6 ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--surface);
+border:1px solid var(--border);border-radius:8px;padding:13px;overflow-x:auto;white-space:pre}
+.mono .cm{color:var(--dim)}.mono .ok{color:var(--green)}.mono .no{color:var(--red)}
+.src{font-size:12.5px;color:var(--dim);margin:5px 0 20px}
+.warn{border-left:3px solid var(--orange);background:var(--surface);
+padding:12px 16px;margin:20px 0 0;border-radius:0 8px 8px 0}
+.cap{color:var(--dim);font-size:12.5px;margin:2px 0 18px}
+svg{max-width:100%;height:auto;display:block;margin:16px 0 6px}
+svg a text{text-decoration:underline}
+svg .box{fill:var(--surface);stroke:var(--border);stroke-width:1.4}
+svg .lbl{fill:var(--text);font:12.5px ui-monospace,Menlo,monospace}
+svg .lbl-b{fill:var(--text);font:bold 13px -apple-system,sans-serif}
+svg .note{fill:var(--dim);font:11.5px -apple-system,sans-serif}
+svg .hdr{fill:var(--accent);font:bold 12.5px -apple-system,sans-serif}
+svg .okt{fill:var(--green);font:bold 12px -apple-system,sans-serif}
+svg .badt{fill:var(--red);font:bold 12px -apple-system,sans-serif}
+svg .dimt{fill:var(--dim);font:bold 12px -apple-system,sans-serif}
+svg .arw{stroke:var(--dim);stroke-width:1.6;fill:none}
+svg .tick{stroke:var(--border);stroke-width:1.2}
+svg .kill{stroke:var(--red);stroke-width:1.5;stroke-dasharray:4 3}
+svg .lnk{fill:var(--accent);font:11.5px ui-monospace,Menlo,monospace}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+  document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head>
+<body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">&#127769; dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+  function lbl(){var b=document.getElementById('theme-toggle');if(b)b.innerHTML=r.getAttribute('data-theme')==='light'?'&#9728; light':'&#127769; dark';}
+  function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
+    b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
+      else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+  document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+<div class="wrap">
+
+<h1>How a rollout snapshot survives <code>kill -9</code>, and the one moment it does not</h1>
+<p class="sub">Companion note for
+<a href="https://github.com/NVIDIA-NeMo/RL/pull/3924">NVIDIA-NeMo/RL #3924</a>.
+All permalinks pin the head <code>c610fbb</code>.</p>
+
+<p>This PR saves rollout work to disk on a timer, so a job that dies mid-step does not have to
+regenerate everything. That only helps if a snapshot killed halfway through is never mistaken for a
+finished one. The trick is a marker file: a snapshot directory counts as real only when it contains a
+file named <code>COMMITTED</code>. The writer builds everything under a temporary name, flushes it to
+the disk, writes the marker <em>last</em>, and only then renames the directory into place. So the
+marker is the last thing to appear, and a reader can trust it.</p>
+
+<p>The order below is the whole design, and it is
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/c610fbbe37451a24360d0abaf32866b843cdb646/nemo_rl/algorithms/single_controller_utils/rollout_checkpoint.py#L486-L521">15 lines of
+<code>commit_snapshot</code></a>. "Flush" means <code>fsync</code> &#8212; asking the operating system to
+actually put the bytes on the disk instead of holding them in memory.</p>
+
+<svg viewBox="0 0 940 400" role="img" aria-label="The five steps of committing a snapshot, and what four different crash points leave behind">
+  <text class="hdr" x="14" y="18">One save, five steps &#8212; and what the next start finds if the process dies at each point</text>
+
+  <line class="tick" x1="14" y1="150" x2="926" y2="150"/>
+
+  <!-- step markers -->
+  <circle cx="70"  cy="150" r="6" fill="var(--accent)"/>
+  <circle cx="250" cy="150" r="6" fill="var(--accent)"/>
+  <circle cx="430" cy="150" r="6" fill="var(--accent)"/>
+  <circle cx="610" cy="150" r="6" fill="var(--accent)"/>
+  <circle cx="800" cy="150" r="6" fill="var(--accent)"/>
+
+  <text class="lbl-b" x="70"  y="112" text-anchor="middle">1. write</text>
+  <text class="lbl-b" x="250" y="112" text-anchor="middle">2. flush files</text>
+  <text class="lbl-b" x="430" y="112" text-anchor="middle">3. write marker</text>
+  <text class="lbl-b" x="610" y="112" text-anchor="middle">4. rename</text>
+  <text class="lbl-b" x="800" y="112" text-anchor="middle">5. delete old</text>
+
+  <text class="lbl" x="70"  y="132" text-anchor="middle">tmp_snapshot_7/</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/c610fbbe37451a24360d0abaf32866b843cdb646/nemo_rl/algorithms/single_controller_utils/rollout_checkpoint.py#L495"><text class="lnk" x="250" y="132" text-anchor="middle">_fsync_tree :495</text></a>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/c610fbbe37451a24360d0abaf32866b843cdb646/nemo_rl/algorithms/single_controller_utils/rollout_checkpoint.py#L497"><text class="lnk" x="430" y="132" text-anchor="middle">COMMITTED :497</text></a>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/c610fbbe37451a24360d0abaf32866b843cdb646/nemo_rl/algorithms/single_controller_utils/rollout_checkpoint.py#L500"><text class="lnk" x="610" y="132" text-anchor="middle">os.rename :500</text></a>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/c610fbbe37451a24360d0abaf32866b843cdb646/nemo_rl/algorithms/single_controller_utils/rollout_checkpoint.py#L516"><text class="lnk" x="800" y="132" text-anchor="middle">rmtree :516</text></a>
+
+  <!-- kill points -->
+  <line class="kill" x1="160" y1="150" x2="160" y2="196"/>
+  <line class="kill" x1="340" y1="150" x2="340" y2="196"/>
+  <line class="kill" x1="520" y1="150" x2="520" y2="196"/>
+  <line class="kill" x1="860" y1="150" x2="860" y2="196"/>
+  <text class="badt" x="160" y="212" text-anchor="middle">kill A</text>
+  <text class="badt" x="340" y="212" text-anchor="middle">kill B</text>
+  <text class="badt" x="520" y="212" text-anchor="middle">kill C</text>
+  <text class="badt" x="860" y="212" text-anchor="middle">kill D</text>
+
+  <!-- outcome boxes -->
+  <rect class="box" x="14" y="230" width="216" height="86" rx="8"/>
+  <text class="okt"  x="28" y="252">A &#183; recovered</text>
+  <text class="note" x="28" y="272">Left on disk: tmp_snapshot_7/</text>
+  <text class="note" x="28" y="290">No marker, so it is skipped.</text>
+  <text class="note" x="28" y="306">Next save reuses number 7 and</text>
+
+  <rect class="box" x="244" y="230" width="216" height="86" rx="8"/>
+  <text class="okt"  x="258" y="252">B &#183; recovered</text>
+  <text class="note" x="258" y="272">Same as A. The marker is</text>
+  <text class="note" x="258" y="290">written after the flush, so a</text>
+  <text class="note" x="258" y="306">half-flushed dir never has one.</text>
+
+  <rect class="box" x="474" y="230" width="216" height="86" rx="8"/>
+  <text class="okt"  x="488" y="252">C &#183; recovered</text>
+  <text class="note" x="488" y="272">Marker exists, rename did not</text>
+  <text class="note" x="488" y="290">happen. Still named tmp_, and</text>
+  <text class="note" x="488" y="306">only snapshot_N is ever read.</text>
+
+  <rect class="box" x="704" y="230" width="222" height="86" rx="8"/>
+  <text class="badt" x="718" y="252">D &#183; stuck forever</text>
+  <text class="note" x="718" y="272">rmtree removed the marker,</text>
+  <text class="note" x="718" y="290">then died. snapshot_3/ now has</text>
+  <text class="note" x="718" y="306">no marker and no owner.</text>
+
+  <text class="note" x="14" y="338">A: the next save computes the same number again and clears the stale temporary directory first.</text>
+  <text class="note" x="14" y="356">D is the only gap. The reader and the cleanup both ask "does this have a marker?", so a directory that lost its marker matches neither.</text>
+
+  <text class="okt"  x="14" y="384">green = recovers on its own</text>
+  <text class="badt" x="230" y="384">red = never reclaimed</text>
+  <text class="dimt" x="420" y="384">dashed line = process killed here</text>
+</svg>
+<p class="cap">Kills A, B and C all land on the safe side. Only D leaves something behind that nothing will ever pick up.</p>
+
+<h2>Why D is unreachable, in the two lines that cause it</h2>
+
+<p>Two different pieces of code decide what a snapshot directory <em>is</em>, and both ask the same
+question. The reader skips anything without a marker:</p>
+
+<div class="mono"><span class="cm"># resolve_latest_snapshot &#8212; pick the newest snapshot to restore from</span>
+for candidate in candidates:
+    if not (candidate / <span class="ok">ROLLOUT_SNAPSHOT_COMMITTED_FILENAME</span>).is_file():
+        continue          <span class="cm"># no marker -&gt; not a real snapshot, ignore it</span></div>
+<p class="src"><a href="https://github.com/NVIDIA-NeMo/RL/blob/c610fbbe37451a24360d0abaf32866b843cdb646/nemo_rl/algorithms/single_controller_utils/rollout_checkpoint.py#L545-L547">rollout_checkpoint.py :545&#8211;547</a></p>
+
+<p>And the cleanup only counts directories that <em>have</em> a marker, then deletes everything past the
+newest <code>keep_latest_k</code> of them:</p>
+
+<div class="mono"><span class="cm"># commit_snapshot &#8212; drop old snapshots after publishing a new one</span>
+committed = sorted(
+    child for child in root.iterdir()
+    if child.is_dir()
+    and _SNAPSHOT_RE.fullmatch(child.name)
+    and (child / <span class="ok">ROLLOUT_SNAPSHOT_COMMITTED_FILENAME</span>).is_file()   <span class="cm"># same question</span>
+)
+stale_snapshots = committed[keep_latest_k:]        <span class="cm"># a marker-less dir is not in this list</span>
+for stale in stale_snapshots:
+    shutil.rmtree(stale)                           <span class="cm"># ...so it is never passed to rmtree</span></div>
+<p class="src"><a href="https://github.com/NVIDIA-NeMo/RL/blob/c610fbbe37451a24360d0abaf32866b843cdb646/nemo_rl/algorithms/single_controller_utils/rollout_checkpoint.py#L505-L518">rollout_checkpoint.py :505&#8211;518</a></p>
+
+<p>Put those together and the gap falls out. <code>shutil.rmtree</code> deletes the files inside a
+directory before the directory itself, so the marker can go first. If the process dies right then,
+<code>snapshot_3/</code> is left with no marker. The reader ignores it. The cleanup does not see it
+either. It is not wrong &#8212; nothing restores from it &#8212; it just sits there taking up disk for the
+rest of the run, and the run after that.</p>
+
+<p>Running the real functions, with <code>keep_latest_k = 2</code> and one marker removed by hand to
+stand in for a kill at point D:</p>
+
+<div class="mono">after 3 saves            -&gt; snapshot_000002  snapshot_000003
+remove one marker        -&gt; snapshot_000003  snapshot_000004
+after 4 more saves       -&gt; <span class="no">snapshot_000003  COMMITTED=False</span>   &lt;- three cleanups later, still here
+                            snapshot_000007  COMMITTED=True
+                            snapshot_000008  COMMITTED=True</div>
+<p class="src">Seven saves, retention of two, and the count on disk is three. The extra one never leaves.</p>
+
+<p>The repair is already written elsewhere in the same file. When the writer picks a name it clears a
+leftover temporary directory first &#8212;
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/c610fbbe37451a24360d0abaf32866b843cdb646/nemo_rl/algorithms/single_controller_utils/rollout_checkpoint.py#L479-L482"><code>if tmp_path.exists(): shutil.rmtree(tmp_path)</code></a> &#8212; which is exactly why kill A
+recovers. Doing the same for a marker-less <code>snapshot_*</code> directory closes D. Deleting the
+marker <em>before</em> the rest of the directory also helps: then a half-finished delete leaves
+something the next pass can still recognise, instead of something invisible.</p>
+
+<div class="warn">
+<strong>What this means if you turn the feature on.</strong> Snapshots are off unless you set
+<code>rollout_checkpointing.interval_s</code>, and the crash protocol itself holds up &#8212; a snapshot is
+either complete and readable or ignored, never half-applied. The cost of the gap is disk, not
+correctness: a run that gets killed during cleanup leaks one snapshot directory each time, and the
+retention setting will not claw it back. That matters more here than it normally would, because being
+killed at an awkward moment is the exact thing this feature exists to survive.
+</div>
+
+</div>
+</body>
+</html>
