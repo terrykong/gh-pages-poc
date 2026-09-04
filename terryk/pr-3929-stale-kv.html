@@ -223,9 +223,71 @@ off. Both finished cleanly.
 <a href="https://github.com/NVIDIA-NeMo/RL/pull/3929#issuecomment-5486191857">this PR comment</a></p>
 
 <p>
-That is a real run, and it covers the case this PR is for. It does <b>not</b> cover what happens
-when a generation worker is broken at the moment the pause is requested — no shard was killed in
-either run.
+That is a real run and it covers the case this PR is for: every refit succeeded. No shard was
+killed in either run, so nothing below was exercised.
+</p>
+
+<h3>What happens if the refit fails while everything is frozen</h3>
+
+<p>
+Freezing the engines makes the failure path longer, because the code that recovers from a bad refit
+now runs with generation stopped. A refit that times out is retried once: the controller waits
+<code>refit_timeout_s</code> (300s by default) plus a 60s grace, probes the fleet, rebuilds the
+communicator, then waits the same 360s again. The engines stay frozen for all of it — and each
+frozen request's own clock is still running.
+</p>
+
+<svg viewBox="0 0 900 250" role="img" aria-label="Timeline of a failed and retried refit: generation is frozen for 720 seconds, which passes the 600 second router budget before the retry finishes.">
+  <text class="lbl-b" x="14" y="20">A refit that fails once, on default settings</text>
+  <text class="note" x="14" y="38">Engines are frozen from the pause until the resume. Seconds along the bottom.</text>
+
+  <!-- frozen band -->
+  <rect class="c-old" x="70" y="64" width="600" height="30" rx="4"/>
+  <text class="c-txt" x="370" y="84" text-anchor="middle">generation frozen — 720s</text>
+
+  <!-- attempt bars -->
+  <rect class="c-gone" x="70"  y="104" width="292" height="24" rx="4"/>
+  <text class="note" x="216" y="121" text-anchor="middle">refit attempt 1 — 360s</text>
+  <rect class="c-gone" x="378" y="104" width="292" height="24" rx="4"/>
+  <text class="note" x="524" y="121" text-anchor="middle">retry — 360s</text>
+  <text class="note" x="370" y="121" text-anchor="middle">·</text>
+
+  <!-- axis -->
+  <line class="arw" x1="70" y1="146" x2="820" y2="146"/>
+  <text class="note" x="70"  y="162" text-anchor="middle">0</text>
+  <text class="note" x="670" y="162" text-anchor="middle">720</text>
+
+  <!-- pause / resume markers -->
+  <text class="mark-lbl" x="70" y="58" text-anchor="middle">pause</text>
+  <text class="mark-lbl" x="670" y="58" text-anchor="middle">resume?</text>
+
+  <!-- budget lines -->
+  <line class="mark" x1="557" y1="60" x2="557" y2="140"/>
+  <text class="hdr" x="557" y="182" text-anchor="middle">router backend_timeout_s = 600s</text>
+  <text class="note" x="557" y="198" text-anchor="middle">crossed while the retry is still running</text>
+  <line class="mark" x1="800" y1="60" x2="800" y2="140"/>
+  <text class="hdr" x="820" y="182" text-anchor="end">per-request limit = 900s</text>
+
+  <text class="lbl" x="70" y="228">If the retry also fails, the resume never runs — the run ends with the engines still frozen.</text>
+</svg>
+
+<p>
+Two things follow. The recovery meant to save the run can outlast the deadlines that were
+protecting the frozen requests: the router gives a backend 600s, and the two attempts alone pass
+that. And the resume is a plain statement after the <code>try</code>/<code>except</code>, so any
+failure in between skips it. The run does end — nothing catches the error — so the engines are
+released when the process exits, not by any cleanup step.
+</p>
+<p class="src">
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/ae0ca2787a012d02ba3f9af6eccf3a5c54dfe1c8/nemo_rl/algorithms/single_controller.py#L3173-L3176">the resume, after the <code>try</code></a> ·
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/ae0ca2787a012d02ba3f9af6eccf3a5c54dfe1c8/nemo_rl/algorithms/single_controller.py#L3157-L3164">the retry inside the recovery window</a> ·
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/ae0ca2787a012d02ba3f9af6eccf3a5c54dfe1c8/nemo_rl/algorithms/single_controller.py#L2974-L2977">where 360s comes from</a>
+</p>
+
+<p>
+Worth saying plainly: none of this is reached unless
+<code>generation_fleet_health.enabled</code> is turned on, which is off in both shipped example
+configs. With it off, a failed refit simply ends the run.
 </p>
 
 <div class="warn">
