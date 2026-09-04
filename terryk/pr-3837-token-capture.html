@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NVIDIA-NeMo/RL #3837 — how training gets the exact tokens the model generated</title>
+<style>
+:root{
+  --bg:#0d1117; --surface:#161b22; --surface2:#1c2128; --border:#30363d;
+  --text:#e6edf3; --dim:#8b949e; --accent:#58a6ff; --green:#3fb950;
+  --orange:#d29922; --red:#f85149;
+}
+:root[data-theme="light"]{
+  --bg:#ffffff; --surface:#f6f8fa; --surface2:#eaeef2; --border:#d0d7de;
+  --text:#1f2328; --dim:#59636e; --accent:#0969da; --green:#1a7f37;
+  --orange:#9a6700; --red:#cf222e;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:28px 20px 70px}
+h1{font-size:22px;margin:0 0 8px;line-height:1.3}
+h2{font-size:18px;margin:32px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;
+  font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
+.sub{color:var(--dim);font-size:13.5px;margin:0 0 16px}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);
+  border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;
+  font:13px/1 ui-monospace,Menlo,monospace;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.18)}
+.mono{font:12.5px ui-monospace,SFMono-Regular,Menlo,monospace;
+  background:var(--surface);border:1px solid var(--border);border-radius:8px;
+  padding:13px;overflow-x:auto;white-space:pre;margin:10px 0}
+.warn{border-left:3px solid var(--red);background:var(--surface);
+  padding:12px 16px;margin:18px 0;border-radius:0 8px 8px 0}
+.hl{border-left:3px solid var(--accent);background:var(--surface);
+  padding:12px 16px;margin:18px 0;border-radius:0 8px 8px 0}
+.step{color:var(--dim);font-size:12.5px;margin:2px 0 14px}
+svg{max-width:100%;height:auto;display:block;margin:16px 0}
+svg .box{fill:var(--surface);stroke:var(--border);stroke-width:1.4}
+svg .lbl{fill:var(--text);font:12.5px ui-monospace,Menlo,monospace}
+svg .lbl-b{fill:var(--text);font:bold 13px -apple-system,sans-serif}
+svg .note{fill:var(--dim);font:11.5px -apple-system,sans-serif}
+svg .hdr{fill:var(--accent);font:bold 12.5px -apple-system,sans-serif}
+svg .ar{stroke:var(--dim);stroke-width:1.6;fill:none}
+svg .ar-hot{stroke:var(--red);stroke-width:3;fill:none}
+svg .ar-tok{stroke:var(--green);stroke-width:3;fill:none}
+svg .redbox{fill:var(--surface);stroke:var(--red);stroke-width:2.2}
+svg .greenbox{fill:var(--surface);stroke:var(--green);stroke-width:2.2}
+svg .dimbox{fill:var(--surface);stroke:var(--dim);stroke-width:1.4;stroke-dasharray:5 4}
+svg .t-red{fill:var(--red);font:bold 11.5px -apple-system,sans-serif}
+svg .t-green{fill:var(--green);font:bold 11.5px -apple-system,sans-serif}
+svg a text{text-decoration:underline;fill:var(--accent);font:11.5px ui-monospace,Menlo,monospace}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+  document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head>
+<body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+  function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+  function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
+    b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
+      else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+  document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+<div class="wrap">
+
+<h1>How training gets the exact tokens the model generated, without trusting the environment to hand them back</h1>
+<p class="sub">Companion illustration for
+<a href="https://github.com/NVIDIA-NeMo/RL/pull/3837">NVIDIA-NeMo/RL #3837</a>
+— token capture through an external TransferQueue sink.
+All permalinks pin the PR head <code>648b948a</code>.</p>
+
+<p>To train on a rollout you need the exact token ids the model produced. Today NeMo-RL asks the
+environment for them: the agent server sends text and token ids back, and the trainer believes
+it — the environment sits in the middle of the token path
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/648b948a8aa930547b0aa183cebca04b7117a4a6/nemo_rl/environments/nemo_gym.py#L895">nemo_gym.py:895</a>).
+This PR adds an opt-in second path. The vLLM worker writes each model call's new tokens straight
+into TransferQueue as it generates them
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/648b948a8aa930547b0aa183cebca04b7117a4a6/nemo_rl/data_plane/tq_token_sink.py#L154">tq_token_sink.py:154</a>),
+and the environment only ever handles short opaque keys. Afterwards a
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/648b948a8aa930547b0aa183cebca04b7117a4a6/nemo_rl/experience/blackbox_finalizer.py#L353">finalizer</a>
+fetches those rows, re-checks their hashes, and glues them into one training row.</p>
+
+<h2>Where the tokens travel</h2>
+
+<svg viewBox="0 0 940 452" role="img" aria-label="Two paths for token ids. In token echo the environment carries the tokens. In capture the tokens go straight to TransferQueue and the environment only sees opaque keys.">
+  <text class="hdr" x="14" y="20">Today — token echo (still the default)</text>
+
+  <rect class="box" x="14" y="34" width="150" height="52" rx="7"/>
+  <text class="lbl" x="30" y="56">vLLM worker</text>
+  <text class="note" x="30" y="74">generates tokens</text>
+
+  <rect class="redbox" x="330" y="34" width="230" height="52" rx="7"/>
+  <text class="lbl" x="346" y="56">agent server (environment)</text>
+  <text class="note" x="346" y="74">re-tokenizes, may drop or reorder</text>
+
+  <rect class="box" x="742" y="34" width="150" height="52" rx="7"/>
+  <text class="lbl" x="758" y="56">trainer</text>
+  <text class="note" x="758" y="74">believes what it got</text>
+
+  <path class="ar-hot" d="M164 60 L326 60"/>
+  <path class="ar-hot" d="M326 60 L316 55 M326 60 L316 65"/>
+  <text class="t-red" x="186" y="52">text + token ids</text>
+
+  <path class="ar-hot" d="M560 60 L738 60"/>
+  <path class="ar-hot" d="M738 60 L728 55 M738 60 L728 65"/>
+  <text class="t-red" x="580" y="52">the ids it claims</text>
+
+  <text class="t-red" x="330" y="106">The environment is inside the token path. If it hands back different ids,</text>
+  <text class="t-red" x="330" y="122">training uses them and nothing notices.</text>
+
+  <path d="M14 146 L926 146" stroke="var(--border)" stroke-width="1"/>
+
+  <text class="hdr" x="14" y="176">With this PR — capture, turned on by token_capture.enabled</text>
+
+  <rect class="box" x="14" y="192" width="150" height="52" rx="7"/>
+  <text class="lbl" x="30" y="214">vLLM worker</text>
+  <text class="note" x="30" y="232">generates tokens</text>
+
+  <rect class="greenbox" x="330" y="192" width="230" height="52" rx="7"/>
+  <text class="lbl" x="346" y="214">TransferQueue staging</text>
+  <text class="note" x="346" y="232">one row per model call</text>
+
+  <path class="ar-tok" d="M164 218 L326 218"/>
+  <path class="ar-tok" d="M326 218 L316 213 M326 218 L316 223"/>
+  <text class="t-green" x="176" y="210">exact new tokens</text>
+
+  <rect class="dimbox" x="330" y="286" width="230" height="52" rx="7"/>
+  <text class="lbl" x="346" y="308">agent server (environment)</text>
+  <text class="note" x="346" y="326">keeps a list of calls — no tokens</text>
+
+  <path class="ar" d="M89 244 L89 312 L326 312"/>
+  <path class="ar" d="M326 312 L316 307 M326 312 L316 317"/>
+  <text class="note" x="104" y="306">short opaque key only</text>
+
+  <rect class="greenbox" x="640" y="238" width="150" height="60" rx="7"/>
+  <text class="lbl" x="656" y="262">finalizer</text>
+  <text class="note" x="656" y="280">re-checks the hashes</text>
+
+  <path class="ar-tok" d="M560 218 L610 218 L610 262 L636 262"/>
+  <path class="ar-tok" d="M636 262 L626 257 M636 262 L626 267"/>
+  <text class="t-green" x="566" y="210">the staged rows</text>
+
+  <path class="ar" d="M560 312 L610 312 L610 276 L636 276"/>
+  <path class="ar" d="M636 276 L626 271 M636 276 L626 281"/>
+  <text class="note" x="566" y="332">which calls, in order</text>
+
+  <rect class="box" x="640" y="330" width="150" height="46" rx="7"/>
+  <text class="lbl" x="656" y="352">trainer</text>
+  <text class="note" x="656" y="368">one verified row</text>
+  <path class="ar-tok" d="M715 298 L715 326"/>
+  <path class="ar-tok" d="M715 326 L710 316 M715 326 L720 316"/>
+
+  <text class="t-green" x="14" y="366">The tokens never pass through the environment.</text>
+  <text class="note" x="14" y="384">It only says which calls happened and in what order,</text>
+  <text class="note" x="14" y="400">so it cannot change a single token id.</text>
+
+  <rect class="greenbox" x="14" y="416" width="14" height="12" rx="3"/>
+  <text class="note" x="36" y="426">tokens</text>
+  <rect class="dimbox" x="104" y="416" width="14" height="12" rx="3"/>
+  <text class="note" x="126" y="426">no tokens</text>
+  <rect class="redbox" x="212" y="416" width="14" height="12" rx="3"/>
+  <text class="note" x="234" y="426">can corrupt the tokens</text>
+
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/648b948a8aa930547b0aa183cebca04b7117a4a6/nemo_rl/data_plane/tq_token_sink.py#L154"><text x="640" y="426">tq_token_sink.py:154</text></a>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/648b948a8aa930547b0aa183cebca04b7117a4a6/nemo_rl/experience/blackbox_finalizer.py#L353"><text x="640" y="410">blackbox_finalizer.py:353</text></a>
+</svg>
+
+<h2>One rollout, start to finish</h2>
+<p class="step">A rollout that made <strong>2</strong> model calls. The first generated
+<strong>3</strong> new tokens, the second <strong>5</strong>. The prompt was <strong>4</strong>
+tokens, so the finished training row is <strong>12</strong> tokens long.</p>
+
+<div class="mono">1. STAGE — the vLLM worker writes each call's new tokens as it finishes them.
+
+   staging partition
+   ┌──────────────┬───────────┬───────────┬──────────────────────────┐
+   │ key          │ prev_len  │ delta_len │ token ids it added       │
+   ├──────────────┼───────────┼───────────┼──────────────────────────┤
+   │ ng-7/call-1  │     4     │     3     │ [811, 812, 813]          │
+   │ ng-7/call-2  │     7     │     5     │ [821, 822, 823, 824, 825]│
+   └──────────────┴───────────┴───────────┴──────────────────────────┘
+   Each row also carries a hash of its own contents.</div>
+<p class="step"><a href="https://github.com/NVIDIA-NeMo/RL/blob/648b948a8aa930547b0aa183cebca04b7117a4a6/nemo_rl/data_plane/tq_token_sink.py#L154">TQTokenSink.stage</a>
+— returns only after TransferQueue says the bytes are stored, so a call is never acknowledged
+before its tokens are safe.</p>
+
+<div class="mono">2. LIST — the agent server records which calls happened. No tokens.
+
+   ledger for rollout 7:  ["ng-7/call-1", "ng-7/call-2"],  last call = call-2</div>
+<p class="step">This is the only thing the environment holds, and it is why the environment cannot
+change a token: it never sees one.</p>
+
+<div class="mono">3. VERIFY — the finalizer fetches those 2 rows and re-checks them.
+
+   recompute hash of ng-7/call-1  ->  matches      keep
+   recompute hash of ng-7/call-2  ->  matches      keep
+   does call-2 start where call-1 ended?  prev_len 7 == 4 + 3   yes
+   any mismatch here and the rollout is dropped, not trained on</div>
+<p class="step"><a href="https://github.com/NVIDIA-NeMo/RL/blob/648b948a8aa930547b0aa183cebca04b7117a4a6/nemo_rl/experience/blackbox_finalizer.py#L353">BlackboxFinalizer.finalize_group</a>
+— the hash walk and the length chaining are done by NeMo-Gym's <code>verify_and_linearize</code>.</p>
+
+<div class="mono">4. PUBLISH — one training row, 4 prompt + 8 generated = 12 tokens.
+
+   a rollout that failed verification still publishes a row, with sample_mask = 0
+   so the group keeps its shape and the failed row contributes nothing to the loss</div>
+<p class="step"><a href="https://github.com/NVIDIA-NeMo/RL/blob/648b948a8aa930547b0aa183cebca04b7117a4a6/nemo_rl/experience/blackbox_finalizer.py#L495">blackbox_finalizer.py:495-505</a>
+— valid rows get <code>sample_mask = 1</code>, rejected rows stay at 0.</p>
+
+<h2>Does it work?</h2>
+
+<p><strong>Nobody has posted a run.</strong> The PR description and every comment on it carry no
+throughput number, no reward or loss curve, and no link to a training job. What it does say is
+that the existing unit tests still pass on a CPU machine — which shows the code imports and its
+tests run, not that a captured rollout trains correctly.</p>
+
+<p>There is one end-to-end test, an
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/648b948a8aa930547b0aa183cebca04b7117a4a6/tests/functional/L1_Functional_Tests_SingleController.sh#L182">L1 job that runs the feature on</a>,
+but it reuses the checks from the run with the feature off — <code>gen_kl_error</code> below a
+threshold, and reward above zero. Neither can tell whether capture was actually used. If the
+setting silently stopped taking effect, the run would fall back to the old path and pass exactly
+the same.</p>
+
+<p>The metric that would settle it already exists and already reaches the dashboard:
+<code>train/token_mult_prob_error</code> compares the engine's own logprobs against what the
+trainer recomputes. If a receipt assembled the wrong tokens, that number moves and nothing else
+does. The thing to ask for before merging is one run with capture on and one with it off, on the
+same recipe, reporting that number.</p>
+
+<div class="warn">
+<strong>It cannot merge yet, for a reason unrelated to the code.</strong>
+The Gym submodule is pinned to the head of an open, unapproved pull request, and the Python
+package every import here resolves against —
+<code>nemo_gym/token_id_capture/staging/</code> — does not exist on Gym's <code>main</code> branch
+at all. So the Gym half has to land first, and this branch then needs re-pinning to whatever
+commit that produces. Worth knowing: when that re-pin happens, all four capture test files hit a
+<code>pytest.importorskip</code> and quietly skip, and the test lane treats "no tests collected"
+as a pass. Without a guard, the day this feature loses its test coverage is the day CI goes green
+and says nothing.
+</div>
+
+</div>
+</body>
+</html>
