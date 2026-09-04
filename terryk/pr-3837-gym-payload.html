@@ -124,15 +124,16 @@ and <code>BlackboxFinalizer</code> puts the two together
 </svg>
 
 <h2>How the pieces join</h2>
-<p class="step">Same rollout as the first page: 2 model calls, adding 3 then 5 tokens onto a
-4-token prompt, giving a 12-token training row.</p>
+<p class="step">A rollout with 2 model calls and one tool result in between. The prompt is 5
+tokens, the model writes 3 then 4, and the tool result adds 2 — a 14-token row of which 7 are
+trained on.</p>
 
 <svg viewBox="0 0 940 428" role="img" aria-label="Each manifest row carries a staging key, which is the address of that call's tokens in TransferQueue. The finalizer fetches the rows the receipt names, re-checks their hashes, and emits one training row.">
   <text class="hdr" x="14" y="18">One manifest row (CallRecord) — no tokens, but it says where they are</text>
   <rect class="orangebox" x="14" y="30" width="410" height="164" rx="8"/>
   <text class="sm" x="30" y="52">model_call_id   "call-1"</text>
   <text class="sm" x="30" y="70">parent_call_id  null        who came before</text>
-  <text class="sm" x="30" y="88">prev_len 4   delta_len 3   cum_len 7</text>
+  <text class="sm" x="30" y="88">prev_len 0   delta_len 8   cum_len 8</text>
   <text class="sm" x="30" y="106">weight_version  12          which weights wrote it</text>
   <text class="sm" x="30" y="124">digest / chain_hash         integrity</text>
   <text class="sm" x="30" y="142">response_id, fingerprints   which call was last</text>
@@ -143,10 +144,10 @@ and <code>BlackboxFinalizer</code> puts the two together
   <text class="hdr" x="516" y="18">TransferQueue staging partition</text>
   <rect class="greenbox" x="516" y="30" width="410" height="164" rx="8"/>
   <text class="sm" x="532" y="52">row "ng-7/call-1"</text>
-  <text class="sm" x="546" y="72">token_ids_delta            [811,812,813]</text>
-  <text class="sm" x="546" y="90">token_mask_delta           [1,1,1]</text>
-  <text class="sm" x="546" y="108">generation_logprobs_delta  [-0.4,-1.1,-0.2]</text>
-  <text class="sm" x="546" y="126">prev_len 4  delta_len 3  weight_version 12</text>
+  <text class="sm" x="546" y="72">token_ids_delta   [5 prompt] + [3 generated]</text>
+  <text class="sm" x="546" y="90">token_mask_delta  [0,0,0,0,0] + [1,1,1]</text>
+  <text class="sm" x="546" y="108">generation_logprobs_delta  0 for carry, real for gen</text>
+  <text class="sm" x="546" y="126">prev_len 0  delta_len 8  weight_version 12</text>
   <text class="sm" x="546" y="144">digest, chain_hash, routed extras</text>
   <text class="t-green" x="532" y="176">24 columns. This is the only place the tokens live.</text>
 
@@ -159,8 +160,8 @@ and <code>BlackboxFinalizer</code> puts the two together
 
   <text class="sm" x="30" y="272">1  gets a FinalizationRequest: group_id, rollout_ids, receipts, rewards — no tensors</text>
   <text class="sm" x="30" y="292">2  fetches the staged rows the receipt's manifest names, by staging_key</text>
-  <text class="sm" x="30" y="312">3  recomputes each row's hash and checks call 2 starts where call 1 ended (7 == 4 + 3)</text>
-  <text class="sm" x="30" y="332">4  glues the deltas into one 12-token row; a rollout that fails any check gets sample_mask 0</text>
+  <text class="sm" x="30" y="312">3  recomputes each row's hash and checks call 2 starts where call 1 ended (8 == 8)</text>
+  <text class="sm" x="30" y="332">4  glues the deltas into one 14-token row; a rollout that fails any check gets sample_mask 0</text>
 
   <a href="https://github.com/NVIDIA-NeMo/RL/blob/648b948a8aa930547b0aa183cebca04b7117a4a6/nemo_rl/experience/finalizer_actor.py#L44"><text x="640" y="272">finalizer_actor.py:44</text></a>
   <a href="https://github.com/NVIDIA-NeMo/RL/blob/648b948a8aa930547b0aa183cebca04b7117a4a6/nemo_rl/data_plane/tq_token_sink.py#L366"><text x="640" y="292">tq_token_sink.py:366</text></a>
@@ -176,27 +177,95 @@ and <code>BlackboxFinalizer</code> puts the two together
   <text class="note" x="14" y="410">The request the actor receives is checked at both ends to be free of tensors, so token data cannot ride the RPC by accident.</text>
 </svg>
 
-<h2>Why it is built this way</h2>
+<h2>One receipt holds every call — but only one path through them trains</h2>
 
-<p>Splitting the reply in two buys three things at once. The environment cannot alter a token,
-because it never holds one. The Ray reply stays small no matter how long the rollout ran — a
-50-turn agent trajectory returns 50 short rows rather than 50 arrays of token ids. And the
-expensive work — fetching, hash-checking and gluing — happens in a separate actor pool after the
-rollout is done, instead of on the path that is generating the next one.</p>
+<p>A receipt is not one model call. Its <code>manifest</code> is a list of every call the rollout
+committed, and each row names its <code>parent_call_id</code>. That makes the manifest a
+<strong>tree</strong>, not a list: a retry, a rejected sample or an abandoned branch all appear as
+rows too. Only the path from the terminal call back to its root is turned into a training row.
+<code>_terminal_chain</code> starts at <code>terminal_model_call_id</code>, follows
+<code>parent_call_id</code> <em>backwards</em> until it hits a row with no parent, then reverses
+the list (<a href="https://github.com/NVIDIA-NeMo/Gym/blob/7e9f0ce687a22a142f9fae0cd95cd31debf45783/nemo_gym/token_id_capture/staging/rebuild.py#L201-L216">rebuild.py:201-216</a>).
+Anything not on that path is verified and then ignored — its tokens stay in TransferQueue and never
+reach the trainer.</p>
 
-<p>The <code>weight_version</code> on each row is what makes staleness visible: one rollout can span
-a weight refresh, and the finalizer can then see that call 1 came from version 12 and call 2 from
-version 13, and apply the configured policy rather than silently mixing them.</p>
+<p>Each call's delta is <strong>new prompt text first, then what the model wrote</strong>. That is
+literally how it is built
+(<a href="https://github.com/NVIDIA-NeMo/Gym/blob/7e9f0ce687a22a142f9fae0cd95cd31debf45783/nemo_gym/token_id_capture/staging/digest.py#L281-L284">digest.py:281-284</a>):</p>
+
+<div class="mono">prompt_delta     = prompt_token_ids[prev_len:]        # whatever is new since the parent ended
+token_ids_delta  = prompt_delta + generated_token_ids
+token_mask_delta = [0.0]*len(prompt_delta) + [1.0]*len(generated_token_ids)</div>
+
+<p>So yes — a tool result is carried on the <em>next</em> call, as masked-out prefix. The finished
+row really is <code>[prompt, gen, tool+gen, tool+gen, …]</code>, and the mask is 0 over every
+carried stretch and 1 over every generated one.</p>
+
+<svg viewBox="0 0 940 300" role="img" aria-label="The manifest is a tree. The chain from the terminal call back to the root is concatenated into the training row; an abandoned branch is staged but never trained.">
+  <text class="hdr" x="14" y="18">The manifest (4 committed calls) — the tree</text>
+  <rect class="greenbox" x="14" y="30" width="120" height="34" rx="6"/>
+  <text class="sm" x="30" y="52">call-1 (root)</text>
+  <rect class="greenbox" x="184" y="30" width="120" height="34" rx="6"/>
+  <text class="sm" x="200" y="52">call-2</text>
+  <rect class="greenbox" x="354" y="30" width="120" height="34" rx="6"/>
+  <text class="sm" x="370" y="52">call-4 terminal</text>
+  <rect class="dimbox" x="184" y="86" width="120" height="34" rx="6"/>
+  <text class="sm" x="200" y="108">call-3</text>
+
+  <path class="ar-tok" d="M134 47 L180 47"/><path class="ar-tok" d="M180 47 L170 42 M180 47 L170 52"/>
+  <path class="ar-tok" d="M304 47 L350 47"/><path class="ar-tok" d="M350 47 L340 42 M350 47 L340 52"/>
+  <path class="ar" d="M74 64 L74 103 L180 103"/><path class="ar" d="M180 103 L170 98 M180 103 L170 108"/>
+  <text class="note" x="86" y="120">a retry or rejected sample: staged, verified, never trained</text>
+  <text class="t-green" x="500" y="52">walk parent_call_id backwards from the terminal, then reverse</text>
+
+  <text class="hdr" x="14" y="158">The row those calls build</text>
+  <rect class="dimbox" x="14" y="172" width="150" height="30" rx="5"/>
+  <text class="sm" x="26" y="192">prompt · 5 · mask 0</text>
+  <rect class="greenbox" x="168" y="172" width="106" height="30" rx="5"/>
+  <text class="sm" x="180" y="192">gen · 3 · mask 1</text>
+  <rect class="dimbox" x="278" y="172" width="128" height="30" rx="5"/>
+  <text class="sm" x="290" y="192">tool · 2 · mask 0</text>
+  <rect class="greenbox" x="410" y="172" width="106" height="30" rx="5"/>
+  <text class="sm" x="422" y="192">gen · 4 · mask 1</text>
+  <text class="note" x="530" y="192">14 tokens · prompt_len 5 · 7 trained on</text>
+
+  <text class="note" x="14" y="228">call-1 delta = 5 + 3 = 8   prev_len 0   cum_len 8</text>
+  <text class="note" x="14" y="248">call-2 delta = 2 + 4 = 6   prev_len 8   cum_len 14      the check: parent cum_len 8 == child prev_len 8</text>
+
+  <rect class="dimbox" x="14" y="266" width="14" height="12" rx="3"/>
+  <text class="note" x="36" y="276">carried in, mask 0 — not trained on</text>
+  <rect class="greenbox" x="300" y="266" width="14" height="12" rx="3"/>
+  <text class="note" x="322" y="276">written by the model, mask 1 — trained on</text>
+</svg>
+
+<p><strong>What happens when the context is rewritten?</strong> Nothing silently — two independent
+checks catch it.</p>
+
+<p>At staging time the gate compares the real generation prompt against the prefix it authorized:
+<code>prompt_token_ids[: admission.prev_len] != call.prefix_token_ids</code> raises
+<em>"generation prompt does not begin with the gate-authorized token prefix"</em>
+(<a href="https://github.com/NVIDIA-NeMo/Gym/blob/7e9f0ce687a22a142f9fae0cd95cd31debf45783/nemo_gym/token_id_capture/staging/capture.py#L160-L161">capture.py:160-161</a>).
+Compaction rewrites the middle of the context, so the prompt stops starting with the parent's exact
+tokens and the call fails to stage. At rebuild time there is a second net:
+<code>parent.cum_len != record.prev_len</code> raises <code>parent_length_mismatch</code>
+(<a href="https://github.com/NVIDIA-NeMo/Gym/blob/7e9f0ce687a22a142f9fae0cd95cd31debf45783/nemo_gym/token_id_capture/staging/rebuild.py#L187-L191">rebuild.py:187-191</a>).
+Either way the rollout is rejected and becomes a masked placeholder row rather than wrong training
+data.</p>
+
+<p>There is a legitimate way to start over: a call can be admitted as a <strong>root</strong>
+(<code>mode="text"</code>, no parent, <code>prev_len 0</code>) instead of chained
+(<code>mode="token_in"</code>). A harness that compacts and then opens a fresh root produces a
+second, independent tree in the same rollout — and since only the terminal's path is linearized,
+everything before the compaction is staged but never trained on. That is coherent, but it is worth
+knowing it is a silent narrowing of what the rollout contributes, not an error.</p>
 
 <div class="warn">
-<strong>The join key is the whole trust story, so it is worth knowing where it can fail.</strong>
-If the manifest cannot be fetched — a dead control plane, a 401, the wrong server name — the
-receipt comes back <code>None</code>, the rollout becomes a masked placeholder row, and training
-continues. With the shipped default (<code>min_valid_fraction_per_group</code> unset) a whole group
-of placeholders is still published, so a sustained control-plane outage produces steps that consume
-prompts and contribute no gradient. The signal exists — <code>finalize/invalid_row_rate</code> —
-but nothing stops on it. That is one of the review findings on this PR, not a claim that it is
-happening today.
+<strong>The practical limits to keep in mind.</strong> Every call on the trained path must add at
+least one generated token — a call that carries text but generates nothing raises
+<code>empty_generation</code>. The mask within a delta has to be all carry then all generation;
+anything interleaved raises <code>invalid_mask_order</code>. And the whole design assumes the
+context only ever grows by appending. Prefix caching and normal multi-turn growth fit that; trimming,
+summarising or reordering the context does not, and turns the rollout into a masked placeholder.
 </div>
 
 </div>
