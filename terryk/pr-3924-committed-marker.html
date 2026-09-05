@@ -74,8 +74,12 @@ marker is the last thing to appear, and a reader can trust it.</p>
 <code>commit_snapshot</code></a>. "Flush" means <code>fsync</code> &#8212; asking the operating system to
 actually put the bytes on the disk instead of holding them in memory.</p>
 
-<svg viewBox="0 0 940 400" role="img" aria-label="The five steps of committing a snapshot, and what four different crash points leave behind">
-  <text class="hdr" x="14" y="18">One save, five steps &#8212; and what the next start finds if the process dies at each point</text>
+<p>To check the design, pick four moments and kill the process at each one. Those are the four
+dashed lines in the figure. Under each is the directory the next start would find, and whether
+anything ever cleans it up.</p>
+
+<svg viewBox="0 0 940 414" role="img" aria-label="The five steps of saving a snapshot, then four moments the process could be killed and what each leaves on disk">
+  <text class="hdr" x="14" y="18">Top: the five steps of one save. Bottom: kill the process at four moments, and what each leaves behind</text>
 
   <line class="tick" x1="14" y1="150" x2="926" y2="150"/>
 
@@ -98,47 +102,48 @@ actually put the bytes on the disk instead of holding them in memory.</p>
   <a href="https://github.com/NVIDIA-NeMo/RL/blob/c610fbbe37451a24360d0abaf32866b843cdb646/nemo_rl/algorithms/single_controller_utils/rollout_checkpoint.py#L500"><text class="lnk" x="610" y="132" text-anchor="middle">os.rename :500</text></a>
   <a href="https://github.com/NVIDIA-NeMo/RL/blob/c610fbbe37451a24360d0abaf32866b843cdb646/nemo_rl/algorithms/single_controller_utils/rollout_checkpoint.py#L516"><text class="lnk" x="800" y="132" text-anchor="middle">rmtree :516</text></a>
 
-  <!-- kill points -->
-  <line class="kill" x1="160" y1="150" x2="160" y2="196"/>
-  <line class="kill" x1="340" y1="150" x2="340" y2="196"/>
-  <line class="kill" x1="520" y1="150" x2="520" y2="196"/>
-  <line class="kill" x1="860" y1="150" x2="860" y2="196"/>
-  <text class="badt" x="160" y="212" text-anchor="middle">kill A</text>
-  <text class="badt" x="340" y="212" text-anchor="middle">kill B</text>
-  <text class="badt" x="520" y="212" text-anchor="middle">kill C</text>
-  <text class="badt" x="860" y="212" text-anchor="middle">kill D</text>
+  <!-- four moments the process could be killed -->
+  <text class="dimt" x="14" y="176">Now kill the process at each of these four moments:</text>
+  <line class="kill" x1="160" y1="182" x2="160" y2="206"/>
+  <line class="kill" x1="340" y1="182" x2="340" y2="206"/>
+  <line class="kill" x1="520" y1="182" x2="520" y2="206"/>
+  <line class="kill" x1="860" y1="182" x2="860" y2="206"/>
+  <text class="badt" x="160" y="222" text-anchor="middle">while writing</text>
+  <text class="badt" x="340" y="222" text-anchor="middle">after flushing</text>
+  <text class="badt" x="520" y="222" text-anchor="middle">after the marker</text>
+  <text class="badt" x="860" y="222" text-anchor="middle">during cleanup</text>
 
-  <!-- outcome boxes -->
-  <rect class="box" x="14" y="230" width="216" height="86" rx="8"/>
-  <text class="okt"  x="28" y="252">A &#183; recovered</text>
-  <text class="note" x="28" y="272">Left on disk: tmp_snapshot_7/</text>
-  <text class="note" x="28" y="290">No marker, so it is skipped.</text>
-  <text class="note" x="28" y="306">Next save reuses number 7 and</text>
+  <!-- what each one leaves behind -->
+  <rect class="box" x="14" y="238" width="216" height="94" rx="8"/>
+  <text class="okt"  x="28" y="260">while writing &#8594; fine</text>
+  <text class="note" x="28" y="280">Leaves tmp_snapshot_7/ behind.</text>
+  <text class="note" x="28" y="298">No marker, so nothing reads it.</text>
+  <text class="note" x="28" y="316">Next save clears and reuses it.</text>
 
-  <rect class="box" x="244" y="230" width="216" height="86" rx="8"/>
-  <text class="okt"  x="258" y="252">B &#183; recovered</text>
-  <text class="note" x="258" y="272">Same as A. The marker is</text>
-  <text class="note" x="258" y="290">written after the flush, so a</text>
-  <text class="note" x="258" y="306">half-flushed dir never has one.</text>
+  <rect class="box" x="244" y="238" width="216" height="94" rx="8"/>
+  <text class="okt"  x="258" y="260">after flushing &#8594; fine</text>
+  <text class="note" x="258" y="280">Leaves tmp_snapshot_7/ behind.</text>
+  <text class="note" x="258" y="298">The marker comes after the</text>
+  <text class="note" x="258" y="316">flush, so it has none either.</text>
 
-  <rect class="box" x="474" y="230" width="216" height="86" rx="8"/>
-  <text class="okt"  x="488" y="252">C &#183; recovered</text>
-  <text class="note" x="488" y="272">Marker exists, rename did not</text>
-  <text class="note" x="488" y="290">happen. Still named tmp_, and</text>
-  <text class="note" x="488" y="306">only snapshot_N is ever read.</text>
+  <rect class="box" x="474" y="238" width="216" height="94" rx="8"/>
+  <text class="okt"  x="488" y="260">after the marker &#8594; fine</text>
+  <text class="note" x="488" y="280">Has a marker, but the rename</text>
+  <text class="note" x="488" y="298">never ran. Still called tmp_,</text>
+  <text class="note" x="488" y="316">and only snapshot_N is read.</text>
 
-  <rect class="box" x="704" y="230" width="222" height="86" rx="8"/>
-  <text class="badt" x="718" y="252">D &#183; stuck forever</text>
-  <text class="note" x="718" y="272">rmtree removed the marker,</text>
-  <text class="note" x="718" y="290">then died. snapshot_3/ now has</text>
-  <text class="note" x="718" y="306">no marker and no owner.</text>
+  <rect class="box" x="704" y="238" width="222" height="94" rx="8"/>
+  <text class="badt" x="718" y="260">during cleanup &#8594; stuck</text>
+  <text class="note" x="718" y="280">rmtree deleted the marker,</text>
+  <text class="note" x="718" y="298">then died. snapshot_3/ now has</text>
+  <text class="note" x="718" y="316">no marker and no owner.</text>
 
-  <text class="note" x="14" y="338">A: the next save computes the same number again and clears the stale temporary directory first.</text>
-  <text class="note" x="14" y="356">D is the only gap. The reader and the cleanup both ask "does this have a marker?", so a directory that lost its marker matches neither.</text>
+  <text class="note" x="14" y="354">The first three all leave a directory with no marker, and nothing reads a directory without one. That is why they are safe.</text>
+  <text class="note" x="14" y="372">The fourth is different: the cleanup also skips markerless directories, so the one it half-deleted is invisible to it too.</text>
 
-  <text class="okt"  x="14" y="384">green = recovers on its own</text>
-  <text class="badt" x="230" y="384">red = never reclaimed</text>
-  <text class="dimt" x="420" y="384">dashed line = process killed here</text>
+  <text class="okt"  x="14" y="398">green = cleans itself up</text>
+  <text class="badt" x="220" y="398">red = left on disk forever</text>
+  <text class="dimt" x="430" y="398">dashed line = process killed at that moment</text>
 </svg>
 <p class="cap">Kills A, B and C all land on the safe side. Only D leaves something behind that nothing will ever pick up.</p>
 
@@ -175,7 +180,7 @@ either. It is not wrong &#8212; nothing restores from it &#8212; it just sits th
 rest of the run, and the run after that.</p>
 
 <p>Running the real functions, with <code>keep_latest_k = 2</code> and one marker removed by hand to
-stand in for a kill at point D:</p>
+stand in for being killed during cleanup:</p>
 
 <div class="mono">after 3 saves            -&gt; snapshot_000002  snapshot_000003
 remove one marker        -&gt; snapshot_000003  snapshot_000004
@@ -186,10 +191,11 @@ after 4 more saves       -&gt; <span class="no">snapshot_000003  COMMITTED=False
 
 <p>The repair is already written elsewhere in the same file. When the writer picks a name it clears a
 leftover temporary directory first &#8212;
-<a href="https://github.com/NVIDIA-NeMo/RL/blob/c610fbbe37451a24360d0abaf32866b843cdb646/nemo_rl/algorithms/single_controller_utils/rollout_checkpoint.py#L479-L482"><code>if tmp_path.exists(): shutil.rmtree(tmp_path)</code></a> &#8212; which is exactly why kill A
-recovers. Doing the same for a marker-less <code>snapshot_*</code> directory closes D. Deleting the
-marker <em>before</em> the rest of the directory also helps: then a half-finished delete leaves
-something the next pass can still recognise, instead of something invisible.</p>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/c610fbbe37451a24360d0abaf32866b843cdb646/nemo_rl/algorithms/single_controller_utils/rollout_checkpoint.py#L479-L482"><code>if tmp_path.exists(): shutil.rmtree(tmp_path)</code></a> &#8212; which is exactly why
+being killed while writing recovers. Doing the same for a marker-less <code>snapshot_*</code>
+directory would close the cleanup case too. Deleting the marker <em>before</em> the rest of the
+directory also helps: then a half-finished delete leaves something the next pass can still
+recognise, instead of something invisible.</p>
 
 <div class="warn">
 <strong>What this means if you turn the feature on.</strong> Snapshots are off unless you set
