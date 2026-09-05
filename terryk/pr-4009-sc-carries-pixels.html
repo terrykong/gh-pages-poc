@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NVIDIA-NeMo/RL #4009 — what SingleController needed before it could carry pixels</title>
+<style>
+:root{
+  --bg:#0d1117; --surface:#161b22; --surface2:#1c2128; --border:#30363d;
+  --text:#e6edf3; --dim:#8b949e; --accent:#58a6ff; --green:#3fb950;
+  --orange:#d29922; --red:#f85149;
+}
+:root[data-theme="light"]{
+  --bg:#ffffff; --surface:#f6f8fa; --surface2:#eaeef2; --border:#d0d7de;
+  --text:#1f2328; --dim:#59636e; --accent:#0969da; --green:#1a7f37;
+  --orange:#9a6700; --red:#cf222e;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:28px 20px 70px}
+h1{font-size:22px;margin:0 0 8px;line-height:1.3}
+h2{font-size:18px;margin:32px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;
+  font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
+.sub{color:var(--dim);font-size:13.5px;margin:0 0 16px}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);
+  border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;
+  font:13px/1 ui-monospace,Menlo,monospace;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.18)}
+.mono{font:12.5px ui-monospace,SFMono-Regular,Menlo,monospace;
+  background:var(--surface);border:1px solid var(--border);border-radius:8px;
+  padding:13px;overflow-x:auto;white-space:pre}
+.warn{border-left:3px solid var(--red);background:var(--surface);
+  padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0}
+.hl{border-left:3px solid var(--green);background:var(--surface);
+  padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0}
+nav.chain{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 6px;padding:0}
+nav.chain a,nav.chain span{display:inline-block;padding:5px 11px;border:1px solid var(--border);
+  border-radius:20px;background:var(--surface);text-decoration:none;color:var(--accent);
+  font-size:12.5px;line-height:1.3;white-space:nowrap}
+nav.chain a:hover{background:var(--surface2)}
+nav.chain span.here{background:var(--accent);color:var(--bg);border-color:var(--accent);font-weight:600}
+p.chainnote{color:var(--dim);font-size:12px;margin:0 0 18px}
+svg{max-width:100%;height:auto;display:block;margin:16px 0}
+svg .box{fill:var(--surface);stroke:var(--border);stroke-width:1.4}
+svg .box-new{fill:var(--surface);stroke:var(--green);stroke-width:2}
+svg .lbl{fill:var(--text);font:12.5px ui-monospace,Menlo,monospace}
+svg .lbl-b{fill:var(--text);font:bold 13px -apple-system,sans-serif}
+svg .note{fill:var(--dim);font:11.5px -apple-system,sans-serif}
+svg .hdr{fill:var(--accent);font:bold 12.5px -apple-system,sans-serif}
+svg .gline{stroke:var(--green);stroke-width:2;fill:none}
+svg .dline{stroke:var(--dim);stroke-width:1.4;fill:none;stroke-dasharray:4 3}
+svg .rline{stroke:var(--red);stroke-width:2;fill:none}
+svg .barrier{stroke:var(--orange);stroke-width:2.4;fill:none;stroke-dasharray:7 4}
+svg .barrier-lbl{fill:var(--orange);font:bold 12px -apple-system,sans-serif}
+svg .g-txt{fill:var(--green);font:bold 11.5px -apple-system,sans-serif}
+svg a text{text-decoration:underline;fill:var(--accent);font:11.5px ui-monospace,Menlo,monospace}
+table{border-collapse:collapse;margin:14px 0;font-size:13.5px;width:100%}
+th,td{border:1px solid var(--border);padding:7px 10px;text-align:left}
+th{background:var(--surface2)}
+td.y{color:var(--green);font-weight:600}
+td.n{color:var(--red);font-weight:600}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+  document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head>
+<body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+  function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+  function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
+    b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
+      else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+  document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+<div class="wrap">
+
+<h1>What SingleController needed before it could carry pixels</h1>
+<p class="sub">Companion illustration for
+<a href="https://github.com/NVIDIA-NeMo/RL/pull/4009">NVIDIA-NeMo/RL #4009</a>
+(support single-controller for Megatron-Inference).
+All permalinks pin the PR head <code>b986f14</code>.</p>
+
+<nav class="chain">
+  <span class="here">1 · carrying pixels</span>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4009-guard-removal.html">2 · why the guard could go</a>
+</nav>
+<p class="chainnote">Two pages on this PR, one question each — this one: what had to be added so images survive the trip.</p>
+
+<p>SingleController (SC) is the newer training loop: one driver process owns the run, and
+rollout, log-prob and training workers talk through a shared key-value store called
+TransferQueue. Before this PR that path was text-only — a run with images would build the
+prompt, expand the image placeholder tokens, and then hand the model a prompt with nowhere
+to get the pixels from. Making it work took changes in four places, and they are not
+interchangeable: one of them has to happen before the others or the run races itself.
+The wire format for images was already built in
+<a href="https://github.com/NVIDIA-NeMo/RL/pull/2957">#2957</a> and is explained
+<a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-2957-vlm-wire.html">on its own page</a>;
+this PR is about getting SC to use it.</p>
+
+<h2>The four places, and the one that must go first</h2>
+
+<svg viewBox="0 0 940 470" role="img" aria-label="SingleController setup timeline: processor, dataset, partition registration barrier, then three concurrent writers">
+  <text x="0" y="14" class="hdr">SETUP — single-threaded, in order</text>
+
+  <rect x="0" y="26" width="250" height="52" rx="7" class="box-new"/>
+  <text x="12" y="46" class="lbl-b">1. build the processor</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/b986f149ad17c217861cf4e80af023c4ab4889f4/examples/run_grpo_single_controller.py#L130">
+    <text x="12" y="64">run_grpo_single_controller.py:130</text></a>
+
+  <path d="M250 52 L285 52" class="gline" marker-end="url(#ar)"/>
+
+  <rect x="288" y="26" width="250" height="52" rx="7" class="box-new"/>
+  <text x="300" y="46" class="lbl-b">2. build the dataset</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/b986f149ad17c217861cf4e80af023c4ab4889f4/nemo_rl/algorithms/single_controller_utils/setup.py#L1022-L1023">
+    <text x="300" y="64">setup.py:1022 · is_vlm=True</text></a>
+
+  <path d="M538 52 L573 52" class="gline" marker-end="url(#ar)"/>
+
+  <rect x="576" y="26" width="364" height="52" rx="7" class="box-new"/>
+  <text x="588" y="46" class="lbl-b">3. name every image column up front</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/b986f149ad17c217861cf4e80af023c4ab4889f4/nemo_rl/algorithms/single_controller_utils/setup.py#L1385">
+    <text x="588" y="64">setup.py:1385 register_partition</text></a>
+
+  <text x="0" y="100" class="note">the processor is what turns an image into tensors; without it the dataset never makes them</text>
+
+  <line x1="0" y1="126" x2="940" y2="126" class="barrier"/>
+  <text x="0" y="120" class="barrier-lbl">▲ everything above happens once, before any worker starts writing</text>
+  <text x="0" y="146" class="barrier-lbl">▼ below this line three workers write to the same store at the same time</text>
+
+  <text x="0" y="182" class="hdr">RUN — three writers, concurrent</text>
+
+  <rect x="0" y="196" width="290" height="86" rx="7" class="box-new"/>
+  <text x="12" y="216" class="lbl-b">rollout worker</text>
+  <text x="12" y="234" class="note">flattens tokens AND pixels together, so the</text>
+  <text x="12" y="250" class="note">expanded placeholders have tensors to match</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/b986f149ad17c217861cf4e80af023c4ab4889f4/nemo_rl/experience/rollout_manager.py#L622">
+    <text x="12" y="270">rollout_manager.py:622</text></a>
+
+  <rect x="306" y="196" width="290" height="86" rx="7" class="box-new"/>
+  <text x="318" y="216" class="lbl-b">writes the batch to the store</text>
+  <text x="318" y="234" class="note">packs the images, and puts their per-row</text>
+  <text x="318" y="250" class="note">shapes in the row tags beside them</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/b986f149ad17c217861cf4e80af023c4ab4889f4/nemo_rl/experience/payload.py#L211">
+    <text x="318" y="270">payload.py:211, 221</text></a>
+
+  <rect x="612" y="196" width="290" height="86" rx="7" class="box-new"/>
+  <text x="624" y="216" class="lbl-b">trainer</text>
+  <text x="624" y="234" class="note">marks which tokens are image placeholders</text>
+  <text x="624" y="250" class="note">so the loss skips them</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/b986f149ad17c217861cf4e80af023c4ab4889f4/nemo_rl/models/policy/workers/megatron_policy_worker.py#L1538">
+    <text x="624" y="270">megatron_policy_worker.py:1538</text></a>
+
+  <path d="M290 239 L306 239" class="gline" marker-end="url(#ar)"/>
+  <path d="M596 239 L612 239" class="gline" marker-end="url(#ar)"/>
+
+  <text x="0" y="320" class="hdr">WHY STEP 3 CANNOT WAIT</text>
+  <rect x="0" y="332" width="440" height="118" rx="7" class="box"/>
+  <text x="12" y="354" class="lbl-b">without the up-front naming</text>
+  <text x="12" y="374" class="note">TransferQueue learns a column name the first</text>
+  <text x="12" y="390" class="note">time someone writes it. Three workers write at</text>
+  <text x="12" y="406" class="note">once, so &quot;who names pixel_values first&quot; is a</text>
+  <text x="12" y="422" class="note">race — and it only shows up under load.</text>
+  <text x="12" y="442" class="lbl">outcome: flaky, not reproducible</text>
+
+  <rect x="462" y="332" width="440" height="118" rx="7" class="box-new"/>
+  <text x="474" y="354" class="lbl-b">with it</text>
+  <text x="474" y="374" class="note">all 12 image column names exist before any</text>
+  <text x="474" y="390" class="note">worker starts. Every later write finds the</text>
+  <text x="474" y="406" class="note">column already there, whichever worker gets</text>
+  <text x="474" y="422" class="note">there first.</text>
+  <text x="474" y="442" class="g-txt">outcome: order stops mattering</text>
+
+  <defs>
+    <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M0 0 L10 5 L0 10 z" fill="var(--green)"/>
+    </marker>
+  </defs>
+</svg>
+
+<h2>What step 3 actually registers</h2>
+
+<p>The list is not hand-written. It is two sets of column names joined together — the ones
+that ride as jagged per-sample data, and the ones that are one value per token:</p>
+
+<div class="mono">partition_fields = fields_with_optional_routed_experts(SC_ROLLOUT_SCHEMA_FIELDS, ...)
+
+if processor is not None:                       # only a VLM run adds these
+    partition_fields.extend(
+        sorted(PACKED_MULTIMODAL_FIELDS | PER_TOKEN_MULTIMODAL_FIELDS)   # 12 names
+    )
+
+dp_client.register_partition(partition_id=..., fields=partition_fields, ...)</div>
+<p class="sub"><a href="https://github.com/NVIDIA-NeMo/RL/blob/b986f149ad17c217861cf4e80af023c4ab4889f4/nemo_rl/algorithms/single_controller_utils/setup.py#L1375-L1394">setup.py:1375-1394</a>
+— the 12 names live in
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/b986f149ad17c217861cf4e80af023c4ab4889f4/nemo_rl/data/multimodal_utils.py#L122">multimodal_utils.py:122</a> and
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/b986f149ad17c217861cf4e80af023c4ab4889f4/nemo_rl/data/multimodal_utils.py#L131">:131</a>.</p>
+
+<p>Two of those names carry the shapes that make the rest readable. An image column is jagged
+— sample 0 might hold two pictures and sample 1 none — so it travels as one flat blob, and
+the per-row shapes needed to cut it back up travel separately in the row tags
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/b986f149ad17c217861cf4e80af023c4ab4889f4/nemo_rl/experience/payload.py#L221">payload.py:221</a>).
+The store cannot work those shapes out on its own, which is why they are shipped by hand.</p>
+
+<h2>Following one prompt group through</h2>
+
+<p>Two prompt groups, three writers, twelve image column names. Group A has one picture,
+group B has none — the case worth watching, because the column is missing for B:</p>
+
+<table>
+<tr><th>step</th><th>group A (1 image)</th><th>group B (no image)</th></tr>
+<tr><td>dataset builds the message</td><td class="y">pixel tensors attached</td><td>tokens only</td></tr>
+<tr><td>rollout flattens for generation</td><td class="y">pixels ride with the prompt</td><td>tokens only</td></tr>
+<tr><td>write to the store</td><td class="y">image column written + shape tag</td><td class="n">image column not written</td></tr>
+<tr><td>trainer reads it back</td><td class="y">rebuilt from blob + shape tag</td><td>nothing to rebuild</td></tr>
+</table>
+
+<p>Group B is the interesting one. Its rows simply have no image column, and the code that
+rebuilds images is written to tolerate that — it treats a row with no shape tag as a row with
+no pictures
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/b986f149ad17c217861cf4e80af023c4ab4889f4/nemo_rl/data/multimodal_utils.py#L261">multimodal_utils.py:261</a>).
+It only gives up when <em>no</em> row in the batch has one.</p>
+
+<div class="hl">
+<strong>So what.</strong> A VLM run on SingleController now works end to end, and the shipped
+recipe is the 8-node CLEVR one added in this PR. The piece worth remembering is step 3: it
+is the only change here whose <em>position</em> matters rather than its contents. Registering
+the column names during setup is what stops three concurrent writers from racing to name the
+same column — and a race like that would have shown up as an occasional failure under load,
+not as a clean error on the first run.
+</div>
+
+</div>
+</body>
+</html>

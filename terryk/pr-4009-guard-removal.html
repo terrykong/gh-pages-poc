@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NVIDIA-NeMo/RL #4009 — why the split trainer could stop refusing image batches</title>
+<style>
+:root{
+  --bg:#0d1117; --surface:#161b22; --surface2:#1c2128; --border:#30363d;
+  --text:#e6edf3; --dim:#8b949e; --accent:#58a6ff; --green:#3fb950;
+  --orange:#d29922; --red:#f85149;
+}
+:root[data-theme="light"]{
+  --bg:#ffffff; --surface:#f6f8fa; --surface2:#eaeef2; --border:#d0d7de;
+  --text:#1f2328; --dim:#59636e; --accent:#0969da; --green:#1a7f37;
+  --orange:#9a6700; --red:#cf222e;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:28px 20px 70px}
+h1{font-size:22px;margin:0 0 8px;line-height:1.3}
+h2{font-size:18px;margin:32px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;
+  font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
+.sub{color:var(--dim);font-size:13.5px;margin:0 0 16px}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);
+  border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;
+  font:13px/1 ui-monospace,Menlo,monospace;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.18)}
+.mono{font:12.5px ui-monospace,SFMono-Regular,Menlo,monospace;
+  background:var(--surface);border:1px solid var(--border);border-radius:8px;
+  padding:13px;overflow-x:auto;white-space:pre}
+.warn{border-left:3px solid var(--red);background:var(--surface);
+  padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0}
+.hl{border-left:3px solid var(--green);background:var(--surface);
+  padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0}
+nav.chain{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 6px;padding:0}
+nav.chain a,nav.chain span{display:inline-block;padding:5px 11px;border:1px solid var(--border);
+  border-radius:20px;background:var(--surface);text-decoration:none;color:var(--accent);
+  font-size:12.5px;line-height:1.3;white-space:nowrap}
+nav.chain a:hover{background:var(--surface2)}
+nav.chain span.here{background:var(--accent);color:var(--bg);border-color:var(--accent);font-weight:600}
+p.chainnote{color:var(--dim);font-size:12px;margin:0 0 18px}
+svg{max-width:100%;height:auto;display:block;margin:16px 0}
+svg .box{fill:var(--surface);stroke:var(--border);stroke-width:1.4}
+svg .lbl{fill:var(--text);font:12.5px ui-monospace,Menlo,monospace}
+svg .lbl-b{fill:var(--text);font:bold 13px -apple-system,sans-serif}
+svg .note{fill:var(--dim);font:11.5px -apple-system,sans-serif}
+svg .hdr{fill:var(--accent);font:bold 12.5px -apple-system,sans-serif}
+svg .ok{fill:var(--green);opacity:.5;stroke:var(--green);stroke-width:1.4}
+svg .bad{fill:var(--red);opacity:.5;stroke:var(--red);stroke-width:1.4}
+svg .ok-t{fill:var(--green);font:bold 12px -apple-system,sans-serif}
+svg .bad-t{fill:var(--red);font:bold 12px -apple-system,sans-serif}
+svg .rowlbl{fill:var(--text);font:12px ui-monospace,Menlo,monospace}
+svg a text{text-decoration:underline;fill:var(--accent);font:11.5px ui-monospace,Menlo,monospace}
+table{border-collapse:collapse;margin:14px 0;font-size:13.5px;width:100%}
+th,td{border:1px solid var(--border);padding:7px 10px;text-align:left}
+th{background:var(--surface2)}
+td.y{color:var(--green);font-weight:600}
+td.n{color:var(--red);font-weight:600}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+  document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head>
+<body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+  function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+  function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
+    b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
+      else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+  document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+<div class="wrap">
+
+<h1>Why the split trainer could stop refusing image batches</h1>
+<p class="sub">Companion illustration for
+<a href="https://github.com/NVIDIA-NeMo/RL/pull/4009">NVIDIA-NeMo/RL #4009</a>
+(support single-controller for Megatron-Inference).
+Permalinks pin the PR head <code>b986f14</code>; &quot;before&quot; links pin the merge base <code>da39e17</code>.</p>
+
+<nav class="chain">
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4009-sc-carries-pixels.html">1 · carrying pixels</a>
+  <span class="here">2 · why the guard could go</span>
+</nav>
+<p class="chainnote">Two pages on this PR, one question each — this one: the check that used to reject image batches, and why deleting it is safe.</p>
+
+<p>SingleController trains in small pieces: it calls <code>train_microbatch</code> once per slice
+of data instead of handing the whole batch to <code>train</code>. Until this PR that method began by
+refusing any model with images. The refusal listed four things it said the method failed to pass
+along to the code that builds the microbatches. This PR deletes the check — and the reason that is
+safe is that <strong>three of the four claims were already untrue</strong> when the check was
+written, and this PR supplies the fourth.</p>
+
+<h2>Four claims, checked one at a time</h2>
+
+<svg viewBox="0 0 940 330" role="img" aria-label="The four capabilities the deleted check named, and whether each was actually passed before and after the PR">
+  <text x="0" y="14" class="hdr">WHAT THE DELETED CHECK CLAIMED WAS MISSING</text>
+
+  <text x="470" y="46" class="lbl-b" text-anchor="middle">was it really missing?</text>
+  <text x="612" y="70" class="lbl-b" text-anchor="middle">before this PR</text>
+  <text x="800" y="70" class="lbl-b" text-anchor="middle">after this PR</text>
+
+  <rect x="0" y="84" width="500" height="36" rx="6" class="box"/>
+  <text x="12" y="107" class="rowlbl">attach_media_token_validity_mask</text>
+  <rect x="540" y="86" width="144" height="32" rx="6" class="bad"/>
+  <text x="612" y="107" class="bad-t" text-anchor="middle">really missing</text>
+  <rect x="728" y="86" width="144" height="32" rx="6" class="ok"/>
+  <text x="800" y="107" class="ok-t" text-anchor="middle">added here</text>
+
+  <rect x="0" y="128" width="500" height="36" rx="6" class="box"/>
+  <text x="12" y="151" class="rowlbl">delegate_pack_to_model</text>
+  <rect x="540" y="130" width="144" height="32" rx="6" class="ok"/>
+  <text x="612" y="151" class="ok-t" text-anchor="middle">already passed</text>
+  <rect x="728" y="130" width="144" height="32" rx="6" class="ok"/>
+  <text x="800" y="151" class="ok-t" text-anchor="middle">unchanged</text>
+
+  <rect x="0" y="172" width="500" height="36" rx="6" class="box"/>
+  <text x="12" y="195" class="rowlbl">delegate_mtp_loss_mask_to_model</text>
+  <rect x="540" y="174" width="144" height="32" rx="6" class="ok"/>
+  <text x="612" y="195" class="ok-t" text-anchor="middle">already passed</text>
+  <rect x="728" y="174" width="144" height="32" rx="6" class="ok"/>
+  <text x="800" y="195" class="ok-t" text-anchor="middle">unchanged</text>
+
+  <rect x="0" y="216" width="500" height="36" rx="6" class="box"/>
+  <text x="12" y="239" class="rowlbl">model_slices_context_parallel_inputs</text>
+  <rect x="540" y="218" width="144" height="32" rx="6" class="ok"/>
+  <text x="612" y="239" class="ok-t" text-anchor="middle">already passed</text>
+  <rect x="728" y="218" width="144" height="32" rx="6" class="ok"/>
+  <text x="800" y="239" class="ok-t" text-anchor="middle">unchanged</text>
+
+  <text x="0" y="278" class="note">&quot;already passed&quot; means the microbatch builder was being given it at the merge base —</text>
+  <text x="0" y="296" class="note">the check&apos;s own error message was out of date about three of the four.</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/da39e178598a287e6970d92ab143511d79287c2c/nemo_rl/models/policy/workers/megatron_policy_worker.py#L1566">
+    <text x="0" y="318">before: megatron_policy_worker.py:1566-1568 (merge base)</text></a>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/b986f149ad17c217861cf4e80af023c4ab4889f4/nemo_rl/models/policy/workers/megatron_policy_worker.py#L1538">
+    <text x="480" y="318">after: megatron_policy_worker.py:1538</text></a>
+</svg>
+
+<p>Here is the same thing in code. At the merge base the microbatch builder was already being
+handed three of the four:</p>
+
+<div class="mono">) = get_microbatch_iterator(
+    data, self.cfg, state["mbs"],
+    straggler_timer=...,
+    delegate_pack_to_model=self.delegate_pack_to_model,                 # claim 2 — passed
+    delegate_mtp_loss_mask_to_model=self.delegate_mtp_loss_mask_to_model,   # claim 3 — passed
+    model_slices_context_parallel_inputs=self.model_slices_context_parallel_inputs,  # claim 4 — passed
+)</div>
+<p class="sub"><a href="https://github.com/NVIDIA-NeMo/RL/blob/da39e178598a287e6970d92ab143511d79287c2c/nemo_rl/models/policy/workers/megatron_policy_worker.py#L1561-L1568">at the merge base, megatron_policy_worker.py:1561-1568</a>
+— so only the image-token mask was genuinely absent.</p>
+
+<p>This PR adds exactly that one line, in the same spot the whole-batch <code>train</code> path
+puts it — after the loss mask is worked out, before the microbatches are built:</p>
+
+<div class="mono">attach_media_token_validity_mask(data, self.media_placeholder_token_id)   # claim 1 — now passed
+
+(
+    data_iterator, num_microbatches, micro_batch_size, seq_length, padded_seq_length,
+) = get_microbatch_iterator(...)</div>
+<p class="sub"><a href="https://github.com/NVIDIA-NeMo/RL/blob/b986f149ad17c217861cf4e80af023c4ab4889f4/nemo_rl/models/policy/workers/megatron_policy_worker.py#L1538">megatron_policy_worker.py:1538</a>,
+matching <a href="https://github.com/NVIDIA-NeMo/RL/blob/b986f149ad17c217861cf4e80af023c4ab4889f4/nemo_rl/models/policy/workers/megatron_policy_worker.py#L873">the same call on the <code>train</code> path at :873</a>.
+The mask marks which tokens are image placeholders so the loss skips them.</p>
+
+<h2>The check was also failing a test that had nothing to do with images</h2>
+
+<p>The check fired on two conditions, not one — images <em>or</em> a model that cuts up its own
+long sequences across GPUs:</p>
+
+<div class="mono">if self.media_placeholder_token_id is not None or (
+    self.model_slices_context_parallel_inputs
+):
+    raise NotImplementedError(...)</div>
+<p class="sub"><a href="https://github.com/NVIDIA-NeMo/RL/blob/da39e178598a287e6970d92ab143511d79287c2c/nemo_rl/models/policy/workers/megatron_policy_worker.py#L1458">at the merge base, megatron_policy_worker.py:1458-1470</a></p>
+
+<p>That second condition catches a text-only test. One case of an existing test
+sets exactly that flag and then calls <code>train_microbatch</code>, so it hits the raise every
+time it runs:</p>
+
+<table>
+<tr><th>test case</th><th>sets the flag?</th><th>result at the merge base</th></tr>
+<tr><td><code>[model-owned-packing]</code></td><td>no</td><td class="y">passes</td></tr>
+<tr><td><code>[model-owned-cp-slicing]</code></td><td class="n">yes</td><td class="n">raises NotImplementedError</td></tr>
+</table>
+
+<p class="sub">The test is
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/da39e178598a287e6970d92ab143511d79287c2c/tests/unit/models/policy/test_megatron_split_state.py#L438">test_megatron_split_state.py:438-475</a>.
+It arrived first; the check was added later, by
+<a href="https://github.com/NVIDIA-NeMo/RL/pull/2957">#2957</a>, which is the newest commit on the main branch.</p>
+
+<div class="warn">
+The failing case is not hypothetical — it is red on the main branch right now. The unit test job
+<code>L0_Unit_Tests_Megatron_Policy_1</code> reports <code>1 failed, 12 passed</code>, and the
+one failure is <code>TestTrainMicrobatch.test_forwards_model_owned_packing_flags[model-owned-cp-slicing]</code>.
+Deleting the check turns it green again, and for the right reason: the microbatch builder really
+is handed that flag.
+</div>
+
+<div class="hl">
+<strong>So what.</strong> Two things travel together here. Removing the check is what lets a
+model with images train through SingleController at all — that is the point of the PR. It also
+repairs a test that has been failing on the main branch, because the same check was rejecting a
+text-only case it was never meant to catch. Worth knowing when reading the diff: deleting a guard
+usually deserves suspicion, and here the guard's own error message was the thing that was out of date.
+</div>
+
+</div>
+</body>
+</html>
