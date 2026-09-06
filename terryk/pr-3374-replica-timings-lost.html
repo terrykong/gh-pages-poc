@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NVIDIA-NeMo/RL #3374 — why one replica's timing numbers disappeared</title>
+<style>
+:root{
+  --bg:#0d1117; --surface:#161b22; --surface2:#1c2128; --border:#30363d;
+  --text:#e6edf3; --dim:#8b949e; --accent:#58a6ff; --green:#3fb950;
+  --orange:#d29922; --red:#f85149;
+}
+:root[data-theme="light"]{
+  --bg:#ffffff; --surface:#f6f8fa; --surface2:#eaeef2; --border:#d0d7de;
+  --text:#1f2328; --dim:#59636e; --accent:#0969da; --green:#1a7f37;
+  --orange:#9a6700; --red:#cf222e;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:28px 20px 70px}
+h1{font-size:22px;margin:0 0 8px;line-height:1.3}
+h2{font-size:18px;margin:32px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;
+  font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
+.sub{color:var(--dim);font-size:13.5px;margin:0 0 16px}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);
+  border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;
+  font:13px/1 ui-monospace,Menlo,monospace;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.18)}
+.mono{font:12.5px ui-monospace,SFMono-Regular,Menlo,monospace;
+  background:var(--surface);border:1px solid var(--border);border-radius:8px;
+  padding:13px;overflow-x:auto;white-space:pre}
+.warn{border-left:3px solid var(--red);background:var(--surface);
+  padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0}
+.hl{border-left:3px solid var(--green);background:var(--surface);
+  padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0}
+.kept{color:var(--green);font-weight:700}
+.drop{color:var(--red);font-weight:700}
+svg{max-width:100%;height:auto;display:block;margin:16px 0}
+svg .box{fill:var(--surface);stroke:var(--border);stroke-width:1.4}
+svg .lbl{fill:var(--text);font:12.5px ui-monospace,Menlo,monospace}
+svg .lbl-b{fill:var(--text);font:bold 13px -apple-system,sans-serif}
+svg .note{fill:var(--dim);font:11.5px -apple-system,sans-serif}
+svg .hdr{fill:var(--accent);font:bold 12.5px -apple-system,sans-serif}
+svg .ok{fill:var(--green);opacity:.16;stroke:var(--green);stroke-width:1.4}
+svg .bad{fill:var(--red);opacity:.16;stroke:var(--red);stroke-width:1.4}
+svg .gone{fill:var(--dim);opacity:.13;stroke:var(--dim);stroke-width:1.4;stroke-dasharray:4 3}
+svg .t-ok{fill:var(--green);font:bold 12px ui-monospace,Menlo,monospace}
+svg .t-bad{fill:var(--red);font:bold 12px ui-monospace,Menlo,monospace}
+svg .t-gone{fill:var(--dim);font:12px ui-monospace,Menlo,monospace}
+svg .arr{stroke:var(--dim);stroke-width:1.6;fill:none}
+svg .arr-bad{stroke:var(--red);stroke-width:2;fill:none}
+svg a text{text-decoration:underline;fill:var(--accent);font:11.5px ui-monospace,Menlo,monospace}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+  document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head>
+<body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+  function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+  function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
+    b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
+      else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+  document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+<div class="wrap">
+
+<h1>Why one replica's timing numbers disappeared, and how naming each actor fixes it</h1>
+<p class="sub">Companion illustration for
+<a href="https://github.com/NVIDIA-NeMo/RL/pull/3374">NVIDIA-NeMo/RL #3374</a>
+(preserve replica identity during routing). All permalinks pin the PR head
+<code>020a5d3</code>; "before" links pin the branch point <code>f93ba52</code>.</p>
+
+<p>A NeMo-Gym <strong>shard</strong> is one group of Gym servers running in one Ray actor.
+Setting <code>replicas: 2</code> on a shard starts two identical copies of it on two nodes, and
+the router hands each prompt group to one of them in turn. Every actor reports how long it
+spent, and those numbers are collected into a dictionary
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/f93ba52988756807f0ede4336ca3e75e463cd18f/nemo_rl/experience/rollouts.py#L2675">keyed by whatever label the router attached</a>.
+Before this PR that label was the <em>shard</em> name. Two replicas of one shard therefore
+shared a key — so the second one to finish overwrote the first, and nobody was told.</p>
+
+<h2>Two replicas, one dictionary key</h2>
+
+<svg viewBox="0 0 900 430" role="img" aria-label="Shard tools with two replicas: before the fix both write to the key tools, so replica 0's 4.0s is overwritten by replica 1's 9.0s and the per-shard breakdown never appears. After the fix they write to tools/0 and tools/1 and both survive.">
+  <text class="hdr" x="16" y="20">One shard `tools`, 2 replicas. Replica 0 spent 4.0s awaiting results; replica 1 spent 9.0s.</text>
+
+  <!-- BEFORE -->
+  <text class="lbl-b" x="16" y="52">Before</text>
+  <rect class="ok"   x="16"  y="64" width="150" height="40" rx="6"/>
+  <text class="t-ok" x="30"  y="82">replica 0</text>
+  <text class="t-ok" x="30"  y="97">4.0s</text>
+  <rect class="ok"   x="16"  y="116" width="150" height="40" rx="6"/>
+  <text class="t-ok" x="30"  y="134">replica 1</text>
+  <text class="t-ok" x="30"  y="149">9.0s</text>
+
+  <path class="arr"     d="M170 84 L250 100" marker-end="url(#a)"/>
+  <path class="arr-bad" d="M170 136 L250 116" marker-end="url(#ab)"/>
+  <text class="note" x="180" y="76">both labelled</text>
+  <text class="note" x="180" y="170">`tools`</text>
+
+  <rect class="bad"   x="255" y="86"  width="215" height="44" rx="6"/>
+  <text class="t-bad" x="268" y="105">actor_timing_by_shard</text>
+  <text class="t-bad" x="268" y="121">{ "tools": 9.0 }  ← 4.0 gone</text>
+
+  <path class="arr" d="M474 108 L545 108" marker-end="url(#a)"/>
+  <text class="note" x="478" y="100">1 key</text>
+
+  <rect class="gone"   x="550" y="64"  width="330" height="40" rx="6"/>
+  <text class="t-gone" x="562" y="82">no `/shard/` keys emitted at all</text>
+  <text class="t-gone" x="562" y="97">the two-instance branch never runs</text>
+  <rect class="bad"    x="550" y="116" width="330" height="40" rx="6"/>
+  <text class="t-bad"  x="562" y="134">timing/rollout/await_results = 9.0</text>
+  <text class="t-bad"  x="562" y="149">one arbitrary replica, shown as the shard</text>
+
+  <line x1="16" y1="188" x2="884" y2="188" stroke="var(--border)" stroke-width="1"/>
+
+  <!-- AFTER -->
+  <text class="lbl-b" x="16" y="214">After</text>
+  <rect class="ok"   x="16"  y="226" width="150" height="40" rx="6"/>
+  <text class="t-ok" x="30"  y="244">replica 0</text>
+  <text class="t-ok" x="30"  y="259">4.0s</text>
+  <rect class="ok"   x="16"  y="278" width="150" height="40" rx="6"/>
+  <text class="t-ok" x="30"  y="296">replica 1</text>
+  <text class="t-ok" x="30"  y="311">9.0s</text>
+
+  <path class="arr" d="M170 246 L250 258" marker-end="url(#a)"/>
+  <path class="arr" d="M170 298 L250 286" marker-end="url(#a)"/>
+  <text class="note" x="176" y="238">`tools/0`</text>
+  <text class="note" x="176" y="330">`tools/1`</text>
+
+  <rect class="ok"   x="255" y="248" width="215" height="44" rx="6"/>
+  <text class="t-ok" x="268" y="267">actor_timing_by_instance</text>
+  <text class="t-ok" x="268" y="283">{ "tools/0": 4.0, "tools/1": 9.0 }</text>
+
+  <path class="arr" d="M474 270 L545 270" marker-end="url(#a)"/>
+  <text class="note" x="478" y="262">2 keys</text>
+
+  <rect class="ok"   x="550" y="226" width="330" height="72" rx="6"/>
+  <text class="t-ok" x="562" y="245">…/shard/tools/0/await_results = 4.0</text>
+  <text class="t-ok" x="562" y="261">…/shard/tools/1/await_results = 9.0</text>
+  <text class="t-ok" x="562" y="277">…/await_results = 9.0  (the slower)</text>
+  <text class="note" x="562" y="292">… = timing/rollout</text>
+
+  <!-- legend -->
+  <rect class="ok"   x="16"  y="356" width="14" height="14" rx="3"/>
+  <text class="note" x="36"  y="368">kept</text>
+  <rect class="bad"  x="90"  y="356" width="14" height="14" rx="3"/>
+  <text class="note" x="110" y="368">wrong or lost</text>
+  <rect class="gone" x="210" y="356" width="14" height="14" rx="3"/>
+  <text class="note" x="230" y="368">never produced</text>
+
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/f93ba52988756807f0ede4336ca3e75e463cd18f/nemo_rl/experience/rollouts.py#L2355">
+    <text x="16" y="398">before: rollouts.py:2355 — label = shard name</text></a>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/020a5d3ce73081f4558df728a98c79333e1962d8/nemo_rl/experience/rollouts.py#L2359">
+    <text x="16" y="416">after: rollouts.py:2359 — label = instance_label(handle)</text></a>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/020a5d3ce73081f4558df728a98c79333e1962d8/nemo_rl/experience/rollouts.py#L2471">
+    <text x="470" y="398">rollouts.py:2471 — the one-entry short circuit</text></a>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/020a5d3ce73081f4558df728a98c79333e1962d8/nemo_rl/environments/nemo_gym.py#L1262">
+    <text x="470" y="416">nemo_gym.py:1262 — instance_label</text></a>
+
+  <defs>
+    <marker id="a" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+      <path d="M0,0 L8,4 L0,8 z" fill="var(--dim)"/></marker>
+    <marker id="ab" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+      <path d="M0,0 L8,4 L0,8 z" fill="var(--red)"/></marker>
+  </defs>
+</svg>
+
+<p>The quiet part is the top-right box. Because both replicas collapsed onto one key, the
+dictionary had <strong>one</strong> entry — and the merge step returns early when there is only one,
+handing back that entry's numbers unchanged with no <code>/shard/</code> breakdown. So you did not
+get a wrong-looking chart with a missing series. You got a normal-looking chart whose single
+number was whichever replica happened to finish last.</p>
+
+<h2>What the fix actually does</h2>
+
+<p>One method replaces the old shard lookup. It walks the handles, and names the actor by
+position <em>only when the shard has more than one</em>, so an unreplicated shard reads exactly as
+it did before replicas existed:</p>
+
+<div class="mono">def instance_label(self, handle):
+    for shard_name, replicas in self.handles.items():
+        for index, replica in enumerate(replicas):
+            if replica is handle:
+                # 1 replica  -> "tools"
+                # 2 replicas -> "tools/0", "tools/1"
+                return shard_name if len(replicas) == 1 else f"{shard_name}/{index}"</div>
+<p class="sub"><a href="https://github.com/NVIDIA-NeMo/RL/blob/020a5d3ce73081f4558df728a98c79333e1962d8/nemo_rl/environments/nemo_gym.py#L1262">nemo_gym.py:1262</a>
+— replaces <a href="https://github.com/NVIDIA-NeMo/RL/blob/f93ba52988756807f0ede4336ca3e75e463cd18f/nemo_rl/environments/nemo_gym.py#L1261">the old <code>shard_name_of</code></a>, which returned the shard name for every replica.</p>
+
+<p>With two distinct keys the merge step now takes its other branch. It writes one entry per
+replica <em>and</em> keeps the combined number, using the maximum rather than the sum, because the
+replicas run at the same time and the step waits for the slowest:</p>
+
+<div class="mono">for instance_label, metrics in timing_by_instance.items():   # "tools/0": 4.0, "tools/1": 9.0
+    for key, value in metrics.items():
+        merged[f"{timer_prefix}/shard/{instance_label}/{suffix}"] = value   # 4.0 and 9.0, both kept
+        merged[key] = max(merged[key], value) if key in merged else value   # max(4.0, 9.0) = 9.0</div>
+<p class="sub"><a href="https://github.com/NVIDIA-NeMo/RL/blob/020a5d3ce73081f4558df728a98c79333e1962d8/nemo_rl/experience/rollouts.py#L2475-L2481">rollouts.py:2475-2481</a>.
+The same label is also used for the log directory, the round-robin bucket, and the text of a
+failure — so a slow replica, its logs and its error all carry one name.</p>
+
+<div class="hl">
+<strong>Why this matters beyond tidier charts.</strong> Replicas exist to spread one step's work
+across more nodes. The reason to add a second replica is that the first one is the bottleneck —
+and the number you would use to check whether that worked was exactly the number being
+overwritten. Before this change you could double a shard's hardware and have no way to see
+which copy was slow.
+</div>
+
+</div>
+</body>
+</html>
