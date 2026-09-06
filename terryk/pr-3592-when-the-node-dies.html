@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NVIDIA-NeMo/RL #3592 — what a shard restart can and cannot do when a whole node dies</title>
+<style>
+:root{
+  --bg:#0d1117; --surface:#161b22; --surface2:#1c2128; --border:#30363d;
+  --text:#e6edf3; --dim:#8b949e; --accent:#58a6ff; --green:#3fb950;
+  --orange:#d29922; --red:#f85149; --purple:#bc8cff;
+}
+:root[data-theme="light"]{
+  --bg:#ffffff; --surface:#f6f8fa; --surface2:#eaeef2; --border:#d0d7de;
+  --text:#1f2328; --dim:#59636e; --accent:#0969da; --green:#1a7f37;
+  --orange:#9a6700; --red:#cf222e; --purple:#8250df;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:28px 20px 70px}
+h1{font-size:22px;margin:0 0 8px;line-height:1.3}
+h2{font-size:18px;margin:32px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;
+  font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
+.sub{color:var(--dim);font-size:13.5px;margin:0 0 16px}
+nav.chain{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 6px;padding:0}
+nav.chain a,nav.chain span{display:inline-block;padding:5px 11px;border:1px solid var(--border);
+  border-radius:20px;background:var(--surface);text-decoration:none;color:var(--accent);
+  font-size:12.5px;line-height:1.3;white-space:nowrap}
+nav.chain a:hover{background:var(--surface2)}
+nav.chain span.here{background:var(--accent);color:var(--bg);border-color:var(--accent);font-weight:600}
+p.chainnote{color:var(--dim);font-size:12px;margin:0 0 18px}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);
+  border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;
+  font:13px/1 ui-monospace,Menlo,monospace;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.18)}
+.mono{font:12.5px ui-monospace,SFMono-Regular,Menlo,monospace;
+  background:var(--surface);border:1px solid var(--border);border-radius:8px;
+  padding:13px;overflow-x:auto;white-space:pre}
+.warn{border-left:3px solid var(--red);background:var(--surface);
+  padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0}
+.hl{border-left:3px solid var(--green);background:var(--surface);
+  padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0}
+blockquote{margin:14px 0;padding:10px 16px;border-left:3px solid var(--border);
+  background:var(--surface);color:var(--dim);font-size:14px;border-radius:0 8px 8px 0}
+svg{max-width:100%;height:auto;display:block;margin:16px 0}
+svg .dom{fill:none;stroke:var(--border);stroke-width:1.4;stroke-dasharray:5 4}
+svg .n-train{fill:var(--accent);opacity:.28;stroke:var(--accent);stroke-width:1.3}
+svg .n-gen{fill:var(--green);opacity:.32;stroke:var(--green);stroke-width:1.3}
+svg .n-dead{fill:var(--red);opacity:.42;stroke:var(--red);stroke-width:1.6}
+svg .lbl{fill:var(--text);font:12px ui-monospace,Menlo,monospace}
+svg .lbl-b{fill:var(--text);font:bold 12.5px -apple-system,sans-serif}
+svg .note{fill:var(--dim);font:11.5px -apple-system,sans-serif}
+svg .bad{fill:var(--red);font:bold 11.5px -apple-system,sans-serif}
+svg .arrow{stroke:var(--red);stroke-width:2;fill:none}
+svg a text{text-decoration:underline;fill:var(--accent);font:11.5px ui-monospace,Menlo,monospace}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+  document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head>
+<body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+  function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+  function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
+    b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
+      else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+  document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+<div class="wrap">
+
+<h1>What a shard restart can and cannot do when a whole node dies</h1>
+<p class="sub">Companion illustration for
+<a href="https://github.com/NVIDIA-NeMo/RL/pull/3592">NVIDIA-NeMo/RL #3592</a>.
+Permalinks pin the PR head <code>5b4a732</code>; Ray behaviour is quoted from the pinned
+version, 2.56.1.</p>
+
+<nav class="chain">
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-3592-shard-comes-back.html">why it never came back</a>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-3592-what-gets-recreated.html">what gets recreated</a>
+  <span class="here">when the node dies</span>
+</nav>
+<p class="chainnote">Three pages on this PR, one question each — this one: the failure the restart is not built for.</p>
+
+<p>The restart puts the replacement actors back on
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/5b4a732d9fcc2034381d146f752e4983d062bed3/nemo_rl/distributed/worker_groups.py#L701">the same placement-group bundle</a>
+the dead ones held. That is deliberate — Ray does not release a bundle when an actor dies, so
+the replacement lands on the same GPU. It also means the restart is only ever as good as the
+bundle. If the engine died, the bundle is still there and the restart works. If the
+<em>node</em> died, the bundle went with it, and everything below follows from that.</p>
+
+<h2>Where a replacement bundle would have to go</h2>
+
+<p>A job with 2 NVLink domains and <code>segment_size: 3</code>, so nodes are handed out in
+complete 3-node segments. Training takes one segment, generation takes two — 9 nodes, which
+is what the job asked for, so nothing is spare. Node 7 dies.</p>
+
+<svg viewBox="0 0 940 430" role="img" aria-label="Nine allocated nodes in two NVLink domains with no free node; when node 7 dies Ray cannot reschedule its bundles">
+  <text class="lbl-b" x="20" y="24">2 NVLink domains · segment_size = 3 · 3 training nodes + 6 generation nodes = 9 · 0 free</text>
+
+  <!-- domain A -->
+  <rect class="dom" x="40" y="52" width="336" height="152" rx="10"/>
+  <text class="note" x="52" y="70">NVLink domain A</text>
+  <rect class="n-train" x="56" y="80" width="96" height="46" rx="6"/>
+  <text class="lbl" x="104" y="108" text-anchor="middle">node 0</text>
+  <rect class="n-train" x="158" y="80" width="96" height="46" rx="6"/>
+  <text class="lbl" x="206" y="108" text-anchor="middle">node 1</text>
+  <rect class="n-train" x="260" y="80" width="96" height="46" rx="6"/>
+  <text class="lbl" x="308" y="108" text-anchor="middle">node 2</text>
+  <rect class="n-gen" x="56" y="140" width="96" height="46" rx="6"/>
+  <text class="lbl" x="104" y="168" text-anchor="middle">node 3</text>
+  <rect class="n-gen" x="158" y="140" width="96" height="46" rx="6"/>
+  <text class="lbl" x="206" y="168" text-anchor="middle">node 4</text>
+  <rect class="n-gen" x="260" y="140" width="96" height="46" rx="6"/>
+  <text class="lbl" x="308" y="168" text-anchor="middle">node 5</text>
+
+  <!-- domain B -->
+  <rect class="dom" x="410" y="52" width="336" height="92" rx="10"/>
+  <text class="note" x="422" y="70">NVLink domain B</text>
+  <rect class="n-gen" x="426" y="80" width="96" height="46" rx="6"/>
+  <text class="lbl" x="474" y="108" text-anchor="middle">node 6</text>
+  <rect class="n-dead" x="528" y="80" width="96" height="46" rx="6"/>
+  <text class="lbl" x="576" y="108" text-anchor="middle">node 7</text>
+  <rect class="n-gen" x="630" y="80" width="96" height="46" rx="6"/>
+  <text class="lbl" x="678" y="108" text-anchor="middle">node 8</text>
+  <text class="bad" x="576" y="140" text-anchor="middle">dies</text>
+
+  <!-- reschedule attempt -->
+  <path class="arrow" d="M576 150 L576 196" marker-end="url(#ah)"/>
+  <defs>
+    <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0 0 L10 5 L0 10 z" fill="var(--red)"/>
+    </marker>
+  </defs>
+  <text class="lbl-b" x="20" y="238">Ray tries to move node 7's bundles somewhere else. It needs a node that is:</text>
+  <text class="note" x="44" y="262">1.  free — but all 9 nodes are already held by training or generation</text>
+  <text class="note" x="44" y="282">2.  in NVLink domain B — the bundle carries that domain as a resource, so domain A cannot take it</text>
+  <text class="bad"  x="44" y="306">Neither is available, so the bundles are never replaced.</text>
+
+  <text class="note" x="44" y="336">Ray 2.56.1, placement-group fault tolerance:</text>
+  <text class="note" x="44" y="354">"If the autoscaler can't provide additional resources or if you're not using the autoscaler,</text>
+  <text class="note" x="44" y="372">the placement group remains in the partially created state indefinitely."</text>
+
+  <!-- legend -->
+  <rect class="n-train" x="44" y="396" width="20" height="14" rx="3"/>
+  <text class="note" x="72" y="408">training</text>
+  <rect class="n-gen" x="150" y="396" width="20" height="14" rx="3"/>
+  <text class="note" x="178" y="408">generation</text>
+  <rect class="n-dead" x="272" y="396" width="20" height="14" rx="3"/>
+  <text class="note" x="300" y="408">dead</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/5b4a732d9fcc2034381d146f752e4983d062bed3/nemo_rl/distributed/virtual_cluster.py#L642">
+    <text x="380" y="408">the domain constraint on each bundle</text>
+  </a>
+</svg>
+
+<h2>What the restart does then</h2>
+
+<p>It does not fail. It stops, quietly, in a place with no timeout. Reading the calls in
+order:</p>
+
+<div class="mono">recreate_worker(8)
+  ray.kill(old)                       # already gone with the node
+  create_worker(pg, bundle_idx=8)     # .remote() returns a handle straight away —
+                                      # Ray does not wait to see if it can be placed
+  -> returns a handle to an actor that will never start
+
+post_init_async(leader)
+  ray.get(...)                        # blocks. the actor is still PENDING_CREATION,
+                                      # so this call has nothing to wait on but forever</div>
+
+<p>Ray creates actors asynchronously:
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/5b4a732d9fcc2034381d146f752e4983d062bed3/nemo_rl/distributed/worker_groups.py#L227"><code>create_worker</code></a>
+ends in <code>.remote()</code> and hands back a handle whether or not the bundle can be
+scheduled. So the restart gets all the way to
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/5b4a732d9fcc2034381d146f752e4983d062bed3/nemo_rl/models/generation/vllm/vllm_generation.py#L748"><code>post_init</code></a>
+before anything notices, and that <code>ray.get</code> has no deadline.</p>
+
+<p>Three things follow, and none of them is loud:</p>
+
+<ul>
+<li>The shard stays <code>RESTARTING</code>, which counts as absent, so training carries on
+without it. That part is fine and intended.</li>
+<li>The attempt is never marked failed, so
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/5b4a732d9fcc2034381d146f752e4983d062bed3/nemo_rl/algorithms/single_controller_utils/config.py#L338"><code>max_restart_attempts_per_shard</code></a>
+is never spent and the shard is never <code>RETIRED</code>. It sits in the in-flight set for
+the rest of the run, so no later tick retries it.</li>
+<li>The parked call is running inside
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/5b4a732d9fcc2034381d146f752e4983d062bed3/nemo_rl/models/generation/engine_supervisor.py#L114"><code>asyncio.to_thread</code></a>,
+whose workers are joined at interpreter exit — so it can also hold up shutdown at the end
+of the run.</li>
+</ul>
+
+<div class="warn">
+<p><strong>There are no spare nodes, and nothing plans for them.</strong> The only "spare"
+in the codebase is a pool of spare <em>prompts</em> for the data plane. At the cluster level
+the job asks for exactly <code>train_nodes + inference_nodes</code>, and
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/5b4a732d9fcc2034381d146f752e4983d062bed3/nemo_rl/distributed/virtual_cluster.py#L579">whatever is left over</a>
+is handed to the teacher model rather than held back. So on a fixed allocation with no
+autoscaler — a Slurm job — a lost node is a lost node.</p>
+<p>Making node loss survivable is a real feature, not a tweak: you would have to allocate
+spare nodes up front, keep them out of every cluster, and pick a replacement inside the same
+NVLink domain when <code>segment_size</code> is set. Worth saying plainly that today the
+restart handles a dead <em>engine</em>, not a dead <em>machine</em>.</p>
+</div>
+
+</div>
+</body>
+</html>
