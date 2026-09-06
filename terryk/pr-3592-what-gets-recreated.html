@@ -43,18 +43,26 @@ p.chainnote{color:var(--dim);font-size:12px;margin:0 0 18px}
   padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0}
 .hl{border-left:3px solid var(--green);background:var(--surface);
   padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0}
+table{border-collapse:collapse;width:100%;margin:14px 0;font-size:13px}
+th,td{border:1px solid var(--border);padding:6px 9px;text-align:left;vertical-align:top}
+th{background:var(--surface2);font-weight:600}
+td.n{width:26px;color:var(--dim);text-align:right}
 svg{max-width:100%;height:auto;display:block;margin:16px 0}
 svg .band{fill:var(--surface);stroke:var(--border);stroke-width:1.2}
+svg .node{fill:none;stroke:var(--border);stroke-width:1.4;stroke-dasharray:5 4}
 svg .cut{fill:var(--orange);opacity:.13;stroke:var(--orange);stroke-width:1.4;stroke-dasharray:5 3}
-svg .lbl{fill:var(--text);font:12.5px ui-monospace,Menlo,monospace}
+svg .lbl{fill:var(--text);font:12px ui-monospace,Menlo,monospace}
 svg .lbl-b{fill:var(--text);font:bold 12.5px -apple-system,sans-serif}
-svg .note{fill:var(--dim);font:11.5px -apple-system,sans-serif}
+svg .note{fill:var(--dim);font:11px -apple-system,sans-serif}
 svg .keep{fill:var(--green);font:bold 11.5px -apple-system,sans-serif}
 svg .redo{fill:var(--orange);font:bold 11.5px -apple-system,sans-serif}
 svg .c-lead{fill:var(--purple);opacity:.6;stroke:var(--purple);stroke-width:1.4}
 svg .c-hold{fill:var(--dim);opacity:.3;stroke:var(--dim);stroke-width:1.4}
-svg .c-txt{fill:var(--text);font:10.5px ui-monospace,Menlo,monospace}
-svg a text{text-decoration:underline;fill:var(--accent);font:11.5px ui-monospace,Menlo,monospace}
+svg .c-vllm{fill:var(--accent);opacity:.34;stroke:var(--accent);stroke-width:1.3}
+svg .c-txt{fill:var(--text);font:10px ui-monospace,Menlo,monospace}
+svg .rep{fill:var(--green);opacity:.22;stroke:var(--green);stroke-width:1.2}
+svg .rep-x{fill:var(--orange);opacity:.26;stroke:var(--orange);stroke-width:1.4}
+svg a text{text-decoration:underline;fill:var(--accent);font:11px ui-monospace,Menlo,monospace}
 </style>
 <script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
   document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
@@ -91,145 +99,173 @@ which is exactly what makes it the
 <a href="https://github.com/NVIDIA-NeMo/RL/blob/5b4a732d9fcc2034381d146f752e4983d062bed3/nemo_rl/models/generation/vllm/vllm_worker.py#L434">model owner</a>.
 The rest set <code>self.llm = None</code> and
 <a href="https://github.com/NVIDIA-NeMo/RL/blob/5b4a732d9fcc2034381d146f752e4983d062bed3/nemo_rl/models/generation/vllm/vllm_worker.py#L446">return immediately</a> —
-they exist to hold their GPU bundle. The owner then builds the vLLM engine with
+they exist to hold their GPU bundle. The owner builds the vLLM engine with
 <a href="https://github.com/NVIDIA-NeMo/RL/blob/5b4a732d9fcc2034381d146f752e4983d062bed3/nemo_rl/models/generation/vllm/worker_utils.py#L21"><code>distributed_executor_backend="ray"</code></a>
 whenever TP×PP &gt; 1, and hands it
 <a href="https://github.com/NVIDIA-NeMo/RL/blob/5b4a732d9fcc2034381d146f752e4983d062bed3/nemo_rl/models/generation/vllm/vllm_worker.py#L521"><code>VLLM_RAY_BUNDLE_INDICES</code></a>
 so vLLM's own Ray workers land on those same bundles.</p>
 
-<h2>Who owns what, and where the restart cuts</h2>
+<h2>One replica across two nodes</h2>
 
-<p>One run with 3 generation shards and tensor parallel = 4, so 12 NeMo-RL actors. Shard 2
-dies. The orange band is everything the restart recreates; everything above it is reused
-as-is.</p>
+<p>Take GB200 with <strong>4 GPUs per node</strong> and <strong>tensor parallel = 8</strong>.
+One replica no longer fits on a machine, and NeMo-RL notices:
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/5b4a732d9fcc2034381d146f752e4983d062bed3/nemo_rl/models/generation/vllm/vllm_generation.py#L228"><code>model_parallel_size &gt; cluster.num_gpus_per_node</code></a>
+switches the cluster to a single <strong>unified placement group</strong> covering every
+inference GPU, instead of one placement group per node.</p>
 
-<svg viewBox="0 0 940 520" role="img" aria-label="Ownership ladder from RayVirtualCluster down to the EngineCore child, with the restart cut covering only shard 2's actors, engine and vLLM workers">
-  <text class="lbl-b" x="20" y="24">3 shards · tensor parallel = 4 · 12 actors · shard 2 dies</text>
+<p>The bundles in that unified group are flattened into topology order and
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/5b4a732d9fcc2034381d146f752e4983d062bed3/nemo_rl/models/generation/vllm/vllm_generation.py#L450">sliced into consecutive chunks of TP×PP</a>.
+Each chunk is one replica. With 3 replicas that is 6 nodes and 24 bundles, and each replica
+straddles a node boundary — the group is only ever labelled with the node of its
+<em>first</em> bundle.</p>
 
-  <!-- the restart cut highlight, drawn first so bands sit on top of its edges -->
-  <rect class="cut" x="468" y="176" width="150" height="316" rx="9"/>
-  <text class="redo" x="543" y="196" text-anchor="middle">what restart_shard recreates</text>
+<svg viewBox="0 0 940 470" role="img" aria-label="Six GB200 nodes of four GPUs each hold three replicas of tensor parallel 8; replica 2 spans nodes 4 and 5 and all eight of its actors are recreated on restart">
+  <text class="lbl-b" x="20" y="22">3 replicas · TP = 8 · 4 GPUs per node · 24 bundles across 6 nodes · replica 2 dies</text>
 
-  <!-- band 1 -->
-  <rect class="band" x="30" y="46" width="640" height="46" rx="7"/>
-  <text class="lbl" x="46" y="66">RayVirtualCluster</text>
-  <text class="note" x="46" y="83">placement group + 12 GPU bundles</text>
-  <text class="keep" x="686" y="66">reused</text>
-  <text class="note" x="686" y="83">a dead actor keeps its bundle,</text>
-  <text class="note" x="686" y="98">so the new one gets the same GPU</text>
+  <!-- top: replicas over nodes -->
+  <rect class="rep" x="40" y="40" width="280" height="52" rx="7"/>
+  <text class="note" x="180" y="58" text-anchor="middle">replica 0 — bundles 0-7</text>
+  <rect class="rep" x="332" y="40" width="280" height="52" rx="7"/>
+  <text class="note" x="472" y="58" text-anchor="middle">replica 1 — bundles 8-15</text>
+  <rect class="rep-x" x="624" y="40" width="280" height="52" rx="7"/>
+  <text class="redo" x="764" y="58" text-anchor="middle">replica 2 — bundles 16-23</text>
 
-  <!-- band 2 -->
-  <rect class="band" x="30" y="110" width="640" height="46" rx="7"/>
-  <text class="lbl" x="46" y="130">VllmGeneration  →  RayWorkerGroup</text>
-  <text class="note" x="46" y="147">owns the 12 actor handles</text>
-  <text class="keep" x="686" y="130">reused</text>
-  <text class="note" x="686" y="147">one handle is swapped in place</text>
+  <rect class="node" x="48" y="64" width="132" height="22" rx="4"/>
+  <text class="c-txt" x="114" y="79" text-anchor="middle">node 0</text>
+  <rect class="node" x="188" y="64" width="124" height="22" rx="4"/>
+  <text class="c-txt" x="250" y="79" text-anchor="middle">node 1</text>
+  <rect class="node" x="340" y="64" width="132" height="22" rx="4"/>
+  <text class="c-txt" x="406" y="79" text-anchor="middle">node 2</text>
+  <rect class="node" x="480" y="64" width="124" height="22" rx="4"/>
+  <text class="c-txt" x="542" y="79" text-anchor="middle">node 3</text>
+  <rect class="node" x="632" y="64" width="132" height="22" rx="4"/>
+  <text class="c-txt" x="698" y="79" text-anchor="middle">node 4</text>
+  <rect class="node" x="772" y="64" width="124" height="22" rx="4"/>
+  <text class="c-txt" x="834" y="79" text-anchor="middle">node 5</text>
 
-  <!-- band 3: the actors -->
-  <rect class="band" x="30" y="204" width="640" height="72" rx="7"/>
-  <text class="lbl" x="46" y="224">NeMo-RL Ray actors</text>
-  <g>
-    <circle class="c-lead" cx="160" cy="252" r="13"/><text class="c-txt" x="160" y="256" text-anchor="middle">0</text>
-    <circle class="c-hold" cx="192" cy="252" r="13"/><text class="c-txt" x="192" y="256" text-anchor="middle">1</text>
-    <circle class="c-hold" cx="224" cy="252" r="13"/><text class="c-txt" x="224" y="256" text-anchor="middle">2</text>
-    <circle class="c-hold" cx="256" cy="252" r="13"/><text class="c-txt" x="256" y="256" text-anchor="middle">3</text>
+  <text class="note" x="20" y="112">every replica sits on two nodes — 4 bundles on each</text>
 
-    <circle class="c-lead" cx="316" cy="252" r="13"/><text class="c-txt" x="316" y="256" text-anchor="middle">4</text>
-    <circle class="c-hold" cx="348" cy="252" r="13"/><text class="c-txt" x="348" y="256" text-anchor="middle">5</text>
-    <circle class="c-hold" cx="380" cy="252" r="13"/><text class="c-txt" x="380" y="256" text-anchor="middle">6</text>
-    <circle class="c-hold" cx="412" cy="252" r="13"/><text class="c-txt" x="412" y="256" text-anchor="middle">7</text>
+  <!-- zoom into replica 2 -->
+  <text class="lbl-b" x="20" y="148">replica 2, in full</text>
+  <rect class="cut" x="34" y="158" width="700" height="176" rx="9"/>
+  <text class="redo" x="748" y="176">recreated</text>
+  <text class="note" x="748" y="192">all 8, across</text>
+  <text class="note" x="748" y="207">both nodes</text>
 
-    <circle class="c-lead" cx="490" cy="252" r="13"/><text class="c-txt" x="490" y="256" text-anchor="middle">8</text>
-    <circle class="c-hold" cx="522" cy="252" r="13"/><text class="c-txt" x="522" y="256" text-anchor="middle">9</text>
-    <circle class="c-hold" cx="554" cy="252" r="13"/><text class="c-txt" x="554" y="256" text-anchor="middle">10</text>
-    <circle class="c-hold" cx="586" cy="252" r="13"/><text class="c-txt" x="586" y="256" text-anchor="middle">11</text>
-  </g>
-  <text class="note" x="208" y="272" text-anchor="middle">shard 0</text>
-  <text class="note" x="364" y="272" text-anchor="middle">shard 1</text>
-  <text class="note" x="538" y="272" text-anchor="middle">shard 2</text>
-  <text class="redo" x="686" y="240">all 4 recreated</text>
-  <text class="note" x="686" y="257">actors 8, 9, 10 and 11 — not just</text>
-  <text class="note" x="686" y="272">the one that owns the model</text>
+  <rect class="node" x="50" y="172" width="320" height="70" rx="7"/>
+  <text class="note" x="62" y="190">node 4 — bundles 16-19</text>
+  <rect class="node" x="392" y="172" width="320" height="70" rx="7"/>
+  <text class="note" x="404" y="190">node 5 — bundles 20-23</text>
 
-  <!-- band 4: engine -->
-  <rect class="band" x="30" y="296" width="640" height="46" rx="7"/>
-  <text class="lbl" x="46" y="316">vLLM engine  —  only on actors 0, 4, 8</text>
-  <text class="note" x="46" y="333">the other 9 actors hold a bundle and nothing else</text>
-  <text class="redo" x="686" y="316">rebuilt on actor 8</text>
-  <text class="note" x="686" y="333">post_init, then it reports a new port</text>
+  <circle class="c-lead" cx="90"  cy="218" r="15"/><text class="c-txt" x="90"  y="222" text-anchor="middle">16</text>
+  <circle class="c-hold" cx="162" cy="218" r="15"/><text class="c-txt" x="162" y="222" text-anchor="middle">17</text>
+  <circle class="c-hold" cx="234" cy="218" r="15"/><text class="c-txt" x="234" y="222" text-anchor="middle">18</text>
+  <circle class="c-hold" cx="306" cy="218" r="15"/><text class="c-txt" x="306" y="222" text-anchor="middle">19</text>
+  <circle class="c-hold" cx="432" cy="218" r="15"/><text class="c-txt" x="432" y="222" text-anchor="middle">20</text>
+  <circle class="c-hold" cx="504" cy="218" r="15"/><text class="c-txt" x="504" y="222" text-anchor="middle">21</text>
+  <circle class="c-hold" cx="576" cy="218" r="15"/><text class="c-txt" x="576" y="222" text-anchor="middle">22</text>
+  <circle class="c-hold" cx="648" cy="218" r="15"/><text class="c-txt" x="648" y="222" text-anchor="middle">23</text>
 
-  <!-- band 5: vllm internals -->
-  <rect class="band" x="30" y="360" width="640" height="72" rx="7"/>
-  <text class="lbl" x="46" y="380">vLLM's own Ray workers  ×4</text>
-  <text class="note" x="46" y="397">placed on the same bundles via VLLM_RAY_BUNDLE_INDICES</text>
-  <text class="lbl" x="46" y="418">EngineCore  —  a plain child process</text>
-  <text class="redo" x="686" y="380">come back with the engine</text>
-  <text class="note" x="686" y="397">NeMo-RL never creates these directly;</text>
-  <text class="note" x="686" y="412">vLLM does, when the engine is built</text>
-  <text class="note" x="686" y="429">the EngineCore is the piece a SIGKILL</text>
-  <text class="note" x="686" y="444">can leave behind holding its GPU</text>
+  <text class="note" x="90" y="258" text-anchor="middle">only this one</text>
+  <text class="note" x="90" y="272" text-anchor="middle">builds the engine</text>
+
+  <!-- vllm's own workers -->
+  <rect class="band" x="50" y="288" width="662" height="38" rx="7"/>
+  <text class="lbl" x="64" y="312">vLLM's own Ray workers ×8</text>
+  <circle class="c-vllm" cx="300" cy="307" r="9"/>
+  <circle class="c-vllm" cx="324" cy="307" r="9"/>
+  <circle class="c-vllm" cx="348" cy="307" r="9"/>
+  <circle class="c-vllm" cx="372" cy="307" r="9"/>
+  <circle class="c-vllm" cx="396" cy="307" r="9"/>
+  <circle class="c-vllm" cx="420" cy="307" r="9"/>
+  <circle class="c-vllm" cx="444" cy="307" r="9"/>
+  <circle class="c-vllm" cx="468" cy="307" r="9"/>
+  <text class="note" x="490" y="311">placed on those same 8 bundles, so they span both nodes too</text>
 
   <!-- legend -->
-  <circle class="c-lead" cx="46" cy="474" r="11"/>
-  <text class="note" x="64" y="478">has bundle_indices — builds the engine</text>
-  <circle class="c-hold" cx="330" cy="474" r="11"/>
-  <text class="note" x="348" y="478">llm = None — holds a GPU bundle</text>
-  <a href="https://github.com/NVIDIA-NeMo/RL/blob/5b4a732d9fcc2034381d146f752e4983d062bed3/nemo_rl/models/generation/vllm/vllm_generation.py#L714">
-    <text x="606" y="478">restart_shard()</text>
+  <circle class="c-lead" cx="46" cy="368" r="11"/>
+  <text class="note" x="64" y="372">model owner — has bundle_indices, builds the engine</text>
+  <circle class="c-hold" cx="380" cy="368" r="11"/>
+  <text class="note" x="398" y="372">holds a GPU bundle, llm = None</text>
+  <circle class="c-vllm" cx="654" cy="368" r="11"/>
+  <text class="note" x="672" y="372">created by vLLM, not by NeMo-RL</text>
+
+  <text class="note" x="20" y="406">the replica is one slice of the flat bundle list; it is tagged with the node of its first bundle only, so nothing about it is node-local</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/5b4a732d9fcc2034381d146f752e4983d062bed3/nemo_rl/models/generation/vllm/vllm_generation.py#L475" target="_blank" rel="noopener">
+    <text x="20" y="430">vllm_generation.py L475 — groups.append((node_idx[first_node], slice_))</text>
   </a>
+  <text class="note" x="20" y="454">a replica that straddles two NVLink domains logs a warning, because the collective then falls back to slower links</text>
 </svg>
 
-<h2>The four calls, with real indices</h2>
+<p>So with TP=8 on 4-GPU nodes, restarting replica 2 recreates <strong>eight</strong> NeMo-RL
+actors — four on node 4 and four on node 5 — even though seven of them never held a model.
+They have to come back because they hold the bundles that vLLM's own workers are placed onto.</p>
 
-<p>Same run: shard 2 is dead, tensor parallel is 4. Every value below is what the code
-actually computes.</p>
+<h2>The call chain, line by line</h2>
 
-<div class="mono">leader_idx = get_dp_leader_worker_idx(2)            # -> 8
-worker_indices = range(8, 8 + 4)                   # -> 8, 9, 10, 11
+<p>Every step of a restart, in order, with the code that does it.</p>
 
-for worker_idx in (8, 9, 10, 11):
-    recreate_worker(worker_idx)                    # replays the recorded creation call:
-                                                   # same placement group, same bundle,
-                                                   # same runtime env, fresh actor name
+<table>
+<tr><th class="n">#</th><th>What happens</th><th>Code</th></tr>
+<tr><td class="n">1</td><td>The fleet-probe pump calls <code>tick()</code> after each probe round</td>
+<td><a href="https://github.com/NVIDIA-NeMo/RL/blob/5b4a732d9fcc2034381d146f752e4983d062bed3/nemo_rl/algorithms/single_controller.py#L2283">single_controller.py:2283</a></td></tr>
+<tr><td class="n">2</td><td><code>tick()</code> starts a restart for every shard that needs one, and returns</td>
+<td><a href="https://github.com/NVIDIA-NeMo/RL/blob/5b4a732d9fcc2034381d146f752e4983d062bed3/nemo_rl/models/generation/engine_supervisor.py#L69">engine_supervisor.py:69</a></td></tr>
+<tr><td class="n">3</td><td>Picks shards that are <code>DEAD</code> and not already being restarted</td>
+<td><a href="https://github.com/NVIDIA-NeMo/RL/blob/5b4a732d9fcc2034381d146f752e4983d062bed3/nemo_rl/models/generation/engine_supervisor.py#L79">engine_supervisor.py:79</a></td></tr>
+<tr><td class="n">4</td><td><code>mark_restarting</code> → <code>RESTARTING</code>, which also spends one attempt from the budget</td>
+<td><a href="https://github.com/NVIDIA-NeMo/RL/blob/5b4a732d9fcc2034381d146f752e4983d062bed3/nemo_rl/models/generation/engine_supervisor.py#L91">engine_supervisor.py:91</a></td></tr>
+<tr><td class="n">5</td><td>Spawns a background task — this is what makes it asynchronous</td>
+<td><a href="https://github.com/NVIDIA-NeMo/RL/blob/5b4a732d9fcc2034381d146f752e4983d062bed3/nemo_rl/models/generation/engine_supervisor.py#L101">engine_supervisor.py:101</a></td></tr>
+<tr><td class="n">6</td><td>Hands the blocking work to a thread so the event loop stays free</td>
+<td><a href="https://github.com/NVIDIA-NeMo/RL/blob/5b4a732d9fcc2034381d146f752e4983d062bed3/nemo_rl/models/generation/engine_supervisor.py#L114">engine_supervisor.py:114</a></td></tr>
+<tr><td class="n">7</td><td><code>restart_shard</code> looks up the replica's first worker</td>
+<td><a href="https://github.com/NVIDIA-NeMo/RL/blob/5b4a732d9fcc2034381d146f752e4983d062bed3/nemo_rl/models/generation/vllm/vllm_generation.py#L715">vllm_generation.py:715</a></td></tr>
+<tr><td class="n">8</td><td>Loops over all <code>model_parallel_size</code> workers — the 8 in the figure</td>
+<td><a href="https://github.com/NVIDIA-NeMo/RL/blob/5b4a732d9fcc2034381d146f752e4983d062bed3/nemo_rl/models/generation/vllm/vllm_generation.py#L717">vllm_generation.py:717</a></td></tr>
+<tr><td class="n">9</td><td>Kills the old actor first, so it cannot still be holding the GPU</td>
+<td><a href="https://github.com/NVIDIA-NeMo/RL/blob/5b4a732d9fcc2034381d146f752e4983d062bed3/nemo_rl/distributed/worker_groups.py#L727">worker_groups.py:727</a></td></tr>
+<tr><td class="n">10</td><td>Gives the replacement a fresh name, because a dead actor's name lingers in the GCS</td>
+<td><a href="https://github.com/NVIDIA-NeMo/RL/blob/5b4a732d9fcc2034381d146f752e4983d062bed3/nemo_rl/distributed/worker_groups.py#L736">worker_groups.py:736</a></td></tr>
+<tr><td class="n">11</td><td>Replays the recorded creation call — same placement group, same bundle</td>
+<td><a href="https://github.com/NVIDIA-NeMo/RL/blob/5b4a732d9fcc2034381d146f752e4983d062bed3/nemo_rl/distributed/worker_groups.py#L740">worker_groups.py:740</a></td></tr>
+<tr><td class="n">12</td><td>Creates the actor. Ray returns a handle straight away, before it is placed</td>
+<td><a href="https://github.com/NVIDIA-NeMo/RL/blob/5b4a732d9fcc2034381d146f752e4983d062bed3/nemo_rl/distributed/worker_groups.py#L227">worker_groups.py:227</a></td></tr>
+<tr><td class="n">13</td><td>Swaps the new handle into the worker group in place</td>
+<td><a href="https://github.com/NVIDIA-NeMo/RL/blob/5b4a732d9fcc2034381d146f752e4983d062bed3/nemo_rl/distributed/worker_groups.py#L749">worker_groups.py:749</a></td></tr>
+<tr><td class="n">14</td><td><code>load_model</code>, but only on the deferred-load path</td>
+<td><a href="https://github.com/NVIDIA-NeMo/RL/blob/5b4a732d9fcc2034381d146f752e4983d062bed3/nemo_rl/models/generation/vllm/vllm_generation.py#L744">vllm_generation.py:744</a></td></tr>
+<tr><td class="n">15</td><td><code>post_init</code> on the owner rebuilds the engine — vLLM then makes its own 8 workers</td>
+<td><a href="https://github.com/NVIDIA-NeMo/RL/blob/5b4a732d9fcc2034381d146f752e4983d062bed3/nemo_rl/models/generation/vllm/vllm_generation.py#L748">vllm_generation.py:748</a></td></tr>
+<tr><td class="n">16</td><td>Asks the new engine for its base URL — a <strong>new port</strong>, not the old one</td>
+<td><a href="https://github.com/NVIDIA-NeMo/RL/blob/5b4a732d9fcc2034381d146f752e4983d062bed3/nemo_rl/models/generation/vllm/vllm_generation.py#L752">vllm_generation.py:752</a></td></tr>
+<tr><td class="n">17</td><td><code>mark_loaded</code> records that URL and moves the shard to <code>STALE</code></td>
+<td><a href="https://github.com/NVIDIA-NeMo/RL/blob/5b4a732d9fcc2034381d146f752e4983d062bed3/nemo_rl/models/generation/engine_supervisor.py#L128">engine_supervisor.py:128</a></td></tr>
+<tr><td class="n">—</td><td>If any of that raises, <code>mark_restart_failed</code> puts it back to <code>DEAD</code> to be retried</td>
+<td><a href="https://github.com/NVIDIA-NeMo/RL/blob/5b4a732d9fcc2034381d146f752e4983d062bed3/nemo_rl/models/generation/engine_supervisor.py#L121">engine_supervisor.py:121</a></td></tr>
+</table>
 
-leader = workers[8]
-post_init_async(leader)                            # rebuilds the vLLM engine ->
-                                                   # vLLM spawns its 4 Ray workers
-                                                   # and the EngineCore child
-url = report_dp_openai_server_base_url(leader)      # a NEW port, not the old one</div>
-
-<p>Two things are worth pulling out of that.</p>
-
-<p><strong>All four actors are recreated, not just the model owner.</strong> The three
-placeholders died with the engine too, and their bundles have to be held by a live actor
-before vLLM can place its workers back on them.
-<a href="https://github.com/NVIDIA-NeMo/RL/blob/5b4a732d9fcc2034381d146f752e4983d062bed3/nemo_rl/distributed/worker_groups.py#L701"><code>recreate_worker</code></a>
-replays the arguments the original creation call was made with rather than working them
-out again — re-deriving the placement group, bundle and rank bookkeeping would be a second
-copy of that logic, free to drift from the first.</p>
-
-<p><strong>The restart stops at NeMo-RL's own actors.</strong> Nothing reaches into vLLM to
-restart a tensor-parallel rank. Those workers are vLLM's, created when the engine is built,
-so they come back as a consequence of rebuilding the engine on actor 8 — not as a step
-anyone wrote.</p>
+<p>Steps 9 to 13 are the only ones that touch Ray actors. There is no step that reaches into
+vLLM to restart a tensor-parallel rank: those workers are vLLM's, made when the engine is
+built at step 15, so they return as a consequence rather than as an instruction.</p>
 
 <div class="hl">
-<p><strong>The short answer to "how far up does it restart".</strong> Up to and including
-every Ray actor NeMo-RL made for that one shard, and no further. The cluster, the placement
-group, its GPU bundles, the worker group and the other two shards are all reused untouched —
-which is the point, because a dead actor does not release its bundle, so the replacement
-lands on the same GPUs.</p>
+<p><strong>How far up does it restart?</strong> Up to and including every Ray actor NeMo-RL made
+for that one replica — all 8 in this example, on both nodes — and no further. The cluster, the
+unified placement group, its 24 bundles, the worker group and the other two replicas are all
+reused untouched. That is the point: a dead actor does not release its bundle, so the
+replacement lands on the same GPUs.</p>
 </div>
 
 <div class="warn">
 <p><strong>The one piece that can survive the kill.</strong> vLLM runs its EngineCore as an
-ordinary child process — no <code>setsid</code>, not a daemon — and every cleanup path vLLM
-and Ray provide runs <em>inside</em> the process being killed. So a SIGKILLed worker leaves
-the EngineCore behind, still holding its GPU, and the replacement then has nowhere to load.
-That is what <code>RAY_process_group_cleanup_enabled=1</code> is for: it puts each worker in
-its own process group so the raylet can kill the leftovers. It has to be set before
-<code>ray start</code>, because the raylet reads it — setting it in the driver does nothing
-on a multi-node job.</p>
+ordinary child process — no <code>setsid</code>, not a daemon — and every cleanup path vLLM and
+Ray provide runs <em>inside</em> the process being killed. So a SIGKILLed worker leaves the
+EngineCore behind, still holding its GPU, and the replacement then has nowhere to load. That is
+what <code>RAY_process_group_cleanup_enabled=1</code> is for: it puts each worker in its own
+process group so the raylet can kill the leftovers. It has to be set before
+<code>ray start</code>, because the raylet reads it — setting it in the driver does nothing on a
+multi-node job, which is exactly the shape this page is about.</p>
 </div>
 
 </div>
