@@ -249,6 +249,28 @@ They have to come back because they hold the bundles that vLLM's own workers are
 vLLM to restart a tensor-parallel rank: those workers are vLLM's, made when the engine is
 built at step 15, so they return as a consequence rather than as an instruction.</p>
 
+<h2>Why not just let Ray restart the actor?</h2>
+
+<p>Ray can do this for you: <code>max_restarts=-1</code> makes it recreate an actor forever.
+NeMo-RL uses that in several places — the environment actors, and the
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/5b4a732d9fcc2034381d146f752e4983d062bed3/nemo_rl/models/generation/generation_router.py#L391">generation router</a>.
+It is deliberately <strong>not</strong> used for generation workers, which take Ray's default of
+<code>0</code> — "the actor doesn't need to be restarted". That is what makes a
+<code>RayActorError</code> conclusive: nothing is going to bring that actor back on its own, so
+the probe can go straight to <code>DEAD</code> without waiting to see if it recovers.</p>
+
+<p>The router's own docstring says why the difference exists:</p>
+
+<div class="mono">max_restarts=-1 is only meaningful because of that: Ray recreates a restarted
+actor through __init__ alone, so a class that starts its server from a separate
+method comes back permanently broken.</div>
+
+<p>That is exactly a generation worker. Ray would re-run <code>__init__</code> and stop there —
+no <code>post_init</code>, no URL report, no place in the refit collective, and no way for the
+ledger to learn that any of it happened. You would get an actor that looks alive and serves
+nothing. Steps 14 to 17 in the table above are precisely the work Ray would skip, which is why
+the restart has to be driven by the application.</p>
+
 <div class="hl">
 <p><strong>How far up does it restart?</strong> Up to and including every Ray actor NeMo-RL made
 for that one replica — all 8 in this example, on both nodes — and no further. The cluster, the
