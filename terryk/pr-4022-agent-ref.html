@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NVIDIA-NeMo/RL #4022 — why the agent that ran a rollout went missing on the way back</title>
+<style>
+:root{
+  --bg:#0d1117; --surface:#161b22; --surface2:#1c2128; --border:#30363d;
+  --text:#e6edf3; --dim:#8b949e; --accent:#58a6ff; --green:#3fb950;
+  --orange:#d29922; --red:#f85149;
+}
+:root[data-theme="light"]{
+  --bg:#ffffff; --surface:#f6f8fa; --surface2:#eaeef2; --border:#d0d7de;
+  --text:#1f2328; --dim:#59636e; --accent:#0969da; --green:#1a7f37;
+  --orange:#9a6700; --red:#cf222e;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:28px 20px 70px}
+h1{font-size:22px;margin:0 0 8px;line-height:1.3}
+h2{font-size:18px;margin:32px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;
+  font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
+.sub{color:var(--dim);font-size:13.5px;margin:0 0 16px}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);
+  border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;
+  font:13px/1 ui-monospace,Menlo,monospace;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.18)}
+.mono{font:12.5px ui-monospace,SFMono-Regular,Menlo,monospace;
+  background:var(--surface);border:1px solid var(--border);border-radius:8px;
+  padding:13px;overflow-x:auto;white-space:pre;margin:10px 0}
+.warn{border-left:3px solid var(--red);background:var(--surface);
+  padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0}
+.hl{border-left:3px solid var(--green);background:var(--surface);
+  padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0}
+.cap{color:var(--dim);font-size:12.5px;margin:2px 0 0}
+nav.chain{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 6px;padding:0}
+nav.chain a,nav.chain span{display:inline-block;padding:5px 11px;border:1px solid var(--border);
+  border-radius:20px;background:var(--surface);text-decoration:none;color:var(--accent);
+  font-size:12.5px;line-height:1.3;white-space:nowrap}
+nav.chain a:hover{background:var(--surface2)}
+nav.chain span.here{background:var(--accent);color:var(--bg);border-color:var(--accent);font-weight:600}
+p.chainnote{color:var(--dim);font-size:12px;margin:0 0 18px}
+svg{max-width:100%;height:auto;display:block;margin:16px 0}
+svg .box{fill:var(--surface);stroke:var(--border);stroke-width:1.4}
+svg .lbl{fill:var(--text);font:12.5px ui-monospace,Menlo,monospace}
+svg .lbl-b{fill:var(--text);font:bold 13px -apple-system,sans-serif}
+svg .note{fill:var(--dim);font:11.5px -apple-system,sans-serif}
+svg .hdr{fill:var(--accent);font:bold 12.5px -apple-system,sans-serif}
+svg .bad{fill:var(--red);font:bold 12px -apple-system,sans-serif}
+svg .good{fill:var(--green);font:bold 12px -apple-system,sans-serif}
+svg .boxbad{fill:var(--surface);stroke:var(--red);stroke-width:1.6}
+svg .boxgood{fill:var(--surface);stroke:var(--green);stroke-width:1.6}
+svg .arr{stroke:var(--dim);stroke-width:1.5;fill:none}
+svg .arrbad{stroke:var(--red);stroke-width:1.8;fill:none;stroke-dasharray:5 3}
+svg .arrgood{stroke:var(--green);stroke-width:1.8;fill:none}
+svg .divider{stroke:var(--border);stroke-width:1.2;stroke-dasharray:4 4}
+svg a text{text-decoration:underline;fill:var(--accent);font:11.5px ui-monospace,Menlo,monospace}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+  document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head>
+<body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+  function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+  function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
+    b.addEventListener('click',function(){var l=r.getAttribute('data-theme')==='light';
+      if(l){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
+      else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();});lbl();}
+  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',wire);else wire();})();</script>
+
+<div class="wrap">
+
+<h1>Why the agent that ran a rollout went missing on the way back</h1>
+<p class="sub">
+  <a href="https://github.com/NVIDIA-NeMo/RL/pull/4022">NVIDIA-NeMo/RL #4022</a> ·
+  fix commit <a href="https://github.com/NVIDIA-NeMo/RL/commit/b99ee92ea81fd42cd4e44c73b48d4ab4414ffc7b">b99ee92e</a> ·
+  all links pinned to <code>b99ee92e</code>
+</p>
+
+<nav class="chain">
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4022-stolen-port.html">the stolen port</a>
+  <span class="here">the missing agent ref</span>
+</nav>
+<p class="chainnote">Two pages on this PR, one bug each — this one: why rows came back without their agent.</p>
+
+<p>
+Every NeMo-Gym row says which agent server should run it. Rows used to carry that answer already
+baked in, under the key <code>agent_ref</code>. Gym changed: a row now arrives carrying only
+<code>task_source</code> — the name of a dataset — and Gym works out the agent from it at dispatch
+time, writing <code>agent_ref</code> onto the row
+(<a href="https://github.com/NVIDIA-NeMo/Gym/blob/fd5e84d6b1c485c80e7ae61553bbd485611c03b4/nemo_gym/rollout_collection.py#L1818-L1822">Gym rollout_collection.py L1818-1822</a>).
+That write happens inside a Ray actor, and that is where the trouble starts.
+</p>
+
+<h2>What went wrong</h2>
+
+<svg viewBox="0 0 940 356" role="img" aria-label="Ray serializes the row, so the actor writes agent_ref onto its own copy and the caller never sees it">
+  <text x="14" y="18" class="hdr">caller (rollout manager)</text>
+  <text x="530" y="18" class="hdr">Gym actor (separate process)</text>
+  <line x1="470" y1="26" x2="470" y2="300" class="divider"/>
+
+  <!-- caller row -->
+  <rect x="14" y="34" width="300" height="52" rx="7" class="box"/>
+  <text x="26" y="54" class="lbl">row A</text>
+  <text x="26" y="72" class="lbl">{"task_source": "chat"}</text>
+
+  <!-- send -->
+  <path d="M316 60 L560 60" class="arr" marker-end="url(#b1)"/>
+  <text x="330" y="52" class="note">Ray copies the row across the process</text>
+  <text x="330" y="80" class="note">boundary — two separate dicts now exist</text>
+
+  <!-- actor row -->
+  <rect x="560" y="34" width="360" height="52" rx="7" class="box"/>
+  <text x="572" y="54" class="lbl">row A' (the actor's own copy)</text>
+  <text x="572" y="72" class="lbl">{"task_source": "chat"}</text>
+
+  <path d="M740 86 L740 112" class="arr" marker-end="url(#b1)"/>
+  <rect x="560" y="112" width="360" height="56" rx="7" class="boxgood"/>
+  <text x="572" y="132" class="lbl">Gym resolves it and writes:</text>
+  <text x="572" y="152" class="lbl">A'["agent_ref"] = {"name": "chat_bot"}</text>
+
+  <!-- old return -->
+  <path d="M560 196 L316 196" class="arrbad" marker-end="url(#b2)"/>
+  <text x="330" y="188" class="bad">BEFORE: returns (rowidx, result, timings)</text>
+  <text x="330" y="214" class="note">the resolved name stays behind in the actor</text>
+
+  <rect x="14" y="172" width="300" height="52" rx="7" class="boxbad"/>
+  <text x="26" y="192" class="lbl">row A — unchanged</text>
+  <text x="26" y="210" class="lbl">{"task_source": "chat"}</text>
+
+  <text x="14" y="250" class="bad">then: row["agent_ref"]["name"] → KeyError</text>
+
+  <!-- new return -->
+  <path d="M560 292 L316 292" class="arrgood" marker-end="url(#b3)"/>
+  <text x="330" y="284" class="good">AFTER: returns (rowidx, agent_ref, result, timings)</text>
+  <text x="330" y="310" class="note">the caller writes the name onto its own copy</text>
+
+  <rect x="14" y="268" width="300" height="52" rx="7" class="boxgood"/>
+  <text x="26" y="288" class="lbl">row A — now filled in</text>
+  <text x="26" y="306" class="lbl">{"task_source", "agent_ref"}</text>
+
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/b99ee92ea81fd42cd4e44c73b48d4ab4414ffc7b/nemo_rl/environments/nemo_gym.py#L689-L694">
+    <text x="14" y="344">nemo_gym.py L689-694 — what the actor yields back</text>
+  </a>
+
+  <defs>
+    <marker id="b1" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+      <path d="M0,0 L6,3 L0,6 z" fill="var(--dim)"/></marker>
+    <marker id="b2" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+      <path d="M0,0 L6,3 L0,6 z" fill="var(--red)"/></marker>
+    <marker id="b3" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+      <path d="M0,0 L6,3 L0,6 z" fill="var(--green)"/></marker>
+  </defs>
+</svg>
+<p class="cap">
+  Green = the row that has the agent name. Red = the caller's row, still missing it. Ray gave the
+  actor a copy, so writing to <code>A'</code> can never change <code>A</code>.
+</p>
+
+<p>
+This is the part that is easy to miss when reading the code. The line that fills in
+<code>agent_ref</code> looks like it mutates the row you passed in — and inside one process it
+would. Across a Ray call it does not, because the actor is working on a copy that was made when the
+call was sent.
+</p>
+
+<h2>The fix</h2>
+
+<p>
+Send the resolved name back with the result instead of relying on the shared-object illusion. The
+stream used to yield three values per row; it now yields four, with the agent name in the middle.
+Following one row through:
+</p>
+
+<div class="mono">
+<span style="color:var(--dim)"># in the actor — say what you resolved, do not just write it locally</span>
+yield (rowidx, nemo_gym_row["agent_ref"], nemo_rl_result, timing_metrics)
+      <span style="color:var(--dim)">#  0            {"name": "chat_bot"}</span>
+
+<span style="color:var(--dim)"># in the caller — unpack the extra value and write it onto our own copy</span>
+rowidx, resolved_agent_ref, result, timing_metrics = await result_ref
+pending_by_rowidx[0]["agent_ref"] = {"name": "chat_bot"}
+</div>
+<p class="cap">
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/b99ee92ea81fd42cd4e44c73b48d4ab4414ffc7b/nemo_rl/environments/nemo_gym.py#L689-L694">nemo_gym.py L689-694</a> ·
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/b99ee92ea81fd42cd4e44c73b48d4ab4414ffc7b/nemo_rl/experience/rollout_manager.py#L976">rollout_manager.py L976</a> ·
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/b99ee92ea81fd42cd4e44c73b48d4ab4414ffc7b/nemo_rl/experience/rollout_manager.py#L992">rollout_manager.py L992</a>
+</p>
+
+<p>
+The same commit adds two checks so a future version of this bug is loud instead of silent. One
+prompt group is many attempts at a single prompt, so every row in it must come back with the same
+agent — if the name is missing, or two rows disagree, the run stops with a message that says so
+rather than writing a wrong value into the training record:
+</p>
+
+<div class="mono">
+resolved_agent_ref = rollout_inputs[0].get("agent_ref")
+if not isinstance(resolved_agent_ref, dict):
+    raise ValueError("NeMo-Gym did not return a resolved agent_ref")
+if any(row.get("agent_ref") != resolved_agent_ref for row in rollout_inputs[1:]):
+    raise ValueError("NeMo-Gym resolved one prompt group to inconsistent agent_ref values")
+</div>
+<p class="cap">
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/b99ee92ea81fd42cd4e44c73b48d4ab4414ffc7b/nemo_rl/experience/rollout_manager.py#L861-L870">rollout_manager.py L861-870</a>
+</p>
+
+<div class="hl">
+<strong>What to take away.</strong> When a function writes to a dict you handed it, that write only
+reaches you if you are in the same process. Send it across a Ray call and you get a copy, so the
+write lands somewhere you will never read. If a remote worker figures something out, it has to
+<em>return</em> it — putting it on the argument is not a channel. The tell is code that reads a key
+some other process was supposed to fill in.
+</div>
+
+</div>
+</body>
+</html>
