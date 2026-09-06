@@ -65,6 +65,7 @@ svg .s-rest{fill:var(--purple);opacity:.42;stroke:var(--purple);stroke-width:1.2
 svg .s-stale{fill:var(--orange);opacity:.45;stroke:var(--orange);stroke-width:1.2}
 svg .s-susp{fill:var(--red);opacity:.2;stroke:var(--red);stroke-width:1.2;stroke-dasharray:4 3}
 svg .work{fill:var(--accent);opacity:.3;stroke:var(--accent);stroke-width:1.2}
+svg .c-num{fill:var(--text);font:bold 12px ui-monospace,Menlo,monospace}
 svg .tick{stroke:var(--border);stroke-width:1;stroke-dasharray:3 3}
 svg .evt{stroke:var(--red);stroke-width:1.8}
 svg a text{text-decoration:underline;fill:var(--accent);font:11px ui-monospace,Menlo,monospace}
@@ -337,64 +338,73 @@ it Gym keeps talking to a socket nobody is listening on.</p>
 <p>Now the timing is different, because the trainers are inside a collective that needs every
 rank. This is where the refit deadline earns its keep.</p>
 
-<svg viewBox="0 0 940 424" role="img" aria-label="Timeline: shard 2 hangs during a refit; the deadline aborts the collective, the recovery probes, marks survivors stale and rebuilds, then the same weight transfer is attempted a second time">
-  <text class="hdr" x="130" y="22" text-anchor="middle">refit starts</text>
-  <text class="hdr" x="330" y="22" text-anchor="middle">shard 2 hangs</text>
-  <text class="hdr" x="560" y="22" text-anchor="middle">deadline fires</text>
-  <text class="hdr" x="790" y="22" text-anchor="middle">second attempt</text>
-  <line class="tick" x1="130" y1="30" x2="130" y2="290"/>
-  <line class="tick" x1="330" y1="30" x2="330" y2="290"/>
-  <line class="tick" x1="560" y1="30" x2="560" y2="290"/>
-  <line class="tick" x1="790" y1="30" x2="790" y2="290"/>
+<svg viewBox="0 0 940 436" role="img" aria-label="Timeline: shard 2 hangs during a refit; the deadline aborts the collective, the recovery probes, marks survivors stale and rebuilds, then the same weight transfer is attempted a second time">
+  <text class="hdr" x="120" y="22" text-anchor="middle">refit starts</text>
+  <text class="hdr" x="300" y="22" text-anchor="middle">shard 2 hangs</text>
+  <text class="hdr" x="520" y="22" text-anchor="middle">deadline fires</text>
+  <text class="hdr" x="700" y="22" text-anchor="middle">second attempt</text>
+  <text class="hdr" x="860" y="22" text-anchor="middle">it completes</text>
+  <line class="tick" x1="120" y1="30" x2="120" y2="296"/>
+  <line class="tick" x1="300" y1="30" x2="300" y2="296"/>
+  <line class="tick" x1="520" y1="30" x2="520" y2="296"/>
+  <line class="tick" x1="700" y1="30" x2="700" y2="296"/>
+  <line class="evt"  x1="860" y1="30" x2="860" y2="296"/>
 
   <text class="lbl-b" x="20" y="60">trainers</text>
-  <rect class="work" x="130" y="46" width="200" height="26" rx="5"/>
-  <text class="note" x="230" y="63" text-anchor="middle">sending weights</text>
-  <rect class="s-dead" x="330" y="46" width="230" height="26" rx="5"/>
-  <text class="note" x="445" y="63" text-anchor="middle">blocked in NCCL, waiting on shard 2</text>
-  <rect class="work" x="790" y="46" width="120" height="26" rx="5"/>
-  <text class="note" x="850" y="63" text-anchor="middle">same weights,</text>
-  <text class="note" x="850" y="78" text-anchor="middle">sent again</text>
+  <rect class="work" x="120" y="46" width="180" height="26" rx="5"/>
+  <text class="note" x="210" y="63" text-anchor="middle">sending weights</text>
+  <rect class="s-dead" x="300" y="46" width="220" height="26" rx="5"/>
+  <text class="note" x="410" y="63" text-anchor="middle">blocked in NCCL</text>
+  <rect class="work" x="700" y="46" width="160" height="26" rx="5"/>
+  <text class="note" x="780" y="63" text-anchor="middle">same weights, sent again</text>
 
   <text class="lbl-b" x="20" y="118">watchdog</text>
-  <text class="note" x="340" y="106">a per-refit thread in each worker is armed with</text>
-  <text class="note" x="340" y="122">refit_timeout_s (300s); when it expires it aborts</text>
-  <text class="note" x="340" y="138">the communicator, which raises RefitAborted</text>
+  <text class="note" x="310" y="106">a per-refit thread in each worker is armed with</text>
+  <text class="note" x="310" y="122">refit_timeout_s (300s); when it expires it aborts</text>
+  <text class="note" x="310" y="138">the communicator, which raises RefitAborted</text>
 
-  <text class="lbl-b" x="20" y="182">recovery</text>
-  <rect class="work" x="560" y="168" width="230" height="26" rx="5"/>
-  <text class="note" x="675" y="185" text-anchor="middle">probe · mark stale · rebuild</text>
+  <text class="lbl-b" x="20" y="167">recovery</text>
+  <rect class="work" x="520" y="150" width="38"  height="26" rx="5"/>
+  <text class="c-num" x="539" y="167" text-anchor="middle">1</text>
+  <rect class="work" x="560" y="150" width="38"  height="26" rx="5"/>
+  <text class="c-num" x="579" y="167" text-anchor="middle">2</text>
+  <rect class="work" x="600" y="150" width="100" height="26" rx="5"/>
+  <text class="c-num" x="650" y="167" text-anchor="middle">3</text>
+  <text class="note" x="20" y="196">all three finish before the second attempt starts — 1 and 2 are near-instant, 3 is the slow one</text>
+  <text class="note" x="20" y="212">1 probe every shard  ·  2 mark the survivors STALE  ·  3 rebuild the refit communicator without shard 2</text>
 
-  <text class="lbl-b" x="20" y="230">shard 2</text>
-  <rect class="s-ok"   x="130" y="216" width="200" height="24" rx="5"/>
-  <text class="note" x="230" y="232" text-anchor="middle">HEALTHY</text>
-  <rect class="s-susp" x="330" y="216" width="230" height="24" rx="5"/>
-  <text class="note" x="445" y="232" text-anchor="middle">SUSPECT → DEAD after 3 probes</text>
-  <rect class="s-rest" x="560" y="216" width="350" height="24" rx="5"/>
-  <text class="note" x="735" y="232" text-anchor="middle">RESTARTING — this runs while the second attempt proceeds</text>
+  <text class="lbl-b" x="20" y="246">shard 2</text>
+  <rect class="s-ok"   x="120" y="232" width="180" height="24" rx="5"/>
+  <text class="note" x="210" y="248" text-anchor="middle">HEALTHY</text>
+  <rect class="s-susp" x="300" y="232" width="60"  height="24" rx="5"/>
+  <text class="note" x="330" y="248" text-anchor="middle">SUSP</text>
+  <rect class="s-dead" x="360" y="232" width="40"  height="24" rx="5"/>
+  <text class="note" x="380" y="248" text-anchor="middle">DEAD</text>
+  <rect class="s-rest" x="400" y="232" width="510" height="24" rx="5"/>
+  <text class="note" x="655" y="248" text-anchor="middle">RESTARTING — begins ~15s in, long before the refit gives up</text>
 
-  <text class="lbl-b" x="20" y="272">the others</text>
-  <rect class="s-ok"    x="130" y="258" width="430" height="24" rx="5"/>
-  <text class="note" x="345" y="274" text-anchor="middle">HEALTHY — still serving rollouts</text>
-  <rect class="s-stale" x="560" y="258" width="230" height="24" rx="5"/>
-  <text class="note" x="675" y="274" text-anchor="middle">STALE — pulled from traffic</text>
-  <rect class="s-ok"    x="790" y="258" width="120" height="24" rx="5"/>
-  <text class="note" x="850" y="274" text-anchor="middle">HEALTHY</text>
+  <text class="lbl-b" x="20" y="284">the others</text>
+  <rect class="s-ok"    x="120" y="270" width="400" height="24" rx="5"/>
+  <text class="note" x="320" y="286" text-anchor="middle">HEALTHY — still serving rollouts</text>
+  <rect class="s-stale" x="520" y="270" width="340" height="24" rx="5"/>
+  <text class="note" x="690" y="286" text-anchor="middle">STALE — no traffic, right through the second attempt</text>
+  <rect class="s-ok"    x="860" y="270" width="50"  height="24" rx="5"/>
 
-  <text class="note" x="20" y="310">an abort leaves every engine that was receiving with a mix of old and new weights, so the survivors are pulled out of service too —</text>
-  <text class="note" x="20" y="326">they are put back only when the second attempt completes and promotes them</text>
-  <text class="note" x="20" y="352">the recovery probes on the spot rather than waiting for the 5s tick: the abort is an event, the probe is a clock, and the clock used to</text>
-  <text class="note" x="20" y="368">lose that race — leaving an empty absent set and no rebuild</text>
+  <text class="ok" x="856" y="312" text-anchor="end">promoted back to HEALTHY only when the transfer completes</text>
+
+  <text class="note" x="20" y="340">an abort leaves every engine that was receiving with a mix of old and new weights, so the survivors are pulled out of service too</text>
+  <text class="note" x="20" y="364">the recovery probes on the spot rather than waiting for the 5s tick: the abort is an event, the probe is a clock, and the clock used to</text>
+  <text class="note" x="20" y="380">lose that race — leaving an empty absent set and no rebuild</text>
 
   <!-- legend -->
-  <rect class="s-ok" x="40" y="392" width="20" height="14" rx="3"/>
-  <text class="note" x="68" y="404">HEALTHY</text>
-  <rect class="s-susp" x="150" y="392" width="20" height="14" rx="3"/>
-  <text class="note" x="178" y="404">SUSPECT: failing probes, still serving</text>
-  <rect class="s-rest" x="424" y="392" width="20" height="14" rx="3"/>
-  <text class="note" x="452" y="404">RESTARTING</text>
-  <rect class="s-stale" x="570" y="392" width="20" height="14" rx="3"/>
-  <text class="note" x="598" y="404">STALE: holds partial weights, no traffic</text>
+  <rect class="s-ok" x="40" y="404" width="20" height="14" rx="3"/>
+  <text class="note" x="68" y="416">HEALTHY</text>
+  <rect class="s-susp" x="150" y="404" width="20" height="14" rx="3"/>
+  <text class="note" x="178" y="416">SUSPECT: failing probes, still serving</text>
+  <rect class="s-rest" x="424" y="404" width="20" height="14" rx="3"/>
+  <text class="note" x="452" y="416">RESTARTING</text>
+  <rect class="s-stale" x="570" y="404" width="20" height="14" rx="3"/>
+  <text class="note" x="598" y="416">STALE: holds partial weights, no traffic</text>
 </svg>
 
 <p><strong>What exactly is retried: the weight transfer, and nothing else.</strong> Not the
