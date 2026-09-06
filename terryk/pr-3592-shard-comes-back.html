@@ -210,7 +210,14 @@ died stayed dead, and the absent set it was in never emptied.</p>
 
 <p>The new code stops asking "is anything absent" and compares two <strong>sets of shard
 numbers</strong>: the set the refit wants in the communicator now, and the set the communicator
-was actually last built over. Same three shards, same moments:</p>
+was actually last built over.</p>
+
+<p>The wanted set is not a wish list. It is
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/5b4a732d9fcc2034381d146f752e4983d062bed3/nemo_rl/weight_sync/membership.py#L73">every shard minus the ones currently marked absent</a>,
+and <a href="https://github.com/NVIDIA-NeMo/RL/blob/5b4a732d9fcc2034381d146f752e4983d062bed3/nemo_rl/models/generation/fleet_health.py#L70">absent means one of three states</a>:
+<code>DEAD</code>, <code>RESTARTING</code> or <code>RETIRED</code>. So it is smaller than the
+full fleet exactly when one of those is true, and equal to the full fleet the rest of the time.
+Same three shards, same moments:</p>
 
 <div class="mono">moment           wants in the group   last built over   same?   decision
 ---------------------------------------------------------------------------
@@ -219,7 +226,7 @@ shard 1 dies     {0,2}                {0,1,2}           no      rebuild over {0,
 engine back up   {0,1,2}              {0,2}             no      rebuild over {0,1,2}   &lt;- the new one
 next refit       {0,1,2}              {0,1,2}           yes     skip</div>
 
-<p>The wanted set comes from
+<p>That set is computed by
 <a href="https://github.com/NVIDIA-NeMo/RL/blob/5b4a732d9fcc2034381d146f752e4983d062bed3/nemo_rl/weight_sync/membership.py#L55"><code>desired_membership()</code></a>,
 which is phrased as "what the membership should be" rather than "what changed" — that is the
 whole trick, because it reads the same in both directions. The built set is remembered in
