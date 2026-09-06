@@ -96,14 +96,14 @@ Permalinks pin the PR head <code>5b4a732</code>.</p>
 <p class="chainnote">Four pages on this PR, one question each — this one: the order things happen in.</p>
 
 <p>Short answer up front: <strong>the restart itself is fully asynchronous and is queued behind
-nothing.</strong> It starts on the next fleet-health tick after the shard is condemned, and it
+nothing.</strong> It starts on the next fleet-health tick after the shard is marked DEAD, and it
 runs on a thread, so training and generation carry on underneath it. What <em>is</em> queued is
 everything after the engine comes back: re-entering the collective waits for the next refit, and
 taking traffic again waits for the next fleet-health tick after that.</p>
 
 <ol class="toc">
 <li><a href="#loops">The four loops, and where a restart actually runs</a></li>
-<li><a href="#detect">Two ways a shard is condemned, and why they take different times</a></li>
+<li><a href="#detect">Two ways a shard is marked DEAD, and why they take different times</a></li>
 <li><a href="#a">Scenario A — it dies between refits</a></li>
 <li><a href="#b">Scenario B — it dies during a refit</a></li>
 <li><a href="#c">Scenario C — it finishes restarting during a refit</a></li>
@@ -180,11 +180,12 @@ started and then nobody waits for it at all.</p>
 
 <p>Two more things worth stating plainly. First, <strong>nothing takes a lock</strong>: there is
 no mutual exclusion between a restart and a refit, and no queue that one waits in for the other.
-Second, generation is <strong>not paused during a refit</strong> on this path — there is no
-drain gate, which the code marks as
+Second, generation is <strong>not paused during a refit</strong> on this path: nothing waits for
+in-flight rollouts to finish before weights start being written, and the code marks adding that
+as
 <a href="https://github.com/NVIDIA-NeMo/RL/blob/5b4a732d9fcc2034381d146f752e4983d062bed3/nemo_rl/algorithms/single_controller.py#L3033">a known TODO</a>.</p>
 
-<h2 id="detect">Two ways a shard is condemned, and why they take different times</h2>
+<h2 id="detect">Two ways a shard is marked DEAD, and why they take different times</h2>
 
 <p>Before any restart can start, the shard has to reach <code>DEAD</code>. How long that takes
 depends on <em>how</em> it failed, and the difference is large.</p>
@@ -205,11 +206,23 @@ depends on <em>how</em> it failed, and the difference is large.</p>
 </tr>
 </table>
 
-<p>A crash also does one extra thing: it
-<a href="https://github.com/NVIDIA-NeMo/RL/blob/5b4a732d9fcc2034381d146f752e4983d062bed3/nemo_rl/algorithms/single_controller.py#L2345">stands down the trainers' refit deadline</a>
-for that shard. A dead peer closes its sockets and NCCL unblocks the survivors on its own, so
-firing the deadline would abort a collective that was about to recover by itself — and that abort
-leaves unusable CUDA contexts behind.</p>
+<p>A crash also does one extra thing, and it needs a sentence of background first. <strong>Every
+refit arms a timer inside each trainer worker.</strong> If the weight transfer has not finished
+within <code>refit_timeout_s</code> (300s by default), that timer breaks the NCCL communicator so
+the trainers stop waiting on a rank that is never going to answer. It is the safety net for a
+generation shard that goes silent mid-transfer.</p>
+
+<p>On a <em>confirmed</em> death, the controller
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/5b4a732d9fcc2034381d146f752e4983d062bed3/nemo_rl/algorithms/single_controller.py#L2424">cancels that timer</a>
+— the code calls this "standing the deadline down". Cancelling the safety net sounds backwards,
+so here is why it is right. A process that has genuinely died closes its sockets, and NCCL sees
+that and unblocks the survivors by itself, which is the clean way out. If the timer fired first
+it would break the communicator instead, and breaking it strands GPU work already queued on the
+<strong>trainers'</strong> own streams — leaving their devices in a state no rebuild can use. So
+on a confirmed death, doing nothing is strictly better than intervening.</p>
+
+<p>A frozen-but-alive rank never produces a confirmed death, so its timer is never cancelled and
+still fires. That is the case the timer exists for.</p>
 
 <div class="note-box">
 <p><strong>A detail that surprises people:</strong> the probe only walks
