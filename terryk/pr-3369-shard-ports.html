@@ -154,6 +154,19 @@ Its <code>port_range_low</code> is optional, and no code anywhere sets it &mdash
 builds the object without it. So the <code>.get()</code> falls back to the default every
 time, for sharded and unsharded jobs alike.</p>
 
+<p>That is why a recipe already in the tree runs on ports it did not ask for:</p>
+
+<div class="mono">examples/nemo_gym/nemotron-3-ultra/swe_teacher.yaml:413
+    port_range_low:  15001     <span class="cm">what the recipe asks for</span>
+    port_range_high: 20000
+                               <span class="cm">what Gym is given: </span><span class="bad">5000–5999</span>
+</div>
+<p class="sub">That recipe is live &mdash; it has a launch script, a docs guide, and it sits in
+the config-validation list. See
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/b6bdd3303070669942e218e7596892c6fe64ef16/examples/nemo_gym/nemotron-3-ultra/swe_teacher.yaml#L413-L414">swe_teacher.yaml:413&ndash;414</a>.
+Every other recipe sets exactly 5000/5999, which is why this went unnoticed: for all of them
+the wrong answer and the right answer are the same number.</p>
+
 <h2>The fix</h2>
 
 <p>Move the value onto the one object the actor actually reads. Same numbers as above.</p>
@@ -190,26 +203,6 @@ low = self.cfg.get("port_range_low", 5000)          <span class="cm"># -> 15001 
 <p>The per-shard range then works for free: <code>apply_shard_overlay</code> already puts
 each shard's range into that shard's config, so once the actor stops overwriting it, every
 shard gets the ports it asked for.</p>
-
-<h2>Does it work?</h2>
-
-<p><strong>Nobody has run this.</strong> There is no before/after, because the bug was found
-by reading the code, not by a failing job &mdash; and it fails quietly, so no run would have
-flagged it on its own. What exists instead is a victim already in the tree:</p>
-
-<div class="mono">examples/nemo_gym/nemotron-3-ultra/swe_teacher.yaml:413
-    port_range_low:  15001     <span class="cm">what the recipe asks for</span>
-    port_range_high: 20000
-                               <span class="cm">what Gym is given: </span><span class="bad">5000–5999</span>
-</div>
-<p class="sub">That recipe is live &mdash; it has a launch script, a docs guide, and it is in
-the config-validation list. See
-<a href="https://github.com/NVIDIA-NeMo/RL/blob/b6bdd3303070669942e218e7596892c6fe64ef16/examples/nemo_gym/nemotron-3-ultra/swe_teacher.yaml#L413-L414">swe_teacher.yaml:413&ndash;414</a>.
-Every other recipe sets exactly 5000/5999, which is why this went unnoticed: for all of them
-the wrong answer and the right answer are the same number.</p>
-
-<p>The check to ask for before merging is small: launch any Gym job with a port range that is
-not 5000&ndash;5999 and print the ports Gym binds. Today they come back in 5000&ndash;5999.</p>
 
 <div class="warn">
 <strong>So what.</strong> The per-shard port range in #3369 is dead on arrival &mdash; it is
