@@ -442,6 +442,29 @@ interrupt a transfer that is already waiting on it. The only thing that ends the
 so NCCL can unblock the survivors by itself. So a hang costs the full 300s; a crash costs
 seconds.</p>
 
+<p><strong>So the restart runs alongside the hang, not after it.</strong> That is the clearest
+case of "queued behind nothing" on this page: at roughly 15 seconds the ledger marks shard 2
+<code>DEAD</code>, <code>tick()</code> spawns the restart, and it reloads a model on a thread for
+the next four minutes while the trainers are still parked in NCCL. Nothing coordinates the two.</p>
+
+<p>Its first act is to kill the hung worker —
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/5b4a732d9fcc2034381d146f752e4983d062bed3/nemo_rl/distributed/worker_groups.py#L709"><code>recreate_worker</code></a>
+anticipates exactly this case: <em>"a worker can be unresponsive rather than gone, and creating
+its replacement while it still holds the GPU would fail on memory."</em> Two things follow that
+are worth holding separately, because the code is explicit about one and silent about the other:</p>
+
+<ul>
+<li><strong>The deadline is still expected to be what ends the wait.</strong> The stand-down
+docstring says so outright — <em>"A frozen rank never produces [a confirmed death], so its
+deadline still fires and still ends the run attributably."</em> Whether killing the hung worker
+at 15s also happens to close its sockets and unblock the trainers early is not something the code
+reasons about, and it should not be counted on.</li>
+<li><strong>The replacement has to load onto the GPU the killed worker was holding.</strong> If
+that worker's EngineCore is orphaned rather than reaped, the memory is still taken and the restart
+fails — which is what <code>RAY_process_group_cleanup_enabled</code> exists to prevent. This
+scenario is where that setting matters most, because the kill is deliberate rather than incidental.</li>
+</ul>
+
 <div class="note-box">
 <p><strong>"But those shards are healthy — why are they STALE?"</strong> They are healthy. That is
 the point: <code>STALE</code> is not a verdict about the process.</p>
