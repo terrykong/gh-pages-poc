@@ -122,7 +122,9 @@ scale — a model reload takes minutes while a probe takes milliseconds — so e
 <a href="https://github.com/NVIDIA-NeMo/RL/blob/5b4a732d9fcc2034381d146f752e4983d062bed3/nemo_rl/algorithms/single_controller.py#L454">four asyncio tasks on one event loop</a>.
 One loop means they never truly run at the same instant — they take turns, handing control over
 at each <code>await</code>. Anything that would block for a long time is pushed onto a thread so
-the other three keep their turns.</p>
+the other three keep their turns. Note what that does and does not buy: moving work to a thread
+keeps the <em>loop</em> free, but the task that awaits that work is still stuck until it
+finishes.</p>
 
 <svg viewBox="0 0 940 300" role="img" aria-label="Four asyncio tasks share one event loop; the restart and the weight transfer run on threads off the loop">
   <text class="lbl-b" x="20" y="22">one event loop, four tasks taking turns</text>
@@ -146,13 +148,14 @@ the other three keep their turns.</p>
 
   <!-- thread pool -->
   <rect class="lane" x="630" y="36" width="280" height="180" rx="9"/>
-  <text class="lbl-b" x="646" y="58">threads, off the loop</text>
-  <rect class="s-rest" x="648" y="72" width="244" height="34" rx="6"/>
-  <text class="lbl" x="660" y="94">the shard restart</text>
-  <rect class="work" x="648" y="116" width="244" height="34" rx="6"/>
-  <text class="lbl" x="660" y="138">the weight transfer</text>
-  <text class="note" x="648" y="170">both reached with asyncio.to_thread,</text>
-  <text class="note" x="648" y="186">so neither stops the four tasks above</text>
+  <text class="lbl-b" x="646" y="56">threads, off the loop</text>
+  <rect class="s-rest" x="648" y="66" width="244" height="30" rx="6"/>
+  <text class="lbl" x="660" y="86">the shard restart</text>
+  <text class="note" x="648" y="112">nobody awaits it — fire and forget</text>
+  <rect class="work" x="648" y="126" width="244" height="30" rx="6"/>
+  <text class="lbl" x="660" y="146">the weight transfer</text>
+  <text class="note" x="648" y="172">the train pump DOES await it, so</text>
+  <text class="note" x="648" y="188">training waits — the other pumps do not</text>
 
   <text class="note" x="30" y="244">The probe pump does three things in a fixed order every 5s, and the order matters:</text>
   <text class="lbl" x="30" y="266">probe the shards  →  supervisor.tick()  →  push serving URLs to the router</text>
@@ -162,7 +165,20 @@ the other three keep their turns.</p>
   <text class="note" x="212" y="288">— a shard condemned by the probe starts restarting on this tick, not the next</text>
 </svg>
 
-<p>Two consequences worth stating plainly. First, <strong>nothing takes a lock</strong>: there is
+<p><strong>"On a thread" and "asynchronous" are not the same thing, and the two boxes on the right
+differ exactly there.</strong> Both the restart and the weight transfer are pushed off the loop,
+so neither freezes the other three pumps. But the weight transfer is
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/5b4a732d9fcc2034381d146f752e4983d062bed3/nemo_rl/algorithms/single_controller.py#L2044">awaited by the train pump</a>:
+the refit is
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/5b4a732d9fcc2034381d146f752e4983d062bed3/nemo_rl/algorithms/single_controller.py#L2034">step 6 of a training step</a>,
+right after
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/5b4a732d9fcc2034381d146f752e4983d062bed3/nemo_rl/algorithms/single_controller.py#L1958">step 5 trains the policy</a>,
+and the pump cannot start the next step until it returns. So <strong>the weight transfer is
+synchronous with respect to the train pump</strong> — it is moved off the loop to protect the
+watchdog and the probe, not to let training run ahead of it. The restart is the opposite: it is
+started and then nobody waits for it at all.</p>
+
+<p>Two more things worth stating plainly. First, <strong>nothing takes a lock</strong>: there is
 no mutual exclusion between a restart and a refit, and no queue that one waits in for the other.
 Second, generation is <strong>not paused during a refit</strong> on this path — there is no
 drain gate, which the code marks as
@@ -362,7 +378,8 @@ healthy-looking weight version. The fix is to promote only the shards the refit 
 <tr><td>Notice a crash</td><td>probe pump</td><td>the next probe tick</td><td>≤ 5s</td></tr>
 <tr><td>Notice a hang</td><td>probe pump</td><td>three consecutive failed probes</td><td>≈ 15s</td></tr>
 <tr><td>Start the restart</td><td>probe pump</td><td>nothing — same tick as the verdict</td><td>immediate</td></tr>
-<tr><td>Reload the model</td><td>a thread</td><td><strong>nothing</strong></td><td>minutes</td></tr>
+<tr><td>Reload the model</td><td>a thread</td><td><strong>nothing</strong> — nobody awaits it</td><td>minutes</td></tr>
+<tr><td>Transfer the weights</td><td>a thread</td><td>—, but <strong>the train pump waits on this one</strong></td><td>seconds</td></tr>
 <tr><td>Rejoin the collective</td><td>train pump</td><td>the next refit</td><td>one training step</td></tr>
 <tr><td>Take traffic again</td><td>probe pump</td><td>the next tick after it is HEALTHY</td><td>≤ 5s</td></tr>
 </table>
