@@ -135,15 +135,15 @@ this PR is about getting SC to use it.</p>
   <text x="12" y="216" class="lbl-b">rollout worker</text>
   <text x="12" y="234" class="note">flattens tokens AND pixels together, so the</text>
   <text x="12" y="250" class="note">expanded placeholders have tensors to match</text>
-  <a href="https://github.com/NVIDIA-NeMo/RL/blob/b986f149ad17c217861cf4e80af023c4ab4889f4/nemo_rl/experience/rollout_manager.py#L622">
-    <text x="12" y="270">rollout_manager.py:622</text></a>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/b986f149ad17c217861cf4e80af023c4ab4889f4/nemo_rl/experience/rollout_manager.py#L620-L623">
+    <text x="12" y="270">rollout_manager.py:623</text></a>
 
   <rect x="306" y="196" width="290" height="86" rx="7" class="box-new"/>
   <text x="318" y="216" class="lbl-b">writes the batch to the store</text>
   <text x="318" y="234" class="note">packs the images, and puts their per-row</text>
   <text x="318" y="250" class="note">shapes in the row tags beside them</text>
-  <a href="https://github.com/NVIDIA-NeMo/RL/blob/b986f149ad17c217861cf4e80af023c4ab4889f4/nemo_rl/experience/payload.py#L211">
-    <text x="318" y="270">payload.py:211, 221</text></a>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/b986f149ad17c217861cf4e80af023c4ab4889f4/nemo_rl/experience/payload.py#L211-L221">
+    <text x="318" y="270">payload.py:211-221</text></a>
 
   <rect x="612" y="196" width="290" height="86" rx="7" class="box-new"/>
   <text x="624" y="216" class="lbl-b">trainer</text>
@@ -216,11 +216,15 @@ group B has none — the case worth watching, because the column is missing for 
 <tr><td>trainer reads it back</td><td class="y">rebuilt from blob + shape tag</td><td>nothing to rebuild</td></tr>
 </table>
 
-<p>Group B is the interesting one. Its rows simply have no image column, and the code that
-rebuilds images is written to tolerate that — it treats a row with no shape tag as a row with
-no pictures
-(<a href="https://github.com/NVIDIA-NeMo/RL/blob/b986f149ad17c217861cf4e80af023c4ab4889f4/nemo_rl/data/multimodal_utils.py#L261">multimodal_utils.py:261</a>).
-It only gives up when <em>no</em> row in the batch has one.</p>
+<p>Group B is the interesting one. In a mixed batch the image column is present — group A wrote
+it — but group B's rows carry no shape tag. The rebuild step handles that per row: a row with
+no tag becomes a row with no pictures
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/b986f149ad17c217861cf4e80af023c4ab4889f4/nemo_rl/data/multimodal_utils.py#L280">multimodal_utils.py:280</a>),
+and it raises only when <em>no</em> row in the batch has one
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/b986f149ad17c217861cf4e80af023c4ab4889f4/nemo_rl/data/multimodal_utils.py#L263-L264">:263-264</a>).
+That is the rebuild step specifically; what the store does when asked for a column a row never
+wrote is a separate question, and one this PR's shipped recipes do not reach, since every
+CLEVR prompt carries an image.</p>
 
 <div class="hl">
 <strong>So what.</strong> A VLM run on SingleController now works end to end, and the shipped
