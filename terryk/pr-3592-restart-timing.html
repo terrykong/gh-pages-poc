@@ -327,15 +327,15 @@ it Gym keeps talking to a socket nobody is listening on.</p>
 <p>Now the timing is different, because the trainers are inside a collective that needs every
 rank. This is where the refit deadline earns its keep.</p>
 
-<svg viewBox="0 0 940 300" role="img" aria-label="Timeline: shard 2 hangs during a refit; the deadline aborts the collective, the recovery probes immediately, rebuilds without the shard and retries once">
+<svg viewBox="0 0 940 400" role="img" aria-label="Timeline: shard 2 hangs during a refit; the deadline aborts the collective, the recovery probes, marks survivors stale and rebuilds, then the same weight transfer is attempted a second time">
   <text class="hdr" x="130" y="22" text-anchor="middle">refit starts</text>
   <text class="hdr" x="330" y="22" text-anchor="middle">shard 2 hangs</text>
   <text class="hdr" x="560" y="22" text-anchor="middle">deadline fires</text>
-  <text class="hdr" x="790" y="22" text-anchor="middle">retry</text>
-  <line class="tick" x1="130" y1="30" x2="130" y2="250"/>
-  <line class="tick" x1="330" y1="30" x2="330" y2="250"/>
-  <line class="tick" x1="560" y1="30" x2="560" y2="250"/>
-  <line class="tick" x1="790" y1="30" x2="790" y2="250"/>
+  <text class="hdr" x="790" y="22" text-anchor="middle">second attempt</text>
+  <line class="tick" x1="130" y1="30" x2="130" y2="290"/>
+  <line class="tick" x1="330" y1="30" x2="330" y2="290"/>
+  <line class="tick" x1="560" y1="30" x2="560" y2="290"/>
+  <line class="tick" x1="790" y1="30" x2="790" y2="290"/>
 
   <text class="lbl-b" x="20" y="60">trainers</text>
   <rect class="work" x="130" y="46" width="200" height="26" rx="5"/>
@@ -343,32 +343,74 @@ rank. This is where the refit deadline earns its keep.</p>
   <rect class="s-dead" x="330" y="46" width="230" height="26" rx="5"/>
   <text class="note" x="445" y="63" text-anchor="middle">blocked in NCCL, waiting on shard 2</text>
   <rect class="work" x="790" y="46" width="120" height="26" rx="5"/>
-  <text class="note" x="850" y="63" text-anchor="middle">sending again</text>
+  <text class="note" x="850" y="63" text-anchor="middle">same weights,</text>
+  <text class="note" x="850" y="78" text-anchor="middle">sent again</text>
 
-  <text class="lbl-b" x="20" y="112">watchdog</text>
-  <text class="note" x="340" y="100">a per-refit thread in each worker is armed with</text>
-  <text class="note" x="340" y="116">refit_timeout_s (300s); when it expires it aborts</text>
-  <text class="note" x="340" y="132">the communicator, which raises RefitAborted</text>
+  <text class="lbl-b" x="20" y="118">watchdog</text>
+  <text class="note" x="340" y="106">a per-refit thread in each worker is armed with</text>
+  <text class="note" x="340" y="122">refit_timeout_s (300s); when it expires it aborts</text>
+  <text class="note" x="340" y="138">the communicator, which raises RefitAborted</text>
 
-  <text class="lbl-b" x="20" y="176">recovery</text>
-  <rect class="work" x="560" y="162" width="230" height="26" rx="5"/>
-  <text class="note" x="675" y="179" text-anchor="middle">probe now, rebuild, retry once</text>
-  <text class="note" x="20" y="206">the recovery probes on the spot rather than waiting for the 5s tick: the abort is an event, the</text>
-  <text class="note" x="20" y="222">probe is a clock, and the clock used to lose that race — leaving an empty absent set and no rebuild</text>
+  <text class="lbl-b" x="20" y="182">recovery</text>
+  <rect class="work" x="560" y="168" width="230" height="26" rx="5"/>
+  <text class="note" x="675" y="185" text-anchor="middle">probe · mark stale · rebuild</text>
 
-  <text class="lbl-b" x="20" y="262">shard 2</text>
-  <rect class="s-ok"   x="130" y="248" width="200" height="24" rx="5"/>
-  <text class="note" x="230" y="264" text-anchor="middle">HEALTHY</text>
-  <rect class="s-susp" x="330" y="248" width="230" height="24" rx="5"/>
-  <text class="note" x="445" y="264" text-anchor="middle">SUSPECT → DEAD after 3 probes</text>
-  <rect class="s-rest" x="560" y="248" width="350" height="24" rx="5"/>
-  <text class="note" x="735" y="264" text-anchor="middle">RESTARTING — the restart runs while the retry proceeds</text>
+  <text class="lbl-b" x="20" y="230">shard 2</text>
+  <rect class="s-ok"   x="130" y="216" width="200" height="24" rx="5"/>
+  <text class="note" x="230" y="232" text-anchor="middle">HEALTHY</text>
+  <rect class="s-susp" x="330" y="216" width="230" height="24" rx="5"/>
+  <text class="note" x="445" y="232" text-anchor="middle">SUSPECT → DEAD after 3 probes</text>
+  <rect class="s-rest" x="560" y="216" width="350" height="24" rx="5"/>
+  <text class="note" x="735" y="232" text-anchor="middle">RESTARTING — this runs while the second attempt proceeds</text>
+
+  <text class="lbl-b" x="20" y="272">the others</text>
+  <rect class="s-ok"    x="130" y="258" width="430" height="24" rx="5"/>
+  <text class="note" x="345" y="274" text-anchor="middle">HEALTHY — still serving rollouts</text>
+  <rect class="s-stale" x="560" y="258" width="230" height="24" rx="5"/>
+  <text class="note" x="675" y="274" text-anchor="middle">STALE — pulled from traffic</text>
+  <rect class="s-ok"    x="790" y="258" width="120" height="24" rx="5"/>
+  <text class="note" x="850" y="274" text-anchor="middle">HEALTHY</text>
+
+  <text class="note" x="20" y="310">an abort leaves every engine that was receiving with a mix of old and new weights, so the survivors are pulled out of service too —</text>
+  <text class="note" x="20" y="326">they are put back only when the second attempt completes and promotes them</text>
+  <text class="note" x="20" y="352">the recovery probes on the spot rather than waiting for the 5s tick: the abort is an event, the probe is a clock, and the clock used to</text>
+  <text class="note" x="20" y="368">lose that race — leaving an empty absent set and no rebuild</text>
 </svg>
 
-<p>The important part for your question: <strong>the restart is not queued behind the refit.</strong>
-Once the shard reaches <code>DEAD</code>, the next probe tick starts the restart on a thread, and
-the retry of the refit proceeds over the surviving shards at the same time. The restarting shard
-counts as absent, so the rebuild correctly excludes it.</p>
+<p><strong>What exactly is retried: the weight transfer, and nothing else.</strong> Not the
+request, not the training step, not the whole refit from the top. The controller calls
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/5b4a732d9fcc2034381d146f752e4983d062bed3/nemo_rl/algorithms/single_controller.py#L3068"><code>_sync_weights_within(kv_scales, "first")</code></a>,
+and when that raises it runs the recovery and then calls the same function again with
+<code>"retry"</code> — the same weights, in the same training step, over a communicator that has
+been rebuilt without the dead shard. The two labels are only there to tell the attempts apart in
+the logs.</p>
+
+<p>The recovery in between does three things, in this order
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/5b4a732d9fcc2034381d146f752e4983d062bed3/nemo_rl/algorithms/single_controller.py#L2521"><code>_recover_from_failed_refit</code></a>):</p>
+
+<ol>
+<li><strong>Probe every shard immediately</strong>, instead of waiting for the 5s tick, so the
+membership is a lookup rather than a race.</li>
+<li><strong>If the failure was an abort, mark the surviving shards <code>STALE</code></strong>
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/5b4a732d9fcc2034381d146f752e4983d062bed3/nemo_rl/algorithms/single_controller.py#L2556"><code>mark_weights_partial</code></a>).
+An abort stops a transfer mid-flight, so every engine that was receiving holds a mix of old and
+new weights — none of them may serve until a transfer finishes. This is the part that surprises
+people: a hang in one shard briefly takes the <em>whole</em> fleet out of service.</li>
+<li><strong>Rebuild the communicator without the dead shard.</strong> If nothing is absent but
+exactly one shard is already <code>SUSPECT</code>, that one is condemned as the silent
+participant and the rebuild is redone — with several suspects, or none, it gives up rather than
+guess and condemn a healthy shard.</li>
+</ol>
+
+<p>Then the second attempt runs, and on success
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/5b4a732d9fcc2034381d146f752e4983d062bed3/nemo_rl/algorithms/single_controller.py#L3100"><code>_promote_refit_shards</code></a>
+puts the survivors back into service. <strong>Once only</strong> — a second failure is treated as
+a real fault rather than a membership problem, and the run ends.</p>
+
+<p>And the answer to the original question: <strong>the restart is not queued behind any of
+this.</strong> Once shard 2 reaches <code>DEAD</code>, the next probe tick starts its restart on a
+thread, and the second attempt at the transfer proceeds over the surviving shards at the same
+time. A <code>RESTARTING</code> shard counts as absent, so the rebuild correctly leaves it out.</p>
 
 <div class="warn">
 <p><strong>One case does not recover.</strong> On the <code>nccl_reshard</code> transport, a fault
