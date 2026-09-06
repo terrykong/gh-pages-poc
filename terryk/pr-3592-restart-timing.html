@@ -240,7 +240,7 @@ window between its engine coming up and the refit that promotes it.</p>
 <p>The common case, and the one the feature is built for. Shard 2 crashes while the run is
 generating. Nothing is mid-collective, so nothing is stuck.</p>
 
-<svg viewBox="0 0 940 356" role="img" aria-label="Timeline: shard 2 crashes between refits, is detected in one probe, restarts on a thread, comes back STALE, is re-admitted at the next refit and serves after the next probe tick">
+<svg viewBox="0 0 940 372" role="img" aria-label="Timeline: shard 2 crashes between refits, is detected in one probe, restarts on a thread, comes back STALE, is re-admitted at the next refit and serves after the next probe tick">
   <text class="hdr" x="120" y="22" text-anchor="middle">crash</text>
   <text class="hdr" x="268" y="22" text-anchor="middle">next probe (≤5s)</text>
   <text class="hdr" x="452" y="22" text-anchor="middle">minutes later</text>
@@ -254,10 +254,8 @@ generating. Nothing is mid-collective, so nothing is stuck.</p>
 
   <!-- state lane -->
   <text class="lbl-b" x="20" y="56">shard 2</text>
-  <rect class="s-ok"    x="40"  y="64" width="80"  height="26" rx="5"/>
-  <text class="note" x="80" y="81" text-anchor="middle">HEALTHY</text>
-  <rect class="s-dead"  x="120" y="64" width="148" height="26" rx="5"/>
-  <text class="note" x="194" y="81" text-anchor="middle">DEAD</text>
+  <rect class="s-ok"    x="40"  y="64" width="228" height="26" rx="5"/>
+  <text class="note" x="154" y="81" text-anchor="middle">HEALTHY — the ledger has not noticed yet</text>
   <rect class="s-rest"  x="268" y="64" width="184" height="26" rx="5"/>
   <text class="note" x="360" y="81" text-anchor="middle">RESTARTING</text>
   <rect class="s-stale" x="452" y="64" width="344" height="26" rx="5"/>
@@ -267,8 +265,9 @@ generating. Nothing is mid-collective, so nothing is stuck.</p>
 
   <!-- probe pump -->
   <text class="lbl-b" x="20" y="122">probe</text>
-  <text class="bad" x="268" y="118">RayActorError → DEAD</text>
-  <text class="note" x="268" y="134">then tick() starts the restart</text>
+  <text class="bad" x="268" y="118">RayActorError → DEAD → RESTARTING</text>
+  <text class="note" x="268" y="134">all in one pass: the probe records the death,</text>
+  <text class="note" x="268" y="148">then tick() starts the restart. DEAD is momentary.</text>
   <text class="ok" x="836" y="118" text-anchor="middle">pushes the new URL</text>
   <text class="note" x="836" y="134" text-anchor="middle">to the router</text>
   <text class="note" x="816" y="152">gap: ≤ 5s</text>
@@ -286,22 +285,23 @@ generating. Nothing is mid-collective, so nothing is stuck.</p>
   <text class="note" x="721" y="233" text-anchor="middle">rebuild group, send weights</text>
   <line class="evt" x1="796" y1="60" x2="796" y2="246"/>
   <text class="ok" x="790" y="206" text-anchor="end">promoted to HEALTHY here</text>
-  <text class="note" x="20" y="258">the model was already loaded during the restart; this step rebuilds the NCCL group to include shard 2, then sends it current weights</text>
+  <text class="note" x="20" y="256">the model was already loaded during the restart; this step rebuilds the NCCL group to include shard 2, then sends it current weights</text>
+  <text class="note" x="20" y="270">between the crash and the probe the process is gone but the ledger still lists it as serving — that window is up to one probe interval</text>
 
   <!-- generation -->
-  <text class="lbl-b" x="20" y="292">rollout</text>
-  <rect class="s-ok" x="40" y="278" width="870" height="20" rx="5"/>
-  <text class="note" x="475" y="292" text-anchor="middle">generation never stops — it just runs on the 3 surviving shards in the middle</text>
+  <text class="lbl-b" x="20" y="306">rollout</text>
+  <rect class="s-ok" x="40" y="292" width="870" height="20" rx="5"/>
+  <text class="note" x="475" y="306" text-anchor="middle">generation never stops — it just runs on the 3 surviving shards in the middle</text>
 
   <!-- legend -->
-  <rect class="s-ok" x="40" y="322" width="20" height="14" rx="3"/>
-  <text class="note" x="68" y="334">HEALTHY: serving</text>
-  <rect class="s-dead" x="196" y="322" width="20" height="14" rx="3"/>
-  <text class="note" x="224" y="334">DEAD: process gone</text>
-  <rect class="s-rest" x="372" y="322" width="20" height="14" rx="3"/>
-  <text class="note" x="400" y="334">RESTARTING: engine coming up</text>
-  <rect class="s-stale" x="620" y="322" width="20" height="14" rx="3"/>
-  <text class="note" x="648" y="334">STALE: in the group, no traffic</text>
+  <rect class="s-ok" x="40" y="336" width="20" height="14" rx="3"/>
+  <text class="note" x="68" y="348">HEALTHY: serving</text>
+  <rect class="s-dead" x="196" y="336" width="20" height="14" rx="3"/>
+  <text class="note" x="224" y="348">DEAD: process gone</text>
+  <rect class="s-rest" x="372" y="336" width="20" height="14" rx="3"/>
+  <text class="note" x="400" y="348">RESTARTING: engine coming up</text>
+  <rect class="s-stale" x="620" y="336" width="20" height="14" rx="3"/>
+  <text class="note" x="648" y="348">STALE: in the group, no traffic</text>
 </svg>
 
 <p><strong>Two things about the right-hand end.</strong> First, the refit step is not reloading
