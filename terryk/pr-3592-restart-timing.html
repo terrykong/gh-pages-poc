@@ -1,0 +1,384 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NVIDIA-NeMo/RL #3592 — when a restart runs, what it waits for, and how a shard re-enters</title>
+<style>
+:root{
+  --bg:#0d1117; --surface:#161b22; --surface2:#1c2128; --border:#30363d;
+  --text:#e6edf3; --dim:#8b949e; --accent:#58a6ff; --green:#3fb950;
+  --orange:#d29922; --red:#f85149; --purple:#bc8cff;
+}
+:root[data-theme="light"]{
+  --bg:#ffffff; --surface:#f6f8fa; --surface2:#eaeef2; --border:#d0d7de;
+  --text:#1f2328; --dim:#59636e; --accent:#0969da; --green:#1a7f37;
+  --orange:#9a6700; --red:#cf222e; --purple:#8250df;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:28px 20px 70px}
+h1{font-size:22px;margin:0 0 8px;line-height:1.3}
+h2{font-size:18px;margin:34px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+h3{font-size:15px;margin:22px 0 6px;color:var(--text)}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;
+  font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
+.sub{color:var(--dim);font-size:13.5px;margin:0 0 16px}
+nav.chain{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 6px;padding:0}
+nav.chain a,nav.chain span{display:inline-block;padding:5px 11px;border:1px solid var(--border);
+  border-radius:20px;background:var(--surface);text-decoration:none;color:var(--accent);
+  font-size:12.5px;line-height:1.3;white-space:nowrap}
+nav.chain a:hover{background:var(--surface2)}
+nav.chain span.here{background:var(--accent);color:var(--bg);border-color:var(--accent);font-weight:600}
+p.chainnote{color:var(--dim);font-size:12px;margin:0 0 18px}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);
+  border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;
+  font:13px/1 ui-monospace,Menlo,monospace;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.18)}
+.mono{font:12.5px ui-monospace,SFMono-Regular,Menlo,monospace;
+  background:var(--surface);border:1px solid var(--border);border-radius:8px;
+  padding:13px;overflow-x:auto;white-space:pre}
+.warn{border-left:3px solid var(--red);background:var(--surface);
+  padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0}
+.hl{border-left:3px solid var(--green);background:var(--surface);
+  padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0}
+.note-box{border-left:3px solid var(--accent);background:var(--surface);
+  padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0}
+table{border-collapse:collapse;width:100%;margin:14px 0;font-size:13.5px}
+th,td{border:1px solid var(--border);padding:7px 10px;text-align:left;vertical-align:top}
+th{background:var(--surface2);font-weight:600}
+ol.toc{background:var(--surface);border:1px solid var(--border);border-radius:8px;
+  padding:12px 12px 12px 32px;font-size:13.5px}
+svg{max-width:100%;height:auto;display:block;margin:16px 0}
+svg .lane{fill:var(--surface);stroke:var(--border);stroke-width:1.1}
+svg .lbl{fill:var(--text);font:12px ui-monospace,Menlo,monospace}
+svg .lbl-b{fill:var(--text);font:bold 12.5px -apple-system,sans-serif}
+svg .note{fill:var(--dim);font:11px -apple-system,sans-serif}
+svg .hdr{fill:var(--accent);font:bold 11.5px -apple-system,sans-serif}
+svg .bad{fill:var(--red);font:bold 11px -apple-system,sans-serif}
+svg .ok{fill:var(--green);font:bold 11px -apple-system,sans-serif}
+svg .s-ok{fill:var(--green);opacity:.45;stroke:var(--green);stroke-width:1.2}
+svg .s-dead{fill:var(--red);opacity:.42;stroke:var(--red);stroke-width:1.2}
+svg .s-rest{fill:var(--purple);opacity:.42;stroke:var(--purple);stroke-width:1.2}
+svg .s-stale{fill:var(--orange);opacity:.45;stroke:var(--orange);stroke-width:1.2}
+svg .s-susp{fill:var(--orange);opacity:.22;stroke:var(--orange);stroke-width:1.2;stroke-dasharray:4 3}
+svg .work{fill:var(--accent);opacity:.3;stroke:var(--accent);stroke-width:1.2}
+svg .tick{stroke:var(--border);stroke-width:1;stroke-dasharray:3 3}
+svg .evt{stroke:var(--red);stroke-width:1.8}
+svg a text{text-decoration:underline;fill:var(--accent);font:11px ui-monospace,Menlo,monospace}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+  document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head>
+<body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+  function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+  function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
+    b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
+      else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+  document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+<div class="wrap">
+
+<h1>When a restart runs, what it waits for, and how a shard re-enters</h1>
+<p class="sub">Companion illustration for
+<a href="https://github.com/NVIDIA-NeMo/RL/pull/3592">NVIDIA-NeMo/RL #3592</a>.
+Permalinks pin the PR head <code>5b4a732</code>.</p>
+
+<nav class="chain">
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-3592-shard-comes-back.html">why it never came back</a>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-3592-what-gets-recreated.html">what gets recreated</a>
+  <span class="here">restart timing</span>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-3592-when-the-node-dies.html">when the node dies</a>
+</nav>
+<p class="chainnote">Four pages on this PR, one question each — this one: the order things happen in.</p>
+
+<p>Short answer up front: <strong>the restart itself is fully asynchronous and is queued behind
+nothing.</strong> It starts on the next fleet-health tick after the shard is condemned, and it
+runs on a thread, so training and generation carry on underneath it. What <em>is</em> queued is
+everything after the engine comes back: re-entering the collective waits for the next refit, and
+taking traffic again waits for the next fleet-health tick after that.</p>
+
+<ol class="toc">
+<li><a href="#loops">The four loops, and where a restart actually runs</a></li>
+<li><a href="#detect">Two ways a shard is condemned, and why they take different times</a></li>
+<li><a href="#a">Scenario A — it dies between refits</a></li>
+<li><a href="#b">Scenario B — it dies during a refit</a></li>
+<li><a href="#c">Scenario C — it finishes restarting during a refit</a></li>
+<li><a href="#blocks">What waits for what</a></li>
+</ol>
+
+<p>Every timeline below uses the same run: <strong>4 generation shards, shard 2 dies</strong>,
+with the shipped defaults
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/5b4a732d9fcc2034381d146f752e4983d062bed3/examples/configs/grpo_math_1B_megatron_single_controller.yaml#L108"><code>probe_interval_s: 5</code></a>,
+<code>unhealthy_threshold: 3</code> and <code>refit_timeout_s: 300</code>. Time axes are not to
+scale — a model reload takes minutes while a probe takes milliseconds — so each tick is labelled.</p>
+
+<h2 id="loops">The four loops, and where a restart actually runs</h2>
+
+<p>The SingleController runs
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/5b4a732d9fcc2034381d146f752e4983d062bed3/nemo_rl/algorithms/single_controller.py#L454">four asyncio tasks on one event loop</a>.
+One loop means they never truly run at the same instant — they take turns, handing control over
+at each <code>await</code>. Anything that would block for a long time is pushed onto a thread so
+the other three keep their turns.</p>
+
+<svg viewBox="0 0 940 300" role="img" aria-label="Four asyncio tasks share one event loop; the restart and the weight transfer run on threads off the loop">
+  <text class="lbl-b" x="20" y="22">one event loop, four tasks taking turns</text>
+  <rect class="lane" x="30" y="36" width="560" height="180" rx="9"/>
+
+  <rect class="work" x="48" y="56" width="240" height="34" rx="6"/>
+  <text class="lbl" x="60" y="78">rollout pump</text>
+  <text class="note" x="300" y="78">keeps generating throughout</text>
+
+  <rect class="work" x="48" y="98" width="240" height="34" rx="6"/>
+  <text class="lbl" x="60" y="120">train pump</text>
+  <text class="note" x="300" y="120">trains, and drives the refit</text>
+
+  <rect class="work" x="48" y="140" width="240" height="34" rx="6"/>
+  <text class="lbl" x="60" y="162">watchdog pump</text>
+  <text class="note" x="300" y="162">stall detection, metrics</text>
+
+  <rect class="work" x="48" y="182" width="240" height="24" rx="6"/>
+  <text class="lbl" x="60" y="199">fleet probe pump</text>
+  <text class="note" x="300" y="199">probe, then tick, then push to the router</text>
+
+  <!-- thread pool -->
+  <rect class="lane" x="630" y="36" width="280" height="180" rx="9"/>
+  <text class="lbl-b" x="646" y="58">threads, off the loop</text>
+  <rect class="s-rest" x="648" y="72" width="244" height="34" rx="6"/>
+  <text class="lbl" x="660" y="94">the shard restart</text>
+  <rect class="work" x="648" y="116" width="244" height="34" rx="6"/>
+  <text class="lbl" x="660" y="138">the weight transfer</text>
+  <text class="note" x="648" y="170">both reached with asyncio.to_thread,</text>
+  <text class="note" x="648" y="186">so neither stops the four tasks above</text>
+
+  <text class="note" x="30" y="244">The probe pump does three things in a fixed order every 5s, and the order matters:</text>
+  <text class="lbl" x="30" y="266">probe the shards  →  supervisor.tick()  →  push serving URLs to the router</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/5b4a732d9fcc2034381d146f752e4983d062bed3/nemo_rl/algorithms/single_controller.py#L2275" target="_blank" rel="noopener">
+    <text x="30" y="288">single_controller.py L2275</text>
+  </a>
+  <text class="note" x="212" y="288">— a shard condemned by the probe starts restarting on this tick, not the next</text>
+</svg>
+
+<p>Two consequences worth stating plainly. First, <strong>nothing takes a lock</strong>: there is
+no mutual exclusion between a restart and a refit, and no queue that one waits in for the other.
+Second, generation is <strong>not paused during a refit</strong> on this path — there is no
+drain gate, which the code marks as
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/5b4a732d9fcc2034381d146f752e4983d062bed3/nemo_rl/algorithms/single_controller.py#L3033">a known TODO</a>.</p>
+
+<h2 id="detect">Two ways a shard is condemned, and why they take different times</h2>
+
+<p>Before any restart can start, the shard has to reach <code>DEAD</code>. How long that takes
+depends on <em>how</em> it failed, and the difference is large.</p>
+
+<table>
+<tr><th>How it fails</th><th>What the probe sees</th><th>Time to <code>DEAD</code></th><th>Why</th></tr>
+<tr>
+  <td><strong>Crash</strong> — the process is gone</td>
+  <td><code>RayActorError</code></td>
+  <td><strong>one probe</strong>, so ≤ 5s</td>
+  <td>Ray only reports this once the process is really gone, so it is conclusive. It goes straight to <code>DEAD</code> with no threshold.</td>
+</tr>
+<tr>
+  <td><strong>Hang</strong> — alive but not answering</td>
+  <td>timeout</td>
+  <td><strong>three probes</strong>, so ≈ 15s</td>
+  <td>A timeout is ambiguous — it could be a blip. It counts one failure, so the shard sits in <code>SUSPECT</code> until <code>unhealthy_threshold</code> is reached.</td>
+</tr>
+</table>
+
+<p>A crash also does one extra thing: it
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/5b4a732d9fcc2034381d146f752e4983d062bed3/nemo_rl/algorithms/single_controller.py#L2345">stands down the trainers' refit deadline</a>
+for that shard. A dead peer closes its sockets and NCCL unblocks the survivors on its own, so
+firing the deadline would abort a collective that was about to recover by itself — and that abort
+leaves unusable CUDA contexts behind.</p>
+
+<div class="note-box">
+<p><strong>A detail that surprises people:</strong> the probe only walks
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/5b4a732d9fcc2034381d146f752e4983d062bed3/nemo_rl/models/generation/fleet_health.py#L194"><code>serving_shards()</code></a>,
+which is <code>HEALTHY</code> plus <code>SUSPECT</code>. So a shard is <em>not</em> probed while
+it is <code>DEAD</code>, <code>RESTARTING</code> or <code>STALE</code>. That is deliberate for the
+first two, but it does mean a freshly restarted <code>STALE</code> shard is unwatched in the
+window between its engine coming up and the refit that promotes it.</p>
+</div>
+
+<h2 id="a">Scenario A — it dies between refits</h2>
+
+<p>The common case, and the one the feature is built for. Shard 2 crashes while the run is
+generating. Nothing is mid-collective, so nothing is stuck.</p>
+
+<svg viewBox="0 0 940 330" role="img" aria-label="Timeline: shard 2 crashes between refits, is detected in one probe, restarts on a thread, comes back STALE, is re-admitted at the next refit and serves after the next probe tick">
+  <text class="hdr" x="120" y="22" text-anchor="middle">crash</text>
+  <text class="hdr" x="268" y="22" text-anchor="middle">next probe (≤5s)</text>
+  <text class="hdr" x="452" y="22" text-anchor="middle">minutes later</text>
+  <text class="hdr" x="646" y="22" text-anchor="middle">next refit</text>
+  <text class="hdr" x="836" y="22" text-anchor="middle">next probe</text>
+  <line class="tick" x1="120" y1="30" x2="120" y2="270"/>
+  <line class="tick" x1="268" y1="30" x2="268" y2="270"/>
+  <line class="tick" x1="452" y1="30" x2="452" y2="270"/>
+  <line class="tick" x1="646" y1="30" x2="646" y2="270"/>
+  <line class="tick" x1="836" y1="30" x2="836" y2="270"/>
+
+  <!-- state lane -->
+  <text class="lbl-b" x="20" y="56">shard 2</text>
+  <rect class="s-ok"    x="40"  y="64" width="80"  height="26" rx="5"/>
+  <text class="note" x="80" y="81" text-anchor="middle">HEALTHY</text>
+  <rect class="s-dead"  x="120" y="64" width="148" height="26" rx="5"/>
+  <text class="note" x="194" y="81" text-anchor="middle">DEAD</text>
+  <rect class="s-rest"  x="268" y="64" width="184" height="26" rx="5"/>
+  <text class="note" x="360" y="81" text-anchor="middle">RESTARTING</text>
+  <rect class="s-stale" x="452" y="64" width="194" height="26" rx="5"/>
+  <text class="note" x="549" y="81" text-anchor="middle">STALE</text>
+  <rect class="s-ok"    x="646" y="64" width="264" height="26" rx="5"/>
+  <text class="note" x="778" y="81" text-anchor="middle">HEALTHY</text>
+
+  <!-- probe pump -->
+  <text class="lbl-b" x="20" y="122">probe</text>
+  <text class="bad" x="268" y="118">RayActorError → DEAD</text>
+  <text class="note" x="268" y="134">then tick() starts the restart</text>
+  <text class="ok" x="836" y="118" text-anchor="middle">pushes the new URL</text>
+  <text class="note" x="836" y="134" text-anchor="middle">to the router</text>
+
+  <!-- restart thread -->
+  <text class="lbl-b" x="20" y="176">restart</text>
+  <rect class="s-rest" x="268" y="158" width="184" height="26" rx="5"/>
+  <text class="note" x="360" y="175" text-anchor="middle">on a thread — reloads the model</text>
+  <text class="note" x="452" y="200">mark_loaded → STALE, with a NEW port</text>
+
+  <!-- train pump -->
+  <text class="lbl-b" x="20" y="234">refit</text>
+  <rect class="work" x="646" y="216" width="150" height="26" rx="5"/>
+  <text class="note" x="721" y="233" text-anchor="middle">rebuild + weights</text>
+  <text class="note" x="20" y="258">at the refit: wanted {0,1,2,3} ≠ built {0,1,3} → rebuild the communicator, send weights, promote to HEALTHY</text>
+
+  <!-- generation -->
+  <text class="lbl-b" x="20" y="292">rollout</text>
+  <rect class="s-ok" x="40" y="278" width="870" height="20" rx="5"/>
+  <text class="note" x="475" y="292" text-anchor="middle">generation never stops — it just runs on the 3 surviving shards in the middle</text>
+</svg>
+
+<p>The two waits at the right-hand end are the ones people miss. The engine is up and healthy
+minutes before it does any work, because <strong>re-entry is gated on the next refit</strong>
+(which happens once per policy training step) and <strong>traffic is gated on the next probe
+tick after that</strong> (≤ 5s), when
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/5b4a732d9fcc2034381d146f752e4983d062bed3/nemo_rl/algorithms/single_controller.py#L2357"><code>_push_router_membership</code></a>
+sends the router the current
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/5b4a732d9fcc2034381d146f752e4983d062bed3/nemo_rl/models/generation/fleet_health.py#L237"><code>serving_base_urls()</code></a>.
+So yes — your guess was right: the shard starts serving when fleet health publishes its URL to
+the router, and because the engine rebinds a new port, that push is what stops Gym talking to a
+socket nobody is listening on.</p>
+
+<h2 id="b">Scenario B — it dies during a refit</h2>
+
+<p>Now the timing is different, because the trainers are inside a collective that needs every
+rank. This is where the refit deadline earns its keep.</p>
+
+<svg viewBox="0 0 940 300" role="img" aria-label="Timeline: shard 2 hangs during a refit; the deadline aborts the collective, the recovery probes immediately, rebuilds without the shard and retries once">
+  <text class="hdr" x="130" y="22" text-anchor="middle">refit starts</text>
+  <text class="hdr" x="330" y="22" text-anchor="middle">shard 2 hangs</text>
+  <text class="hdr" x="560" y="22" text-anchor="middle">deadline fires</text>
+  <text class="hdr" x="790" y="22" text-anchor="middle">retry</text>
+  <line class="tick" x1="130" y1="30" x2="130" y2="250"/>
+  <line class="tick" x1="330" y1="30" x2="330" y2="250"/>
+  <line class="tick" x1="560" y1="30" x2="560" y2="250"/>
+  <line class="tick" x1="790" y1="30" x2="790" y2="250"/>
+
+  <text class="lbl-b" x="20" y="60">trainers</text>
+  <rect class="work" x="130" y="46" width="200" height="26" rx="5"/>
+  <text class="note" x="230" y="63" text-anchor="middle">sending weights</text>
+  <rect class="s-dead" x="330" y="46" width="230" height="26" rx="5"/>
+  <text class="note" x="445" y="63" text-anchor="middle">blocked in NCCL, waiting on shard 2</text>
+  <rect class="work" x="790" y="46" width="120" height="26" rx="5"/>
+  <text class="note" x="850" y="63" text-anchor="middle">sending again</text>
+
+  <text class="lbl-b" x="20" y="112">watchdog</text>
+  <text class="note" x="340" y="100">a per-refit thread in each worker is armed with</text>
+  <text class="note" x="340" y="116">refit_timeout_s (300s); when it expires it aborts</text>
+  <text class="note" x="340" y="132">the communicator, which raises RefitAborted</text>
+
+  <text class="lbl-b" x="20" y="176">recovery</text>
+  <rect class="work" x="560" y="162" width="230" height="26" rx="5"/>
+  <text class="note" x="675" y="179" text-anchor="middle">probe now, rebuild, retry once</text>
+  <text class="note" x="20" y="206">the recovery probes on the spot rather than waiting for the 5s tick: the abort is an event, the</text>
+  <text class="note" x="20" y="222">probe is a clock, and the clock used to lose that race — leaving an empty absent set and no rebuild</text>
+
+  <text class="lbl-b" x="20" y="262">shard 2</text>
+  <rect class="s-ok"   x="130" y="248" width="200" height="24" rx="5"/>
+  <text class="note" x="230" y="264" text-anchor="middle">HEALTHY</text>
+  <rect class="s-susp" x="330" y="248" width="230" height="24" rx="5"/>
+  <text class="note" x="445" y="264" text-anchor="middle">SUSPECT → DEAD after 3 probes</text>
+  <rect class="s-rest" x="560" y="248" width="350" height="24" rx="5"/>
+  <text class="note" x="735" y="264" text-anchor="middle">RESTARTING — the restart runs while the retry proceeds</text>
+</svg>
+
+<p>The important part for your question: <strong>the restart is not queued behind the refit.</strong>
+Once the shard reaches <code>DEAD</code>, the next probe tick starts the restart on a thread, and
+the retry of the refit proceeds over the surviving shards at the same time. The restarting shard
+counts as absent, so the rebuild correctly excludes it.</p>
+
+<div class="warn">
+<p><strong>One case does not recover.</strong> On the <code>nccl_reshard</code> transport, a fault
+while the bulk transfer is in flight cannot be recovered in-process: aborting the communicator does
+not retire CUDA work already queued on the trainers' own streams, so no rebuild can bootstrap on
+those devices. The run
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/5b4a732d9fcc2034381d146f752e4983d062bed3/nemo_rl/algorithms/single_controller.py#L3068">detects this and ends in seconds with a named cause</a>
+rather than wedging. On the <code>collective</code> transport the same fault recovers.</p>
+</div>
+
+<h2 id="c">Scenario C — it finishes restarting during a refit</h2>
+
+<p>The third case is the one that falls out of everything above: the restart takes minutes and the
+loop is free the whole time, so a restart can finish at <em>any</em> point — including in the
+middle of a refit, after that refit has already decided who is in the group.</p>
+
+<div class="mono">refit starts        membership settled as {0,1,3}   — shard 2 is RESTARTING, so absent
+  |
+  |   ...weight transfer in flight, the loop is free...
+  |
+  +-- restart finishes -> mark_loaded -> shard 2 becomes STALE
+  |
+refit ends          promote every STALE shard -> shard 2 becomes HEALTHY</div>
+
+<p>Shard 2 is promoted by a refit it was never part of, and so has never received weights. The
+promotion step
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/5b4a732d9fcc2034381d146f752e4983d062bed3/nemo_rl/algorithms/single_controller.py#L2612"><code>_promote_refit_shards</code></a>
+promotes every shard that is <code>STALE</code> when it runs, with no check that the shard took
+part. Until this PR nothing could turn a shard <code>STALE</code> mid-refit, so that held.</p>
+
+<div class="warn">
+<p><strong>This is a live bug, raised in review and not yet fixed.</strong> The shard serves one
+step of rollouts generated from the checkpoint it loaded off disk, mixed into the training batch
+with nothing marking it. It self-corrects at the next refit, so the damage is bounded to one step
+— but it is silent, and the metric meant to catch it is written by the same call, so it reports a
+healthy-looking weight version. The fix is to promote only the shards the refit actually wrote to.</p>
+</div>
+
+<h2 id="blocks">What waits for what</h2>
+
+<table>
+<tr><th>Step</th><th>Runs on</th><th>Waits for</th><th>How long</th></tr>
+<tr><td>Notice a crash</td><td>probe pump</td><td>the next probe tick</td><td>≤ 5s</td></tr>
+<tr><td>Notice a hang</td><td>probe pump</td><td>three consecutive failed probes</td><td>≈ 15s</td></tr>
+<tr><td>Start the restart</td><td>probe pump</td><td>nothing — same tick as the verdict</td><td>immediate</td></tr>
+<tr><td>Reload the model</td><td>a thread</td><td><strong>nothing</strong></td><td>minutes</td></tr>
+<tr><td>Rejoin the collective</td><td>train pump</td><td>the next refit</td><td>one training step</td></tr>
+<tr><td>Take traffic again</td><td>probe pump</td><td>the next tick after it is HEALTHY</td><td>≤ 5s</td></tr>
+</table>
+
+<div class="hl">
+<p><strong>So: is the restart synchronous with anything? No.</strong> It is started from the
+fleet-health tick and immediately handed to a thread, and nothing waits on it — not the refit, not
+training, not generation. The supervisor's
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/5b4a732d9fcc2034381d146f752e4983d062bed3/nemo_rl/models/generation/engine_supervisor.py#L69"><code>tick()</code></a>
+returns as soon as it has started the work, and a shard already being restarted is skipped on later
+ticks so a slow reload cannot pile up.</p>
+<p>The waiting is all on the way back in, and it is deliberate: a restarted engine holds whatever
+weights it loaded from disk, so it must sit out until a refit gives it current ones. That is what
+<code>STALE</code> means — in the group, so the refit reaches it, but not in the serving set.</p>
+</div>
+
+</div>
+</body>
+</html>
