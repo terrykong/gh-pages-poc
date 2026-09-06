@@ -111,9 +111,9 @@ so the port is never free for even an instant. The bug is about <em>when</em> th
 
   <path d="M229 140 L229 160" class="arrbad" marker-end="url(#a2)"/>
   <rect x="14" y="160" width="430" height="60" rx="7" class="boxbad"/>
-  <text x="26" y="179" class="lbl">model init forks a child</text>
-  <text x="26" y="196" class="note">async checkpointing starts a worker process;</text>
-  <text x="26" y="211" class="note">fork() copies every open fd, including the listener</text>
+  <text x="26" y="179" class="lbl">something in model init forks</text>
+  <text x="26" y="196" class="note">a child process starts without exec'ing, so it</text>
+  <text x="26" y="211" class="note">inherits every open fd, including the listener</text>
 
   <path d="M229 220 L229 240" class="arrbad" marker-end="url(#a2)"/>
   <rect x="14" y="240" width="430" height="44" rx="7" class="boxbad"/>
@@ -142,8 +142,8 @@ so the port is never free for even an instant. The bug is about <em>when</em> th
 
   <path d="M713 140 L713 160" class="arrgood" marker-end="url(#a3)"/>
   <rect x="500" y="160" width="426" height="60" rx="7" class="box"/>
-  <text x="512" y="179" class="lbl">model init forks a child</text>
-  <text x="512" y="196" class="note">same fork, same async checkpointing —</text>
+  <text x="512" y="179" class="lbl">something in model init forks</text>
+  <text x="512" y="196" class="note">the same child starts at the same point —</text>
   <text x="512" y="211" class="note">but the child inherits no listening socket</text>
 
   <path d="M713 220 L713 240" class="arrgood" marker-end="url(#a3)"/>
@@ -182,6 +182,28 @@ so the port is never free for even an instant. The bug is about <em>when</em> th
 </p>
 
 <p>
+<strong>Why does only one process serve, and why is the socket just a placeholder?</strong> The HTTP
+server starts on
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/b99ee92ea81fd42cd4e44c73b48d4ab4414ffc7b/nemo_rl/models/generation/megatron/megatron_worker.py#L614-L619">rank 0 only</a> —
+the other ranks set no URL. And the server does not share the socket it is handed. It reads the port
+number off it, closes it, and then starts several frontend processes that each bind that port
+themselves with <code>SO_REUSEPORT</code>, so each gets its own accept queue. Its
+<a href="https://github.com/NVIDIA/Megatron-LM/blob/1e7598cbfae888cdd3d741a351aae588d56f66c0/megatron/core/inference/text_generation_server/dynamic_text_gen_server/text_generation_server.py#L261-L266">own docs say why</a>:
+sharing one inherited socket does not spread load, because the processes race to accept from a single
+queue and whichever is already running keeps winning. So the socket that gets passed around is only
+ever a way to say "this number is taken" — nothing reads from it.
+</p>
+
+<p>
+<strong>What is not known:</strong> which call actually forks. The PR author names the async
+checkpoint worker as a likely candidate and says plainly he is not certain, and the code that starts
+it asks for <code>spawn</code> rather than <code>fork</code> — a spawned child starts a fresh
+interpreter and would not inherit the socket. So the guilty fork is somewhere else in model
+initialization and has not been pinned down. The fix does not depend on finding it: if nothing is
+holding a listening socket during that whole stretch, it does not matter what forks.
+</p>
+
+<p>
 The child process is not doing anything wrong. It inherited a listening socket it never asked for
 and never calls <code>accept()</code> on, so every connection the kernel gives it just sits in a
 queue. From Gym's side the request is sent and no reply ever comes.
@@ -197,7 +219,7 @@ moment. Same three steps, same port 7431:</p>
 <span style="color:var(--dim)"># 1. worker start-up — keep the int, not the fd</span>
 self._reserved_http_server_port = 7431   <span style="color:var(--dim)"># was: receive_held_socket(7431)</span>
 
-<span style="color:var(--dim)"># 2. model loads; async checkpointing calls fork()
+<span style="color:var(--dim)"># 2. model loads; somewhere in here a child process is forked
 #    child copies open fds — there is no listening fd to copy</span>
 
 <span style="color:var(--dim)"># 3. HTTP server is about to start — now ask for the socket</span>
