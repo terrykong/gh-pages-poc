@@ -99,7 +99,8 @@ Permalinks pin the PR head <code>5b4a732</code>.</p>
 nothing.</strong> It starts on the next fleet-health tick after the shard is marked DEAD, and it
 runs on a thread, so training and generation carry on underneath it. What <em>is</em> queued is
 everything after the engine comes back: re-entering the collective waits for the next refit, and
-taking traffic again waits for the next fleet-health tick after that.</p>
+on the NeMo-Gym path taking traffic again waits for one more fleet-health tick after that. On the
+default path — native Ray calls, no router — traffic resumes the moment the refit promotes it.</p>
 
 <ol class="toc">
 <li><a href="#loops">The four loops, and where a restart actually runs</a></li>
@@ -258,10 +259,10 @@ generating. Nothing is mid-collective, so nothing is stuck.</p>
   <text class="note" x="194" y="81" text-anchor="middle">DEAD</text>
   <rect class="s-rest"  x="268" y="64" width="184" height="26" rx="5"/>
   <text class="note" x="360" y="81" text-anchor="middle">RESTARTING</text>
-  <rect class="s-stale" x="452" y="64" width="194" height="26" rx="5"/>
-  <text class="note" x="549" y="81" text-anchor="middle">STALE</text>
-  <rect class="s-ok"    x="646" y="64" width="264" height="26" rx="5"/>
-  <text class="note" x="778" y="81" text-anchor="middle">HEALTHY</text>
+  <rect class="s-stale" x="452" y="64" width="344" height="26" rx="5"/>
+  <text class="note" x="624" y="81" text-anchor="middle">STALE — in the group, but takes no traffic</text>
+  <rect class="s-ok"    x="796" y="64" width="114" height="26" rx="5"/>
+  <text class="note" x="853" y="81" text-anchor="middle">HEALTHY</text>
 
   <!-- probe pump -->
   <text class="lbl-b" x="20" y="122">probe</text>
@@ -269,6 +270,8 @@ generating. Nothing is mid-collective, so nothing is stuck.</p>
   <text class="note" x="268" y="134">then tick() starts the restart</text>
   <text class="ok" x="836" y="118" text-anchor="middle">pushes the new URL</text>
   <text class="note" x="836" y="134" text-anchor="middle">to the router</text>
+  <text class="note" x="816" y="152">gap: ≤ 5s</text>
+  <text class="note" x="816" y="166">Gym path only</text>
 
   <!-- restart thread -->
   <text class="lbl-b" x="20" y="176">restart</text>
@@ -279,8 +282,10 @@ generating. Nothing is mid-collective, so nothing is stuck.</p>
   <!-- train pump -->
   <text class="lbl-b" x="20" y="234">refit</text>
   <rect class="work" x="646" y="216" width="150" height="26" rx="5"/>
-  <text class="note" x="721" y="233" text-anchor="middle">rebuild + weights</text>
-  <text class="note" x="20" y="258">at the refit: wanted {0,1,2,3} ≠ built {0,1,3} → rebuild the communicator, send weights, promote to HEALTHY</text>
+  <text class="note" x="721" y="233" text-anchor="middle">rebuild group, send weights</text>
+  <line class="evt" x1="796" y1="60" x2="796" y2="246"/>
+  <text class="ok" x="790" y="206" text-anchor="end">promoted to HEALTHY here</text>
+  <text class="note" x="20" y="258">the model was already loaded during the restart; this step rebuilds the NCCL group to include shard 2, then sends it current weights</text>
 
   <!-- generation -->
   <text class="lbl-b" x="20" y="292">rollout</text>
@@ -288,16 +293,34 @@ generating. Nothing is mid-collective, so nothing is stuck.</p>
   <text class="note" x="475" y="292" text-anchor="middle">generation never stops — it just runs on the 3 surviving shards in the middle</text>
 </svg>
 
-<p>The two waits at the right-hand end are the ones people miss. The engine is up and healthy
-minutes before it does any work, because <strong>re-entry is gated on the next refit</strong>
-(which happens once per policy training step) and <strong>traffic is gated on the next probe
-tick after that</strong> (≤ 5s), when
-<a href="https://github.com/NVIDIA-NeMo/RL/blob/5b4a732d9fcc2034381d146f752e4983d062bed3/nemo_rl/algorithms/single_controller.py#L2357"><code>_push_router_membership</code></a>
-sends the router the current
-<a href="https://github.com/NVIDIA-NeMo/RL/blob/5b4a732d9fcc2034381d146f752e4983d062bed3/nemo_rl/models/generation/fleet_health.py#L237"><code>serving_base_urls()</code></a>.
-So yes — your guess was right: the shard starts serving when fleet health publishes its URL to
-the router, and because the engine rebinds a new port, that push is what stops Gym talking to a
-socket nobody is listening on.</p>
+<p><strong>Two things about the right-hand end.</strong> First, the refit step is not reloading
+anything — the model was loaded from disk minutes earlier, during the restart. What the refit
+does is rebuild the NCCL group so it includes shard 2 again, and then send it the current
+weights. That is why the shard has to wait for a refit at all: it has a model, but the wrong
+version of it.</p>
+
+<p>Second, the shard becomes <code>HEALTHY</code> at the <em>end</em> of that refit, when
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/5b4a732d9fcc2034381d146f752e4983d062bed3/nemo_rl/algorithms/single_controller.py#L2612"><code>_promote_refit_shards</code></a>
+runs — not at the start. The little gap after it is a real wait, and <strong>whether it costs you
+anything depends on how rollouts are routed</strong>:</p>
+
+<table>
+<tr><th>Routing</th><th>When the shard gets traffic again</th><th>Why</th></tr>
+<tr>
+  <td><strong>Native Ray calls</strong><br>(<code>generation_router.enabled: false</code>, the default)</td>
+  <td><strong>immediately</strong>, on the next request</td>
+  <td><a href="https://github.com/NVIDIA-NeMo/RL/blob/5b4a732d9fcc2034381d146f752e4983d062bed3/nemo_rl/models/generation/vllm/vllm_generation.py#L1034"><code>_next_dp_shard_idx</code></a> asks the selector per request, and it reads <a href="https://github.com/NVIDIA-NeMo/RL/blob/5b4a732d9fcc2034381d146f752e4983d062bed3/nemo_rl/models/generation/fleet_health.py#L558"><code>serving_shards()</code></a> live. Nothing is cached.</td>
+</tr>
+<tr>
+  <td><strong>Via the NeMo-Gym router</strong></td>
+  <td>at the next probe tick, so ≤ 5s later</td>
+  <td>Gym holds one fixed URL and never re-resolves it, so the router has to be told. <a href="https://github.com/NVIDIA-NeMo/RL/blob/5b4a732d9fcc2034381d146f752e4983d062bed3/nemo_rl/algorithms/single_controller.py#L2357"><code>_push_router_membership</code></a> sends it <a href="https://github.com/NVIDIA-NeMo/RL/blob/5b4a732d9fcc2034381d146f752e4983d062bed3/nemo_rl/models/generation/fleet_health.py#L237"><code>serving_base_urls()</code></a> on the probe pump's clock.</td>
+</tr>
+</table>
+
+<p>So your guess about the router was right, but only for the Gym path — and that push matters
+there for a specific reason: the restarted engine binds a <strong>new port</strong>, so without
+it Gym keeps talking to a socket nobody is listening on.</p>
 
 <h2 id="b">Scenario B — it dies during a refit</h2>
 
@@ -394,7 +417,8 @@ healthy-looking weight version. The fix is to promote only the shards the refit 
 <tr><td>Reload the model</td><td>a thread</td><td><strong>nothing</strong> — nobody awaits it</td><td>minutes</td></tr>
 <tr><td>Transfer the weights</td><td>a thread</td><td>—, but <strong>the train pump waits on this one</strong></td><td>seconds</td></tr>
 <tr><td>Rejoin the collective</td><td>train pump</td><td>the next refit</td><td>one training step</td></tr>
-<tr><td>Take traffic again</td><td>probe pump</td><td>the next tick after it is HEALTHY</td><td>≤ 5s</td></tr>
+<tr><td>Take traffic again — native calls</td><td>rollout pump</td><td>nothing; the selector reads the ledger live</td><td>immediate</td></tr>
+<tr><td>Take traffic again — via the Gym router</td><td>probe pump</td><td>the next tick after it is HEALTHY</td><td>≤ 5s</td></tr>
 </table>
 
 <div class="hl">
