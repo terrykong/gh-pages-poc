@@ -422,6 +422,30 @@ participant and the rebuild is redone — with several suspects, or none, it giv
 guess and condemn a healthy shard.</li>
 </ol>
 
+<div class="note-box">
+<p><strong>"But those shards are healthy — why are they STALE?"</strong> They are healthy. That is
+the point: <code>STALE</code> is not a verdict about the process.</p>
+<p>Every other state describes the <em>process</em> — <code>HEALTHY</code> and
+<code>SUSPECT</code> are answering or not, <code>DEAD</code> and <code>RESTARTING</code> and
+<code>RETIRED</code> are gone or coming back. <code>STALE</code> describes the
+<strong>weights</strong>. An abort cuts a transfer off mid-flight, so every engine that was
+receiving holds a mix of old and new weights. Generating rollouts from a half-updated model is
+silently wrong, which is worse than generating nothing. The
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/5b4a732d9fcc2034381d146f752e4983d062bed3/nemo_rl/models/generation/fleet_health.py#L429"><code>mark_weights_partial</code></a>
+docstring puts it in one line:</p>
+<p><em>"STALE rather than DEAD: the process is alive and refits normally, it just must not serve
+until a refit completes."</em></p>
+<p>So the same state means one thing — <strong>this engine's weights are not the current
+ones</strong> — and it is reached two ways: a restarted engine holding what it loaded from disk,
+or a survivor holding a half-finished transfer. Both are cured by the same event, a completed
+refit, which is why both sit in the group (so the refit can reach them) and out of the serving
+set (so nothing reads from them meanwhile).</p>
+<p>One nicety worth knowing: the ledger remembers what the shard was <em>before</em> it went
+stale. Without that, a shard that was <code>SUSPECT</code> would come back as <code>HEALTHY</code>
+and the recovery would quietly erase the failure count — which is the only counter that can
+condemn a wedged engine that still answers probes.</p>
+</div>
+
 <p>Then the second attempt runs, and on success
 <a href="https://github.com/NVIDIA-NeMo/RL/blob/5b4a732d9fcc2034381d146f752e4983d062bed3/nemo_rl/algorithms/single_controller.py#L3100"><code>_promote_refit_shards</code></a>
 puts the survivors back into service. <strong>Once only</strong> — a second failure is treated as
