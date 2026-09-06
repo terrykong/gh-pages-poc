@@ -407,97 +407,52 @@ rank. This is where the refit deadline earns its keep.</p>
   <text class="note" x="598" y="416">STALE: holds partial weights, no traffic</text>
 </svg>
 
-<p><strong>What exactly is retried: the weight transfer, and nothing else.</strong> Not the
-request, not the training step, not the whole refit from the top. The controller calls
-<a href="https://github.com/NVIDIA-NeMo/RL/blob/5b4a732d9fcc2034381d146f752e4983d062bed3/nemo_rl/algorithms/single_controller.py#L3068"><code>_sync_weights_within(kv_scales, "first")</code></a>,
-and when that raises it runs the recovery and then calls the same function again with
-<code>"retry"</code> — the same weights, in the same training step, over a communicator that has
-been rebuilt without the dead shard. The two labels are only there to tell the attempts apart in
-the logs.</p>
+<p><strong>What gets retried is the weight transfer, once.</strong> Not the request, not the
+training step. The controller calls
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/5b4a732d9fcc2034381d146f752e4983d062bed3/nemo_rl/algorithms/single_controller.py#L3068"><code>_sync_weights_within(..., "first")</code></a>;
+when that raises it recovers and calls the same function again with <code>"retry"</code> — same
+weights, same training step, smaller group — then
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/5b4a732d9fcc2034381d146f752e4983d062bed3/nemo_rl/algorithms/single_controller.py#L3100"><code>_promote_refit_shards</code></a>
+puts the survivors back in service. A second failure ends the run: at that point it is a fault,
+not a membership problem.</p>
 
-<p>The recovery in between does three things, in this order
-(<a href="https://github.com/NVIDIA-NeMo/RL/blob/5b4a732d9fcc2034381d146f752e4983d062bed3/nemo_rl/algorithms/single_controller.py#L2521"><code>_recover_from_failed_refit</code></a>):</p>
-
-<ol>
-<li><strong>Probe every shard immediately</strong>, instead of waiting for the 5s tick, so the
-membership is a lookup rather than a race.</li>
-<li><strong>If the failure was an abort, mark the surviving shards <code>STALE</code></strong>
-(<a href="https://github.com/NVIDIA-NeMo/RL/blob/5b4a732d9fcc2034381d146f752e4983d062bed3/nemo_rl/algorithms/single_controller.py#L2556"><code>mark_weights_partial</code></a>).
-An abort stops a transfer mid-flight, so every engine that was receiving holds a mix of old and
-new weights — none of them may serve until a transfer finishes. This is the part that surprises
-people: a hang in one shard briefly takes the <em>whole</em> fleet out of service.</li>
-<li><strong>Rebuild the communicator without the dead shard.</strong> If nothing is absent but
+<p><strong>The three numbered steps in the figure</strong> are
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/5b4a732d9fcc2034381d146f752e4983d062bed3/nemo_rl/algorithms/single_controller.py#L2521"><code>_recover_from_failed_refit</code></a>:
+probe every shard on the spot rather than on the 5s clock, mark the survivors
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/5b4a732d9fcc2034381d146f752e4983d062bed3/nemo_rl/algorithms/single_controller.py#L2556"><code>STALE</code></a> if the failure
+was an abort, then rebuild the communicator without the dead shard. If nothing is absent but
 exactly one shard is already <code>SUSPECT</code>, that one is condemned as the silent
-participant and the rebuild is redone — with several suspects, or none, it gives up rather than
-guess and condemn a healthy shard.</li>
-</ol>
-
-<p><strong>Notice how far apart two of those moments are.</strong> With the defaults the ledger
-marks shard 2 <code>DEAD</code> after three failed probes — about 15 seconds. The trainers stay
-blocked for the full <code>refit_timeout_s</code>, 300 seconds, because <strong>nothing connects
-the ledger's verdict to an in-flight collective</strong>. Knowing a shard is dead does not
-interrupt a transfer that is already waiting on it. The only thing that ends the wait early is a
-<em>confirmed process death</em>, and that does the opposite — it
-<a href="https://github.com/NVIDIA-NeMo/RL/blob/5b4a732d9fcc2034381d146f752e4983d062bed3/nemo_rl/algorithms/single_controller.py#L2347">cancels the deadline</a>
-so NCCL can unblock the survivors by itself. So a hang costs the full 300s; a crash costs
-seconds.</p>
-
-<p><strong>So the restart runs alongside the hang, not after it.</strong> That is the clearest
-case of "queued behind nothing" on this page: at roughly 15 seconds the ledger marks shard 2
-<code>DEAD</code>, <code>tick()</code> spawns the restart, and it reloads a model on a thread for
-the next four minutes while the trainers are still parked in NCCL. Nothing coordinates the two.</p>
-
-<p>Its first act is to kill the hung worker —
-<a href="https://github.com/NVIDIA-NeMo/RL/blob/5b4a732d9fcc2034381d146f752e4983d062bed3/nemo_rl/distributed/worker_groups.py#L709"><code>recreate_worker</code></a>
-anticipates exactly this case: <em>"a worker can be unresponsive rather than gone, and creating
-its replacement while it still holds the GPU would fail on memory."</em> Two things follow that
-are worth holding separately, because the code is explicit about one and silent about the other:</p>
-
-<ul>
-<li><strong>The deadline is still expected to be what ends the wait.</strong> The stand-down
-docstring says so outright — <em>"A frozen rank never produces [a confirmed death], so its
-deadline still fires and still ends the run attributably."</em> Whether killing the hung worker
-at 15s also happens to close its sockets and unblock the trainers early is not something the code
-reasons about, and it should not be counted on.</li>
-<li><strong>The replacement has to load onto the GPU the killed worker was holding.</strong> If
-that worker's EngineCore is orphaned rather than reaped, the memory is still taken and the restart
-fails — which is what <code>RAY_process_group_cleanup_enabled</code> exists to prevent. This
-scenario is where that setting matters most, because the kill is deliberate rather than incidental.</li>
-</ul>
+participant — with several suspects, or none, it gives up rather than condemn a healthy shard by
+guessing.</p>
 
 <div class="note-box">
-<p><strong>"But those shards are healthy — why are they STALE?"</strong> They are healthy. That is
-the point: <code>STALE</code> is not a verdict about the process.</p>
-<p>Every other state describes the <em>process</em> — <code>HEALTHY</code> and
-<code>SUSPECT</code> are answering or not, <code>DEAD</code> and <code>RESTARTING</code> and
-<code>RETIRED</code> are gone or coming back. <code>STALE</code> describes the
-<strong>weights</strong>. An abort cuts a transfer off mid-flight, so every engine that was
-receiving holds a mix of old and new weights. Generating rollouts from a half-updated model is
-silently wrong, which is worse than generating nothing. The
+<p><strong>Why are the survivors STALE when they are perfectly healthy?</strong> Because
+<code>STALE</code> is a verdict on the <em>weights</em>, not the process. Every other state
+describes the process; <code>STALE</code> says "this engine's weights are not the current ones".
+An abort stops a transfer mid-flight, so every receiving engine holds a mix of old and new —
+generating from that is silently wrong.
 <a href="https://github.com/NVIDIA-NeMo/RL/blob/5b4a732d9fcc2034381d146f752e4983d062bed3/nemo_rl/models/generation/fleet_health.py#L429"><code>mark_weights_partial</code></a>
-docstring puts it in one line:</p>
-<p><em>"STALE rather than DEAD: the process is alive and refits normally, it just must not serve
-until a refit completes."</em></p>
-<p>So the same state means one thing — <strong>this engine's weights are not the current
-ones</strong> — and it is reached two ways: a restarted engine holding what it loaded from disk,
-or a survivor holding a half-finished transfer. Both are cured by the same event, a completed
-refit, which is why both sit in the group (so the refit can reach them) and out of the serving
-set (so nothing reads from them meanwhile).</p>
-<p>One nicety worth knowing: the ledger remembers what the shard was <em>before</em> it went
-stale. Without that, a shard that was <code>SUSPECT</code> would come back as <code>HEALTHY</code>
-and the recovery would quietly erase the failure count — which is the only counter that can
-condemn a wedged engine that still answers probes.</p>
+puts it in one line: <em>"the process is alive and refits normally, it just must not serve until a
+refit completes."</em></p>
+<p>It is the same state a restarted engine sits in, for the same reason and a different cause.
+Both stay in the group so the refit can reach them, and out of the serving set so nothing reads
+from them meanwhile.</p>
 </div>
 
-<p>Then the second attempt runs, and on success
-<a href="https://github.com/NVIDIA-NeMo/RL/blob/5b4a732d9fcc2034381d146f752e4983d062bed3/nemo_rl/algorithms/single_controller.py#L3100"><code>_promote_refit_shards</code></a>
-puts the survivors back into service. <strong>Once only</strong> — a second failure is treated as
-a real fault rather than a membership problem, and the run ends.</p>
+<p><strong>Two things about the timing.</strong> The ledger marks shard 2 <code>DEAD</code> after
+three failed probes — about 15s — but the trainers stay blocked for the full 300s deadline,
+because nothing connects the ledger's verdict to an in-flight collective. Only a <em>confirmed
+process death</em> ends the wait early, and it does so by
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/5b4a732d9fcc2034381d146f752e4983d062bed3/nemo_rl/algorithms/single_controller.py#L2347">cancelling the deadline</a> and letting
+NCCL unblock the survivors itself. So a hang costs the full 300s; a crash costs seconds.</p>
 
-<p>And the answer to the original question: <strong>the restart is not queued behind any of
-this.</strong> Once shard 2 reaches <code>DEAD</code>, the next probe tick starts its restart on a
-thread, and the second attempt at the transfer proceeds over the surviving shards at the same
-time. A <code>RESTARTING</code> shard counts as absent, so the rebuild correctly leaves it out.</p>
+<p>And the restart begins at that 15s mark, running on a thread the whole time the trainers are
+parked — the clearest "queued behind nothing" on this page. Its first act is to kill the hung
+worker, which
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/5b4a732d9fcc2034381d146f752e4983d062bed3/nemo_rl/distributed/worker_groups.py#L709"><code>recreate_worker</code></a> expects
+(<em>"a worker can be unresponsive rather than gone"</em>). The replacement then has to load onto
+the GPU that worker was holding, so if its EngineCore is orphaned rather than reaped the restart
+fails on memory — which is where <code>RAY_process_group_cleanup_enabled</code> matters most.</p>
 
 <div class="warn">
 <p><strong>One case does not recover.</strong> On the <code>nccl_reshard</code> transport, a fault
