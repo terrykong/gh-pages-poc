@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>NVIDIA-NeMo/RL #3592 — how a restarted generation shard gets back into the fleet</title>
+<title>NVIDIA-NeMo/RL #3592 — how a dead generation shard gets back into the fleet</title>
 <style>
 :root{
   --bg:#0d1117; --surface:#161b22; --surface2:#1c2128; --border:#30363d;
@@ -43,8 +43,10 @@ p.chainnote{color:var(--dim);font-size:12px;margin:0 0 18px}
   padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0}
 .hl{border-left:3px solid var(--green);background:var(--surface);
   padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0}
+blockquote{margin:14px 0;padding:10px 16px;border-left:3px solid var(--border);
+  background:var(--surface);color:var(--dim);font-size:13.5px;border-radius:0 8px 8px 0;
+  font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
 svg{max-width:100%;height:auto;display:block;margin:16px 0}
-svg .box{fill:var(--surface);stroke:var(--border);stroke-width:1.4}
 svg .lbl{fill:var(--text);font:12.5px ui-monospace,Menlo,monospace}
 svg .lbl-b{fill:var(--text);font:bold 13px -apple-system,sans-serif}
 svg .note{fill:var(--dim);font:11.5px -apple-system,sans-serif}
@@ -71,11 +73,11 @@ svg a text{text-decoration:underline;fill:var(--accent);font:11.5px ui-monospace
   document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
 <div class="wrap">
 
-<h1>How a restarted generation shard gets back into the fleet</h1>
+<h1>How a dead generation shard gets back into the fleet</h1>
 <p class="sub">Companion illustration for
 <a href="https://github.com/NVIDIA-NeMo/RL/pull/3592">NVIDIA-NeMo/RL #3592</a>
 (part 4/4 of the SingleController elastic-recovery stack).
-Permalinks pin the PR head <code>5b4a732</code>; the "before" code is pinned at the base
+Permalinks pin the PR head <code>5b4a732</code>; "before" code is pinned at the base
 commit <code>d0f8c07</code>, where it still exists.
 Earlier in this stack:
 <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-3591-what-survives.html">which failures survive</a>.</p>
@@ -87,161 +89,175 @@ Earlier in this stack:
 </nav>
 <p class="chainnote">Three pages on this PR, one question each — this one: why a returning shard was shut out.</p>
 
-<p>A run keeps several generation shards. If one dies, the earlier PRs in this stack drop it
-and carry on with the rest — the refit communicator is rebuilt over the survivors. But the
-fleet could only ever get <em>smaller</em>. Nothing brought a shard back, and this PR is
-about why that was not just a missing feature but structurally impossible.</p>
+<p>A run keeps several generation shards. The earlier PRs in this stack made a dead one
+survivable: it is dropped, the refit communicator is rebuilt over the survivors, and training
+continues. But the fleet could only ever get <em>smaller</em>.</p>
 
-<p>The refit code decided whether to rebuild by asking one question:
-<a href="https://github.com/NVIDIA-NeMo/RL/blob/d0f8c078770bb4be9e1cb133d8fbcbac408e4872/nemo_rl/weight_sync/collective_weight_synchronizer.py#L242">is anything absent right now?</a>
-That question can tell you a shard has <em>left</em>. It cannot tell you one has
-<em>returned</em> — because a returned shard makes the absent set empty, which looks
-exactly like a healthy fleet with nothing to do.</p>
+<p><strong>Two separate things were missing, and this PR adds both.</strong> Nothing restarted
+a dead engine — there was no supervisor and no
+<code>restart_shard</code> method to call. And even if you had restarted one by hand, it could
+not have rejoined, because the code that decides whether to rebuild the communicator asked
+only <a href="https://github.com/NVIDIA-NeMo/RL/blob/d0f8c078770bb4be9e1cb133d8fbcbac408e4872/nemo_rl/weight_sync/collective_weight_synchronizer.py#L242">"is anything absent right now?"</a>
+A returning shard makes the absent set empty, which looks exactly like a healthy fleet with
+nothing to do.</p>
 
-<h2>Why a shard could never come back</h2>
+<h2>Three stories, one dead shard</h2>
 
-<p>Three shards, numbered 0, 1 and 2. Shard 1 dies, then its engine is restarted. Follow
-the row marked <strong>before</strong>: at the moment the engine comes back, the old check
-returns early and the communicator is never rebuilt, so shard 1 stays out for the rest of
-the run.</p>
+<p>Three shards, numbered 0, 1 and 2. Shard 1 dies. The top row is what actually happened
+before this PR. The middle row is the thought experiment that shows why restarting alone would
+not have been enough. The bottom row is this PR.</p>
 
-<svg viewBox="0 0 940 420" role="img" aria-label="Before and after comparison across four moments: shard 1 dies and restarts; before the fix it never rejoins">
-  <!-- column headers -->
+<svg viewBox="0 0 940 510" role="img" aria-label="Three rows showing a dead shard: before the PR it is never restarted; restarting alone still leaves it shut out; with the PR it rejoins">
   <text class="hdr" x="230" y="30" text-anchor="middle">steady state</text>
   <text class="hdr" x="410" y="30" text-anchor="middle">shard 1 dies</text>
-  <text class="hdr" x="590" y="30" text-anchor="middle">engine back up</text>
+  <text class="hdr" x="590" y="30" text-anchor="middle">minutes later</text>
   <text class="hdr" x="770" y="30" text-anchor="middle">next refit</text>
+  <line class="sep" x1="150" y1="46" x2="920" y2="46"/>
 
-  <text class="note" x="230" y="48" text-anchor="middle">absent = { }</text>
-  <text class="note" x="410" y="48" text-anchor="middle">absent = {1}</text>
-  <text class="note" x="590" y="48" text-anchor="middle">absent = { }</text>
-  <text class="note" x="770" y="48" text-anchor="middle">absent = { }</text>
+  <!-- ROW A: before this PR -->
+  <text class="rowlbl" x="20" y="106">before</text>
+  <text class="note" x="20" y="123">what happened</text>
+  <circle class="c-ok"   cx="196" cy="110" r="15"/><text class="c-txt" x="196" y="114" text-anchor="middle">0</text>
+  <circle class="c-ok"   cx="230" cy="110" r="15"/><text class="c-txt" x="230" y="114" text-anchor="middle">1</text>
+  <circle class="c-ok"   cx="264" cy="110" r="15"/><text class="c-txt" x="264" y="114" text-anchor="middle">2</text>
+  <circle class="c-ok"   cx="376" cy="110" r="15"/><text class="c-txt" x="376" y="114" text-anchor="middle">0</text>
+  <circle class="c-dead" cx="410" cy="110" r="15"/><text class="c-txt" x="410" y="114" text-anchor="middle">1</text>
+  <circle class="c-ok"   cx="444" cy="110" r="15"/><text class="c-txt" x="444" y="114" text-anchor="middle">2</text>
+  <circle class="c-ok"   cx="556" cy="110" r="15"/><text class="c-txt" x="556" y="114" text-anchor="middle">0</text>
+  <circle class="c-dead" cx="590" cy="110" r="15"/><text class="c-txt" x="590" y="114" text-anchor="middle">1</text>
+  <circle class="c-ok"   cx="624" cy="110" r="15"/><text class="c-txt" x="624" y="114" text-anchor="middle">2</text>
+  <circle class="c-ok"   cx="736" cy="110" r="15"/><text class="c-txt" x="736" y="114" text-anchor="middle">0</text>
+  <circle class="c-dead" cx="770" cy="110" r="15"/><text class="c-txt" x="770" y="114" text-anchor="middle">1</text>
+  <circle class="c-ok"   cx="804" cy="110" r="15"/><text class="c-txt" x="804" y="114" text-anchor="middle">2</text>
+  <text class="note" x="590" y="146" text-anchor="middle">nothing restarts it</text>
+  <text class="note" x="770" y="146" text-anchor="middle">smaller fleet, for good</text>
+  <line class="sep" x1="150" y1="168" x2="920" y2="168"/>
 
-  <line class="sep" x1="120" y1="62" x2="920" y2="62"/>
+  <!-- ROW B: restart alone (counterfactual) -->
+  <text class="rowlbl" x="20" y="220">restart only</text>
+  <text class="note" x="20" y="237">a thought experiment</text>
+  <circle class="c-ok"    cx="196" cy="224" r="15"/><text class="c-txt" x="196" y="228" text-anchor="middle">0</text>
+  <circle class="c-ok"    cx="230" cy="224" r="15"/><text class="c-txt" x="230" y="228" text-anchor="middle">1</text>
+  <circle class="c-ok"    cx="264" cy="224" r="15"/><text class="c-txt" x="264" y="228" text-anchor="middle">2</text>
+  <circle class="c-ok"    cx="376" cy="224" r="15"/><text class="c-txt" x="376" y="228" text-anchor="middle">0</text>
+  <circle class="c-dead"  cx="410" cy="224" r="15"/><text class="c-txt" x="410" y="228" text-anchor="middle">1</text>
+  <circle class="c-ok"    cx="444" cy="224" r="15"/><text class="c-txt" x="444" y="228" text-anchor="middle">2</text>
+  <circle class="c-ok"    cx="556" cy="224" r="15"/><text class="c-txt" x="556" y="228" text-anchor="middle">0</text>
+  <circle class="c-stale" cx="590" cy="224" r="15"/><text class="c-txt" x="590" y="228" text-anchor="middle">1</text>
+  <circle class="c-ok"    cx="624" cy="224" r="15"/><text class="c-txt" x="624" y="228" text-anchor="middle">2</text>
+  <circle class="c-ok"    cx="736" cy="224" r="15"/><text class="c-txt" x="736" y="228" text-anchor="middle">0</text>
+  <circle class="c-idle"  cx="770" cy="224" r="15"/><text class="c-txt" x="770" y="228" text-anchor="middle">1</text>
+  <circle class="c-ok"    cx="804" cy="224" r="15"/><text class="c-txt" x="804" y="228" text-anchor="middle">2</text>
+  <text class="note" x="590" y="260" text-anchor="middle">engine up, so nothing is absent</text>
+  <text class="note" x="770" y="260" text-anchor="middle">the check returns early:</text>
+  <text class="note" x="770" y="276" text-anchor="middle">no rebuild, still out</text>
+  <line class="sep" x1="150" y1="292" x2="920" y2="292"/>
 
-  <!-- BEFORE row -->
-  <text class="rowlbl" x="20" y="118">before</text>
-  <text class="note" x="20" y="136">this PR</text>
-  <g>
-    <circle class="c-ok" cx="196" cy="112" r="15"/><text class="c-txt" x="196" y="116" text-anchor="middle">0</text>
-    <circle class="c-ok" cx="230" cy="112" r="15"/><text class="c-txt" x="230" y="116" text-anchor="middle">1</text>
-    <circle class="c-ok" cx="264" cy="112" r="15"/><text class="c-txt" x="264" y="116" text-anchor="middle">2</text>
-
-    <circle class="c-ok"   cx="376" cy="112" r="15"/><text class="c-txt" x="376" y="116" text-anchor="middle">0</text>
-    <circle class="c-dead" cx="410" cy="112" r="15"/><text class="c-txt" x="410" y="116" text-anchor="middle">1</text>
-    <circle class="c-ok"   cx="444" cy="112" r="15"/><text class="c-txt" x="444" y="116" text-anchor="middle">2</text>
-
-    <circle class="c-ok"   cx="556" cy="112" r="15"/><text class="c-txt" x="556" y="116" text-anchor="middle">0</text>
-    <circle class="c-idle" cx="590" cy="112" r="15"/><text class="c-txt" x="590" y="116" text-anchor="middle">1</text>
-    <circle class="c-ok"   cx="624" cy="112" r="15"/><text class="c-txt" x="624" y="116" text-anchor="middle">2</text>
-
-    <circle class="c-ok"   cx="736" cy="112" r="15"/><text class="c-txt" x="736" y="116" text-anchor="middle">0</text>
-    <circle class="c-idle" cx="770" cy="112" r="15"/><text class="c-txt" x="770" y="116" text-anchor="middle">1</text>
-    <circle class="c-ok"   cx="804" cy="112" r="15"/><text class="c-txt" x="804" y="116" text-anchor="middle">2</text>
-  </g>
-  <text class="note" x="590" y="150" text-anchor="middle">absent set is empty, so the check</text>
-  <text class="note" x="590" y="166" text-anchor="middle">returns early: no rebuild</text>
-  <text class="note" x="770" y="150" text-anchor="middle">still outside the group:</text>
-  <text class="note" x="770" y="166" text-anchor="middle">idle for good</text>
-
-  <line class="sep" x1="120" y1="196" x2="920" y2="196"/>
-
-  <!-- AFTER row -->
-  <text class="rowlbl" x="20" y="252">after</text>
-  <text class="note" x="20" y="270">this PR</text>
-  <g>
-    <circle class="c-ok" cx="196" cy="246" r="15"/><text class="c-txt" x="196" y="250" text-anchor="middle">0</text>
-    <circle class="c-ok" cx="230" cy="246" r="15"/><text class="c-txt" x="230" y="250" text-anchor="middle">1</text>
-    <circle class="c-ok" cx="264" cy="246" r="15"/><text class="c-txt" x="264" y="250" text-anchor="middle">2</text>
-
-    <circle class="c-ok"   cx="376" cy="246" r="15"/><text class="c-txt" x="376" y="250" text-anchor="middle">0</text>
-    <circle class="c-dead" cx="410" cy="246" r="15"/><text class="c-txt" x="410" y="250" text-anchor="middle">1</text>
-    <circle class="c-ok"   cx="444" cy="246" r="15"/><text class="c-txt" x="444" y="250" text-anchor="middle">2</text>
-
-    <circle class="c-ok"    cx="556" cy="246" r="15"/><text class="c-txt" x="556" y="250" text-anchor="middle">0</text>
-    <circle class="c-stale" cx="590" cy="246" r="15"/><text class="c-txt" x="590" y="250" text-anchor="middle">1</text>
-    <circle class="c-ok"    cx="624" cy="246" r="15"/><text class="c-txt" x="624" y="250" text-anchor="middle">2</text>
-
-    <circle class="c-ok" cx="736" cy="246" r="15"/><text class="c-txt" x="736" y="250" text-anchor="middle">0</text>
-    <circle class="c-ok" cx="770" cy="246" r="15"/><text class="c-txt" x="770" y="250" text-anchor="middle">1</text>
-    <circle class="c-ok" cx="804" cy="246" r="15"/><text class="c-txt" x="804" y="250" text-anchor="middle">2</text>
-  </g>
-  <text class="note" x="590" y="284" text-anchor="middle">wanted {0,1,2}, built {0,2}:</text>
-  <text class="note" x="590" y="300" text-anchor="middle">different, so rebuild</text>
-  <text class="note" x="770" y="284" text-anchor="middle">gets current weights,</text>
-  <text class="note" x="770" y="300" text-anchor="middle">then serves again</text>
-
-  <line class="sep" x1="120" y1="328" x2="920" y2="328"/>
+  <!-- ROW C: this PR -->
+  <text class="rowlbl" x="20" y="344">with this PR</text>
+  <circle class="c-ok"    cx="196" cy="348" r="15"/><text class="c-txt" x="196" y="352" text-anchor="middle">0</text>
+  <circle class="c-ok"    cx="230" cy="348" r="15"/><text class="c-txt" x="230" y="352" text-anchor="middle">1</text>
+  <circle class="c-ok"    cx="264" cy="348" r="15"/><text class="c-txt" x="264" y="352" text-anchor="middle">2</text>
+  <circle class="c-ok"    cx="376" cy="348" r="15"/><text class="c-txt" x="376" y="352" text-anchor="middle">0</text>
+  <circle class="c-dead"  cx="410" cy="348" r="15"/><text class="c-txt" x="410" y="352" text-anchor="middle">1</text>
+  <circle class="c-ok"    cx="444" cy="348" r="15"/><text class="c-txt" x="444" y="352" text-anchor="middle">2</text>
+  <circle class="c-ok"    cx="556" cy="348" r="15"/><text class="c-txt" x="556" y="352" text-anchor="middle">0</text>
+  <circle class="c-stale" cx="590" cy="348" r="15"/><text class="c-txt" x="590" y="352" text-anchor="middle">1</text>
+  <circle class="c-ok"    cx="624" cy="348" r="15"/><text class="c-txt" x="624" y="352" text-anchor="middle">2</text>
+  <circle class="c-ok"    cx="736" cy="348" r="15"/><text class="c-txt" x="736" y="352" text-anchor="middle">0</text>
+  <circle class="c-ok"    cx="770" cy="348" r="15"/><text class="c-txt" x="770" y="352" text-anchor="middle">1</text>
+  <circle class="c-ok"    cx="804" cy="348" r="15"/><text class="c-txt" x="804" y="352" text-anchor="middle">2</text>
+  <text class="note" x="590" y="384" text-anchor="middle">the supervisor restarts it</text>
+  <text class="note" x="770" y="384" text-anchor="middle">wanted and built differ,</text>
+  <text class="note" x="770" y="400" text-anchor="middle">rebuilt — it serves again</text>
+  <line class="sep" x1="150" y1="416" x2="920" y2="416"/>
 
   <!-- legend -->
-  <text class="lbl-b" x="20" y="360">what the colours mean</text>
-  <circle class="c-ok" cx="200" cy="356" r="11"/>
-  <text class="note" x="218" y="360">serving</text>
-  <circle class="c-dead" cx="300" cy="356" r="11"/>
-  <text class="note" x="318" y="360">dead</text>
-  <circle class="c-stale" cx="386" cy="356" r="11"/>
-  <text class="note" x="404" y="360">engine up, holding old weights — no traffic yet</text>
-  <circle class="c-idle" cx="732" cy="356" r="11"/>
-  <text class="note" x="750" y="360">alive but shut out</text>
+  <circle class="c-ok" cx="34" cy="446" r="11"/>
+  <text class="note" x="52" y="450">serving</text>
+  <circle class="c-dead" cx="132" cy="446" r="11"/>
+  <text class="note" x="150" y="450">dead</text>
+  <circle class="c-stale" cx="218" cy="446" r="11"/>
+  <text class="note" x="236" y="450">engine up, old weights, no traffic</text>
+  <circle class="c-idle" cx="474" cy="446" r="11"/>
+  <text class="note" x="492" y="450">alive but shut out of the refit</text>
 
-  <text class="note" x="20" y="396">the line that decided it, before:</text>
+  <text class="note" x="20" y="486">the check that decided the middle row, before:</text>
   <a href="https://github.com/NVIDIA-NeMo/RL/blob/d0f8c078770bb4be9e1cb133d8fbcbac408e4872/nemo_rl/weight_sync/collective_weight_synchronizer.py#L242">
-    <text x="238" y="396">if not absent_shards: return False</text>
+    <text x="292" y="486">if not absent_shards: return False</text>
   </a>
 </svg>
 
-<h2>What the fix does</h2>
+<h2>How we know the top row is what really happened</h2>
 
-<p>The new code stops asking "is anything absent" and instead compares the membership it
-<em>wants</em> against the one it last <em>built</em>. Same three shards, same moments —
-here are the two values at each step, and the decision that falls out of them.</p>
+<p>At the base commit, three things are true and each is easy to check.
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/5b4a732d9fcc2034381d146f752e4983d062bed3/nemo_rl/models/generation/engine_supervisor.py#L1"><code>engine_supervisor.py</code></a>
+is added by this PR, so no file existed to drive a restart. <code>restart_shard</code> is also
+added by this PR — it had been written earlier and then deleted by a merge, and
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/5b4a732d9fcc2034381d146f752e4983d062bed3/nemo_rl/models/generation/vllm/vllm_generation.py#L686">the comment above it</a>
+records that. And the ledger's restart transitions had no caller at all — the old code says so
+itself, in the comment this PR deletes:</p>
 
-<div class="mono">moment            wanted        built         equal?   decision
--------------------------------------------------------------------
-steady state      {0,1,2}       {0,1,2}       yes      skip
-shard 1 dies      {0,2}         {0,1,2}       no       rebuild over {0,2}
-engine back up    {0,1,2}       {0,2}         no       rebuild over {0,1,2}   &lt;- the new one
-next refit        {0,1,2}       {0,1,2}       yes      skip</div>
+<blockquote>because absent_shards() never empties again -- nothing in production calls
+mark_restarting or mark_loaded</blockquote>
 
-<p>"Wanted" comes from
+<p><a href="https://github.com/NVIDIA-NeMo/RL/blob/d0f8c078770bb4be9e1cb133d8fbcbac408e4872/nemo_rl/weight_sync/collective_weight_synchronizer.py#L117">collective_weight_synchronizer.py at the base commit</a>.
+<code>mark_restarting</code> is what moves a shard out of <code>DEAD</code>, and
+<code>mark_loaded</code> is what says its engine is back. With neither ever called, a shard that
+died stayed dead, and the absent set it was in never emptied.</p>
+
+<h2>What the fix compares</h2>
+
+<p>The new code stops asking "is anything absent" and compares two <strong>sets of shard
+numbers</strong>: the set the refit wants in the communicator now, and the set the communicator
+was actually last built over. Same three shards, same moments:</p>
+
+<div class="mono">moment           wants in the group   last built over   same?   decision
+---------------------------------------------------------------------------
+steady state     {0,1,2}              {0,1,2}           yes     skip
+shard 1 dies     {0,2}                {0,1,2}           no      rebuild over {0,2}
+engine back up   {0,1,2}              {0,2}             no      rebuild over {0,1,2}   &lt;- the new one
+next refit       {0,1,2}              {0,1,2}           yes     skip</div>
+
+<p>The wanted set comes from
 <a href="https://github.com/NVIDIA-NeMo/RL/blob/5b4a732d9fcc2034381d146f752e4983d062bed3/nemo_rl/weight_sync/membership.py#L55"><code>desired_membership()</code></a>,
-which is phrased as "what the membership should be" rather than "what changed" — that is
-the whole trick, because it reads the same in both directions. "Built" is remembered in
+which is phrased as "what the membership should be" rather than "what changed" — that is the
+whole trick, because it reads the same in both directions. The built set is remembered in
 <code>_built_membership</code>, and the comparison is
-<a href="https://github.com/NVIDIA-NeMo/RL/blob/5b4a732d9fcc2034381d146f752e4983d062bed3/nemo_rl/weight_sync/collective_weight_synchronizer.py#L299">one line</a>.</p>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/5b4a732d9fcc2034381d146f752e4983d062bed3/nemo_rl/weight_sync/collective_weight_synchronizer.py#L299">one line</a>.
+Notice the third row: that is the case the old check could never see, because its absent set is
+empty and so was a healthy fleet's.</p>
 
-<p>Something still has to restart the engine and say when it is ready. That is
-<a href="https://github.com/NVIDIA-NeMo/RL/blob/5b4a732d9fcc2034381d146f752e4983d062bed3/nemo_rl/models/generation/engine_supervisor.py#L69"><code>EngineSupervisor.tick()</code></a>,
-which picks up dead shards and calls
+<p>The other half is the thing that makes the engine come back at all:
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/5b4a732d9fcc2034381d146f752e4983d062bed3/nemo_rl/models/generation/engine_supervisor.py#L69"><code>EngineSupervisor.tick()</code></a>
+picks up dead shards and calls
 <a href="https://github.com/NVIDIA-NeMo/RL/blob/5b4a732d9fcc2034381d146f752e4983d062bed3/nemo_rl/models/generation/vllm/vllm_generation.py#L695"><code>restart_shard</code></a>
-in the background. It hands the shard back through four states, and the orange one above is
-the interesting one:</p>
+in the background, handing the shard along four states:</p>
 
 <div class="mono">DEAD --(restart starts)--> RESTARTING --(engine up)--> STALE --(next refit)--> HEALTHY
                            ^^^^^^^^^^                       ^^^^^
                            not in the collective            in the collective,
                            at all                           but takes no traffic</div>
 
-<p><code>RESTARTING</code> is treated as
+<p><code>RESTARTING</code> counts as
 <a href="https://github.com/NVIDIA-NeMo/RL/blob/5b4a732d9fcc2034381d146f752e4983d062bed3/nemo_rl/models/generation/fleet_health.py#L70">absent</a>,
 so a rebuild that happens while the engine is still loading correctly leaves it out.
-<code>STALE</code> is the opposite: the shard is in the group, so the refit can write
-weights into it, but it is kept out of the serving set until that refit lands. A restarted
-engine only has whatever it loaded from disk, and that ordering is what stops those stale
-weights reaching a rollout.</p>
+<code>STALE</code> is the opposite: the shard is in the group, so the refit can write weights
+into it, but it takes no traffic until that refit lands. A restarted engine only has whatever
+it loaded from disk, and that ordering is what keeps those old weights out of a rollout.</p>
 
 <div class="hl">
-<p><strong>What this buys you.</strong> A long run that sheds a few transient failures no
-longer ends permanently smaller — a shard lost at hour one can be serving again a few
-minutes later. It is off by default: set
+<p><strong>What this buys you.</strong> A long run that sheds a few transient failures no longer
+ends permanently smaller — a shard lost at hour one can be serving again a few minutes later.
+It is off by default: set
 <a href="https://github.com/NVIDIA-NeMo/RL/blob/5b4a732d9fcc2034381d146f752e4983d062bed3/nemo_rl/algorithms/single_controller_utils/config.py#L338"><code>async_rl.generation_fleet_health.restart_dead_shards: true</code></a>
 on top of <code>generation_fleet_health.enabled</code>.</p>
 <p>Two things to know before you turn it on. Restarting does <strong>not</strong> raise the
-<code>min_healthy_shards</code> floor — a restarting shard is not serving, so a run can
-still stop while a restart is in flight. And a killed vLLM worker leaves its EngineCore
-holding the GPU unless the raylet is told to reap it, which needs
-<code>RAY_process_group_cleanup_enabled=1</code> set <em>before</em> <code>ray start</code>,
-not from the driver. Without that the replacement has nowhere to load.</p>
+<code>min_healthy_shards</code> floor — a restarting shard is not serving, so a run can still
+stop while a restart is in flight. And a killed vLLM worker leaves its EngineCore holding the
+GPU unless the raylet is told to reap it, which needs
+<code>RAY_process_group_cleanup_enabled=1</code> set <em>before</em> <code>ray start</code>, not
+from the driver. Without that the replacement has nowhere to load.</p>
 </div>
 
 </div>
