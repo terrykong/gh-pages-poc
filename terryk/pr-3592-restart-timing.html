@@ -465,9 +465,11 @@ rather than wedging. On the <code>collective</code> transport the same fault rec
 
 <h2 id="c">Scenario C — it finishes restarting during a refit</h2>
 
-<p>Everything above makes this possible: the restart takes minutes, the loop is free
-throughout, so a restart can finish at <em>any</em> moment — including after a refit has already
-decided who is in its group, but before that refit ends.</p>
+<p><strong>Shard 2 did not fail during this refit.</strong> It died in an earlier step and has
+been restarting ever since, so when this refit settled its membership shard 2 was already
+<code>RESTARTING</code> — absent, and correctly left out. All of that works as intended. The only
+new thing is <em>when</em> the reload finishes: it takes minutes and the loop is free throughout,
+so it can land at any moment, including in the middle of someone else's refit.</p>
 
 <svg viewBox="0 0 940 372" role="img" aria-label="Shard 2 finishes restarting mid-refit, becomes STALE after membership was settled, and is promoted to HEALTHY by a refit that never sent it any weights">
   <text class="hdr" x="140" y="22" text-anchor="middle">membership settled</text>
@@ -484,8 +486,8 @@ decided who is in its group, but before that refit ends.</p>
   <text class="note" x="475" y="63" text-anchor="middle">sending weights to shards 0, 1 and 3 — shard 2 is not in the group</text>
 
   <text class="lbl-b" x="20" y="110">shard 2</text>
-  <rect class="s-rest"  x="140" y="96" width="460" height="26" rx="5"/>
-  <text class="note" x="370" y="113" text-anchor="middle">RESTARTING — absent, correctly left out</text>
+  <rect class="s-rest"  x="60" y="96" width="540" height="26" rx="5"/>
+  <text class="note" x="330" y="113" text-anchor="middle">RESTARTING since an earlier step — absent, correctly left out</text>
   <rect class="s-stale" x="600" y="96" width="210" height="26" rx="5"/>
   <text class="note" x="705" y="113" text-anchor="middle">STALE</text>
   <rect class="s-ok"    x="810" y="96" width="100" height="26" rx="5"/>
@@ -525,10 +527,15 @@ decided who is in its group, but before that refit ends.</p>
   <text class="note" x="20" y="354">nothing could turn a shard STALE in the middle of a refit, so the two questions had the same answer</text>
 </svg>
 
-<p>Shard 2 becomes <code>STALE</code> after membership was settled, so
+<p><strong>It should stay STALE — that is exactly the bug.</strong> Shard 2 took no part in
+this refit, so nothing gave it current weights, and the design is explicit that a completed refit
+is the only way back into the serving set. But
 <a href="https://github.com/NVIDIA-NeMo/RL/blob/5b4a732d9fcc2034381d146f752e4983d062bed3/nemo_rl/algorithms/single_controller.py#L2612"><code>_promote_refit_shards</code></a>
-sweeps it up at the end along with the shards that really were refitted. It asks only whether a
-shard is <code>STALE</code>, not whether it took part.</p>
+promotes every shard that is <code>STALE</code> when it runs, and
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/5b4a732d9fcc2034381d146f752e4983d062bed3/nemo_rl/models/generation/fleet_health.py#L467"><code>report_refit</code></a>
+takes the shard index on faith. Neither one checks participation, because until this PR nothing
+could turn a shard <code>STALE</code> in the middle of a refit — so "is STALE" and "was refitted"
+described the same set, and no check was needed.</p>
 
 <div class="warn">
 <p><strong>This is a live bug, raised in review and not yet fixed.</strong> The shard serves one
