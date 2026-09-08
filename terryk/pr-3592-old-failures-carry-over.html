@@ -203,6 +203,21 @@ pulled it out of service".</strong> It is written in
 <code>STALE</code> — so it never records <code>STALE</code> itself. That guard is deliberate: the
 field exists so a completed refit can put the shard <em>back</em> where it was, and "back to
 STALE" would say nothing.</p>
+<p><strong>It never decides whether a shard joins a refit.</strong> That is decided by the
+state on its own: <code>DEAD</code>, <code>RESTARTING</code> and <code>RETIRED</code> are
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/5b4a732d9fcc2034381d146f752e4983d062bed3/nemo_rl/models/generation/fleet_health.py#L70">treated as absent</a> and left out; <code>STALE</code> is not. A
+<code>STALE</code> shard takes part in the transfer normally — that is the only way it stops
+being stale. This field is read once, at the very
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/5b4a732d9fcc2034381d146f752e4983d062bed3/nemo_rl/algorithms/single_controller.py#L3107">end of a completed refit</a>, and only to pick which state the shard goes
+back to.</p>
+
+<p><strong>And it is not a shortcut back to HEALTHY — it is what makes that harder.</strong>
+Without it a suspect shard would go SUSPECT, then STALE when a refit aborts, then straight to
+HEALTHY when the next one lands, and its failure count would be wiped by a refit that had nothing
+to do with why it was failing. That count is the only thing that can catch an engine which
+answers health checks and still fails every request, so wiping it means such an engine is never
+caught. The field keeps the suspicion alive across the abort.</p>
+
 <p>That is why the third column still reads <code>SUSPECT</code>.
 <a href="https://github.com/NVIDIA-NeMo/RL/blob/5b4a732d9fcc2034381d146f752e4983d062bed3/nemo_rl/models/generation/fleet_health.py#L332"><code>condemn_silent_participant</code></a> moves the shard to
 <code>DEAD</code> and does not touch this field at all. Only one other line ever changes it:
@@ -315,6 +330,10 @@ self._transition(shard, ShardState.STALE)
 <span class="good">#   -> next refit: HEALTHY, streak 0</span></div>
 
 <div class="warn">
+<p><strong>The bug in one line: a guard built to survive one aborted refit also survives a new
+process.</strong> Keeping a suspicion across an abort is right — the engine is the same one, and
+it is still suspect. Keeping it across a restart is not: that engine is gone, and the record
+outlives it.</p>
 <p><strong>What this costs.</strong> One spurious condemnation, and it is not cheap: the shard is
 killed and reloaded again — minutes with a quarter of the fleet down — and one of its five
 restarts is spent, all triggered by a single unrelated failed request. It does not repeat, because
