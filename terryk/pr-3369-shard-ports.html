@@ -169,40 +169,70 @@ the wrong answer and the right answer are the same number.</p>
 
 <h2>The fix</h2>
 
-<p>Move the value onto the one object the actor actually reads. Same numbers as above.</p>
+<p>The catch is that <code>NemoGymConfig</code> has <strong>two</strong> separate places a port
+range can sit, both spelled <code>port_range_low</code>:</p>
 
-<div class="mono"><span class="cm"># today — build_nemo_gym_config()</span>
+<div class="mono">class NemoGymConfig(TypedDict):
+    port_range_low: NotRequired[int]     <span class="cm">(A) top level — the actor reads this one</span>
+    initial_global_config_dict: Dict     <span class="cm">(B) nested — this is what Gym is handed</span>
+</div>
+
+<p>The recipe's 15001 <em>is</em> passed, and it does arrive &mdash; in <strong>(B)</strong>.
+Nothing ever fills <strong>(A)</strong>. The actor reads (A), finds nothing, and writes its
+default on top of (B). Same numbers as the figure:</p>
+
+<div class="mono"><span class="cm"># today — build_nemo_gym_config() fills (B) only</span>
 nemo_gym_dict = dict(env_configs["nemo_gym"])   <span class="cm"># {"port_range_low": 15001, ...}</span>
 return NemoGymConfig(
     model_name=model_name,
-    initial_global_config_dict=nemo_gym_dict,   <span class="cm"># 15001 rides along in here ...</span>
-)                                               <span class="cm"># ... but no port_range_low field</span>
+    initial_global_config_dict=nemo_gym_dict,   <span class="cm">(B) = 15001 — the value is in here</span>
+)                                               <span class="cm">(A) never set</span>
 
-<span class="cm"># in the actor — _spinup()</span>
-low = self.cfg.get("port_range_low", 5000)      <span class="cm"># field absent  -> 5000  </span><span class="bad">the value dies here</span>
-initial_global_config_dict["port_range_low"] = low   <span class="cm"># 15001 overwritten by 5000</span>
+<span class="cm"># in the actor — _spinup() reads (A), then overwrites (B)</span>
+low = self.cfg.get("port_range_low", 5000)           <span class="cm">reads (A): unset  -> 5000</span>
+initial_global_config_dict["port_range_low"] = low   <span class="cm">writes (B): 15001 </span><span class="bad">-> 5000</span>
 </div>
+
+<p>So what is (B)'s copy for? It is the one <strong>Gym</strong> reads &mdash; Gym takes its port
+range from the config dict it is handed
+(<a href="https://github.com/NVIDIA-NeMo/Gym/blob/c3bac96314a59f28b896f597eb9845d175bb0252/nemo_gym/global_config.py#L773">global_config.py:773</a>).
+(B) is the destination, not a spare, and that last line is the deliberate handoff: publish
+NeMo-RL's decision into the dict Gym gets. The design is right. The value only sits in (B)
+beforehand because <code>nemo_gym_dict</code> starts life as the raw YAML block, so whatever the
+user typed is already in there &mdash; and the handoff then writes over it, with a default,
+because (A) was never filled.</p>
+
+<p>Two smaller consequences of the same empty (A). It is
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/b6bdd3303070669942e218e7596892c6fe64ef16/nemo_rl/environments/nemo_gym.py#L562-L564">also what picks the head server's own port</a>,
+so that lands in 5000&ndash;5999 too. And the
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/b6bdd3303070669942e218e7596892c6fe64ef16/nemo_rl/environments/nemo_gym.py#L596-L604">warning</a>
+for a range outside that default &mdash; which 15001&ndash;20000 is &mdash; never prints, because
+the value it checks has already fallen back to the default. The bug hides its own symptom.</p>
 <p class="sub">Lines above: <a href="https://github.com/NVIDIA-NeMo/RL/blob/b6bdd3303070669942e218e7596892c6fe64ef16/nemo_rl/environments/nemo_gym.py#L1214">nemo_gym.py:1214</a>,
 <a href="https://github.com/NVIDIA-NeMo/RL/blob/b6bdd3303070669942e218e7596892c6fe64ef16/nemo_rl/environments/nemo_gym.py#L1266-L1277">1266&ndash;1277</a>,
 <a href="https://github.com/NVIDIA-NeMo/RL/blob/b6bdd3303070669942e218e7596892c6fe64ef16/nemo_rl/environments/nemo_gym.py#L594-L606">594&ndash;606</a>.</p>
 
-<div class="mono"><span class="cm"># fixed — pop the range and pass it as a real field</span>
-low  = nemo_gym_dict.pop("port_range_low", 5000)    <span class="cm"># 15001</span>
+<p>The fix is to move the value out of (B) and into (A), and let the handoff put it back:</p>
+
+<div class="mono"><span class="cm"># fixed — take the range out of (B), pass it as a real field</span>
+low  = nemo_gym_dict.pop("port_range_low", 5000)    <span class="cm"># 15001, lifted out of (B)</span>
 high = nemo_gym_dict.pop("port_range_high", 5999)   <span class="cm"># 20000</span>
 return NemoGymConfig(
     model_name=model_name,
-    port_range_low=low,                             <span class="cm"># 15001  </span><span class="ok">now the actor can see it</span>
-    port_range_high=high,                           <span class="cm"># 20000</span>
+    port_range_low=low,                             <span class="cm">(A) = 15001 </span><span class="ok">the actor finds it</span>
+    port_range_high=high,
     initial_global_config_dict=nemo_gym_dict,
 )
 
 <span class="cm"># in the actor — unchanged code, different answer</span>
-low = self.cfg.get("port_range_low", 5000)          <span class="cm"># -> 15001  </span><span class="ok">survives</span>
+low = self.cfg.get("port_range_low", 5000)           <span class="cm">reads (A): </span><span class="ok">15001</span>
+initial_global_config_dict["port_range_low"] = low   <span class="cm">writes (B): </span><span class="ok">15001 — Gym gets it</span>
 </div>
 
-<p>The per-shard range then works for free: <code>apply_shard_overlay</code> already puts
-each shard's range into that shard's config, so once the actor stops overwriting it, every
-shard gets the ports it asked for.</p>
+<p>Nothing about the actor changes; the handoff finally has something to hand off. The
+per-shard range then works for free: <code>apply_shard_overlay</code> already puts each shard's
+range into that shard's config, so once the fallback stops firing, every shard gets the ports
+it asked for.</p>
 
 <div class="warn">
 <strong>So what.</strong> The per-shard port range in #3369 is dead on arrival &mdash; it is
