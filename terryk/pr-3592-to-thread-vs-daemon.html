@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NVIDIA-NeMo/RL #3592 — asyncio.to_thread vs a dedicated daemon thread</title>
+<style>
+:root{
+  --bg:#0d1117; --surface:#161b22; --surface2:#1c2128; --border:#30363d;
+  --text:#e6edf3; --dim:#8b949e; --accent:#58a6ff; --green:#3fb950;
+  --orange:#d29922; --red:#f85149; --purple:#bc8cff;
+}
+:root[data-theme="light"]{
+  --bg:#ffffff; --surface:#f6f8fa; --surface2:#eaeef2; --border:#d0d7de;
+  --text:#1f2328; --dim:#59636e; --accent:#0969da; --green:#1a7f37;
+  --orange:#9a6700; --red:#cf222e; --purple:#8250df;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:28px 20px 70px}
+h1{font-size:22px;margin:0 0 8px;line-height:1.3}
+h2{font-size:18px;margin:34px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;
+  font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
+.sub{color:var(--dim);font-size:13.5px;margin:0 0 16px}
+nav.chain{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 6px;padding:0}
+nav.chain a,nav.chain span{display:inline-block;padding:5px 11px;border:1px solid var(--border);
+  border-radius:20px;background:var(--surface);text-decoration:none;color:var(--accent);
+  font-size:12.5px;line-height:1.3;white-space:nowrap}
+nav.chain a:hover{background:var(--surface2)}
+nav.chain span.here{background:var(--accent);color:var(--bg);border-color:var(--accent);font-weight:600}
+p.chainnote{color:var(--dim);font-size:12px;margin:0 0 18px}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);
+  border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;
+  font:13px/1 ui-monospace,Menlo,monospace;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.18)}
+.mono{font:12.5px ui-monospace,SFMono-Regular,Menlo,monospace;
+  background:var(--surface);border:1px solid var(--border);border-radius:8px;
+  padding:13px;overflow-x:auto;white-space:pre}
+.mono .c{color:var(--dim)}
+.mono .bad{color:var(--red)}
+.mono .good{color:var(--green)}
+.mono a{color:var(--dim);text-decoration:none}
+.mono a:hover{color:var(--accent);text-decoration:underline}
+.warn{border-left:3px solid var(--red);background:var(--surface);
+  padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0}
+.hl{border-left:3px solid var(--green);background:var(--surface);
+  padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0}
+.note-box{border-left:3px solid var(--accent);background:var(--surface);
+  padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0}
+.cap{color:var(--dim);font-size:12.5px;margin:2px 0 20px}
+table{border-collapse:collapse;width:100%;margin:14px 0;font-size:13.5px}
+th,td{border:1px solid var(--border);padding:7px 10px;text-align:left;vertical-align:top}
+th{background:var(--surface2);font-weight:600}
+svg{max-width:100%;height:auto;display:block;margin:16px 0}
+svg .note{fill:var(--dim);font:11px -apple-system,sans-serif}
+svg .hdr{fill:var(--accent);font:bold 11.5px -apple-system,sans-serif}
+svg .lbl-b{fill:var(--text);font:bold 12.5px -apple-system,sans-serif}
+svg .bad{fill:var(--red);font:bold 11.5px -apple-system,sans-serif}
+svg .okn{fill:var(--green);font:bold 11.5px -apple-system,sans-serif}
+svg .work{fill:var(--accent);opacity:.3;stroke:var(--accent);stroke-width:1.2}
+svg .s-warn{fill:var(--orange);opacity:.42;stroke:var(--orange);stroke-width:1.2}
+svg .s-bad{fill:var(--red);opacity:.42;stroke:var(--red);stroke-width:1.2}
+svg .s-ok{fill:var(--green);opacity:.45;stroke:var(--green);stroke-width:1.2}
+svg .tick{stroke:var(--border);stroke-width:1;stroke-dasharray:3 3}
+svg .evt{stroke:var(--red);stroke-width:1.8}
+svg a text{text-decoration:underline;fill:var(--accent);font:11px ui-monospace,Menlo,monospace}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+  document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head>
+<body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+  function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+  function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
+    b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
+      else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+  document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+<div class="wrap">
+
+<h1>Why the restart needs its own thread, not asyncio.to_thread</h1>
+<p class="sub">Companion illustration for
+<a href="https://github.com/NVIDIA-NeMo/RL/pull/3592">NVIDIA-NeMo/RL #3592</a>.
+Permalinks pin the PR head <code>5b4a732</code>; stdlib quotes are CPython 3.13.</p>
+
+<nav class="chain">
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-3592-shard-comes-back.html">why it never came back</a>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-3592-what-gets-recreated.html">what gets recreated</a>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-3592-restart-timing.html">restart timing</a>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-3592-promoted-without-weights.html">promoted without weights</a>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-3592-old-failures-carry-over.html">old failures carry over</a>
+  <span class="here">to_thread vs daemon thread</span>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-3592-when-the-node-dies.html">when the node dies</a>
+</nav>
+<p class="chainnote">Seven pages on this PR, one question each — this one: why the choice of thread matters.</p>
+
+<p>Restarting an engine means blocking Ray calls that know nothing about asyncio, so the control
+loop cannot simply await them. Both ways of handling that put the work on a real thread, and
+<strong>both leave the event loop completely free</strong> — the rollout pump and the watchdog keep
+running either way. They differ only in what happens to that thread when the restart never
+finishes. Today the supervisor uses
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/5b4a732d9fcc2034381d146f752e4983d062bed3/nemo_rl/models/generation/engine_supervisor.py#L114"><code>asyncio.to_thread</code></a>;
+the trainer side of the same codebase already refuses to, and
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/5b4a732d9fcc2034381d146f752e4983d062bed3/nemo_rl/algorithms/single_controller.py#L2986">starts its own daemon thread instead</a>.</p>
+
+<svg viewBox="0 0 940 286" role="img" aria-label="Shutdown with a restart still running: a pooled non-daemon thread is joined with no timeout so the process never exits, while a daemon thread is skipped and the process exits normally">
+  <text class="hdr" x="120" y="18" text-anchor="middle">the run ends</text>
+  <text class="hdr" x="420" y="18" text-anchor="middle">asyncio.run waits 300s, warns, gives up</text>
+  <text class="hdr" x="660" y="18" text-anchor="middle">_python_exit joins</text>
+  <text class="hdr" x="866" y="18" text-anchor="middle">process exits</text>
+  <line class="tick" x1="120" y1="26" x2="120" y2="196"/>
+  <line class="evt"  x1="660" y1="26" x2="660" y2="196"/>
+  <line class="tick" x1="820" y1="26" x2="820" y2="196"/>
+
+  <text class="lbl-b" x="14" y="52">to_thread</text>
+  <text class="note"  x="14" y="68">pooled, not a daemon</text>
+  <rect class="work"   x="120" y="42" width="180" height="26" rx="5"/>
+  <text class="note" x="210" y="59" text-anchor="middle">restart_shard still running</text>
+  <rect class="s-warn" x="300" y="42" width="360" height="26" rx="5"/>
+  <text class="note" x="480" y="59" text-anchor="middle">300s stall, then a RuntimeWarning</text>
+  <rect class="s-bad"  x="660" y="42" width="266" height="26" rx="5"/>
+  <text class="note" x="793" y="59" text-anchor="middle">joined with no timeout — never returns</text>
+  <text class="bad" x="14" y="92">the process never exits, and the GPUs stay held</text>
+
+  <text class="lbl-b" x="14" y="132">dedicated thread</text>
+  <text class="note"  x="14" y="148">daemon=True</text>
+  <rect class="work"  x="120" y="122" width="540" height="26" rx="5"/>
+  <text class="note" x="390" y="139" text-anchor="middle">restart_shard still running — the wait already timed out and marked the shard failed</text>
+  <rect class="s-ok"  x="820" y="122" width="106" height="26" rx="5"/>
+  <text class="note" x="873" y="139" text-anchor="middle">exits</text>
+  <text class="okn" x="14" y="172">not joined — daemon threads are skipped, so the process exits and the GPUs come back</text>
+
+  <text class="note" x="14" y="216">Both rows keep the event loop free the whole time. The only difference is the thread each one runs on, and whether</text>
+  <text class="note" x="14" y="232">the interpreter waits for it. A stuck restart never returns to the pool's queue, so the sentinel that asks it to stop is never seen.</text>
+
+  <rect class="work"  x="14"  y="248" width="18" height="12" rx="2"/>
+  <text class="note" x="40"  y="258">the restart, still running</text>
+  <rect class="s-warn" x="215" y="248" width="18" height="12" rx="2"/>
+  <text class="note" x="241" y="258">waiting on it</text>
+  <rect class="s-bad" x="350" y="248" width="18" height="12" rx="2"/>
+  <text class="note" x="376" y="258">stuck forever</text>
+  <rect class="s-ok"  x="490" y="248" width="18" height="12" rx="2"/>
+  <text class="note" x="516" y="258">clean exit</text>
+</svg>
+
+<h2>The same function, both ways</h2>
+
+<div class="mono"><span class="c"># today — engine_supervisor.py</span>
+async def _restart(self, shard_idx: int) -> None:
+    try:
+        <span class="c"># Borrows a worker from the event loop's DEFAULT ThreadPoolExecutor,</span>
+        <span class="c"># shared by every to_thread in the process and capped at min(32, cpus+4).</span>
+        <span class="c"># The loop is free while we wait. No timeout, and no way to add one</span>
+        <span class="c"># that helps -- see below.</span>
+        url = await asyncio.to_thread(self._generation.restart_shard, shard_idx)
+    except Exception as e:
+        self._monitor.mark_restart_failed(shard_idx)
+        return
+    self._monitor.mark_loaded(shard_idx, base_url=url)</div>
+
+<div class="mono"><span class="c"># the pattern already used by _sync_weights_within in this repo</span>
+async def _restart(self, shard_idx: int, budget_s: float) -> None:
+    loop = asyncio.get_running_loop()
+    settled: asyncio.Future = loop.create_future()
+
+    def _settle(setter, value) -> None:
+        <span class="c"># wait_for cancels `settled` on timeout, and setting a result on a</span>
+        <span class="c"># cancelled future raises InvalidStateError inside the loop callback.</span>
+        if not settled.done():
+            setter(value)
+
+    def _run() -> None:
+        <span class="c"># Runs on OUR thread. Results cross back via call_soon_threadsafe,</span>
+        <span class="c"># because a Future may only be touched from the loop's own thread.</span>
+        try:
+            url = self._generation.restart_shard(shard_idx)
+        except BaseException as exc:
+            loop.call_soon_threadsafe(_settle, settled.set_exception, exc)
+        else:
+            loop.call_soon_threadsafe(_settle, settled.set_result, url)
+
+    <span class="good">threading.Thread(target=_run, name=f"gen-restart-{shard_idx}", daemon=True).start()</span>
+
+    try:
+        url = await asyncio.wait_for(settled, budget_s)     <span class="good"># bounded</span>
+    except asyncio.TimeoutError:
+        self._monitor.mark_restart_failed(shard_idx)        <span class="good"># counts as a failure</span>
+        return
+    self._monitor.mark_loaded(shard_idx, base_url=url)</div>
+
+<table>
+<tr><th></th><th><code>to_thread</code></th><th>dedicated daemon thread</th></tr>
+<tr><td>Event loop blocked?</td><td>No</td><td>No — <em>identical</em></td></tr>
+<tr><td>Thread comes from</td><td>the shared default pool, capped at <code>min(32, cpus+4)</code></td><td>created for this one call</td></tr>
+<tr><td>Daemon?</td><td><strong>No</strong> — the process waits for it at exit</td><td><strong>Yes</strong> — the process does not</td></tr>
+<tr><td>Wait bounded?</td><td>not as written</td><td><code>wait_for(budget_s)</code></td></tr>
+<tr><td>A hang costs</td><td>a pool slot forever, and shutdown</td><td>one thread, and a recorded failure</td></tr>
+</table>
+
+<h2>Why a timeout on to_thread is not enough</h2>
+
+<p>The obvious repair is <code>await asyncio.wait_for(asyncio.to_thread(...), 900)</code>. It does
+bound the wait. It does not fix anything else, because <strong>a thread in Python cannot be
+cancelled.</strong> The timeout abandons the <em>await</em>; the thread keeps running
+<code>restart_shard</code> for as long as it wants. So one pool slot is gone for the rest of the
+run, and the thread is still not a daemon, so shutdown still waits for it.</p>
+
+<p>That is the whole reason the fix is three things at once: <strong>dedicated</strong> (does not
+eat a shared slot), <strong>daemon</strong> (cannot hold up exit), and <strong>bounded</strong>
+(the shard is marked failed instead of vanishing).</p>
+
+<div class="note-box">
+<p><strong>What "daemon" actually means.</strong> Python does not exit when your code finishes. It
+first runs <code>threading._shutdown</code>, whose own comment reads <em>"Wait for all non-daemon
+threads to exit."</em> So the flag answers exactly one question: does the process wait for this
+thread before exiting? <code>daemon=True</code> means no — the interpreter exits and the thread
+dies wherever it happens to be.</p>
+<p>And the join really is unbounded. <code>concurrent.futures.thread</code> registers an exit hook
+that puts a stop-sentinel on each worker's queue and then calls <code>t.join()</code> with no
+timeout. A worker only checks that queue <em>between</em> work items, so a thread stuck inside
+<code>restart_shard</code> never sees the sentinel and the join never returns.</p>
+</div>
+
+<div class="warn">
+<p><strong>Why this matters for a restart specifically.</strong> A model reload takes minutes, and
+the restart is aimed at a shard that may be on a node that is never coming back — so "this call
+might never return" is the expected case, not the unlucky one. That makes it the worst call in the
+feature to run on a shared, non-daemon, unbounded thread. The cost is a training job that has
+already given up on a shard but cannot put its GPUs down.</p>
+</div>
+
+</div>
+</body>
+</html>
