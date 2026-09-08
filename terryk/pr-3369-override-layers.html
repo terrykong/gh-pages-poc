@@ -1,0 +1,191 @@
+<title>Shard overrides vs the claim rule</title>
+<style>
+:root{
+  --bg:#0d1117; --surface:#161b22; --surface2:#1c2128; --border:#30363d;
+  --text:#e6edf3; --dim:#8b949e; --accent:#58a6ff; --green:#3fb950;
+  --orange:#d29922; --red:#f85149;
+}
+:root[data-theme="light"]{
+  --bg:#ffffff; --surface:#f6f8fa; --surface2:#eaeef2; --border:#d0d7de;
+  --text:#1f2328; --dim:#59636e; --accent:#0969da; --green:#1a7f37;
+  --orange:#9a6700; --red:#cf222e;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:28px 20px 70px}
+h1{font-size:22px;margin:0 0 8px;line-height:1.3}
+h2{font-size:18px;margin:32px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;
+  font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
+.sub{color:var(--dim);font-size:13.5px;margin:0 0 10px}
+nav.chain{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 6px;padding:0}
+nav.chain a,nav.chain span{display:inline-block;padding:5px 11px;border:1px solid var(--border);
+  border-radius:20px;background:var(--surface);text-decoration:none;color:var(--accent);
+  font-size:12.5px;line-height:1.3;white-space:nowrap}
+nav.chain a:hover{background:var(--surface2)}
+nav.chain span.here{background:var(--accent);color:var(--bg);border-color:var(--accent);font-weight:600}
+p.chainnote{color:var(--dim);font-size:12px;margin:0 0 18px}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);
+  border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;
+  font:13px/1 ui-monospace,Menlo,monospace;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.18)}
+.mono{font:12.5px ui-monospace,SFMono-Regular,Menlo,monospace;
+  background:var(--surface);border:1px solid var(--border);border-radius:8px;
+  padding:13px;overflow-x:auto;white-space:pre;line-height:1.55}
+.warn{border-left:3px solid var(--red);background:var(--surface);
+  padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0}
+.cm{color:var(--dim)}
+.ok{color:var(--green);font-weight:700}
+.bad{color:var(--red);font-weight:700}
+svg{max-width:100%;height:auto;display:block;margin:16px 0}
+svg .panel{fill:var(--surface);stroke:var(--border);stroke-width:1.4}
+svg .cell{fill:none;stroke:var(--border);stroke-width:1.2}
+svg .lbl{fill:var(--text);font:12.5px ui-monospace,Menlo,monospace}
+svg .note{fill:var(--dim);font:11.5px -apple-system,sans-serif}
+svg .hdr{fill:var(--accent);font:bold 12.5px -apple-system,sans-serif}
+svg .yes{fill:var(--green);opacity:.16;stroke:var(--green);stroke-width:1.3}
+svg .leak{fill:var(--red);opacity:.16;stroke:var(--red);stroke-width:1.3}
+svg .t-yes{fill:var(--green);font:bold 12px ui-monospace,Menlo,monospace}
+svg .t-leak{fill:var(--red);font:bold 12px ui-monospace,Menlo,monospace}
+svg .t-non{fill:var(--dim);font:12px ui-monospace,Menlo,monospace}
+svg .arr-bad{stroke:var(--red);stroke-width:2;fill:none}
+svg a text{text-decoration:underline;fill:var(--accent);font:11.5px ui-monospace,Menlo,monospace}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+  document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+  function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+  function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
+    b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
+      else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+  document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+<div class="wrap">
+
+<h1>How an override can put a Gym server on a shard that never asked for it</h1>
+<p class="sub">Companion note for
+<a href="https://github.com/NVIDIA-NeMo/RL/pull/3369">NVIDIA-NeMo/RL #3369</a>
+(define shard configuration). All permalinks pin the PR head <code>b6bdd33</code>.</p>
+
+<nav class="chain">
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-3369-shard-ports.html">port range</a>
+  <span class="here">override layers</span>
+</nav>
+<p class="chainnote">Two pages on this PR, one question each — this one: what the override layers are allowed to override.</p>
+
+<p>Sharding splits one NeMo-Gym config across several actors. The config's top-level
+dict-shaped keys are its <em>entries</em> &mdash; each one is a server Gym will start. Every entry
+must be claimed by exactly one shard, and
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/b6bdd3303070669942e218e7596892c6fe64ef16/nemo_rl/environments/nemo_gym_shards.py#L286-L322"><code>parse_shard_plan</code> enforces that</a>:
+an unclaimed entry is an error, and two shards claiming one entry is an error. Then
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/b6bdd3303070669942e218e7596892c6fe64ef16/nemo_rl/environments/nemo_gym_shards.py#L360-L372"><code>apply_shard_overlay</code></a>
+merges two more layers on top of the claimed set &mdash; <code>common_overrides</code> and the
+shard's own <code>overrides</code> &mdash; and checks neither against those claims.</p>
+
+<h2>Two shards, three entries, one leak</h2>
+
+<svg viewBox="0 0 940 356" role="img" aria-label="A config with two shards and three entries; common_overrides puts code_gen on the shard that never claimed it.">
+  <text class="hdr" x="24" y="20">the config</text>
+  <rect class="panel" x="24" y="30" width="352" height="182" rx="8"/>
+  <text class="lbl" x="38" y="52">common_inherited_overlays:</text>
+  <text class="lbl" x="38" y="70">  - policy_model</text>
+  <text class="lbl" x="38" y="92">shards:</text>
+  <text class="lbl" x="38" y="110">  - name: math</text>
+  <text class="lbl" x="38" y="128">    inherited_overlays: [math_env]</text>
+  <text class="lbl" x="38" y="146">  - name: code</text>
+  <text class="lbl" x="38" y="164">    inherited_overlays: [code_gen]</text>
+  <text class="t-leak" x="38" y="190">common_overrides:</text>
+  <text class="t-leak" x="38" y="204">  code_gen: {num_workers: 64}</text>
+
+  <text class="hdr" x="410" y="20">what each shard ends up running</text>
+  <text class="lbl" x="556" y="48">shard: math</text>
+  <text class="lbl" x="726" y="48">shard: code</text>
+
+  <text class="lbl" x="410" y="82">policy_model</text>
+  <rect class="yes" x="546" y="64" width="150" height="26" rx="5"/>
+  <text class="t-yes" x="566" y="82">claimed</text>
+  <rect class="yes" x="712" y="64" width="150" height="26" rx="5"/>
+  <text class="t-yes" x="732" y="82">claimed</text>
+
+  <text class="lbl" x="410" y="122">math_env</text>
+  <rect class="yes" x="546" y="104" width="150" height="26" rx="5"/>
+  <text class="t-yes" x="566" y="122">claimed</text>
+  <rect class="cell" x="712" y="104" width="150" height="26" rx="5"/>
+  <text class="t-non" x="732" y="122">not here</text>
+
+  <text class="lbl" x="410" y="162">code_gen</text>
+  <rect class="leak" x="546" y="144" width="150" height="26" rx="5"/>
+  <text class="t-leak" x="566" y="162">NOT claimed</text>
+  <rect class="yes" x="712" y="144" width="150" height="26" rx="5"/>
+  <text class="t-yes" x="732" y="162">claimed</text>
+
+  <path class="arr-bad" d="M300 210 C 380 250, 470 210, 560 176" marker-end="url(#r)"/>
+  <text class="t-leak" x="352" y="246">common_overrides applies to every shard,</text>
+  <text class="t-leak" x="352" y="262">so code_gen lands on math too</text>
+
+  <rect x="24" y="288" width="14" height="14" rx="3" class="yes"/>
+  <text class="note" x="46" y="299">the shard claimed this entry, so it runs it</text>
+  <rect x="330" y="288" width="14" height="14" rx="3" class="leak"/>
+  <text class="note" x="352" y="299">a startable server the shard never claimed</text>
+  <text class="note" x="24" y="330">The math shard now starts a second Gym server it was never sized for. Nothing in the parser objects.</text>
+
+  <defs>
+    <marker id="r" markerWidth="9" markerHeight="9" refX="7" refY="3.2" orient="auto">
+      <path d="M0,0 L7,3.2 L0,6.4 z" fill="var(--red)"/></marker>
+  </defs>
+</svg>
+
+<p>The parser has already decided <code>code_gen</code> belongs to the <code>code</code> shard.
+The merge then puts it on <code>math</code> as well, and <code>code_gen</code> carries an
+<code>entrypoint</code>, so it is a real server that starts. Under
+<a href="https://github.com/NVIDIA-NeMo/RL/pull/3371">#3371</a> you find out only after every
+actor is already up &mdash; that is when the agent-to-shard map is built and raises &mdash; so
+you pay the whole multi-node startup first.</p>
+
+<p>The same two layers drop one key on the floor. A <code>config_paths</code> written into
+<code>overrides</code> is
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/b6bdd3303070669942e218e7596892c6fe64ef16/nemo_rl/environments/nemo_gym_shards.py#L374">overwritten by the shard's own list</a>
+with no warning, while <code>port_range_low</code> and <code>port_range_high</code> written into
+the very same layer
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/b6bdd3303070669942e218e7596892c6fe64ef16/nemo_rl/environments/nemo_gym_shards.py#L375-L377">do take effect</a>.
+One layer, two behaviours, neither written down.</p>
+
+<h2>The fix</h2>
+
+<p>Check both layers against the claims the parser already computed, in
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/b6bdd3303070669942e218e7596892c6fe64ef16/nemo_rl/environments/nemo_gym_shards.py#L286-L322"><code>parse_shard_plan</code></a>,
+so the run stops before any actor starts. Same config as the figure:</p>
+
+<div class="mono"><span class="cm"># the parser already knows this by the time the claim checks finish</span>
+claims = {"policy_model": "common", "math_env": "math", "code_gen": "code"}
+
+<span class="cm"># 1. an override layer naming an entry that a different shard claims</span>
+<span class="cm">#    common_overrides sets code_gen; claims say code_gen -> shard 'code'</span>
+raise ShardConfigError(
+    "common_overrides sets Gym entry 'code_gen', which shard 'code' claims. "
+    "Move it under that shard's 'overrides'."
+)
+
+<span class="cm"># 2. config_paths written into an override layer</span>
+<span class="cm">#    shard 'math' overrides: {config_paths: [x.yaml]} — dropped silently today</span>
+raise ShardConfigError(
+    "shard 'math' sets 'config_paths' in 'overrides'; use the shard's own "
+    "config_paths field."
+)
+</div>
+
+<p>Both are cheap: the parser holds <code>claims</code> and the entry list already, and
+neither check needs a Gym import or a running actor.</p>
+
+<div class="warn">
+<strong>So what.</strong> The parser guarantees each Gym entry is claimed by exactly one shard,
+then two later layers are free to break that guarantee &mdash; quietly. Today the cost is a
+wasted multi-node startup before <a href="https://github.com/NVIDIA-NeMo/RL/pull/3371">#3371</a>
+notices; a <code>config_paths</code> in the same layer is dropped and never noticed at all.
+Validating both layers where the claims are computed turns both into a setup-time error, and
+writes down what an override is actually allowed to set.
+</div>
+
+</div>
