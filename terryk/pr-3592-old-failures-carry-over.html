@@ -95,7 +95,7 @@ reason written next to them: <em>"carrying that count into a fresh engine would 
 unlucky probe re-condemn it immediately, burning a restart attempt for nothing."</em> That reason
 is right. It also applies to two fields it does not clear.</p>
 
-<svg viewBox="0 0 940 300" role="img" aria-label="A per-shard record traced across five events; the restart clears the URL and the probe counters but leaves the failure streak and the earlier verdict in place, so the next refit brings the new engine back as suspect">
+<svg viewBox="0 0 940 316" role="img" aria-label="A per-shard record traced across five events; the restart clears the URL and the probe counters but leaves the failure streak and the earlier verdict in place, so the next refit brings the new engine back as suspect">
   <text class="chdr" x="276" y="16" text-anchor="middle">shard 1 fails 2 requests</text>
   <a href="https://github.com/NVIDIA-NeMo/RL/blob/5b4a732d9fcc2034381d146f752e4983d062bed3/nemo_rl/models/generation/fleet_health.py#L351" target="_blank" rel="noopener">
     <text x="276" y="31" text-anchor="middle">report_failure</text></a>
@@ -174,16 +174,36 @@ is right. It also applies to two fields it does not clear.</p>
   <rect class="cell-n"   x="780" y="172" width="144" height="26" rx="4"/>
   <text class="cval" x="852" y="190" text-anchor="middle">the new port</text>
 
-  <text class="note" x="14" y="222">At the fourth column the process is destroyed and a new one takes over. mark_loaded picks up the new port and clears the two probe counters,</text>
-  <text class="note" x="14" y="238">then leaves the rest. So the next completed refit reads a verdict, and a failure count, that belong to a process that no longer exists.</text>
+  <text class="note" x="14" y="222">state_before_partial is not a history of the state row above. Only the second column ever writes it, and after that it just sits there.</text>
+  <text class="note" x="14" y="238">At the fourth column the process is destroyed and a new one takes over. mark_loaded picks up the new port and clears the two probe counters,</text>
+  <text class="note" x="14" y="254">then leaves the rest. So the next completed refit reads a verdict, and a failure count, that belong to a process that no longer exists.</text>
 
-  <rect class="cell-bad" x="14"  y="252" width="18" height="12" rx="2"/>
-  <text class="note" x="40"  y="262">still the dead engine's — should have been cleared</text>
-  <rect class="cell-ok"  x="330" y="252" width="18" height="12" rx="2"/>
-  <text class="note" x="356" y="262">correctly updated for the new process</text>
+  <rect class="cell-bad" x="14"  y="268" width="18" height="12" rx="2"/>
+  <text class="note" x="40"  y="278">still the dead engine's — should have been cleared</text>
+  <rect class="cell-ok"  x="330" y="268" width="18" height="12" rx="2"/>
+  <text class="note" x="356" y="278">correctly updated for the new process</text>
 </svg>
 <p class="cap">Shard 1 of four. The thresholds are the shipped defaults: three failed requests in
 a row condemn a shard, and a shard gets five restarts before it is retired for good.</p>
+
+<div class="note-box">
+<p><strong>"Partial" is about the weights, not the state.</strong> A refit is a weight transfer
+from the trainer to the engines. If one is aborted halfway, every engine that was receiving is
+left holding a mix of old and new weights — a partly-applied update.
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/5b4a732d9fcc2034381d146f752e4983d062bed3/nemo_rl/models/generation/fleet_health.py#L429"><code>mark_weights_partial</code></a> is what records that, by moving the
+shard to <code>STALE</code> so it stays in the next refit but serves nothing meanwhile.</p>
+<p><strong>So <code>state_before_partial</code> means "what this shard was before the abort
+pulled it out of service".</strong> It is written in
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/5b4a732d9fcc2034381d146f752e4983d062bed3/nemo_rl/models/generation/fleet_health.py#L450">exactly one place</a> — that function, and only when the shard is not already
+<code>STALE</code> — so it never records <code>STALE</code> itself. That guard is deliberate: the
+field exists so a completed refit can put the shard <em>back</em> where it was, and "back to
+STALE" would say nothing.</p>
+<p>That is why the third column still reads <code>SUSPECT</code>.
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/5b4a732d9fcc2034381d146f752e4983d062bed3/nemo_rl/models/generation/fleet_health.py#L332"><code>condemn_silent_participant</code></a> moves the shard to
+<code>DEAD</code> and does not touch this field at all. Only one other line ever changes it:
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/5b4a732d9fcc2034381d146f752e4983d062bed3/nemo_rl/models/generation/fleet_health.py#L472"><code>report_refit</code></a>, which reads it and clears it in the same
+breath. Nothing in between — not the restart — resets it, which is the whole bug.</p>
+</div>
 
 <h2>This is guaranteed on that path, not unlucky timing</h2>
 
