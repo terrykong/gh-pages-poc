@@ -86,6 +86,39 @@ shard's own <code>overrides</code> &mdash; and checks neither against those clai
 
 <h2>How code_gen reaches a shard that never claimed it</h2>
 
+<p>Here is the config the figure walks through. Three entries, two shards, and one line
+that causes the whole problem:</p>
+
+<div class="mono"><span class="cm"># three entries — each a complete server definition</span>
+policy_model: {responses_api_models: {vllm:     {entrypoint: ...}}}
+math_env:     {resources_servers:    {math_env: {entrypoint: ...}}}
+code_gen:     {resources_servers:    {code_gen: {entrypoint: ...}}}
+
+common_inherited_overlays: [policy_model]   <span class="cm"># claimed by every shard</span>
+shards:
+  - name: math
+    inherited_overlays: [math_env]          <span class="cm"># math claims math_env</span>
+  - name: code
+    inherited_overlays: [code_gen]          <span class="cm"># code claims code_gen</span>
+
+common_overrides:
+  code_gen: {resources_servers: {code_gen: {entrypoint: ...}}}   <span class="bad">&lt;- the mistake</span>
+</div>
+
+<p><strong>Why <code>code_gen</code> and not <code>math_env</code>?</strong> Nothing here is
+automatic. <code>common_overrides</code> is a block you write by hand, and it is merged into
+every shard exactly as written. <code>code_gen</code> is named in it, so <code>code_gen</code>
+goes to every shard. <code>math_env</code> is not named in it, so it stays where it was claimed.
+Swap the two names and the leak swaps direction. The layer does not know or care which shard
+claimed what &mdash; that is the whole problem.</p>
+
+<p>Writing it there is an easy mistake to make: you want <code>code_gen</code> tuned, or present,
+across the job, and <code>common_overrides</code> reads like the place for that. The accounted-for
+way to say it is <code>common_inherited_overlays</code>, with
+<code>allowed_duplicate_entries</code> when an entry really should appear on more than one shard.
+Both of those go through the claim check. <code>common_overrides</code> does not.</p>
+
+
 <svg viewBox="0 0 940 416" role="img" aria-label="The four merge layers that build one shard's config. Only the second layer checks which entries the shard claimed.">
   <text class="hdr" x="24" y="20">building the Gym config for shard &quot;math&quot;</text>
   <text class="hdr" x="478" y="20">entries this layer adds</text>
@@ -112,7 +145,7 @@ shard's own <code>overrides</code> &mdash; and checks neither against those clai
   <text class="t-leak" x="42" y="207">merged in whole — nothing checks it against the claims</text>
   <rect class="leak" x="478" y="170" width="86" height="26" rx="5"/>
   <text class="t-leak" x="490" y="188">code_gen</text>
-  <text class="note" x="578" y="188">put straight back, one layer later</text>
+  <text class="note" x="578" y="188">the whole entry, put back one layer later</text>
 
   <rect class="panel" x="24" y="230" width="430" height="56" rx="8"/>
   <text class="lbl" x="42" y="254">4  shard.overrides</text>
@@ -143,7 +176,7 @@ shard's own <code>overrides</code> &mdash; and checks neither against those clai
   </defs>
 </svg>
 
-<p>The config behind the figure: <code>common_inherited_overlays: [policy_model]</code>, a <code>math</code> shard claiming <code>math_env</code>, a <code>code</code> shard claiming <code>code_gen</code>, and <code>common_overrides: {code_gen: {num_workers: 64}}</code>. The merge is four dictionaries stacked in order, and only the second was built from the claim list. The third and fourth are whatever the user wrote, copied in whole — so naming an entry there puts it back on every shard, one layer after the claim rule took it out. <code>code_gen</code> carries an <code>entrypoint</code>, so on <code>math</code> it is a real server that starts. Under <a href="https://github.com/NVIDIA-NeMo/RL/pull/3371">#3371</a> you find out only once every actor is already up, which is when the agent-to-shard map is built and raises — so you pay the whole multi-node startup first.</p>
+<p>Because the block names a whole entry and not just a setting inside one, what lands on <code>math</code> is a complete server definition with its own <code>entrypoint</code> &mdash; so <code>math</code> starts a second Gym server it was never sized for. (Name only a setting, say <code>code_gen: {num_workers: 64}</code>, and <code>math</code> instead gains a stray <code>code_gen</code> key holding just that setting, which Gym ignores because it is not shaped like a server. The shard that claimed <code>code_gen</code> gets the tweak correctly either way.) Under <a href="https://github.com/NVIDIA-NeMo/RL/pull/3371">#3371</a> the unclaimed server is caught only once every actor is already up, which is when the agent-to-shard map is built and raises &mdash; so you pay the whole multi-node startup first.</p>
 
 <p>The same two layers drop one key on the floor. A <code>config_paths</code> written into
 <code>overrides</code> is
