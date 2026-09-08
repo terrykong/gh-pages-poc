@@ -84,52 +84,58 @@ an unclaimed entry is an error, and two shards claiming one entry is an error. T
 merges two more layers on top of the claimed set &mdash; <code>common_overrides</code> and the
 shard's own <code>overrides</code> &mdash; and checks neither against those claims.</p>
 
-<h2>Two shards, three entries, one leak</h2>
+<h2>How code_gen reaches a shard that never claimed it</h2>
 
-<svg viewBox="0 0 940 356" role="img" aria-label="A config with two shards and three entries; common_overrides puts code_gen on the shard that never claimed it.">
-  <text class="hdr" x="24" y="20">the config</text>
-  <rect class="panel" x="24" y="30" width="352" height="182" rx="8"/>
-  <text class="lbl" x="38" y="52">common_inherited_overlays:</text>
-  <text class="lbl" x="38" y="70">  - policy_model</text>
-  <text class="lbl" x="38" y="92">shards:</text>
-  <text class="lbl" x="38" y="110">  - name: math</text>
-  <text class="lbl" x="38" y="128">    inherited_overlays: [math_env]</text>
-  <text class="lbl" x="38" y="146">  - name: code</text>
-  <text class="lbl" x="38" y="164">    inherited_overlays: [code_gen]</text>
-  <text class="t-leak" x="38" y="190">common_overrides:</text>
-  <text class="t-leak" x="38" y="204">  code_gen: {num_workers: 64}</text>
+<svg viewBox="0 0 940 432" role="img" aria-label="The four merge layers that build one shard's config. Only the second layer checks which entries the shard claimed.">
+  <text class="hdr" x="24" y="20">building the Gym config for shard &quot;math&quot;</text>
+  <text class="hdr" x="478" y="20">entries this layer adds</text>
 
-  <text class="hdr" x="410" y="20">what each shard ends up running</text>
-  <text class="lbl" x="556" y="48">shard: math</text>
-  <text class="lbl" x="726" y="48">shard: code</text>
+  <rect class="panel" x="24" y="32" width="430" height="56" rx="8"/>
+  <text class="lbl" x="42" y="56">1  shared_base</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/b6bdd3303070669942e218e7596892c6fe64ef16/nemo_rl/environments/nemo_gym_shards.py#L355-L359"><text x="236" y="56">shards.py:355-359</text></a>
+  <text class="note" x="42" y="75">keeps everything that is not an entry — all three are dropped</text>
+  <text class="t-non" x="478" y="64">none — the base is stripped of entries</text>
 
-  <text class="lbl" x="410" y="82">policy_model</text>
-  <rect class="yes" x="546" y="64" width="150" height="26" rx="5"/>
-  <text class="t-yes" x="566" y="82">claimed</text>
-  <rect class="yes" x="712" y="64" width="150" height="26" rx="5"/>
-  <text class="t-yes" x="732" y="82">claimed</text>
+  <rect class="panel" x="24" y="98" width="430" height="56" rx="8"/>
+  <text class="lbl" x="42" y="122">2  selected_inherited</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/b6bdd3303070669942e218e7596892c6fe64ef16/nemo_rl/environments/nemo_gym_shards.py#L360-L363"><text x="236" y="122">shards.py:360-363</text></a>
+  <text class="t-yes" x="42" y="141">puts back only what math claims — the claim rule lives here</text>
+  <rect class="yes" x="478" y="104" width="112" height="26" rx="5"/>
+  <text class="t-yes" x="490" y="122">policy_model</text>
+  <rect class="yes" x="598" y="104" width="86" height="26" rx="5"/>
+  <text class="t-yes" x="610" y="122">math_env</text>
+  <text class="note" x="478" y="147">code_gen correctly left out — math never claimed it</text>
 
-  <text class="lbl" x="410" y="122">math_env</text>
-  <rect class="yes" x="546" y="104" width="150" height="26" rx="5"/>
-  <text class="t-yes" x="566" y="122">claimed</text>
-  <rect class="cell" x="712" y="104" width="150" height="26" rx="5"/>
-  <text class="t-non" x="732" y="122">not here</text>
+  <rect class="panel" x="24" y="164" width="430" height="56" rx="8"/>
+  <text class="lbl" x="42" y="188">3  common_overrides</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/b6bdd3303070669942e218e7596892c6fe64ef16/nemo_rl/environments/nemo_gym_shards.py#L368"><text x="236" y="188">shards.py:368</text></a>
+  <text class="t-leak" x="42" y="207">merged in whole — nothing checks it against the claims</text>
+  <rect class="leak" x="478" y="170" width="86" height="26" rx="5"/>
+  <text class="t-leak" x="490" y="188">code_gen</text>
+  <text class="note" x="578" y="188">put straight back, one layer later</text>
 
-  <text class="lbl" x="410" y="162">code_gen</text>
-  <rect class="leak" x="546" y="144" width="150" height="26" rx="5"/>
-  <text class="t-leak" x="566" y="162">NOT claimed</text>
-  <rect class="yes" x="712" y="144" width="150" height="26" rx="5"/>
-  <text class="t-yes" x="732" y="162">claimed</text>
+  <rect class="panel" x="24" y="230" width="430" height="56" rx="8"/>
+  <text class="lbl" x="42" y="254">4  shard.overrides</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/b6bdd3303070669942e218e7596892c6fe64ef16/nemo_rl/environments/nemo_gym_shards.py#L369"><text x="236" y="254">shards.py:369</text></a>
+  <text class="note" x="42" y="273">merged in whole too — empty in this example</text>
+  <text class="t-non" x="478" y="262">none</text>
 
-  <path class="arr-bad" d="M300 210 C 380 250, 470 210, 560 176" marker-end="url(#r)"/>
-  <text class="t-leak" x="352" y="246">common_overrides applies to every shard,</text>
-  <text class="t-leak" x="352" y="262">so code_gen lands on math too</text>
+  <path class="arr-bad" d="M700 190 C 762 190, 774 214, 774 300" marker-end="url(#r)"/>
 
-  <rect x="24" y="288" width="14" height="14" rx="3" class="yes"/>
-  <text class="note" x="46" y="299">the shard claimed this entry, so it runs it</text>
-  <rect x="330" y="288" width="14" height="14" rx="3" class="leak"/>
-  <text class="note" x="352" y="299">a startable server the shard never claimed</text>
-  <text class="note" x="24" y="330">The math shard now starts a second Gym server it was never sized for. Nothing in the parser objects.</text>
+  <text class="hdr" x="24" y="316">what shard &quot;math&quot; ends up running</text>
+  <rect class="yes" x="24" y="326" width="112" height="26" rx="5"/>
+  <text class="t-yes" x="36" y="344">policy_model</text>
+  <rect class="yes" x="144" y="326" width="86" height="26" rx="5"/>
+  <text class="t-yes" x="156" y="344">math_env</text>
+  <rect class="leak" x="238" y="326" width="86" height="26" rx="5"/>
+  <text class="t-leak" x="250" y="344">code_gen</text>
+  <text class="t-leak" x="336" y="344">a server it never claimed, and was not sized for</text>
+
+  <rect x="24" y="376" width="14" height="14" rx="3" class="yes"/>
+  <text class="note" x="46" y="387">added because this shard claimed it</text>
+  <rect x="330" y="376" width="14" height="14" rx="3" class="leak"/>
+  <text class="note" x="352" y="387">added with no claim check</text>
+  <text class="note" x="24" y="414">Layer 2 is the only one that looks at claims. Layers 3 and 4 are copied in whole, so an entry named there comes back.</text>
 
   <defs>
     <marker id="r" markerWidth="9" markerHeight="9" refX="7" refY="3.2" orient="auto">
@@ -137,12 +143,7 @@ shard's own <code>overrides</code> &mdash; and checks neither against those clai
   </defs>
 </svg>
 
-<p>The parser has already decided <code>code_gen</code> belongs to the <code>code</code> shard.
-The merge then puts it on <code>math</code> as well, and <code>code_gen</code> carries an
-<code>entrypoint</code>, so it is a real server that starts. Under
-<a href="https://github.com/NVIDIA-NeMo/RL/pull/3371">#3371</a> you find out only after every
-actor is already up &mdash; that is when the agent-to-shard map is built and raises &mdash; so
-you pay the whole multi-node startup first.</p>
+<p>The config behind the figure: <code>common_inherited_overlays: [policy_model]</code>, a <code>math</code> shard claiming <code>math_env</code>, a <code>code</code> shard claiming <code>code_gen</code>, and <code>common_overrides: {code_gen: {num_workers: 64}}</code>. The merge is four dictionaries stacked in order, and only the second was built from the claim list. The third and fourth are whatever the user wrote, copied in whole — so naming an entry there puts it back on every shard, one layer after the claim rule took it out. <code>code_gen</code> carries an <code>entrypoint</code>, so on <code>math</code> it is a real server that starts. Under <a href="https://github.com/NVIDIA-NeMo/RL/pull/3371">#3371</a> you find out only once every actor is already up, which is when the agent-to-shard map is built and raises — so you pay the whole multi-node startup first.</p>
 
 <p>The same two layers drop one key on the floor. A <code>config_paths</code> written into
 <code>overrides</code> is
