@@ -55,6 +55,11 @@ svg .cval{fill:var(--text);font:11.5px ui-monospace,Menlo,monospace}
 svg .cell-n{fill:var(--surface2);stroke:var(--border);stroke-width:1}
 svg .cell-bad{fill:var(--red);opacity:.42;stroke:var(--red);stroke-width:1.2}
 svg .cell-ok{fill:var(--green);opacity:.45;stroke:var(--green);stroke-width:1.2}
+svg .bad{fill:var(--red);font:bold 11.5px -apple-system,sans-serif}
+svg .okn{fill:var(--green);font:bold 11.5px -apple-system,sans-serif}
+svg .bad-t{fill:var(--red);font:bold 12.5px -apple-system,sans-serif;letter-spacing:.4px}
+svg .ok-t{fill:var(--green);font:bold 12.5px -apple-system,sans-serif;letter-spacing:.4px}
+svg .div{stroke:var(--border);stroke-width:1}
 svg a text{text-decoration:underline;fill:var(--accent);font:10.5px ui-monospace,Menlo,monospace}
 </style>
 <script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
@@ -236,6 +241,64 @@ again. <code>report_refit</code> takes an
 on that branch, so it skips the reset that would have zeroed the count.</p>
 
 <h2>The fix: a new process has no history</h2>
+
+<p>The first three events are the same either way: the shard really was failing requests, and it
+really was the right one to condemn. Everything below is about the last two — what the restart
+hands to the refit, and what the refit does with it.</p>
+
+<svg viewBox="0 0 940 334" role="img" aria-label="The last two events shown twice: as the PR is written today, where the shard returns suspect holding the dead engine's failure count, and with the two clearing lines added, where it returns healthy">
+  <text class="bad-t" x="14" y="16">TODAY — as the PR is written</text>
+  <text class="chdr" x="382" y="38" text-anchor="middle">restart finishes · mark_loaded</text>
+  <text class="chdr" x="748" y="38" text-anchor="middle">next refit lands · report_refit</text>
+
+  <text class="rowlbl" x="14" y="68">state</text>
+  <rect class="cell-n"   x="204" y="50" width="356" height="26" rx="4"/>
+  <text class="cval" x="382" y="68" text-anchor="middle">STALE</text>
+  <rect class="cell-bad" x="570" y="50" width="356" height="26" rx="4"/>
+  <text class="cval" x="748" y="68" text-anchor="middle">SUSPECT</text>
+
+  <text class="rowlbl" x="14" y="98">state_before_partial</text>
+  <rect class="cell-bad" x="204" y="80" width="356" height="26" rx="4"/>
+  <text class="cval" x="382" y="98" text-anchor="middle">SUSPECT — still the dead engine's</text>
+  <rect class="cell-n"   x="570" y="80" width="356" height="26" rx="4"/>
+  <text class="cval" x="748" y="98" text-anchor="middle">read, then cleared</text>
+
+  <text class="rowlbl" x="14" y="128">consecutive_reported_failures</text>
+  <rect class="cell-bad" x="204" y="110" width="356" height="26" rx="4"/>
+  <text class="cval" x="382" y="128" text-anchor="middle">2 — carried over</text>
+  <rect class="cell-bad" x="570" y="110" width="356" height="26" rx="4"/>
+  <text class="cval" x="748" y="128" text-anchor="middle">2 — the reset is skipped</text>
+
+  <text class="bad" x="14" y="154">one more failed request condemns it: DEAD, a second restart, another of its five attempts gone</text>
+
+  <line class="div" x1="14" y1="172" x2="926" y2="172"/>
+
+  <text class="ok-t" x="14" y="198">WITH THE TWO LINES ADDED</text>
+  <text class="chdr" x="382" y="220" text-anchor="middle">restart finishes · mark_loaded</text>
+  <text class="chdr" x="748" y="220" text-anchor="middle">next refit lands · report_refit</text>
+
+  <text class="rowlbl" x="14" y="250">state</text>
+  <rect class="cell-n"  x="204" y="232" width="356" height="26" rx="4"/>
+  <text class="cval" x="382" y="250" text-anchor="middle">STALE</text>
+  <rect class="cell-ok" x="570" y="232" width="356" height="26" rx="4"/>
+  <text class="cval" x="748" y="250" text-anchor="middle">HEALTHY</text>
+
+  <text class="rowlbl" x="14" y="280">state_before_partial</text>
+  <rect class="cell-ok" x="204" y="262" width="356" height="26" rx="4"/>
+  <text class="cval" x="382" y="280" text-anchor="middle">none — cleared with the port</text>
+  <rect class="cell-n"  x="570" y="262" width="356" height="26" rx="4"/>
+  <text class="cval" x="748" y="280" text-anchor="middle">nothing to read</text>
+
+  <text class="rowlbl" x="14" y="310">consecutive_reported_failures</text>
+  <rect class="cell-ok" x="204" y="292" width="356" height="26" rx="4"/>
+  <text class="cval" x="382" y="310" text-anchor="middle">0 — cleared with the port</text>
+  <rect class="cell-ok" x="570" y="292" width="356" height="26" rx="4"/>
+  <text class="cval" x="748" y="310" text-anchor="middle">0</text>
+
+  <text class="okn" x="14" y="330">one more failed request takes it to SUSPECT, which is where an engine with one failure belongs</text>
+</svg>
+
+<p>The edit that gets there:</p>
 
 <div class="mono"><span class="c"># fleet_health.py, mark_loaded — today</span>
 shard.consecutive_probe_failures = 0
