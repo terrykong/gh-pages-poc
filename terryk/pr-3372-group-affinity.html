@@ -67,7 +67,7 @@ svg a text{text-decoration:underline;fill:var(--accent);font:11.5px ui-monospace
 <p class="sub">Companion illustration for
 <a href="https://github.com/NVIDIA-NeMo/RL/pull/3372">NVIDIA-NeMo/RL #3372</a>
 — routing rollouts across sharded NeMo-Gym actors.
-All permalinks pin the PR head <code>3dbea58</code>.</p>
+All permalinks pin the PR head <code>33d77fc</code>.</p>
 
 <p>NeMo-Gym runs the environment that scores rollouts. Until this PR there was one Gym
 actor, so every row went to it. This PR lets a job run several Gym actors — the config
@@ -75,8 +75,9 @@ calls each one a <em>shard</em> — and splits the work between them. The split 
 to make: each training prompt is generated
 several times, and the whole set has to be scored together, so
 <strong>a prompt's generations must all land on one actor</strong>. The router therefore
-hands out work one prompt group at a time, never one row at a time
-(<a href="https://github.com/NVIDIA-NeMo/RL/blob/3dbea58e71723699b6d7087bd3b5bcef37082e9c/nemo_rl/experience/rollouts.py#L2318">rollouts.py:2318</a>).</p>
+hands out work one prompt group at a time, never one row at a time, and sends each
+group to the actor that serves the route name its rows carry
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/33d77fc8a8ed2f1f57b2f6ea5880f597cd9c08b5/nemo_rl/experience/rollouts.py#L2430">rollouts.py:2430</a>).</p>
 
 <h2>Whole groups go to one actor — never single rows</h2>
 
@@ -84,9 +85,9 @@ hands out work one prompt group at a time, never one row at a time
   <text class="lbl-b" x="20" y="20">One training batch: 4 prompts, 3 generations each = 12 rows</text>
 
   <rect x="640" y="8" width="14" height="14" class="c-a"/>
-  <text class="note" x="660" y="20">agent “math”</text>
+  <text class="note" x="660" y="20">route “math”</text>
   <rect x="770" y="8" width="14" height="14" class="c-b"/>
-  <text class="note" x="790" y="20">agent “tools”</text>
+  <text class="note" x="790" y="20">route “tools”</text>
 
   <rect x="34" y="40" width="188" height="56" class="grp" rx="5"/>
   <rect x="228" y="40" width="188" height="56" class="grp" rx="5"/>
@@ -133,7 +134,7 @@ hands out work one prompt group at a time, never one row at a time
   <path class="arr" d="M322 150 L322 190 L620 190 L620 215"/>
   <path class="arr" d="M710 150 L710 190 L680 190 L680 215"/>
 
-  <text class="hdr" x="20" y="180">route by the agent each prompt names</text>
+  <text class="hdr" x="20" y="180">route by the name each prompt carries</text>
 
   <rect x="120" y="218" width="300" height="96" class="box" rx="7"/>
   <text class="hdr" x="140" y="240">Gym actor for shard “math”</text>
@@ -150,14 +151,14 @@ hands out work one prompt group at a time, never one row at a time
   <text class="lbl-b" x="20" y="350">The row numbers never change. Both actors report rows by their place in the</text>
   <text class="lbl-b" x="20" y="368">whole batch, so the code that reassembles groups never learns actors were split.</text>
 
-  <a href="https://github.com/NVIDIA-NeMo/RL/blob/3dbea58e71723699b6d7087bd3b5bcef37082e9c/nemo_rl/experience/rollouts.py#L2315">
-    <text x="20" y="396">rollouts.py:2315 — stamps each row with its place in the batch</text></a>
-  <a href="https://github.com/NVIDIA-NeMo/RL/blob/3dbea58e71723699b6d7087bd3b5bcef37082e9c/nemo_rl/experience/rollouts.py#L2353">
-    <text x="20" y="418">rollouts.py:2353 — picks the actor for a group</text></a>
-  <a href="https://github.com/NVIDIA-NeMo/RL/blob/3dbea58e71723699b6d7087bd3b5bcef37082e9c/nemo_rl/environments/nemo_gym.py#L1217">
-    <text x="520" y="396">nemo_gym.py:1217 — agent name to shard name</text></a>
-  <a href="https://github.com/NVIDIA-NeMo/RL/blob/3dbea58e71723699b6d7087bd3b5bcef37082e9c/nemo_rl/environments/nemo_gym.py#L1239">
-    <text x="520" y="418">nemo_gym.py:1239 — shard to one of its copies</text></a>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/33d77fc8a8ed2f1f57b2f6ea5880f597cd9c08b5/nemo_rl/experience/rollouts.py#L2424">
+    <text x="20" y="396">rollouts.py:2424 — stamps each row with its place in the batch</text></a>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/33d77fc8a8ed2f1f57b2f6ea5880f597cd9c08b5/nemo_rl/experience/rollouts.py#L2465">
+    <text x="20" y="418">rollouts.py:2465 — picks the actor for a group</text></a>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/33d77fc8a8ed2f1f57b2f6ea5880f597cd9c08b5/nemo_rl/environments/nemo_gym.py#L1541">
+    <text x="520" y="396">nemo_gym.py:1541 — route name to shard name</text></a>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/33d77fc8a8ed2f1f57b2f6ea5880f597cd9c08b5/nemo_rl/environments/nemo_gym.py#L1561">
+    <text x="520" y="418">nemo_gym.py:1561 — shard to one of its copies</text></a>
 </svg>
 
 <h2>How the replies get put back together</h2>
@@ -169,24 +170,26 @@ the figure.</p>
 <div class="mono">1. Number every row by its place in the batch, before anything is sent.
 
    rows[0]["_rowidx"] = 0 ... rows[11]["_rowidx"] = 11</div>
-<p class="src"><a href="https://github.com/NVIDIA-NeMo/RL/blob/3dbea58e71723699b6d7087bd3b5bcef37082e9c/nemo_rl/experience/rollouts.py#L2293">rollouts.py:2293</a></p>
+<p class="src"><a href="https://github.com/NVIDIA-NeMo/RL/blob/33d77fc8a8ed2f1f57b2f6ea5880f597cd9c08b5/nemo_rl/experience/rollouts.py#L2358">rollouts.py:2358</a></p>
 
-<div class="mono">2. Walk the batch 3 rows at a time. Every row in a group must name the same
-   agent, or the batch is rejected. Then look up that agent's actor.
+<div class="mono">2. Walk the batch 3 rows at a time. Every row in a group must give the same
+   route name, or the batch is rejected. Then look up that route's actor.
+   The route name is the row's agent_ref.name, or its task_source if there
+   is no agent_ref.
 
-   rows 0,1,2   -> all name "math"   -> math actor    (bucket keeps 0,1,2)
-   rows 3,4,5   -> all name "tools"  -> tools actor   (bucket keeps 3,4,5)
-   rows 6,7,8   -> all name "math"   -> math actor    (bucket becomes 0,1,2,6,7,8)
-   rows 9,10,11 -> all name "tools"  -> tools actor   (bucket becomes 3,4,5,9,10,11)</div>
-<p class="src"><a href="https://github.com/NVIDIA-NeMo/RL/blob/3dbea58e71723699b6d7087bd3b5bcef37082e9c/nemo_rl/experience/rollouts.py#L2340">rollouts.py:2340</a> — the same-agent check ·
-<a href="https://github.com/NVIDIA-NeMo/RL/blob/3dbea58e71723699b6d7087bd3b5bcef37082e9c/nemo_rl/experience/rollouts.py#L2353">:2353</a> — pick the actor</p>
+   rows 0,1,2   -> all give "math"   -> math actor    (bucket keeps 0,1,2)
+   rows 3,4,5   -> all give "tools"  -> tools actor   (bucket keeps 3,4,5)
+   rows 6,7,8   -> all give "math"   -> math actor    (bucket becomes 0,1,2,6,7,8)
+   rows 9,10,11 -> all give "tools"  -> tools actor   (bucket becomes 3,4,5,9,10,11)</div>
+<p class="src"><a href="https://github.com/NVIDIA-NeMo/RL/blob/33d77fc8a8ed2f1f57b2f6ea5880f597cd9c08b5/nemo_rl/experience/rollouts.py#L2452">rollouts.py:2452</a> — the same-route check · <a href="https://github.com/NVIDIA-NeMo/RL/blob/33d77fc8a8ed2f1f57b2f6ea5880f597cd9c08b5/nemo_rl/environments/nemo_gym.py#L1491">nemo_gym.py:1491</a> — where the route name comes from ·
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/33d77fc8a8ed2f1f57b2f6ea5880f597cd9c08b5/nemo_rl/experience/rollouts.py#L2465">:2353</a> — pick the actor</p>
 
 <div class="mono">3. Start both actors, then hand back whichever row finishes first.
    Two streams in, one stream out.
 
    tools row 4  ->  math row 0  ->  math row 6  ->  tools row 3  ->  ...</div>
-<p class="src"><a href="https://github.com/NVIDIA-NeMo/RL/blob/3dbea58e71723699b6d7087bd3b5bcef37082e9c/nemo_rl/experience/rollouts.py#L2409">rollouts.py:2409</a> — wait for the first ready row ·
-<a href="https://github.com/NVIDIA-NeMo/RL/blob/3dbea58e71723699b6d7087bd3b5bcef37082e9c/nemo_rl/experience/rollouts.py#L2431">:2431</a> — pass it on</p>
+<p class="src"><a href="https://github.com/NVIDIA-NeMo/RL/blob/33d77fc8a8ed2f1f57b2f6ea5880f597cd9c08b5/nemo_rl/experience/rollouts.py#L2522">rollouts.py:2522</a> — wait for the first ready row ·
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/33d77fc8a8ed2f1f57b2f6ea5880f597cd9c08b5/nemo_rl/experience/rollouts.py#L2544">:2431</a> — pass it on</p>
 
 <div class="mono">4. The collector files each row under row_number // 3 and releases a group
    only once all 3 of its rows are in. It never sees an actor name.
@@ -196,8 +199,8 @@ the figure.</p>
    row 6  -> group 2, holding {6}          -> not ready
    row 3  -> group 1, holding {3,4}        -> not ready
    row 5  -> group 1, holding {3,4,5}      -> group 1 complete, released</div>
-<p class="src"><a href="https://github.com/NVIDIA-NeMo/RL/blob/3dbea58e71723699b6d7087bd3b5bcef37082e9c/nemo_rl/experience/rollouts.py#L1819">rollouts.py:1819</a> — row number to group number ·
-<a href="https://github.com/NVIDIA-NeMo/RL/blob/3dbea58e71723699b6d7087bd3b5bcef37082e9c/nemo_rl/experience/rollouts.py#L1804">:1804</a> — the collector</p>
+<p class="src"><a href="https://github.com/NVIDIA-NeMo/RL/blob/33d77fc8a8ed2f1f57b2f6ea5880f597cd9c08b5/nemo_rl/experience/rollouts.py#L1884">rollouts.py:1884</a> — row number to group number ·
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/33d77fc8a8ed2f1f57b2f6ea5880f597cd9c08b5/nemo_rl/experience/rollouts.py#L1863">:1804</a> — the collector</p>
 
 <p>Step 4 is why step 1 matters. Because the numbers are positions in the whole batch and
 no actor renumbers them, the collector that existed before this PR keeps working unchanged.
@@ -210,17 +213,17 @@ against the other generations of the same prompt. Those hold a whole group in on
 and wait until it is complete. Split a group across two actors and each half waits forever
 for rollouts sitting in the other — the run stops with no error. Sending whole groups is
 what prevents it, and the code says so at
-<a href="https://github.com/NVIDIA-NeMo/RL/blob/3dbea58e71723699b6d7087bd3b5bcef37082e9c/nemo_rl/experience/rollouts.py#L2325">rollouts.py:2325</a>.
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/33d77fc8a8ed2f1f57b2f6ea5880f597cd9c08b5/nemo_rl/experience/rollouts.py#L2438">rollouts.py:2438</a>.
 </div>
 
 <div class="warn">
 <strong>The size of a group is a caller-supplied number, and the wrong value is silent.</strong>
 The router is told how many rows make a group by
-<a href="https://github.com/NVIDIA-NeMo/RL/blob/3dbea58e71723699b6d7087bd3b5bcef37082e9c/nemo_rl/experience/rollouts.py#L2740"><code>num_generations_per_prompt</code></a>,
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/33d77fc8a8ed2f1f57b2f6ea5880f597cd9c08b5/nemo_rl/experience/rollouts.py#L2864"><code>num_generations_per_prompt</code></a>,
 which defaults to <code>1</code>. At <code>1</code> every row is its own group and the rows of one
 prompt scatter across actors — the case above. The only check is that the group size divides
 the batch evenly
-(<a href="https://github.com/NVIDIA-NeMo/RL/blob/3dbea58e71723699b6d7087bd3b5bcef37082e9c/nemo_rl/experience/rollouts.py#L2630">rollouts.py:2630</a>),
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/33d77fc8a8ed2f1f57b2f6ea5880f597cd9c08b5/nemo_rl/experience/rollouts.py#L2743">rollouts.py:2743</a>),
 and <code>1</code> divides everything, so a caller that forgets to pass it gets no warning.
 Every caller passes the right value by the time sharding can be switched on, so nothing is
 broken today — but it is worth knowing which argument holds this together.
