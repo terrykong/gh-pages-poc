@@ -33,7 +33,11 @@ code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;
   background:var(--surface);border:1px solid var(--border);border-radius:8px;
   padding:13px;overflow-x:auto;white-space:pre}
 .mono .del{color:var(--red)}
+.mono .add{color:var(--green)}
 .mono .cmt{color:var(--dim)}
+.mono .bad{color:var(--red);font-weight:700}
+.mono .good{color:var(--green);font-weight:700}
+.mono .rule{color:var(--border)}
 .warn{border-left:3px solid var(--orange);background:var(--surface);
   padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0}
 nav.chain{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 6px;padding:0}
@@ -83,15 +87,37 @@ svg a text{text-decoration:underline;fill:var(--accent);font:11px ui-monospace,M
 <p class="chainnote">Three pages on #3371, one question each — this one: how a duplicated model engine gets past the guard.
 Background from the PR below it in the stack: <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-3369-shard-ports.html">why a shard's port range never reaches Gym</a> (#3369).</p>
 
-<p>Every shard reports the config entries it started, by name. Two different rules are then
-applied to those names, in
+<p>First, what an <strong>entry</strong> is, because the rest depends on it. A Gym config is a set
+of top-level named entries, and each one declares which kinds of server it provides. There are
+three kinds, and a single entry can declare more than one. This is what a shard hands back from
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/917ffc3ec18b9ec85ca25158628b2b9cf0b38bfc/nemo_rl/environments/nemo_gym.py#L540"><code>list_entries()</code></a>:</p>
+
+<div class="mono">{
+  "math_agent":   ["responses_api_agents"],                         <span class="cmt"># rollouts can be sent here</span>
+  "math_env":     ["resources_servers"],                            <span class="cmt"># a tool server</span>
+  "judge_model":  ["responses_api_models"],                         <span class="cmt"># a model engine — holds GPUs</span>
+  "policy_model": ["responses_api_agents", "responses_api_models"], <span class="cmt"># both at once</span>
+}
+</div>
+
+<p>So <em>"agent"</em> is not a separate kind of object. It is a property of a name <em>in a given
+shard</em>: this entry, here, declares <code>responses_api_agents</code>. That is the one kind a
+rollout row can name as its destination, which is why agents get their own rule. Everything else
+— tool servers, judge and policy model engines — is supporting machinery that rollouts never
+address directly.</p>
+
+<p>The part that makes the bug possible: each shard loads its own list of YAML files, so
+<strong>the same name can declare different kinds in different shards</strong>. Nothing checks that
+it does not.</p>
+
+<p>Two rules are applied to those names, in
 <a href="https://github.com/NVIDIA-NeMo/RL/blob/917ffc3ec18b9ec85ca25158628b2b9cf0b38bfc/nemo_rl/environments/nemo_gym_shards.py#L386"><code>build_agent_shard_map()</code></a>:</p>
 
 <ul>
 <li><strong>Agents</strong> must live in exactly one shard — a rollout row names an agent, so two
 hosts would mean no single destination. That is
 <a href="https://github.com/NVIDIA-NeMo/RL/blob/917ffc3ec18b9ec85ca25158628b2b9cf0b38bfc/nemo_rl/environments/nemo_gym_shards.py#L404-L416">loop 1</a>.</li>
-<li><strong>Everything else</strong> may be duplicated, but only on purpose — you have to list it in
+<li><strong>Every other kind</strong> may be duplicated, but only on purpose — you have to list it in
 <code>allowed_duplicate_entries</code>. That is
 <a href="https://github.com/NVIDIA-NeMo/RL/blob/917ffc3ec18b9ec85ca25158628b2b9cf0b38bfc/nemo_rl/environments/nemo_gym_shards.py#L418-L431">loop 2</a>,
 and it exists because an accidental copy of a judge or model server quietly doubles its GPU claim.</li>
@@ -107,7 +133,7 @@ That is the gap.</p>
   <text class="hdr" x="16" y="20">Two shards both start something called the same thing</text>
 
   <rect class="caught" x="16" y="34" width="424" height="330" rx="8"/>
-  <text class="lbl-b" x="30" y="56">Caught — a plain entry in both shards</text>
+  <text class="lbl-b" x="30" y="56">Caught — not an agent in either shard</text>
   <text class="sm" x="30" y="80">judged: shared_judge  [responses_api_models]</text>
   <text class="sm" x="30" y="98">tools:  shared_judge  [responses_api_models]</text>
 
@@ -145,15 +171,79 @@ That is the gap.</p>
   <text class="note" x="474" y="344">GPUs for the whole run.</text>
 </svg>
 
-<p>The skip was written for the left-hand column: once loop 1 has ruled on an agent, loop 2
-should not rule on it again. But the map it consults is keyed by name for the entire job, so in
-the right-hand column the <em>other</em> shard's entry — which loop 1 never even looked at, because
-it is not an agent there — inherits the exemption.</p>
-
 <p>The function's own docstring names this exact harm
 (<a href="https://github.com/NVIDIA-NeMo/RL/blob/917ffc3ec18b9ec85ca25158628b2b9cf0b38bfc/nemo_rl/environments/nemo_gym_shards.py#L395-L397">shards.py L395-L397</a>):</p>
 
 <blockquote><p>a shared YAML dropped into two shards' path lists quietly brings its judge along and doubles that judge's GPU claim</p></blockquote>
+
+<h2>Step through it, one variable at a time</h2>
+
+<p>Same code both times — only the input differs. Line numbers are
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/917ffc3ec18b9ec85ca25158628b2b9cf0b38bfc/nemo_rl/environments/nemo_gym_shards.py#L404-L431">shards.py L404-L431</a>.
+The results below are executed output: both loops lifted verbatim from that blob and run on the
+inputs shown, not hand-simulated.</p>
+
+<div class="mono"><span class="cmt">CASE 1 — the name is not an agent in either shard. The guard fires.</span>
+
+entries_by_shard = {
+    "judged": {"shared_judge": ["responses_api_models"]},
+    "tools":  {"shared_judge": ["responses_api_models"]},
+}
+allowed_duplicate_entries = frozenset()          <span class="cmt"># nothing allowlisted</span>
+
+<span class="rule">── loop 1 · agents only ─────────────────────────────────────────</span>
+agent_to_shard = {}
+  judged / shared_judge      types = ["responses_api_models"]
+      L407  "responses_api_agents" not in types  → True    <span class="cmt">continue</span>
+  tools  / shared_judge      types = ["responses_api_models"]
+      L407  not an agent here either             → True    <span class="cmt">continue</span>
+  <span class="cmt">⇒ agent_to_shard = {}                          # nothing recorded</span>
+
+<span class="rule">── loop 2 · everything else ─────────────────────────────────────</span>
+hosting_shard = {}
+  judged / shared_judge
+      L421  entry in agent_to_shard              → False   <span class="cmt">not skipped</span>
+      L423  entry in hosting_shard               → False   <span class="cmt">no raise</span>
+      L431  hosting_shard = {"shared_judge": "judged"}
+  tools  / shared_judge
+      L421  entry in agent_to_shard              → False   <span class="cmt">not skipped</span>
+      L423  entry in hosting_shard               → True    <span class="good">RAISE — correct</span>
+</div>
+
+<div class="mono"><span class="cmt">CASE 2 — an agent in one shard, a model server in the other. Nothing fires.</span>
+
+entries_by_shard = {
+    "judged": {"policy_model": ["responses_api_agents", "responses_api_models"]},
+    "tools":  {"policy_model": ["responses_api_models"]},
+}
+allowed_duplicate_entries = frozenset()          <span class="cmt"># nothing allowlisted</span>
+
+<span class="rule">── loop 1 · agents only ─────────────────────────────────────────</span>
+agent_to_shard = {}
+  judged / policy_model      types = ["responses_api_agents", "responses_api_models"]
+      L407  not an agent?                        → False   <span class="cmt">falls through</span>
+      L409  entry in agent_to_shard              → False   <span class="cmt">no raise</span>
+      L416  agent_to_shard = {"policy_model": "judged"}
+  tools  / policy_model      types = ["responses_api_models"]
+      L407  "responses_api_agents" not in types  → True    <span class="cmt">continue</span>
+  <span class="cmt">⇒ agent_to_shard = {"policy_model": "judged"}   # tools' copy was never looked at</span>
+
+<span class="rule">── loop 2 · everything else ─────────────────────────────────────</span>
+hosting_shard = {}
+  judged / policy_model
+      L421  entry in agent_to_shard              → True    <span class="cmt">skipped (intended)</span>
+  tools  / policy_model
+      L421  entry in agent_to_shard              → True    <span class="bad">skipped TOO — the bug</span>
+  <span class="cmt">⇒ hosting_shard = {}                           # loop 2 never recorded anything</span>
+
+<span class="bad">no raise.</span> returns {"policy_model": "judged"} — and tools is now running
+a second policy_model model engine that nobody was told about.
+</div>
+
+<p>The skip is keyed on the name <em>for the whole job</em>. In case 2 the name is in
+<code>agent_to_shard</code> because of <strong>judged</strong>, and <strong>tools</strong>' entirely
+separate entry — which loop 1 skipped over, since it is not an agent there — inherits that
+exemption on the way past.</p>
 
 <h2>The fix, and why it cannot over-fire</h2>
 
@@ -167,6 +257,18 @@ it is not an agent there — inherits the exemption.</p>
           if entry in hosting_shard and entry not in allowed_duplicate_entries:
               raise ShardSetupError(...)
           hosting_shard.setdefault(entry, shard_name)
+</div>
+
+<p>Case 2 then runs like this — loop 1 is unchanged, so only loop 2 is shown:</p>
+
+<div class="mono"><span class="rule">── loop 2 · with the skip deleted ───────────────────────────────</span>
+hosting_shard = {}
+  judged / policy_model
+      L423  entry in hosting_shard               → False   <span class="cmt">no raise</span>
+      L431  hosting_shard = {"policy_model": "judged"}
+  tools  / policy_model
+      L423  entry in hosting_shard               → True
+            entry not in allowed_duplicate_entries → True  <span class="good">RAISE — fixed</span>
 </div>
 
 <p>The obvious worry is that agents now get checked twice and start raising for no reason. They
