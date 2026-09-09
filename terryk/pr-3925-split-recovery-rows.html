@@ -53,6 +53,10 @@ svg .vB{fill:var(--orange);font:bold 12.5px ui-monospace,Menlo,monospace}
 svg .nul{fill:var(--dim);font:12.5px ui-monospace,Menlo,monospace;opacity:.7}
 svg .bad{fill:var(--red);font:bold 12.5px -apple-system,sans-serif}
 svg .panel{fill:var(--surface2);stroke:var(--red);stroke-width:1.4}
+svg .d-done{fill:var(--green);stroke:var(--green)}
+svg .d-keep{fill:var(--orange);stroke:var(--orange)}
+svg .d-rerun{fill:none;stroke:var(--red);stroke-width:1.6}
+svg .d-skip{fill:none;stroke:var(--dim);stroke-width:1.2;opacity:.55}
 svg a text{text-decoration:underline;fill:var(--accent);font:11px ui-monospace,Menlo,monospace}
 </style>
 <script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
@@ -75,79 +79,131 @@ svg a text{text-decoration:underline;fill:var(--accent);font:11px ui-monospace,M
 <a href="https://github.com/NVIDIA-NeMo/RL/pull/3924">#3924</a>.
 All permalinks pin the PR head <code>a4c10a78</code>.</p>
 
-<p>After a crash, the SingleController restarts and tries to keep the rollout work it had already
-finished. Two things happen, and each one logs its own numbers. First the restore path counts the
-groups it pulled back out of the replay buffer and logs
-<code>groups_reused</code>
-(<a href="https://github.com/NVIDIA-NeMo/RL/blob/a4c10a78134211fbfa3e7e62fa950a5b05f89864/nemo_rl/algorithms/single_controller.py#L818"><code>_log_rollout_restore_metrics</code></a>).
-Then the redispatch path counts the groups it had to generate again and logs
-<code>groups_redispatched</code> plus the sibling counts
-(<a href="https://github.com/NVIDIA-NeMo/RL/blob/a4c10a78134211fbfa3e7e62fa950a5b05f89864/nemo_rl/algorithms/single_controller.py#L1259"><code>_redispatch_restored_rollouts</code></a>).
-Both are separate calls to
-<a href="https://github.com/NVIDIA-NeMo/RL/blob/a4c10a78134211fbfa3e7e62fa950a5b05f89864/nemo_rl/algorithms/single_controller.py#L766"><code>_log_telemetry_metrics</code></a>,
-and every call writes <strong>one W&amp;B history row</strong> stamped with its own
+<p>One prompt produces a <strong>group</strong> of rollouts. The group size is
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/a4c10a78134211fbfa3e7e62fa950a5b05f89864/nemo_rl/experience/rollout_manager.py#L1632"><code>num_generations_per_prompt</code></a>,
+stored per group as <code>expected_generations</code>. The individual rollouts inside one group are
+called <strong>siblings</strong>. Everything below uses a group size of <strong>4</strong>.</p>
+
+<p>After a crash the SingleController gets work back from <strong>two different places</strong>, and
+each place logs its own numbers:</p>
+
+<ul>
+<li><strong>Finished groups</strong> come back out of the replay buffer. All 4 siblings are already
+done, so nothing is regenerated. The restore path counts them and logs <code>groups_reused</code>
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/a4c10a78134211fbfa3e7e62fa950a5b05f89864/nemo_rl/algorithms/single_controller.py#L818">single_controller.py:818</a>).</li>
+<li><strong>Unfinished groups</strong> sit in a separate recovery ledger. Some of their siblings
+finished before the crash and are kept; the rest must be run again. The redispatch path counts these
+and logs <code>groups_considered</code>, <code>groups_redispatched</code>,
+<code>siblings_reused</code> and <code>siblings_redispatched</code>
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/a4c10a78134211fbfa3e7e62fa950a5b05f89864/nemo_rl/algorithms/single_controller.py#L1259">single_controller.py:1259-1269</a>).</li>
+</ul>
+
+<p><strong>These two sets do not overlap.</strong> The code says so itself when it logs
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/a4c10a78134211fbfa3e7e62fa950a5b05f89864/nemo_rl/algorithms/single_controller.py#L1021">“<code>N</code> unfinished rollout group(s) <em>next to</em> <code>M</code> canonical group(s)”</a>.
+So <code>groups_considered</code> is not a superset of <code>groups_reused</code>, and
+<code>groups_redispatched</code> is a subset of <code>groups_considered</code> only — none of it is
+part of <code>groups_reused</code>.</p>
+
+<p>Both paths call
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/a4c10a78134211fbfa3e7e62fa950a5b05f89864/nemo_rl/algorithms/single_controller.py#L766"><code>_log_telemetry_metrics</code></a>
+separately, and every call writes <strong>one W&amp;B history row</strong> stamped with its own
 <code>telemetry/wall_time_seconds</code>. So the two counts never share a row — and W&amp;B can only
 divide two numbers that sit in the same row.</p>
 
-<svg viewBox="0 0 940 372" role="img" aria-label="Two W&amp;B history rows; groups_reused is in the first, groups_redispatched in the second, so their ratio cannot be computed">
-  <text class="ttl" x="14" y="18">W&amp;B history, keys under prefix <tspan style="font-family:ui-monospace,Menlo,monospace">timing/rollout_recovery/</tspan></text>
+<svg viewBox="0 0 940 508" role="img" aria-label="Two disjoint sets of recovered groups, the two W and B history rows they are logged into, and the reuse ratio that cannot be computed from either row">
+  <text class="ttl" x="14" y="18">What comes back after a restart — two separate places. Group size = 4 siblings.</text>
 
-  <!-- column headers -->
-  <text class="hd" x="20"  y="46">event</text>
-  <text class="hd" x="132" y="46">wall_time_s</text>
-  <text class="hd" x="248" y="46">groups_reused</text>
-  <text class="hd" x="404" y="46">groups_considered</text>
-  <text class="hd" x="574" y="46">groups_redispatched</text>
-  <text class="hd" x="768" y="46">siblings_reused</text>
+  <!-- ── population A: finished groups from the replay buffer ── -->
+  <text class="hd" x="14" y="44">FINISHED groups — recovered whole from the replay buffer</text>
+  <g>
+    <circle class="d-done" cx="31" cy="62" r="4.5"/><circle class="d-done" cx="42" cy="62" r="4.5"/><circle class="d-done" cx="53" cy="62" r="4.5"/><circle class="d-done" cx="64" cy="62" r="4.5"/>
+    <circle class="d-done" cx="87" cy="62" r="4.5"/><circle class="d-done" cx="98" cy="62" r="4.5"/><circle class="d-done" cx="109" cy="62" r="4.5"/><circle class="d-done" cx="120" cy="62" r="4.5"/>
+    <circle class="d-done" cx="143" cy="62" r="4.5"/><circle class="d-done" cx="154" cy="62" r="4.5"/><circle class="d-done" cx="165" cy="62" r="4.5"/><circle class="d-done" cx="176" cy="62" r="4.5"/>
+    <circle class="d-done" cx="199" cy="62" r="4.5"/><circle class="d-done" cx="210" cy="62" r="4.5"/><circle class="d-done" cx="221" cy="62" r="4.5"/><circle class="d-done" cx="232" cy="62" r="4.5"/>
+    <circle class="d-done" cx="255" cy="62" r="4.5"/><circle class="d-done" cx="266" cy="62" r="4.5"/><circle class="d-done" cx="277" cy="62" r="4.5"/><circle class="d-done" cx="288" cy="62" r="4.5"/>
+    <circle class="d-done" cx="311" cy="62" r="4.5"/><circle class="d-done" cx="322" cy="62" r="4.5"/><circle class="d-done" cx="333" cy="62" r="4.5"/><circle class="d-done" cx="344" cy="62" r="4.5"/>
+    <circle class="d-done" cx="367" cy="62" r="4.5"/><circle class="d-done" cx="378" cy="62" r="4.5"/><circle class="d-done" cx="389" cy="62" r="4.5"/><circle class="d-done" cx="400" cy="62" r="4.5"/>
+  </g>
+  <text class="note" x="14" y="86">7 groups x 4 siblings = 28 rollouts, nothing regenerated.</text>
+  <text class="vA"   x="430" y="66">groups_reused = 7</text>
 
-  <!-- row A : restore -->
-  <rect class="cell"  x="14"  y="56" width="112" height="40"/>
-  <rect class="cell"  x="126" y="56" width="116" height="40"/>
-  <rect class="cellA" x="242" y="56" width="156" height="40"/>
-  <rect class="cell"  x="398" y="56" width="170" height="40"/>
-  <rect class="cell"  x="568" y="56" width="194" height="40"/>
-  <rect class="cell"  x="762" y="56" width="164" height="40"/>
-  <text class="lbl" x="24"  y="81">restore</text>
-  <text class="lbl" x="136" y="81">8.1</text>
-  <text class="vA"  x="252" y="81">7</text>
-  <text class="nul" x="408" y="81">— null —</text>
-  <text class="nul" x="578" y="81">— null —</text>
-  <text class="nul" x="772" y="81">— null —</text>
-
-  <!-- row B : redispatch -->
-  <rect class="cell"  x="14"  y="96" width="112" height="40"/>
-  <rect class="cell"  x="126" y="96" width="116" height="40"/>
-  <rect class="cell"  x="242" y="96" width="156" height="40"/>
-  <rect class="cellB" x="398" y="96" width="170" height="40"/>
-  <rect class="cellB" x="568" y="96" width="194" height="40"/>
-  <rect class="cellB" x="762" y="96" width="164" height="40"/>
-  <text class="lbl" x="24"  y="121">redispatch</text>
-  <text class="lbl" x="136" y="121">8.6</text>
-  <text class="nul" x="252" y="121">— null —</text>
-  <text class="vB"  x="408" y="121">9</text>
-  <text class="vB"  x="578" y="121">5</text>
-  <text class="vB"  x="772" y="121">23</text>
+  <!-- ── population B: unfinished groups from the recovery ledger ── -->
+  <text class="hd" x="14" y="118">UNFINISHED groups — held in the recovery ledger (a different set)</text>
+  <g>
+    <circle class="d-keep" cx="31" cy="136" r="4.5"/><circle class="d-keep" cx="42" cy="136" r="4.5"/><circle class="d-keep" cx="53" cy="136" r="4.5"/><circle class="d-keep" cx="64" cy="136" r="4.5"/>
+    <circle class="d-keep" cx="87" cy="136" r="4.5"/><circle class="d-keep" cx="98" cy="136" r="4.5"/><circle class="d-keep" cx="109" cy="136" r="4.5"/><circle class="d-keep" cx="120" cy="136" r="4.5"/>
+    <circle class="d-keep" cx="143" cy="136" r="4.5"/><circle class="d-keep" cx="154" cy="136" r="4.5"/><circle class="d-keep" cx="165" cy="136" r="4.5"/><circle class="d-rerun" cx="176" cy="136" r="4.5"/>
+    <circle class="d-keep" cx="199" cy="136" r="4.5"/><circle class="d-keep" cx="210" cy="136" r="4.5"/><circle class="d-rerun" cx="221" cy="136" r="4.5"/><circle class="d-rerun" cx="232" cy="136" r="4.5"/>
+    <circle class="d-keep" cx="255" cy="136" r="4.5"/><circle class="d-rerun" cx="266" cy="136" r="4.5"/><circle class="d-rerun" cx="277" cy="136" r="4.5"/><circle class="d-rerun" cx="288" cy="136" r="4.5"/>
+    <circle class="d-skip" cx="311" cy="136" r="4.5"/><circle class="d-skip" cx="322" cy="136" r="4.5"/><circle class="d-skip" cx="333" cy="136" r="4.5"/><circle class="d-skip" cx="344" cy="136" r="4.5"/>
+    <circle class="d-skip" cx="367" cy="136" r="4.5"/><circle class="d-skip" cx="378" cy="136" r="4.5"/><circle class="d-skip" cx="389" cy="136" r="4.5"/><circle class="d-skip" cx="400" cy="136" r="4.5"/>
+    <circle class="d-skip" cx="423" cy="136" r="4.5"/><circle class="d-skip" cx="434" cy="136" r="4.5"/><circle class="d-skip" cx="445" cy="136" r="4.5"/><circle class="d-skip" cx="456" cy="136" r="4.5"/>
+    <circle class="d-skip" cx="479" cy="136" r="4.5"/><circle class="d-skip" cx="490" cy="136" r="4.5"/><circle class="d-skip" cx="501" cy="136" r="4.5"/><circle class="d-skip" cx="512" cy="136" r="4.5"/>
+  </g>
+  <line x1="24" y1="150" x2="296" y2="150" stroke="var(--orange)" stroke-width="1.4"/>
+  <line x1="303" y1="150" x2="520" y2="150" stroke="var(--dim)" stroke-width="1.4"/>
+  <text class="note" x="24"  y="166">5 relaunched: 14 kept + 6 rerun = 20</text>
+  <text class="note" x="303" y="166">4 considered, not relaunched</text>
+  <text class="vB"   x="545" y="128">groups_considered = 9</text>
+  <text class="vB"   x="545" y="148">groups_redispatched = 5</text>
+  <text class="vB"   x="545" y="168">siblings_reused = 14, siblings_redispatched = 6</text>
 
   <!-- legend -->
-  <rect class="cellA" x="14" y="150" width="14" height="14"/>
-  <text class="note" x="34" y="162">written by the restore event</text>
-  <rect class="cellB" x="230" y="150" width="14" height="14"/>
-  <text class="note" x="250" y="162">written by the redispatch event</text>
-  <text class="note" x="470" y="162">“null” = the key is simply absent from that row</text>
+  <circle class="d-done" cx="20" cy="192" r="4.5"/>
+  <text class="note" x="30" y="196">finished sibling, kept</text>
+  <circle class="d-keep" cx="185" cy="192" r="4.5"/>
+  <text class="note" x="195" y="196">sibling kept inside an unfinished group</text>
+  <circle class="d-rerun" cx="450" cy="192" r="4.5"/>
+  <text class="note" x="460" y="196">must be run again</text>
+  <circle class="d-skip" cx="600" cy="192" r="4.5"/>
+  <text class="note" x="610" y="196">group not relaunched</text>
 
-  <!-- the panel that cannot be built -->
-  <rect class="panel" x="14" y="184" width="912" height="106" rx="8"/>
-  <text class="ttl"  x="30" y="208">The doc’s own question 5: “How much completed rollout work was reused after restart?”</text>
-  <text class="lbl"  x="30" y="234">groups_reused / (groups_reused + groups_redispatched)</text>
-  <text class="lbl"  x="30" y="258">on the restore row:   7 / (7 + <tspan class="nul">null</tspan>)   →  <tspan class="bad">no value</tspan></text>
-  <text class="lbl"  x="30" y="280">on the redispatch row:  <tspan class="nul">null</tspan> / (<tspan class="nul">null</tspan> + 5)  →  <tspan class="bad">no value</tspan></text>
+  <text class="note" x="14" y="220">siblings_reused + siblings_redispatched always equals groups_redispatched x group size — here 14 + 6 = 5 x 4 = 20.</text>
 
-  <text class="note" x="14" y="316">The answer a reader wants is 7 / 12 = 0.58. Both numbers are logged; no single row holds both, so no panel can divide them.</text>
-  <text class="note" x="14" y="334">Note 9 is not 7 + 5 — groups_considered counts every group in the recovery ledger, including ones no slot was free for.</text>
+  <!-- ── the two W&B rows ── -->
+  <text class="ttl" x="14" y="252">W&amp;B history, keys under <tspan style="font-family:ui-monospace,Menlo,monospace">timing/rollout_recovery/</tspan></text>
+  <text class="hd" x="20"  y="278">event</text>
+  <text class="hd" x="132" y="278">wall_time_s</text>
+  <text class="hd" x="248" y="278">groups_reused</text>
+  <text class="hd" x="404" y="278">groups_considered</text>
+  <text class="hd" x="574" y="278">groups_redispatched</text>
+  <text class="hd" x="768" y="278">siblings_reused</text>
 
-  <a href="https://github.com/NVIDIA-NeMo/RL/blob/a4c10a78134211fbfa3e7e62fa950a5b05f89864/nemo_rl/algorithms/single_controller.py#L771">
-    <text x="14" y="360">each call bumps _telemetry_sample_index → a new row (single_controller.py:771)</text>
-  </a>
+  <rect class="cell"  x="14"  y="288" width="112" height="40"/>
+  <rect class="cell"  x="126" y="288" width="116" height="40"/>
+  <rect class="cellA" x="242" y="288" width="156" height="40"/>
+  <rect class="cell"  x="398" y="288" width="170" height="40"/>
+  <rect class="cell"  x="568" y="288" width="194" height="40"/>
+  <rect class="cell"  x="762" y="288" width="164" height="40"/>
+  <text class="lbl" x="24"  y="313">restore</text>
+  <text class="lbl" x="136" y="313">8.1</text>
+  <text class="vA"  x="252" y="313">7</text>
+  <text class="nul" x="408" y="313">— null —</text>
+  <text class="nul" x="578" y="313">— null —</text>
+  <text class="nul" x="772" y="313">— null —</text>
+
+  <rect class="cell"  x="14"  y="328" width="112" height="40"/>
+  <rect class="cell"  x="126" y="328" width="116" height="40"/>
+  <rect class="cell"  x="242" y="328" width="156" height="40"/>
+  <rect class="cellB" x="398" y="328" width="170" height="40"/>
+  <rect class="cellB" x="568" y="328" width="194" height="40"/>
+  <rect class="cellB" x="762" y="328" width="164" height="40"/>
+  <text class="lbl" x="24"  y="353">redispatch</text>
+  <text class="lbl" x="136" y="353">8.6</text>
+  <text class="nul" x="252" y="353">— null —</text>
+  <text class="vB"  x="408" y="353">9</text>
+  <text class="vB"  x="578" y="353">5</text>
+  <text class="vB"  x="772" y="353">14</text>
+
+  <text class="note" x="14" y="386">“null” = the key is simply absent from that row. Each event is its own _log_telemetry_metrics call, so each gets its own row.</text>
+
+  <!-- ── the panel that cannot be built ── -->
+  <rect class="panel" x="14" y="402" width="912" height="94" rx="8"/>
+  <text class="ttl"  x="30" y="426">The doc’s own question 5: “How much completed rollout work was reused after restart?”</text>
+  <text class="lbl"  x="30" y="450">on the restore row:   7 / (7 + <tspan class="nul">null</tspan>)   →  <tspan class="bad">no value</tspan></text>
+  <text class="lbl"  x="30" y="472">on the redispatch row:  <tspan class="nul">null</tspan> / (<tspan class="nul">null</tspan> + 5)  →  <tspan class="bad">no value</tspan></text>
+  <text class="note" x="480" y="450">The answer a reader wants is 7 / (7 + 5) = 0.58.</text>
+  <text class="note" x="480" y="472">Both numbers are logged; no row holds both.</text>
 </svg>
 
 <h2>A suggested fix — not in the PR today</h2>
@@ -176,11 +232,11 @@ self._log_telemetry_metrics(load_metrics, prefix="timing/rollout_recovery")
 self._log_telemetry_metrics(
     {
         "redispatch_schedule_seconds": 0.4,
-        "groups_considered":    9.0,   <span class="c"># every group in the recovery ledger</span>
-        "groups_redispatched":  5.0,   <span class="c"># had to be generated again</span>
-        "siblings_reused":     23.0,
-        "siblings_redispatched": 11.0,
-<span class="g">        "groups_reused":        7.0,   # ← PROPOSED, not present today</span>
+        "groups_considered":    9.0,   <span class="c"># unfinished groups in the ledger</span>
+        "groups_redispatched":  5.0,   <span class="c"># of those 9, relaunched</span>
+        "siblings_reused":     14.0,   <span class="c"># siblings kept inside those 5</span>
+        "siblings_redispatched": 6.0,  <span class="c"># 14 + 6 = 5 groups x 4</span>
+<span class="g">        "groups_reused":        7.0,   # ← PROPOSED: the FINISHED groups, from the other event</span>
     },
     prefix="timing/rollout_recovery",
 )</div>
@@ -189,7 +245,7 @@ self._log_telemetry_metrics(
 
 <div class="mono"><span class="c"># 3. with that one key added, one row holds both and the panel works</span>
 row 2:  groups_reused = <span class="g">7</span>   groups_redispatched = <span class="g">5</span>
-        7 / (7 + 5)  =  <span class="g">0.58</span>   <span class="c"># 58% of the work survived the restart</span></div>
+        7 / (7 + 5)  =  <span class="g">0.58</span>   <span class="c"># 58% of the groups that came back needed no regeneration</span></div>
 
 <p>There is a cheaper version if the author would rather not touch the code: leave the two events
 alone, split the one table row in
