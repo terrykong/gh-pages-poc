@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NVIDIA-NeMo/RL #3371 — the duplicate-entry check a name can walk straight past</title>
+<style>
+:root{
+  --bg:#0d1117; --surface:#161b22; --surface2:#1c2128; --border:#30363d;
+  --text:#e6edf3; --dim:#8b949e; --accent:#58a6ff; --green:#3fb950;
+  --orange:#d29922; --red:#f85149;
+}
+:root[data-theme="light"]{
+  --bg:#ffffff; --surface:#f6f8fa; --surface2:#eaeef2; --border:#d0d7de;
+  --text:#1f2328; --dim:#59636e; --accent:#0969da; --green:#1a7f37;
+  --orange:#9a6700; --red:#cf222e;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:28px 20px 70px}
+h1{font-size:22px;margin:0 0 8px;line-height:1.3}
+h2{font-size:18px;margin:32px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;
+  font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
+.sub{color:var(--dim);font-size:13.5px;margin:0 0 16px}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);
+  border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;
+  font:13px/1 ui-monospace,Menlo,monospace;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.18)}
+.mono{font:12.5px ui-monospace,SFMono-Regular,Menlo,monospace;
+  background:var(--surface);border:1px solid var(--border);border-radius:8px;
+  padding:13px;overflow-x:auto;white-space:pre}
+.mono .del{color:var(--red)}
+.mono .cmt{color:var(--dim)}
+.warn{border-left:3px solid var(--orange);background:var(--surface);
+  padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0}
+nav.chain{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 6px;padding:0}
+nav.chain a,nav.chain span{display:inline-block;padding:5px 11px;border:1px solid var(--border);
+  border-radius:20px;background:var(--surface);text-decoration:none;color:var(--accent);
+  font-size:12.5px;line-height:1.3;white-space:nowrap}
+nav.chain a:hover{background:var(--surface2)}
+nav.chain span.here{background:var(--accent);color:var(--bg);border-color:var(--accent);font-weight:600}
+p.chainnote{color:var(--dim);font-size:12px;margin:0 0 18px}
+svg{max-width:100%;height:auto;display:block;margin:16px 0}
+svg .box{fill:var(--surface);stroke:var(--border);stroke-width:1.4}
+svg .caught{fill:var(--surface2);stroke:var(--green);stroke-width:1.4}
+svg .escapes{fill:var(--surface2);stroke:var(--red);stroke-width:1.4}
+svg .sm{fill:var(--text);font:11px ui-monospace,Menlo,monospace}
+svg .lbl-b{fill:var(--text);font:bold 13px -apple-system,sans-serif}
+svg .note{fill:var(--dim);font:11.5px -apple-system,sans-serif}
+svg .hdr{fill:var(--accent);font:bold 12.5px -apple-system,sans-serif}
+svg .okt{fill:var(--green);font:bold 11.5px -apple-system,sans-serif}
+svg .badt{fill:var(--red);font:bold 11.5px -apple-system,sans-serif}
+svg .arrow{stroke:var(--dim);stroke-width:1.5;fill:none}
+svg .arrow-r{stroke:var(--red);stroke-width:1.8;fill:none}
+svg a text{text-decoration:underline;fill:var(--accent);font:11px ui-monospace,Menlo,monospace}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+  document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head>
+<body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+  function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+  function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
+    b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
+      else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+  document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+<div class="wrap">
+
+<h1>The duplicate-entry check a name can walk straight past</h1>
+<p class="sub">
+<a href="https://github.com/NVIDIA-NeMo/RL/pull/3371">NVIDIA-NeMo/RL #3371</a>
+— one skip, written for one job, silently does a second one. All permalinks pin the PR head <code>917ffc3</code>.</p>
+
+<nav class="chain">
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-3371-shard-actors.html">one actor per node</a>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-3371-shared-deadline.html">the shared deadline</a>
+  <span class="here">the duplicate check</span>
+</nav>
+<p class="chainnote">Three pages on #3371, one question each — this one: how a duplicated model engine gets past the guard.
+Background from the PR below it in the stack: <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-3369-shard-ports.html">why a shard's port range never reaches Gym</a> (#3369).</p>
+
+<p>Every shard reports the config entries it started, by name. Two different rules are then
+applied to those names, in
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/917ffc3ec18b9ec85ca25158628b2b9cf0b38bfc/nemo_rl/environments/nemo_gym_shards.py#L386"><code>build_agent_shard_map()</code></a>:</p>
+
+<ul>
+<li><strong>Agents</strong> must live in exactly one shard — a rollout row names an agent, so two
+hosts would mean no single destination. That is
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/917ffc3ec18b9ec85ca25158628b2b9cf0b38bfc/nemo_rl/environments/nemo_gym_shards.py#L404-L416">loop 1</a>.</li>
+<li><strong>Everything else</strong> may be duplicated, but only on purpose — you have to list it in
+<code>allowed_duplicate_entries</code>. That is
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/917ffc3ec18b9ec85ca25158628b2b9cf0b38bfc/nemo_rl/environments/nemo_gym_shards.py#L418-L431">loop 2</a>,
+and it exists because an accidental copy of a judge or model server quietly doubles its GPU claim.</li>
+</ul>
+
+<p>Loop 2 opens by skipping anything loop 1 already recorded as an agent. That skip is keyed on
+the <strong>name alone</strong>, across the whole job — not on "was it an agent <em>in this shard</em>".
+That is the gap.</p>
+
+<h2>The same name, two shards: what each loop sees</h2>
+
+<svg viewBox="0 0 900 400" role="img" aria-label="Two cases side by side. When a name is a model server in both shards the guard raises. When the same name is an agent in one shard and a model server in the other, loop 2 skips it in both shards and nothing raises.">
+  <text class="hdr" x="16" y="20">Two shards both start something called the same thing</text>
+
+  <rect class="caught" x="16" y="34" width="424" height="330" rx="8"/>
+  <text class="lbl-b" x="30" y="56">Caught — a plain entry in both shards</text>
+  <text class="sm" x="30" y="80">judged: shared_judge  [responses_api_models]</text>
+  <text class="sm" x="30" y="98">tools:  shared_judge  [responses_api_models]</text>
+
+  <text class="note" x="30" y="128">loop 1 — agents only</text>
+  <text class="sm" x="30" y="148">neither is an agent, so nothing is recorded</text>
+  <text class="sm" x="30" y="166">agent_to_shard = {}</text>
+
+  <text class="note" x="30" y="196">loop 2 — everything else</text>
+  <text class="sm" x="30" y="216">judged: not skipped, remembered</text>
+  <text class="sm" x="30" y="234">tools:  not skipped, already seen</text>
+  <text class="okt" x="30" y="258">raises: appears in two shards, not allowlisted</text>
+
+  <text class="note" x="30" y="292">The operator gets a named error at startup</text>
+  <text class="note" x="30" y="310">and fixes the config. This is the guard</text>
+  <text class="note" x="30" y="328">doing exactly its job.</text>
+
+  <rect class="escapes" x="460" y="34" width="424" height="330" rx="8"/>
+  <text class="lbl-b" x="474" y="56">Escapes — an agent in one, a model in the other</text>
+  <text class="sm" x="474" y="80">judged: policy_model [agents, models]</text>
+  <text class="sm" x="474" y="98">tools:  policy_model [models]</text>
+
+  <text class="note" x="474" y="128">loop 1 — agents only</text>
+  <text class="sm" x="474" y="148">judged: is an agent, recorded</text>
+  <text class="sm" x="474" y="166">tools:  not an agent here, passed over</text>
+  <text class="sm" x="474" y="184">agent_to_shard = {policy_model: judged}</text>
+
+  <text class="note" x="474" y="214">loop 2 — everything else</text>
+  <text class="sm" x="474" y="234">judged: name is in the map, skipped</text>
+  <text class="badt" x="474" y="252">tools:  name is in the map, skipped too</text>
+  <text class="badt" x="474" y="276">nothing raises</text>
+
+  <path class="arrow-r" d="M474 288 L700 288"/>
+  <text class="note" x="474" y="308">tools quietly starts a second policy_model</text>
+  <text class="note" x="474" y="326">model engine. Nobody is told, and it claims</text>
+  <text class="note" x="474" y="344">GPUs for the whole run.</text>
+</svg>
+
+<p>The skip was written for the left-hand column: once loop 1 has ruled on an agent, loop 2
+should not rule on it again. But the map it consults is keyed by name for the entire job, so in
+the right-hand column the <em>other</em> shard's entry — which loop 1 never even looked at, because
+it is not an agent there — inherits the exemption.</p>
+
+<p>The function's own docstring names this exact harm
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/917ffc3ec18b9ec85ca25158628b2b9cf0b38bfc/nemo_rl/environments/nemo_gym_shards.py#L395-L397">shards.py L395-L397</a>):</p>
+
+<blockquote><p>a shared YAML dropped into two shards' path lists quietly brings its judge along and doubles that judge's GPU claim</p></blockquote>
+
+<h2>The fix, and why it cannot over-fire</h2>
+
+<p>Delete the skip. Loop 2 then considers every name, in every shard.</p>
+
+<div class="mono"><span class="cmt">  # nemo_gym_shards.py, loop 2</span>
+  for shard_name, entries in entries_by_shard.items():
+      for entry in entries:
+<span class="del">-         if entry in agent_to_shard:</span>
+<span class="del">-             continue</span>
+          if entry in hosting_shard and entry not in allowed_duplicate_entries:
+              raise ShardSetupError(...)
+          hosting_shard.setdefault(entry, shard_name)
+</div>
+
+<p>The obvious worry is that agents now get checked twice and start raising for no reason. They
+do not, and it is worth walking the three cases:</p>
+
+<div class="mono">an agent in ONE shard      loop 2 sees it once, records it, no raise      <span class="cmt">unchanged</span>
+an agent in TWO shards     loop 1 already raised; loop 2 never runs       <span class="cmt">unchanged</span>
+agent here, model there    loop 2 now sees both and raises                <span class="cmt">the fix</span>
+listed in the allowlist    the allowlist check still exempts it           <span class="cmt">unchanged</span>
+</div>
+
+<p>Running the existing suite against the change confirms it: all 46 tests in the shard-schema
+test file still pass, and a new test for the escaping case fails before the deletion and passes
+after.</p>
+
+<div class="warn">
+<strong>Why this is easy to hit in practice.</strong> A shard is a <em>slice</em> of the Gym config
+— one agent plus the tool servers and judges it needs, pulled in through a list of YAML files. Two
+shards pulling in one shared YAML is the normal way to reuse a judge, and top-level entry names are
+short and generic. Nothing anywhere enforces that a name means the same kind of thing in two
+different shards, which is precisely what this function exists to police.
+</div>
+
+</div>
+</body>
+</html>
