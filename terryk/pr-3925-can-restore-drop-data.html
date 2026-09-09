@@ -83,7 +83,7 @@ svg .arr{stroke:var(--orange);stroke-width:1.6;fill:none}
 <h1>Can a restore drop a prompt? Only if the sampler cursor comes back wrong</h1>
 <p class="sub">For
 <a href="https://github.com/NVIDIA-NeMo/RL/pull/3925">NVIDIA-NeMo/RL #3925</a>.
-All permalinks pin <code>a4c10a78</code>. Settled by a
+All permalinks pin <code>a4c10a78</code>. The evidence is a
 <a href="https://github.com/terrykong/gh-pages-poc/blob/47cd8814384382893c2a56a86f939caf76b48936/terryk/pr-3925-test_restore_after_borrow.py">round-trip test</a>
 that runs the real code through a borrow, a checkpoint and a restore.</p>
 
@@ -123,11 +123,12 @@ if buffered:
 <p class="sub"><a href="https://github.com/NVIDIA-NeMo/RL/blob/a4c10a78134211fbfa3e7e62fa950a5b05f89864/nemo_rl/algorithms/single_controller.py#L1149">single_controller.py:1149-1152</a></p>
 
 <p>It fires when the replay buffer already holds a group stamped for the step this batch is being
-admitted to. So the question is whether a run can reach that state. The borrow looked like the way:
-it moves a finished group into an earlier step and sends a spare to repay the later one, and it runs
-with rollout recovery on (<a href="https://github.com/NVIDIA-NeMo/RL/blob/a4c10a78134211fbfa3e7e62fa950a5b05f89864/nemo_rl/algorithms/single_controller.py#L1983">:1983</a>)
+admitted to. The one mechanism that moves finished groups between steps is the borrow: it re-stamps a
+finished group into an earlier step and sends a spare to repay the later one, and it runs with rollout
+recovery on (<a href="https://github.com/NVIDIA-NeMo/RL/blob/a4c10a78134211fbfa3e7e62fa950a5b05f89864/nemo_rl/algorithms/single_controller.py#L1983">:1983</a>)
 as well as off (<a href="https://github.com/NVIDIA-NeMo/RL/blob/a4c10a78134211fbfa3e7e62fa950a5b05f89864/nemo_rl/algorithms/single_controller.py#L2020">:2020</a>).
-Rather than argue it from the code, the test below does it.</p>
+Even so, a borrow cannot make the discard fire — the test below runs one through a checkpoint and a
+restore to show it, and then shows the one thing that can.</p>
 
 <h2>The round trip, on the real code</h2>
 
@@ -277,13 +278,6 @@ stops the run instead of quietly shrinking the dataset.</p>
 with <a href="https://github.com/NVIDIA-NeMo/RL/blob/a4c10a78134211fbfa3e7e62fa950a5b05f89864/tests/unit/single_controller/_checkpoint_scenarios.py#L362"><code>admitted=True</code></a>.
 The <a href="https://github.com/terrykong/gh-pages-poc/blob/47cd8814384382893c2a56a86f939caf76b48936/terryk/pr-3925-test_restore_after_borrow.py">test above</a>
 covers both, and is offered for the PR as is.</p>
-</div>
-
-<div class="good">
-<p style="margin:0"><strong>Correction.</strong> Earlier versions of this page said “yes”, based on a
-probe that stubbed the buffer’s <code>count_for_target_step</code> to return 1. That showed what the
-branch does when its condition holds — not that a run can make the condition hold. Running the whole
-path with the real buffer shows it cannot, unless the cursor is restored wrong.</p>
 </div>
 
 </div>
