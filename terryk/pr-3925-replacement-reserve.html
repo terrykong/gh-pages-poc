@@ -86,8 +86,10 @@ pre-existing, opt-in mechanism that came up while reading the recovery counters.
 <p><strong>Everything on this page happens during a live run, not at restore.</strong> The code
 is in <code>_dispatch_one_prompt</code> inside the rollout pump, and it fires the moment a prompt
 exhausts its retry budgets mid-training — on a fresh run from scratch, with no checkpoint
-involved. Checkpointing enters only because one of its settings happens to gate the borrow,
-which is the surprising part.</p>
+involved. Checkpointing does not change any of it: the same borrow runs with
+<code>save_data_plane</code> on or off — checked by
+<a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-3925-test_restore_after_borrow.py">running it</a>,
+not by reading.</p>
 
 <p>A training step consumes a fixed number of prompt groups. If a prompt is retried until its
 budget runs out and is finally given up on, that step is one group short. Something has to give,
@@ -114,13 +116,13 @@ hold the batch size constant instead.</p>
   <circle class="d-hole" cx="98" cy="75" r="7"/>
   <text class="note" x="120" y="79">step 7 trains on 2 groups</text>
 
-  <text class="hd" x="14" y="128">replace + save_data_plane:true — dispatch a spare for the same step</text>
+  <text class="hd" x="14" y="128">replace, no finished later group to take — dispatch a spare for the same step</text>
   <rect class="box" x="14" y="138" width="250" height="42" rx="6"/>
   <circle class="d-ok" cx="42" cy="159" r="7"/><circle class="d-ok" cx="70" cy="159" r="7"/>
   <circle class="d-spare" cx="98" cy="159" r="7"/>
   <text class="note" x="120" y="163">step 7 waits for the spare, then trains on 3</text>
 
-  <text class="hd" x="14" y="212">replace + save_data_plane:false — borrow now, repay later</text>
+  <text class="hd" x="14" y="212">replace, a later step already finished — borrow now, repay later</text>
   <rect class="box" x="14" y="222" width="250" height="42" rx="6"/>
   <circle class="d-ok" cx="42" cy="243" r="7"/><circle class="d-ok" cx="70" cy="243" r="7"/>
   <circle class="d-ok9" cx="98" cy="243" r="7"/>
@@ -157,11 +159,11 @@ wasted — nothing was generated for them, and they stay in the pool.</p>
 <tr><td><code>replacement_reserve_prompts</code></td><td>1</td><td>Low-water mark for the spare pool. Read only under <code>"replace"</code>.</td></tr>
 </table>
 
-<h2>The borrow, and the setting that switches it off</h2>
+<h2>The borrow runs with checkpointing on or off</h2>
 
 <p><strong>“Recovery on/off” is not a knob, and it is not about save/restore time.</strong> It is a
-flag computed once when the controller starts, and it then governs the <em>whole run</em>, live
-dispatch included:</p>
+flag computed once when the controller starts. It decides <em>where</em> in the code the borrow
+happens — not whether it happens:</p>
 
 <div class="mono">self._rollout_recovery_enabled = bool(
     restoring_rollout_recovery                       <span class="c"># resuming a checkpoint that has a recovery payload</span>
@@ -173,36 +175,22 @@ dispatch included:</p>
 )</div>
 <p class="sub"><a href="https://github.com/NVIDIA-NeMo/RL/blob/a4c10a78134211fbfa3e7e62fa950a5b05f89864/nemo_rl/algorithms/single_controller.py#L497-L504">single_controller.py:497-504</a></p>
 
-<p>So turning on data-plane checkpointing silently changes how a dropped prompt is handled during
-normal operation — the borrow stops happening for the entire run, not just around a restore. Both
-columns below are live-run behaviour; the config decides which one you get.</p>
+<p>With the flag on, the borrow happens inside the checkpoint-atomic mutation cut
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/a4c10a78134211fbfa3e7e62fa950a5b05f89864/nemo_rl/algorithms/single_controller.py#L1983">:1983</a>),
+because the dropped prompt’s ledger record and the spare’s reservation have to change together. With it
+off, the same call sits a few lines lower
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/a4c10a78134211fbfa3e7e62fa950a5b05f89864/nemo_rl/algorithms/single_controller.py#L2020">:2020</a>).
+Either way <code>_promote_into_step</code> runs and the spare is sent to the lender. This is the config
+that gets you the borrow at all:</p>
 
-<table>
-<tr><th></th><th>borrow runs</th><th>borrow skipped</th></tr>
-<tr><td>config</td>
-<td><div class="mono">checkpointing:
-  enabled: true
-  save_data_plane: <span class="c">false</span>
+<div class="mono">checkpointing:
+  save_data_plane: true   <span class="c"># or false — makes no difference to the borrow</span>
 async_rl:
   sampler:
     name: in_order
+    max_lookahead_versions: 1   <span class="c"># ≥ 1; at 0 no later step can have finished, so there is nothing to borrow</span>
   rollout_failure:
-    on_dropped_prompt: replace</div></td>
-<td><div class="mono">checkpointing:
-  enabled: true
-  save_data_plane: <span class="c">true</span>
-async_rl:
-  sampler:
-    name: in_order
-  rollout_failure:
-    on_dropped_prompt: replace</div></td></tr>
-<tr><td>on a dropped prompt</td>
-<td>spare dispatched, <em>and</em> a finished group borrowed from a later step</td>
-<td>spare dispatched for the same step; no borrow</td></tr>
-</table>
-
-<p>Only <code>save_data_plane</code> differs. <code>on_dropped_prompt: replace</code> is required in
-both — at the default <code>shrink</code> neither column does anything.</p>
+    on_dropped_prompt: replace  <span class="c"># required; at the default "shrink" none of this runs</span></div>
 
 <p><strong>The spare and the borrow are not a package.</strong> The link runs one way only:</p>
 
@@ -214,13 +202,13 @@ both — at the default <code>shrink</code> neither column does anything.</p>
     <a href="https://github.com/NVIDIA-NeMo/RL/blob/a4c10a78134211fbfa3e7e62fa950a5b05f89864/nemo_rl/algorithms/single_controller.py#L2016-L2018">“Borrowing
     without one would leave the lender short instead: the same hole, one step later.”</a></td></tr>
 <tr><td>spare → borrow</td><td><strong>no</strong></td>
-    <td>With rollout recovery on, the spare is dispatched for the same step and the borrow is
-    skipped entirely. That is the whole of the <code>"replace"</code> behaviour in this mode.</td></tr>
+    <td>The borrow needs a finished group in a later step to take. When there is none — lookahead 0,
+    or nothing later has finished yet — the spare is dispatched for the same step and that step waits
+    for it.</td></tr>
 </table>
 
-<p>So a run with recovery enabled and <code>on_dropped_prompt="replace"</code> uses the spare pool
-and never borrows. A run with recovery disabled uses both. There is no configuration that borrows
-without a spare pool.</p>
+<p>So every <code>"replace"</code> run uses the spare pool, and borrows whenever a later step has a
+finished group to lend. There is no configuration that borrows without a spare pool.</p>
 
 <p>First, where a spare comes from. The pool is a separate holding area, filled by taking a whole
 dataloader batch <em>instead of</em> admitting it as a training step:</p>
@@ -251,15 +239,16 @@ dataloader batch <em>instead of</em> admitting it as a training step:</p>
   <text class="note" x="14" y="130">so it is topped up on demand rather than filled once. Nothing is ever put back into it.</text>
 </svg>
 
-<p>Now the two settings, drawn as the same five moments. Only step&nbsp;3 differs.</p>
+<p>Now the two cases, drawn as the same five moments. Only step&nbsp;3 differs — and what picks the
+case is whether a later step already has a finished group, not any setting.</p>
 
-<svg viewBox="0 0 940 414" role="img" aria-label="Two columns showing the same five moments; with save_data_plane true step 7 waits for the spare, with save_data_plane false step 7 borrows a finished group from step 9 and the spare is dispatched for step 9 instead">
+<svg viewBox="0 0 940 414" role="img" aria-label="Two columns showing the same five moments; when no later step has finished, step 7 waits for the spare; when step 9 has finished, step 7 borrows a finished group from step 9 and the spare is dispatched for step 9 instead">
   <defs><marker id="ah3" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto">
     <path d="M0,0 L7,3.5 L0,7 z" fill="var(--orange)"/></marker></defs>
 
   <line x1="468" y1="26" x2="468" y2="374" stroke="var(--border)" stroke-width="1"/>
-  <text class="hd" x="14"  y="18">save_data_plane: true  →  no borrow</text>
-  <text class="hd" x="486" y="18">save_data_plane: false  →  borrow</text>
+  <text class="hd" x="14"  y="18">no finished later group  →  the spare fills step 7</text>
+  <text class="hd" x="486" y="18">step 9 already finished  →  borrow</text>
 
   <line x1="14" y1="30" x2="926" y2="30" stroke="var(--border)" stroke-width="1"/>
 
@@ -338,12 +327,18 @@ which is why <code>promote_ready_group</code> picks the furthest future step as 
 take a group that is already finished from a later step, re-stamp it to the step with the hole so that
 step can close now, then dispatch the spare stamped for the step you took it from.</p>
 
-<div class="mono"><span class="c"># the borrow is a debt, and the spare is what repays it</span>
+<div class="mono"><span class="c"># with rollout recovery on — inside the checkpoint-atomic mutation cut</span>
+if replacement is not None:
+    lender_step = self._promote_into_step(target_step)       <span class="c"># :1983</span>
+    if lender_step is not None:
+        target_step = lender_step
+<span class="c"># with it off — the same borrow, a few lines lower</span>
 if not self._rollout_recovery_enabled:
-    lender_step = self._promote_into_step(target_step)
+    lender_step = self._promote_into_step(target_step)       <span class="c"># :2020</span>
     if lender_step is not None:
         target_step = lender_step        <span class="c"># the spare now belongs to the lender</span></div>
-<p class="sub"><a href="https://github.com/NVIDIA-NeMo/RL/blob/a4c10a78134211fbfa3e7e62fa950a5b05f89864/nemo_rl/algorithms/single_controller.py#L2019">single_controller.py:2019-2022</a>
+<p class="sub"><a href="https://github.com/NVIDIA-NeMo/RL/blob/a4c10a78134211fbfa3e7e62fa950a5b05f89864/nemo_rl/algorithms/single_controller.py#L1983">single_controller.py:1983</a>
+and <a href="https://github.com/NVIDIA-NeMo/RL/blob/a4c10a78134211fbfa3e7e62fa950a5b05f89864/nemo_rl/algorithms/single_controller.py#L2020">:2020</a>
 — <a href="https://github.com/NVIDIA-NeMo/RL/blob/a4c10a78134211fbfa3e7e62fa950a5b05f89864/nemo_rl/algorithms/single_controller.py#L2402"><code>_promote_into_step</code></a>
 is the only caller of
 <a href="https://github.com/NVIDIA-NeMo/RL/blob/a4c10a78134211fbfa3e7e62fa950a5b05f89864/nemo_rl/algorithms/async_utils/replay_buffer.py#L1940"><code>promote_ready_group</code></a>
@@ -354,10 +349,12 @@ in the repo.</p>
 reaches the last step, which has nobody to borrow from.” The furthest future step is chosen as lender
 because it is due last and has the most slack.</p>
 
-<p><strong>That <code>if not self._rollout_recovery_enabled</code> is the whole reason the recovery
-counters behave.</strong> Borrowing is the only thing that puts a committed group into a step that has
-not been dispatched yet. With rollout recovery on, it never runs — so at restore, a re-admitted batch
-never finds its step already partly filled, and nothing is discarded.</p>
+<p><strong>Does a borrow put a restore at risk?</strong> No. The borrow moves a group between steps
+that were both already admitted, and the spare takes the lender’s stamp, so nothing is ever stamped
+past the sampler cursor. After a restore, a re-admitted batch gets the next stamp after the saved
+cursor, finds nothing there, and dispatches in full. The
+<a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-3925-can-restore-drop-data.html">third page</a>
+runs exactly this through a checkpoint and back.</p>
 
 <div class="warn">
 <p style="margin:0 0 8px"><strong>Is it worth keeping?</strong> An honest summary rather than a
@@ -367,9 +364,8 @@ recommendation, since this is pre-existing and not part of #3925:</p>
 moves the effective batch size around without saying so.</p>
 <p style="margin:0"><em>Against:</em> it is three knobs, a spare pool that costs a whole diverted
 batch, and a debt-and-repayment protocol whose ordering comments run longer than the code. The borrow
-half is already switched off in the mode this PR is about, so it only runs for
-non-recovery <code>in_order</code> runs that opted into <code>"replace"</code> — a narrow corner to
-carry that much machinery for. If it were dropped, the spare substitution could stay and only the
+only ever runs for <code>in_order</code> runs that opted into <code>"replace"</code> with lookahead
+≥ 1 — a narrow corner to carry that much machinery for. If it were dropped, the spare substitution could stay and only the
 borrow/repay would go, which is where nearly all the complexity lives.</p>
 </div>
 

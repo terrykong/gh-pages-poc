@@ -109,8 +109,12 @@ holds groups that did not. The code says so where it logs
     <td>Groups that finished before the crash, restored whole from the replay buffer. No generation needed.</td></tr>
 <tr><td class="old">groups_considered</td><td><code>groups_unfinished_found</code></td>
     <td>Groups in the recovery ledger: at least one sibling had not sealed. Includes groups with zero sealed siblings.</td></tr>
-<tr><td class="old">groups_redispatched</td><td><code>groups_unfinished_resumed</code></td>
-    <td>Of those, the ones relaunched. Relaunching waits for buffer and in-flight capacity; it never skips a group.</td></tr>
+<tr><td class="old">groups_redispatched</td><td><em>remove</em></td>
+    <td>Always equal to the line above on any checkpoint this code writes: every unfinished group is
+    relaunched, and the one branch that could drop a reserved group needs a sampler cursor the
+    checkpoint never produces (<a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-3925-can-restore-drop-data.html">third page</a>).
+    If that branch is kept, count its gap as <code>groups_unfinished_dropped</code> instead of a
+    second, near-identical total.</td></tr>
 <tr><td class="old">siblings_reused</td><td><code>siblings_reused</code></td>
     <td>Unchanged. Siblings whose output survived and is not regenerated. Only groups that were dispatched can contribute.</td></tr>
 <tr><td class="old">siblings_redispatched</td><td><code>siblings_rerun</code></td>
@@ -169,15 +173,15 @@ checkpoint captures.</p>
   <text class="note" x="420" y="292">no generation; straight back into the buffer</text>
   <text class="lbl" x="30" y="314">groups_unfinished_found    = 8</text>
   <text class="note" x="420" y="314">5 dispatched + 3 never dispatched</text>
-  <text class="lbl" x="30" y="336">groups_unfinished_resumed  = 8</text>
-  <text class="note" x="420" y="336">all of them — relaunch waits for capacity, never skips</text>
+  <text class="lbl" x="30" y="336">relaunched                 = 8</text>
+  <text class="note" x="420" y="336">all of them, always — relaunch waits for capacity, never skips</text>
   <text class="lbl" x="30" y="358">siblings_reused = 14   siblings_rerun = 18</text>
   <text class="note" x="420" y="358">18 = 6 from the dispatched five, plus 3 x 4 = 12</text>
 </svg>
 
 <div class="mono"><span class="c"># the invariant that ties the sibling counts to the group counts</span>
-siblings_reused + siblings_rerun  ==  groups_unfinished_resumed * group_size
-        <span class="g">14</span>     +      <span class="g">18</span>        ==             <span class="g">8</span>              *      <span class="g">4</span>     <span class="c"># 32</span>
+siblings_reused + siblings_rerun  ==  groups_unfinished_found * group_size
+        <span class="g">14</span>     +      <span class="g">18</span>        ==            <span class="g">8</span>             *      <span class="g">4</span>     <span class="c"># 32</span>
 
 <span class="c"># the three never-dispatched groups contribute nothing to siblings_reused.</span>
 <span class="c"># that is the visible signature of "admitted, but the pump never got to them".</span></div>
@@ -191,7 +195,7 @@ so a blocked group is a slow group, not a lost one. The class docstring makes th
 “cannot deadlock merely because the checkpoint contained more unfinished ownership records than free
 replay slots.”</p>
 
-<h2>The one open question</h2>
+<h2>The discard branch, settled by running it</h2>
 
 <p>There <em>is</em> a path where a group in the ledger is released instead of relaunched. During
 re-admission, if the replay buffer already holds groups stamped for the same target step, the surplus
@@ -216,13 +220,16 @@ and no generated work is lost. What is lost is the prompt: the record is
 and the dataloader cursor is already past it.</p>
 
 <div class="warn">
-<p style="margin:0"><strong>What I could not determine.</strong> I could not construct a restore where
-<code>groups_unfinished_found</code> and <code>groups_unfinished_resumed</code> actually differ. A drop
-needs a re-admitted <code>RESERVED</code> batch to land on a target step that already has buffered
-groups — but <code>RESERVED</code> means the admission never committed, so that step had nothing
-dispatched of its own. If the two counters can never differ at restore, one of them is redundant. If
-they can, that case deserves a doc line and a test, because nothing covers it today. That is a question
-for the author, not a defect.</p>
+<p style="margin:0"><strong>It cannot fire on a checkpoint this code writes.</strong> A
+<a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-3925-test_restore_after_borrow.py">round-trip test</a>
+on the real code — a live borrow and repayment, the real checkpoint capture, a restore into a fresh
+controller — brings every prompt back and logs <code>groups_considered == groups_redispatched</code>.
+The re-admitted batch is stamped one past the saved sampler cursor, and nothing in the buffer can carry
+that stamp. The same test restored with the cursor rebuilt from <code>trainer_version</code> (the
+fallback for a checkpoint with no saved cursor) drops all three reserved prompts — which is what the
+branch guards against, and why one counter is enough. The
+<a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-3925-can-restore-drop-data.html">third page</a>
+draws both runs.</p>
 </div>
 
 </div>
