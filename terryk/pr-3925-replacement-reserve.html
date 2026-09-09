@@ -81,6 +81,12 @@ pre-existing, opt-in mechanism that came up while reading the recovery counters.
 </nav>
 <p class="chainnote">Two pages from the #3925 review — this one: what a spare prompt is for.</p>
 
+<p><strong>Everything on this page happens during a live run, not at restore.</strong> The code
+is in <code>_dispatch_one_prompt</code> inside the rollout pump, and it fires the moment a prompt
+exhausts its retry budgets mid-training — on a fresh run from scratch, with no checkpoint
+involved. Checkpointing enters only because one of its settings happens to gate the borrow,
+which is the surprising part.</p>
+
 <p>A training step consumes a fixed number of prompt groups. If a prompt is retried until its
 budget runs out and is finally given up on, that step is one group short. Something has to give,
 and <a href="https://github.com/NVIDIA-NeMo/RL/blob/a4c10a78134211fbfa3e7e62fa950a5b05f89864/nemo_rl/algorithms/single_controller_utils/config.py#L203"><code>on_dropped_prompt</code></a>
@@ -149,7 +155,7 @@ wasted — nothing was generated for them, and they stay in the pool.</p>
 <tr><td><code>replacement_reserve_prompts</code></td><td>1</td><td>Low-water mark for the spare pool. Read only under <code>"replace"</code>.</td></tr>
 </table>
 
-<h2>The borrow, and why it is off during recovery</h2>
+<h2>The borrow, and the setting that switches it off</h2>
 
 <p><strong>“Recovery on/off” is not a knob, and it is not about save/restore time.</strong> It is a
 flag computed once when the controller starts, and it then governs the <em>whole run</em>, live
@@ -166,7 +172,8 @@ dispatch included:</p>
 <p class="sub"><a href="https://github.com/NVIDIA-NeMo/RL/blob/a4c10a78134211fbfa3e7e62fa950a5b05f89864/nemo_rl/algorithms/single_controller.py#L497-L504">single_controller.py:497-504</a></p>
 
 <p>So turning on data-plane checkpointing silently changes how a dropped prompt is handled during
-normal operation — the borrow stops happening for the entire run, not just around a restore.</p>
+normal operation — the borrow stops happening for the entire run, not just around a restore. Both
+columns below are live-run behaviour; the config decides which one you get.</p>
 
 <table>
 <tr><th></th><th>borrow runs</th><th>borrow skipped</th></tr>
