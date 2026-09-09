@@ -269,8 +269,9 @@ only runs for a checkpoint that has no saved cursor.</p>
 <p style="margin:0 0 8px"><strong>What this means for the PR.</strong> On every checkpoint this code
 writes, <code>groups_considered</code> and <code>groups_redispatched</code> are equal — the discard is
 the only thing that could separate them, and it needs a cursor below stamps already in the buffer. One
-of the two counters is redundant. If the branch is meant to stay as a guard, the useful number is its
-gap, not a second total.</p>
+of the two counters is redundant. And the branch itself should not drop prompts: on a correct cursor it
+never runs, and on a wrong one it loses data with only a print. Better to raise there, so a bad cursor
+stops the run instead of quietly shrinking the dataset.</p>
 <p style="margin:0">Nothing in CI runs a borrow through a checkpoint, and nothing re-admits a
 <code>RESERVED</code> batch against a real buffer — every scenario in the recovery matrix builds groups
 with <a href="https://github.com/NVIDIA-NeMo/RL/blob/a4c10a78134211fbfa3e7e62fa950a5b05f89864/tests/unit/single_controller/_checkpoint_scenarios.py#L362"><code>admitted=True</code></a>.
