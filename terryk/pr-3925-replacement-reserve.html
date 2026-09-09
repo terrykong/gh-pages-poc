@@ -106,13 +106,13 @@ hold the batch size constant instead.</p>
   <circle class="d-hole" cx="98" cy="75" r="7"/>
   <text class="note" x="120" y="79">step 7 trains on 2 groups</text>
 
-  <text class="hd" x="14" y="128">replace, recovery ON — dispatch a spare for the same step</text>
+  <text class="hd" x="14" y="128">replace + save_data_plane:true — dispatch a spare for the same step</text>
   <rect class="box" x="14" y="138" width="250" height="42" rx="6"/>
   <circle class="d-ok" cx="42" cy="159" r="7"/><circle class="d-ok" cx="70" cy="159" r="7"/>
   <circle class="d-spare" cx="98" cy="159" r="7"/>
   <text class="note" x="120" y="163">step 7 waits for the spare, then trains on 3</text>
 
-  <text class="hd" x="14" y="212">replace, recovery OFF — borrow now, repay later</text>
+  <text class="hd" x="14" y="212">replace + save_data_plane:false — borrow now, repay later</text>
   <rect class="box" x="14" y="222" width="250" height="42" rx="6"/>
   <circle class="d-ok" cx="42" cy="243" r="7"/><circle class="d-ok" cx="70" cy="243" r="7"/>
   <circle class="d-ok" cx="98" cy="243" r="7"/>
@@ -150,6 +150,50 @@ wasted — nothing was generated for them, and they stay in the pool.</p>
 </table>
 
 <h2>The borrow, and why it is off during recovery</h2>
+
+<p><strong>“Recovery on/off” is not a knob, and it is not about save/restore time.</strong> It is a
+flag computed once when the controller starts, and it then governs the <em>whole run</em>, live
+dispatch included:</p>
+
+<div class="mono">self._rollout_recovery_enabled = bool(
+    restoring_rollout_recovery                       <span class="c"># resuming a checkpoint that has a recovery payload</span>
+    or (
+        self._master_config.checkpointing["enabled"]
+        and self._master_config.checkpointing.get("save_data_plane")
+        and self._sampler.supports_buffer_checkpoint  <span class="c"># True for all four shipped samplers</span>
+    )
+)</div>
+<p class="sub"><a href="https://github.com/NVIDIA-NeMo/RL/blob/a4c10a78134211fbfa3e7e62fa950a5b05f89864/nemo_rl/algorithms/single_controller.py#L497-L504">single_controller.py:497-504</a></p>
+
+<p>So turning on data-plane checkpointing silently changes how a dropped prompt is handled during
+normal operation — the borrow stops happening for the entire run, not just around a restore.</p>
+
+<table>
+<tr><th></th><th>borrow runs</th><th>borrow skipped</th></tr>
+<tr><td>config</td>
+<td><div class="mono">checkpointing:
+  enabled: true
+  save_data_plane: <span class="c">false</span>
+async_rl:
+  sampler:
+    name: in_order
+  rollout_failure:
+    on_dropped_prompt: replace</div></td>
+<td><div class="mono">checkpointing:
+  enabled: true
+  save_data_plane: <span class="c">true</span>
+async_rl:
+  sampler:
+    name: in_order
+  rollout_failure:
+    on_dropped_prompt: replace</div></td></tr>
+<tr><td>on a dropped prompt</td>
+<td>spare dispatched, <em>and</em> a finished group borrowed from a later step</td>
+<td>spare dispatched for the same step; no borrow</td></tr>
+</table>
+
+<p>Only <code>save_data_plane</code> differs. <code>on_dropped_prompt: replace</code> is required in
+both — at the default <code>shrink</code> neither column does anything.</p>
 
 <p><strong>The spare and the borrow are not a package.</strong> The link runs one way only:</p>
 
