@@ -55,7 +55,13 @@ svg .box{fill:var(--surface);stroke:var(--border);stroke-width:1.2}
 svg .boxbad{fill:var(--surface);stroke:var(--red);stroke-width:2}
 svg .ok{fill:var(--green);font:bold 14px -apple-system,sans-serif}
 svg .no{fill:var(--red);font:bold 14px -apple-system,sans-serif}
-svg .arr{stroke:var(--dim);stroke-width:1.5;fill:none}
+svg .d-ok{fill:var(--green);stroke:var(--green)}
+svg .d-ok9{fill:var(--teal);stroke:var(--teal)}
+svg .d-spare{fill:var(--orange);stroke:var(--orange)}
+svg .d-rerun{fill:none;stroke:var(--dim);stroke-width:1.6}
+svg .d-hole{fill:none;stroke:var(--dim);stroke-width:1.4;stroke-dasharray:3 2}
+svg .d-drop{fill:none;stroke:var(--red);stroke-width:2.2}
+svg .arr{stroke:var(--orange);stroke-width:1.6;fill:none}
 </style>
 <script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
   document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
@@ -116,24 +122,89 @@ if not self._rollout_recovery_enabled:
 and <a href="https://github.com/NVIDIA-NeMo/RL/blob/a4c10a78134211fbfa3e7e62fa950a5b05f89864/nemo_rl/algorithms/single_controller.py#L2020">:2020</a>.
 The <code>if not …</code> guards in this area are “don’t do it twice”, not “recovery disables this”.</p>
 
-<p>So the chain closes. I drove the real
-<a href="https://github.com/NVIDIA-NeMo/RL/blob/a4c10a78134211fbfa3e7e62fa950a5b05f89864/nemo_rl/algorithms/single_controller.py#L1117"><code>_admit_reserved_prompt_groups</code></a>
-with a batch of two <code>RESERVED</code> groups, varying only what the buffer reports for their target
-step:</p>
+<p>Group size <strong>4</strong>, and a training step takes <strong>3</strong> groups. Read the three
+panels left to right — the first two happen live, the third after the restart.</p>
 
-<div class="mono">--- A: step is empty
-    reserved            : 2
-    target_step assigned: 5
+<svg viewBox="0 0 940 470" role="img" aria-label="Three panels: a borrow leaves a repayment group in step 9 before step 9 is dispatched; the checkpoint captures that plus step 9's reserved batch; on restore the re-admission finds one group already there and discards one reserved prompt">
+  <defs><marker id="ah4" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto">
+    <path d="M0,0 L7,3.5 L0,7 z" fill="var(--orange)"/></marker></defs>
+
+  <!-- ── PANEL 1 ── -->
+  <text class="ttl" x="14" y="18">1.  Live: step 7 loses a prompt and borrows from step 9</text>
+  <text class="lbl" x="14" y="46">step 7</text>
+  <circle class="d-ok" cx="78" cy="42" r="7"/><circle class="d-ok" cx="100" cy="42" r="7"/><circle class="d-hole" cx="122" cy="42" r="7"/>
+  <text class="note" x="150" y="46">one group given up on</text>
+
+  <text class="lbl" x="14" y="76">step 9</text>
+  <circle class="d-ok9" cx="78" cy="72" r="7"/><circle class="d-ok9" cx="100" cy="72" r="7"/><circle class="d-ok9" cx="122" cy="72" r="7"/>
+  <text class="note" x="150" y="76">finished early — it is due later, so it has the most slack</text>
+
+  <path class="arr" d="M122 92 L122 108 L100 108" marker-end="url(#ah4)"/>
+  <text class="note" x="150" y="112">one of step 9’s groups moves into step 7, which closes now</text>
+  <text class="note" x="150" y="130">a spare is dispatched FOR STEP 9 to repay it</text>
+  <circle class="d-spare" cx="122" cy="126" r="7"/>
+
+  <line x1="14" y1="148" x2="926" y2="148" stroke="var(--border)" stroke-width="1"/>
+
+  <!-- ── PANEL 2 ── -->
+  <text class="ttl" x="14" y="176">2.  The spare lands, then the checkpoint is taken</text>
+
+  <text class="hd"  x="14" y="202">replay buffer</text>
+  <rect class="box" x="14" y="210" width="330" height="48" rx="6"/>
+  <circle class="d-spare" cx="44" cy="234" r="7"/>
+  <text class="note" x="66" y="238">1 finished group, stamped step 9  ← the repayment</text>
+
+  <text class="hd"  x="380" y="202">recovery ledger</text>
+  <rect class="box" x="380" y="210" width="546" height="48" rx="6"/>
+  <circle class="d-rerun" cx="410" cy="234" r="7"/><circle class="d-rerun" cx="432" cy="234" r="7"/><circle class="d-rerun" cx="454" cy="234" r="7"/>
+  <text class="note" x="476" y="230">step 9’s own batch: 3 groups, RESERVED,</text>
+  <text class="note" x="476" y="246">0/4 each — held at the lookahead gate</text>
+
+  <text class="note" x="14" y="278">Step 9 now has a finished group even though its own batch was never dispatched. That is the state the checkpoint saves.</text>
+
+  <line x1="14" y1="296" x2="926" y2="296" stroke="var(--border)" stroke-width="1"/>
+
+  <!-- ── PANEL 3 ── -->
+  <text class="ttl" x="14" y="324">3.  Restore: the batch is re-admitted, and one prompt is released</text>
+
+  <text class="lbl" x="14"  y="352">step 9 needs</text>
+  <circle class="d-hole" cx="128" cy="348" r="7"/><circle class="d-hole" cx="150" cy="348" r="7"/><circle class="d-hole" cx="172" cy="348" r="7"/>
+  <text class="note" x="200" y="352">3 groups</text>
+
+  <text class="lbl" x="14"  y="382">already there</text>
+  <circle class="d-spare" cx="128" cy="378" r="7"/>
+  <text class="note" x="200" y="382">1 — the repayment group from panel 2</text>
+
+  <text class="lbl" x="14"  y="412">so it dispatches</text>
+  <circle class="d-rerun" cx="128" cy="408" r="7"/><circle class="d-rerun" cx="150" cy="408" r="7"/>
+  <text class="note" x="200" y="412">2 of the 3 reserved prompts</text>
+
+  <text class="lbl" x="14"  y="442">and discards</text>
+  <circle class="d-drop" cx="128" cy="438" r="7"/>
+  <text class="no"   x="200" y="442">1 — released, never served again</text>
+  <text class="note" x="470" y="442">the dataloader cursor is already past it</text>
+</svg>
+
+<p>The last row is what the probe prints. Same numbers, produced by the real
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/a4c10a78134211fbfa3e7e62fa950a5b05f89864/nemo_rl/algorithms/single_controller.py#L1117"><code>_admit_reserved_prompt_groups</code></a>
+rather than by reading it:</p>
+
+<div class="mono">--- A: step 9 is empty
+    reserved            : 3
+    target_step assigned: 9
     buffer reported     : 0 already stamped for that step
-    dispatched          : 2
+    dispatched          : 3
     DISCARDED           : 0   []
 
---- B: step already has 1 buffered group (post-borrow)
-    reserved            : 2
-    target_step assigned: 5
+--- B: step 9 already holds the repayment group
+    reserved            : 3
+    target_step assigned: 9
     buffer reported     : 1 already stamped for that step
-    dispatched          : 1
-    <span class="r">DISCARDED           : 1   ['76e87f43-9aa1-416b-b015-6a1987825cd7']</span></div>
+    dispatched          : 2
+    <span class="r">DISCARDED           : 1   ['dea5deb3-a9bd-45e6-8a3e-5306c64a6e11']</span></div>
+
+<p>Only the buffer’s answer differs between the two cases. Everything else — the sampler, the ledger,
+the admission — is the same production code.</p>
 
 <p>One reserved prompt is released and never served again. It is a <code>RESERVED</code> group, so
 <strong>no generated rollout is lost</strong> —
