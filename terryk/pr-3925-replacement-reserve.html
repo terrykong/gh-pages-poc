@@ -151,6 +151,24 @@ wasted — nothing was generated for them, and they stay in the pool.</p>
 
 <h2>The borrow, and why it is off during recovery</h2>
 
+<p><strong>The spare and the borrow are not a package.</strong> The link runs one way only:</p>
+
+<table>
+<tr><th></th><th>needs the other?</th><th>why</th></tr>
+<tr><td>borrow → spare</td><td><strong>yes, always</strong></td>
+    <td>The borrow is a debt and the spare is the repayment. The code will not borrow without a
+    spare in hand —
+    <a href="https://github.com/NVIDIA-NeMo/RL/blob/a4c10a78134211fbfa3e7e62fa950a5b05f89864/nemo_rl/algorithms/single_controller.py#L2016-L2018">“Borrowing
+    without one would leave the lender short instead: the same hole, one step later.”</a></td></tr>
+<tr><td>spare → borrow</td><td><strong>no</strong></td>
+    <td>With rollout recovery on, the spare is dispatched for the same step and the borrow is
+    skipped entirely. That is the whole of the <code>"replace"</code> behaviour in this mode.</td></tr>
+</table>
+
+<p>So a run with recovery enabled and <code>on_dropped_prompt="replace"</code> uses the spare pool
+and never borrows. A run with recovery disabled uses both. There is no configuration that borrows
+without a spare pool.</p>
+
 <p>Dispatching a spare still means <em>waiting</em> for it to generate. The borrow removes that wait:
 take a group that is already finished from a later step, re-stamp it to the step with the hole so that
 step can close now, then dispatch the spare stamped for the step you took it from.</p>
