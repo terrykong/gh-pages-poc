@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>NVIDIA-NeMo/RL #3925 — can a restore throw away a prompt?</title>
+<title>NVIDIA-NeMo/RL #3925 — yes, a restore can drop a prompt</title>
 <style>
 :root{
   --bg:#0d1117; --surface:#161b22; --surface2:#1c2128; --border:#30363d;
@@ -41,6 +41,7 @@ p.chainnote{color:var(--dim);font-size:12px;margin:0 0 18px}
   padding:13px;overflow-x:auto;white-space:pre;margin:14px 0}
 .mono .c{color:var(--dim)}
 .mono .r{color:var(--red)}
+.mono .g{color:var(--green)}
 .good{border-left:3px solid var(--green);background:var(--surface);
   padding:12px 16px;margin:18px 0;border-radius:0 8px 8px 0}
 .warn{border-left:3px solid var(--orange);background:var(--surface);
@@ -69,10 +70,10 @@ svg .arr{stroke:var(--dim);stroke-width:1.5;fill:none}
   document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
 <div class="wrap">
 
-<h1>Can a restore throw away a prompt?</h1>
+<h1>Yes — a restore can drop a prompt</h1>
 <p class="sub">For
 <a href="https://github.com/NVIDIA-NeMo/RL/pull/3925">NVIDIA-NeMo/RL #3925</a>.
-All permalinks pin <code>a4c10a78</code>.</p>
+All permalinks pin <code>a4c10a78</code>. Confirmed by running the real admission code, not by reading.</p>
 
 <nav class="chain">
   <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-3925-split-recovery-rows.html">recovery counters</a>
@@ -81,13 +82,8 @@ All permalinks pin <code>a4c10a78</code>.</p>
 </nav>
 <p class="chainnote">Three pages from the #3925 review — this one: whether restoring can lose a prompt.</p>
 
-<p><strong>Short answer: no, as far as the code can be read — and it fails on a contradiction, not a
-coincidence.</strong> Two of the conditions required to drop a prompt at restore are controlled by the
-same setting, in opposite directions.</p>
-
-<p>There is exactly one line in the restore path that can drop anything. It runs while re-admitting a
-batch of <code>RESERVED</code> prompt groups — ones the sampler had claimed from the dataloader but
-never dispatched:</p>
+<p>One line in the restore path can drop a prompt. It runs while re-admitting a batch of
+<code>RESERVED</code> groups — prompts the sampler claimed from the dataloader but never dispatched:</p>
 
 <div class="mono">buffered = self._buffer.count_for_target_step(target_step)
 if buffered:
@@ -97,98 +93,102 @@ if buffered:
         self._rollout_manager.discard_prompt_group(cut, group_id)   <span class="r"># never re-served</span></div>
 <p class="sub"><a href="https://github.com/NVIDIA-NeMo/RL/blob/a4c10a78134211fbfa3e7e62fa950a5b05f89864/nemo_rl/algorithms/single_controller.py#L1149">single_controller.py:1149-1152</a></p>
 
-<p>It fires only when <code>buffered &gt; 0</code> — the replay buffer already holds a finished group
-stamped for the step this batch is being admitted to. So the question becomes: <em>how does a step that
-was never dispatched already have a finished group?</em></p>
+<p>It fires when <code>buffered &gt; 0</code> — the replay buffer already holding a finished group for
+the step this batch is being admitted to. The question is whether that state is reachable on a run that
+can restore. It is.</p>
 
-<h2>The five conditions, and the one that closes</h2>
+<h2>The counter-example, run against the real code</h2>
 
-<svg viewBox="0 0 940 400" role="img" aria-label="Five conditions must all hold for a restore to drop a prompt; conditions four and five are controlled by save_data_plane in opposite directions, so they cannot both hold">
-  <text class="ttl" x="14" y="18">All five must hold at once for a prompt to be dropped on restore</text>
+<p>The borrow is what puts a finished group into a step that was never dispatched, and it runs
+<strong>in both modes</strong>. There are two call sites, and the recovery one is not a no-op — it is
+simply done earlier, inside a checkpoint-atomic mutation cut, because ledger ownership has to transfer
+atomically:</p>
 
-  <rect class="box" x="14" y="32" width="700" height="42" rx="6"/>
-  <text class="lbl" x="30" y="50">1.  on_dropped_prompt: replace</text>
-  <text class="note" x="30" y="66">default is “shrink”, which never touches the spare pool</text>
-  <text class="ok" x="740" y="58">possible</text>
+<div class="mono"><span class="c"># under rollout recovery — inside the mutation cut</span>
+self._rollout_manager.discard_prompt_group(cut, lineage_group_id)
+if replacement is not None:
+    lender_step = self._promote_into_step(target_step)     <span class="g"># :1983 — the borrow</span>
+    ...
+<span class="c"># without rollout recovery — the same borrow, plainly</span>
+if not self._rollout_recovery_enabled:
+    lender_step = self._promote_into_step(target_step)     <span class="g"># :2020</span></div>
+<p class="sub"><a href="https://github.com/NVIDIA-NeMo/RL/blob/a4c10a78134211fbfa3e7e62fa950a5b05f89864/nemo_rl/algorithms/single_controller.py#L1983">single_controller.py:1983</a>
+and <a href="https://github.com/NVIDIA-NeMo/RL/blob/a4c10a78134211fbfa3e7e62fa950a5b05f89864/nemo_rl/algorithms/single_controller.py#L2020">:2020</a>.
+The <code>if not …</code> guards in this area are “don’t do it twice”, not “recovery disables this”.</p>
 
-  <rect class="box" x="14" y="82" width="700" height="42" rx="6"/>
-  <text class="lbl" x="30" y="100">2.  sampler stamps a target step</text>
-  <text class="note" x="30" y="116">only in_order does; windowed, ready_first, weight_fifo all return None</text>
-  <text class="ok" x="740" y="108">possible</text>
+<p>So the chain closes. I drove the real
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/a4c10a78134211fbfa3e7e62fa950a5b05f89864/nemo_rl/algorithms/single_controller.py#L1117"><code>_admit_reserved_prompt_groups</code></a>
+with a batch of two <code>RESERVED</code> groups, varying only what the buffer reports for their target
+step:</p>
 
-  <rect class="box" x="14" y="132" width="700" height="42" rx="6"/>
-  <text class="lbl" x="30" y="150">3.  a prompt fails until its retry budget is gone</text>
-  <text class="note" x="30" y="166">otherwise there is no hole to fill and no borrow</text>
-  <text class="ok" x="740" y="158">possible</text>
+<div class="mono">--- A: step is empty
+    reserved            : 2
+    target_step assigned: 5
+    buffer reported     : 0 already stamped for that step
+    dispatched          : 2
+    DISCARDED           : 0   []
 
-  <rect class="boxbad" x="14" y="182" width="700" height="42" rx="6"/>
-  <text class="lbl" x="30" y="200">4.  the borrow ran, pre-filling a future step</text>
-  <text class="note" x="30" y="216">needs save_data_plane: FALSE — the borrow is gated on it</text>
-  <text class="no" x="740" y="208">requires false</text>
+--- B: step already has 1 buffered group (post-borrow)
+    reserved            : 2
+    target_step assigned: 5
+    buffer reported     : 1 already stamped for that step
+    dispatched          : 1
+    <span class="r">DISCARDED           : 1   ['76e87f43-9aa1-416b-b015-6a1987825cd7']</span></div>
 
-  <rect class="boxbad" x="14" y="232" width="700" height="42" rx="6"/>
-  <text class="lbl" x="30" y="250">5.  a restore actually happens</text>
-  <text class="note" x="30" y="266">needs save_data_plane: TRUE — nothing else writes the recovery payload</text>
-  <text class="no" x="740" y="258">requires true</text>
+<p>One reserved prompt is released and never served again. It is a <code>RESERVED</code> group, so
+<strong>no generated rollout is lost</strong> —
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/a4c10a78134211fbfa3e7e62fa950a5b05f89864/nemo_rl/experience/rollout_manager.py#L1657"><code>discard_prompt_group</code></a>
+releases “a reservation that will intentionally never be dispatched”, and the record is
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/a4c10a78134211fbfa3e7e62fa950a5b05f89864/nemo_rl/experience/rollout_recovery.py#L798">simply deleted</a>.
+What is lost is the prompt: the dataloader cursor is already past it, so that example is not trained on
+this epoch.</p>
 
-  <path class="arr" d="M726 203 L760 203 L760 240 L726 240" stroke="var(--red)"/>
-  <text class="no" x="700" y="300">4 and 5 cannot both hold</text>
-  <text class="note" x="14" y="300">One setting, two opposite requirements. The borrow is what pre-fills a future step, and it is</text>
-  <text class="note" x="14" y="318">switched off precisely when the run is able to checkpoint and restore at all.</text>
+<h2>What has to line up, and what it means for the counters</h2>
 
-  <rect class="box" x="14" y="336" width="912" height="50" rx="6"/>
-  <text class="ttl"  x="30" y="358">So on any run that can restore, the borrow never ran, no future step is pre-filled,</text>
-  <text class="ttl"  x="30" y="376">buffered is 0, and the discard does not fire.</text>
+<svg viewBox="0 0 940 268" role="img" aria-label="Four conditions that must hold for a restore to drop a prompt, all of them reachable">
+  <text class="ttl" x="14" y="18">All four hold together on a perfectly ordinary configuration</text>
+
+  <rect class="box" x="14" y="32" width="700" height="40" rx="6"/>
+  <text class="lbl" x="30" y="49">1.  on_dropped_prompt: replace</text>
+  <text class="note" x="30" y="65">opt-in; the default is “shrink”</text>
+  <text class="ok" x="742" y="56">reachable</text>
+
+  <rect class="box" x="14" y="80" width="700" height="40" rx="6"/>
+  <text class="lbl" x="30" y="97">2.  sampler stamps a target step</text>
+  <text class="note" x="30" y="113">in_order does; the other three return None and skip the discard</text>
+  <text class="ok" x="742" y="104">reachable</text>
+
+  <rect class="box" x="14" y="128" width="700" height="40" rx="6"/>
+  <text class="lbl" x="30" y="145">3.  a prompt is given up on, and a spare is available</text>
+  <text class="note" x="30" y="161">this triggers the borrow, which stamps a group into a future step</text>
+  <text class="ok" x="742" y="152">reachable</text>
+
+  <rect class="box" x="14" y="176" width="700" height="40" rx="6"/>
+  <text class="lbl" x="30" y="193">4.  a checkpoint lands while that step’s batch is still RESERVED</text>
+  <text class="note" x="30" y="209">the lookahead gate holds a batch in RESERVED while it waits</text>
+  <text class="ok" x="742" y="200">reachable</text>
+
+  <rect class="box" x="14" y="228" width="912" height="32" rx="6"/>
+  <text class="ttl" x="30" y="249">On restore that batch is re-admitted, buffered &gt; 0, and the surplus is discarded.</text>
 </svg>
 
-<p>The gate is one line, and it is the whole argument:</p>
-
-<div class="mono">if not self._rollout_recovery_enabled:          <span class="c"># condition 4 lives in here</span>
-    lender_step = self._promote_into_step(target_step)
-
-<span class="c"># and rollout recovery is exactly what makes a restore possible:</span>
-self._rollout_recovery_enabled = bool(
-    restoring_rollout_recovery
-    or (checkpointing["enabled"] and checkpointing["save_data_plane"] and ...)
-)</div>
-<p class="sub"><a href="https://github.com/NVIDIA-NeMo/RL/blob/a4c10a78134211fbfa3e7e62fa950a5b05f89864/nemo_rl/algorithms/single_controller.py#L2019">single_controller.py:2019</a>
-and <a href="https://github.com/NVIDIA-NeMo/RL/blob/a4c10a78134211fbfa3e7e62fa950a5b05f89864/nemo_rl/algorithms/single_controller.py#L497">:497-504</a>.
-<a href="https://github.com/NVIDIA-NeMo/RL/blob/a4c10a78134211fbfa3e7e62fa950a5b05f89864/nemo_rl/algorithms/single_controller.py#L2402"><code>_promote_into_step</code></a>
-is the only caller of
-<a href="https://github.com/NVIDIA-NeMo/RL/blob/a4c10a78134211fbfa3e7e62fa950a5b05f89864/nemo_rl/algorithms/async_utils/replay_buffer.py#L1940"><code>promote_ready_group</code></a>
-in the repo, so there is no second way to move a finished group into another step.</p>
-
-<div class="good">
-<p style="margin:0"><strong>Also worth knowing: the groups that could be dropped have no generated work
-in them.</strong> Only <code>RESERVED</code> groups reach that code, and
-<a href="https://github.com/NVIDIA-NeMo/RL/blob/a4c10a78134211fbfa3e7e62fa950a5b05f89864/nemo_rl/experience/rollout_manager.py#L1657"><code>discard_prompt_group</code></a>
-says so outright — it releases “a reservation that will intentionally never be dispatched.” So even in
-the impossible case, no rollout would be thrown away; only a prompt claim. Groups that were dispatched
-are <code>ADMITTED</code>, and
-<a href="https://github.com/NVIDIA-NeMo/RL/blob/a4c10a78134211fbfa3e7e62fa950a5b05f89864/nemo_rl/algorithms/single_controller.py#L1218">every one of those is relaunched unconditionally</a>.</p>
+<div class="warn">
+<p style="margin:0 0 8px"><strong>What this means for the PR.</strong> <code>groups_considered</code>
+and <code>groups_redispatched</code> are <em>not</em> redundant — their difference is exactly the count
+of prompts released without ever being generated. That difference is worth naming rather than leaving
+to subtraction.</p>
+<p style="margin:0">And nothing tests it. Every scenario in the recovery matrix builds groups with
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/a4c10a78134211fbfa3e7e62fa950a5b05f89864/tests/unit/single_controller/_checkpoint_scenarios.py#L362"><code>admitted=True</code></a>,
+so the <code>RESERVED</code> arm never runs there, and the one test that does build
+<code>RESERVED</code> groups replaces the admission with a stub — so the discard has never executed in
+CI. The probe above is the first time it has run.</p>
 </div>
 
-<h2>What I could not rule out</h2>
-
-<p>This is read from the code, not observed in a run, and the restore path in question has no test
-coverage. Every scenario in the recovery matrix builds groups with
-<a href="https://github.com/NVIDIA-NeMo/RL/blob/a4c10a78134211fbfa3e7e62fa950a5b05f89864/tests/unit/single_controller/_checkpoint_scenarios.py#L362"><code>admitted=True</code></a>,
-so the <code>RESERVED</code> arm never runs there. The one test that does create <code>RESERVED</code>
-groups replaces the admission with a stub, so it never reaches the discard either.</p>
-
-<p>Two things would change the answer, and neither is visible from reading:</p>
-
-<ul>
-<li>a restored sampler dispatch cursor that rewinds onto a step the buffer already has groups for;</li>
-<li>any future caller of <code>promote_ready_group</code> that is not behind the recovery gate.</li>
-</ul>
-
-<div class="warn">
-<p style="margin:0"><strong>What this means for the PR.</strong> If the two counters can never differ
-on the restore path, then <code>groups_considered</code> and <code>groups_redispatched</code> are
-always equal in every run that emits them, and one of them is redundant. If they <em>can</em> differ,
-the case deserves a test, because none exists. Either answer improves the change, and the author can
-settle it in a sentence — he wrote the recovery path.</p>
+<div class="good">
+<p style="margin:0"><strong>Correction.</strong> An earlier version of this page argued the opposite —
+that conditions 3 and 4 were mutually exclusive because <code>save_data_plane</code> gated the borrow
+off. That was wrong: the borrow has two call sites and runs under recovery too. The probe was written
+to settle it by execution rather than by another reading of the code.</p>
 </div>
 
 </div>
