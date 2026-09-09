@@ -213,6 +213,59 @@ both — at the default <code>shrink</code> neither column does anything.</p>
 and never borrows. A run with recovery disabled uses both. There is no configuration that borrows
 without a spare pool.</p>
 
+<p>The two settings differ in <strong>who waits for the spare to generate</strong>. Read each column
+top to bottom:</p>
+
+<svg viewBox="0 0 940 350" role="img" aria-label="Side by side sequences: with save_data_plane true the step waits for the spare; with save_data_plane false the step borrows a finished group from a later step and the spare repays that later step">
+  <line x1="470" y1="30" x2="470" y2="336" stroke="var(--border)" stroke-width="1"/>
+
+  <text class="hd" x="14"  y="22">save_data_plane: true   →  no borrow</text>
+  <text class="hd" x="490" y="22">save_data_plane: false  →  borrow</text>
+
+  <text class="note" x="14"  y="44">step 7 loses a prompt</text>
+  <text class="lbl" x="14"  y="70">step 7</text>
+  <circle class="d-ok" cx="78" cy="66" r="7"/><circle class="d-ok" cx="100" cy="66" r="7"/><circle class="d-hole" cx="122" cy="66" r="7"/>
+  <text class="note" x="490" y="44">step 7 loses a prompt; step 9 is already done</text>
+  <text class="lbl" x="490" y="70">step 7</text>
+  <circle class="d-ok" cx="554" cy="66" r="7"/><circle class="d-ok" cx="576" cy="66" r="7"/><circle class="d-hole" cx="598" cy="66" r="7"/>
+  <text class="lbl" x="660" y="70">step 9</text>
+  <circle class="d-ok" cx="724" cy="66" r="7"/><circle class="d-ok" cx="746" cy="66" r="7"/><circle class="d-ok" cx="768" cy="66" r="7"/>
+
+  <text class="note" x="14"  y="110">take a spare from the pool</text>
+  <circle class="d-spare" cx="200" cy="106" r="7"/>
+  <text class="note" x="490" y="110">take a spare from the pool</text>
+  <circle class="d-spare" cx="676" cy="106" r="7"/>
+
+  <text class="note" x="14"  y="150">dispatch it for step 7 — now generating</text>
+  <text class="note" x="490" y="150">move a finished group from step 9 into step 7</text>
+  <path class="arr" d="M768 128 L620 128"/>
+
+  <text class="note" x="14"  y="190">step 7 waits</text>
+  <text class="lbl" x="490" y="190">step 7</text>
+  <circle class="d-ok" cx="554" cy="186" r="7"/><circle class="d-ok" cx="576" cy="186" r="7"/><circle class="d-ok" cx="598" cy="186" r="7"/>
+  <text class="note" x="620" y="190">full — trains immediately</text>
+
+  <text class="lbl" x="14"  y="230">step 7</text>
+  <circle class="d-ok" cx="78" cy="226" r="7"/><circle class="d-ok" cx="100" cy="226" r="7"/><circle class="d-spare" cx="122" cy="226" r="7"/>
+  <text class="note" x="150" y="230">spare arrives — trains</text>
+  <text class="lbl" x="490" y="230">step 9</text>
+  <circle class="d-ok" cx="554" cy="226" r="7"/><circle class="d-ok" cx="576" cy="226" r="7"/><circle class="d-hole" cx="598" cy="226" r="7"/>
+  <text class="note" x="620" y="230">now one short — it lent one out</text>
+
+  <text class="note" x="490" y="270">dispatch the spare for step 9 — now generating</text>
+
+  <text class="lbl" x="490" y="310">step 9</text>
+  <circle class="d-ok" cx="554" cy="306" r="7"/><circle class="d-ok" cx="576" cy="306" r="7"/><circle class="d-spare" cx="598" cy="306" r="7"/>
+  <text class="note" x="620" y="310">spare arrives — loan repaid</text>
+
+  <text class="note" x="14" y="336">step 7 pays the wait</text>
+  <text class="note" x="490" y="336">step 9 pays it instead — and step 9 is due later</text>
+</svg>
+
+<p>Same number of rollouts either way, and the same prompt is given up on. The borrow only moves
+<em>when</em> the waiting happens — onto the step that has the most slack, which is why
+<code>promote_ready_group</code> picks the furthest future step as lender.</p>
+
 <p>Dispatching a spare still means <em>waiting</em> for it to generate. The borrow removes that wait:
 take a group that is already finished from a later step, re-stamp it to the step with the hole so that
 step can close now, then dispatch the spare stamped for the step you took it from.</p>
