@@ -65,7 +65,7 @@ svg a text{text-decoration:underline;fill:var(--accent);font:11px ui-monospace,M
 <p class="sub">Companion illustration for
 <a href="https://github.com/NVIDIA-NeMo/RL/pull/3373">NVIDIA-NeMo/RL #3373</a>
 — <em>wire sharded stacks into training</em>.
-All permalinks pin the PR head <code>f93ba52</code>.</p>
+All permalinks pin the PR head <code>8b97de9</code>.</p>
 <p class="chainnote">One page on #3373. Background from the PRs below it in the stack:
 <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-3371-shard-actors.html">how the shard actors get created</a> (#3371)
 and <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-3372-group-affinity.html">how rollouts get routed to them</a> (#3372).</p>
@@ -74,15 +74,15 @@ and <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-3372-group-affin
 servers. That happens in a <code>finally</code> block, so it runs even when training already
 failed. A shutdown that never returns there is worse than a slow one: it replaces the real
 training error with a job that just sits.
-<a href="https://github.com/NVIDIA-NeMo/RL/blob/f93ba52988756807f0ede4336ca3e75e463cd18f/nemo_rl/environments/utils.py#L147"><code>shutdown_environments()</code></a>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/8b97de9e84f86051f345c7ba2bfe471489507096/nemo_rl/environments/utils.py#L147"><code>shutdown_environments()</code></a>
 is the helper every entrypoint calls, and it has a 10-second limit for exactly that reason
-(<a href="https://github.com/NVIDIA-NeMo/RL/blob/f93ba52988756807f0ede4336ca3e75e463cd18f/nemo_rl/environments/utils.py#L149">utils.py:149</a>).</p>
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/8b97de9e84f86051f345c7ba2bfe471489507096/nemo_rl/environments/utils.py#L149">utils.py:149</a>).</p>
 
 <p>This PR changes what gets handed to that helper. It used to be one Ray actor handle; now it
 is a <code>NemoGymShardSet</code>, a plain Python object that owns several actors
-(<a href="https://github.com/NVIDIA-NeMo/RL/blob/f93ba52988756807f0ede4336ca3e75e463cd18f/nemo_rl/algorithms/single_controller_utils/setup.py#L1303">setup.py:1303</a>).
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/8b97de9e84f86051f345c7ba2bfe471489507096/nemo_rl/algorithms/single_controller_utils/setup.py#L1490">setup.py:1490</a>).
 The helper tells the two apart by asking whether <code>shutdown</code> is a remote call
-(<a href="https://github.com/NVIDIA-NeMo/RL/blob/f93ba52988756807f0ede4336ca3e75e463cd18f/nemo_rl/environments/utils.py#L182">utils.py:182</a>) —
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/8b97de9e84f86051f345c7ba2bfe471489507096/nemo_rl/environments/utils.py#L182">utils.py:182</a>) —
 and the two branches do not have the same limits.</p>
 
 <h2>Which branch teardown takes, before and after</h2>
@@ -102,11 +102,11 @@ and the two branches do not have the same limits.</p>
   <path class="arw" d="M220 182 L220 206" marker-end="url(#a1)"/>
   <rect class="ok-b" x="30" y="208" width="380" height="46" rx="6"/>
   <text class="lbl" x="44" y="228">ray.get(..., timeout=10.0)</text>
-  <a href="https://github.com/NVIDIA-NeMo/RL/blob/f93ba52988756807f0ede4336ca3e75e463cd18f/nemo_rl/environments/utils.py#L185"><text x="44" y="246">utils.py:185</text></a>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/8b97de9e84f86051f345c7ba2bfe471489507096/nemo_rl/environments/utils.py#L185"><text x="44" y="246">utils.py:185</text></a>
   <path class="arw" d="M220 254 L220 278" marker-end="url(#a1)"/>
   <rect class="ok-b" x="30" y="280" width="380" height="46" rx="6"/>
   <text class="lbl" x="44" y="300">if it times out: ray.kill(env)</text>
-  <a href="https://github.com/NVIDIA-NeMo/RL/blob/f93ba52988756807f0ede4336ca3e75e463cd18f/nemo_rl/environments/utils.py#L195"><text x="44" y="318">utils.py:195</text></a>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/8b97de9e84f86051f345c7ba2bfe471489507096/nemo_rl/environments/utils.py#L195"><text x="44" y="318">utils.py:195</text></a>
   <rect class="ok-b" x="30" y="344" width="380" height="40" rx="6"/>
   <text class="ok-t" x="44" y="369">Bounded — 10s, then the actor is killed</text>
 
@@ -122,18 +122,18 @@ and the two branches do not have the same limits.</p>
   <path class="arw" d="M675 182 L675 206" marker-end="url(#a1)"/>
   <rect class="bad-b" x="480" y="208" width="390" height="46" rx="6"/>
   <text class="lbl" x="494" y="228">env.shutdown()  &#8592; no timeout passed</text>
-  <a href="https://github.com/NVIDIA-NeMo/RL/blob/f93ba52988756807f0ede4336ca3e75e463cd18f/nemo_rl/environments/utils.py#L187"><text x="494" y="246">utils.py:187</text></a>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/8b97de9e84f86051f345c7ba2bfe471489507096/nemo_rl/environments/utils.py#L187"><text x="494" y="246">utils.py:187</text></a>
   <path class="arw" d="M675 254 L675 278" marker-end="url(#a1)"/>
   <rect class="bad-b" x="480" y="280" width="390" height="46" rx="6"/>
   <text class="lbl" x="494" y="300">inside: ray.get(..., timeout=None)</text>
-  <a href="https://github.com/NVIDIA-NeMo/RL/blob/f93ba52988756807f0ede4336ca3e75e463cd18f/nemo_rl/environments/nemo_gym.py#L1276"><text x="494" y="318">nemo_gym.py:1276</text></a>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/8b97de9e84f86051f345c7ba2bfe471489507096/nemo_rl/environments/nemo_gym.py#L1598"><text x="494" y="318">nemo_gym.py:1598</text></a>
   <rect class="bad-b" x="480" y="344" width="390" height="40" rx="6"/>
   <text class="bad-t" x="494" y="369">No limit, and no kill to fall back on</text>
 
   <text class="note" x="30" y="416">Green = the wait has an upper limit.  Red = it does not.</text>
   <text class="note" x="30" y="436">The 10-second default at utils.py:149 is still there. The plain branch just never receives it —</text>
   <text class="note" x="30" y="453">env.shutdown() takes no timeout argument, so the caller's value has nowhere to go.</text>
-  <text class="note" x="30" y="478">Six call sites now hand the helper a shard set, including run_grpo.py:264 and grpo.py:4088.</text>
+  <text class="note" x="30" y="478">Six call sites now hand the helper a shard set, including run_grpo.py:237 and grpo.py:4102.</text>
 
   <defs><marker id="a1" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto">
     <path d="M0,0 L0,6 L7,3 z" fill="var(--dim)"/></marker></defs>
@@ -184,7 +184,7 @@ short. Two edits carry it the rest of the way:</p>
 -    env.shutdown()
 +    env.shutdown(timeout=timeout)          # timeout = 10.0 by default (utils.py:149)
 
-# 2. nemo_rl/environments/nemo_gym.py:1276 — accept it instead of hardcoding None
+# 2. nemo_rl/environments/nemo_gym.py:1598 — accept it instead of hardcoding None
 -def shutdown(self) -> None:
 +def shutdown(self, timeout: float | None = DEFAULT_ENV_SHUTDOWN_TIMEOUT_SECONDS) -> None:
          shutdown_environments(
@@ -196,7 +196,7 @@ short. Two edits carry it the rest of the way:</p>
 <p>That second call already holds real Ray actor handles, so once a limit reaches it the normal
 <code>ray.get(..., timeout=…)</code> and <code>ray.kill()</code> path works again with no other
 change. One existing assertion moves with it —
-<a href="https://github.com/NVIDIA-NeMo/RL/blob/f93ba52988756807f0ede4336ca3e75e463cd18f/tests/unit/environments/test_nemo_gym_utils.py#L1043">test_nemo_gym_utils.py:1043</a>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/8b97de9e84f86051f345c7ba2bfe471489507096/tests/unit/environments/test_nemo_gym_utils.py#L1090">test_nemo_gym_utils.py:1090</a>
 currently pins <code>timeout=None</code>, and it predates this PR.</p>
 
 <div class="warn">
