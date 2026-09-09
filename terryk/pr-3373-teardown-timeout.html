@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NVIDIA-NeMo/RL #3373 — how NeMo-Gym teardown lost its 10-second limit</title>
+<style>
+:root{
+  --bg:#0d1117; --surface:#161b22; --surface2:#1c2128; --border:#30363d;
+  --text:#e6edf3; --dim:#8b949e; --accent:#58a6ff; --green:#3fb950;
+  --orange:#d29922; --red:#f85149;
+}
+:root[data-theme="light"]{
+  --bg:#ffffff; --surface:#f6f8fa; --surface2:#eaeef2; --border:#d0d7de;
+  --text:#1f2328; --dim:#59636e; --accent:#0969da; --green:#1a7f37;
+  --orange:#9a6700; --red:#cf222e;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:28px 20px 70px}
+h1{font-size:22px;margin:0 0 8px;line-height:1.3}
+h2{font-size:18px;margin:32px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;
+  font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
+.sub{color:var(--dim);font-size:13.5px;margin:0 0 6px}
+p.chainnote{color:var(--dim);font-size:12px;margin:0 0 18px}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);
+  border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;
+  font:13px/1 ui-monospace,Menlo,monospace;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.18)}
+.mono{font:12.5px ui-monospace,SFMono-Regular,Menlo,monospace;
+  background:var(--surface);border:1px solid var(--border);border-radius:8px;
+  padding:13px;overflow-x:auto;white-space:pre}
+.warn{border-left:3px solid var(--red);background:var(--surface);
+  padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0}
+svg{max-width:100%;height:auto;display:block;margin:16px 0}
+svg .box{fill:var(--surface);stroke:var(--border);stroke-width:1.4}
+svg .lbl{fill:var(--text);font:11.5px ui-monospace,Menlo,monospace}
+svg .lbl-b{fill:var(--text);font:bold 13px -apple-system,sans-serif}
+svg .note{fill:var(--dim);font:11px -apple-system,sans-serif}
+svg .hdr{fill:var(--accent);font:bold 12.5px -apple-system,sans-serif}
+svg .ok-b{fill:var(--surface);stroke:var(--green);stroke-width:1.8}
+svg .bad-b{fill:var(--surface);stroke:var(--red);stroke-width:1.8}
+svg .ok-t{fill:var(--green);font:bold 12px -apple-system,sans-serif}
+svg .bad-t{fill:var(--red);font:bold 12px -apple-system,sans-serif}
+svg .arw{stroke:var(--dim);stroke-width:1.6;fill:none}
+svg a text{text-decoration:underline;fill:var(--accent);font:11px ui-monospace,Menlo,monospace}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+  document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head>
+<body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+  function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+  function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
+    b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
+      else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+  document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+<div class="wrap">
+
+<h1>How NeMo-Gym teardown lost its 10-second limit</h1>
+<p class="sub">Companion illustration for
+<a href="https://github.com/NVIDIA-NeMo/RL/pull/3373">NVIDIA-NeMo/RL #3373</a>
+— <em>wire sharded stacks into training</em>.
+All permalinks pin the PR head <code>f93ba52</code>.</p>
+<p class="chainnote">One page on #3373. Background from the PRs below it in the stack:
+<a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-3371-shard-actors.html">how the shard actors get created</a> (#3371)
+and <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-3372-group-affinity.html">how rollouts get routed to them</a> (#3372).</p>
+
+<p>When a training run ends — cleanly or by crashing — something has to stop the NeMo-Gym
+servers. That happens in a <code>finally</code> block, so it runs even when training already
+failed. A shutdown that never returns there is worse than a slow one: it replaces the real
+training error with a job that just sits.
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/f93ba52988756807f0ede4336ca3e75e463cd18f/nemo_rl/environments/utils.py#L147"><code>shutdown_environments()</code></a>
+is the helper every entrypoint calls, and it has a 10-second limit for exactly that reason
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/f93ba52988756807f0ede4336ca3e75e463cd18f/nemo_rl/environments/utils.py#L149">utils.py:149</a>).</p>
+
+<p>This PR changes what gets handed to that helper. It used to be one Ray actor handle; now it
+is a <code>NemoGymShardSet</code>, a plain Python object that owns several actors
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/f93ba52988756807f0ede4336ca3e75e463cd18f/nemo_rl/algorithms/single_controller_utils/setup.py#L1303">setup.py:1303</a>).
+The helper tells the two apart by asking whether <code>shutdown</code> is a remote call
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/f93ba52988756807f0ede4336ca3e75e463cd18f/nemo_rl/environments/utils.py#L182">utils.py:182</a>) —
+and the two branches do not have the same limits.</p>
+
+<h2>Which branch teardown takes, before and after</h2>
+
+<svg viewBox="0 0 900 500" role="img" aria-label="Two lanes comparing teardown before and after the PR. Before: a Ray actor handle takes the remote branch, waits at most 10 seconds, then kills the actor. After: a NemoGymShardSet takes the plain-method branch, the caller's timeout is never passed, and the inner call waits with no limit and no kill.">
+  <text class="hdr" x="16" y="20">What <tspan font-family="ui-monospace,Menlo,monospace">shutdown_environments()</tspan> does with the NeMo-Gym entry</text>
+
+  <!-- lane A -->
+  <text class="lbl-b" x="40" y="52">Before this PR</text>
+  <rect class="box" x="30" y="64" width="380" height="46" rx="6"/>
+  <text class="lbl" x="44" y="84">env_handles["nemo_gym"] holds</text>
+  <text class="lbl" x="44" y="101">a Ray actor handle</text>
+  <path class="arw" d="M220 110 L220 134" marker-end="url(#a1)"/>
+  <rect class="box" x="30" y="136" width="380" height="46" rx="6"/>
+  <text class="lbl" x="44" y="156">it has .shutdown.remote</text>
+  <text class="lbl" x="44" y="173">so the remote branch is taken</text>
+  <path class="arw" d="M220 182 L220 206" marker-end="url(#a1)"/>
+  <rect class="ok-b" x="30" y="208" width="380" height="46" rx="6"/>
+  <text class="lbl" x="44" y="228">ray.get(..., timeout=10.0)</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/f93ba52988756807f0ede4336ca3e75e463cd18f/nemo_rl/environments/utils.py#L185"><text x="44" y="246">utils.py:185</text></a>
+  <path class="arw" d="M220 254 L220 278" marker-end="url(#a1)"/>
+  <rect class="ok-b" x="30" y="280" width="380" height="46" rx="6"/>
+  <text class="lbl" x="44" y="300">if it times out: ray.kill(env)</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/f93ba52988756807f0ede4336ca3e75e463cd18f/nemo_rl/environments/utils.py#L195"><text x="44" y="318">utils.py:195</text></a>
+  <rect class="ok-b" x="30" y="344" width="380" height="40" rx="6"/>
+  <text class="ok-t" x="44" y="369">Bounded — 10s, then the actor is killed</text>
+
+  <!-- lane B -->
+  <text class="lbl-b" x="490" y="52">After this PR</text>
+  <rect class="box" x="480" y="64" width="390" height="46" rx="6"/>
+  <text class="lbl" x="494" y="84">env_handles["nemo_gym"] holds</text>
+  <text class="lbl" x="494" y="101">a NemoGymShardSet</text>
+  <path class="arw" d="M675 110 L675 134" marker-end="url(#a1)"/>
+  <rect class="box" x="480" y="136" width="390" height="46" rx="6"/>
+  <text class="lbl" x="494" y="156">.shutdown is a plain method</text>
+  <text class="lbl" x="494" y="173">so the plain branch is taken</text>
+  <path class="arw" d="M675 182 L675 206" marker-end="url(#a1)"/>
+  <rect class="bad-b" x="480" y="208" width="390" height="46" rx="6"/>
+  <text class="lbl" x="494" y="228">env.shutdown()  &#8592; no timeout passed</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/f93ba52988756807f0ede4336ca3e75e463cd18f/nemo_rl/environments/utils.py#L187"><text x="494" y="246">utils.py:187</text></a>
+  <path class="arw" d="M675 254 L675 278" marker-end="url(#a1)"/>
+  <rect class="bad-b" x="480" y="280" width="390" height="46" rx="6"/>
+  <text class="lbl" x="494" y="300">inside: ray.get(..., timeout=None)</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/f93ba52988756807f0ede4336ca3e75e463cd18f/nemo_rl/environments/nemo_gym.py#L1276"><text x="494" y="318">nemo_gym.py:1276</text></a>
+  <rect class="bad-b" x="480" y="344" width="390" height="40" rx="6"/>
+  <text class="bad-t" x="494" y="369">No limit, and no kill to fall back on</text>
+
+  <text class="note" x="30" y="416">Green = the wait has an upper limit.  Red = it does not.</text>
+  <text class="note" x="30" y="436">The 10-second default at utils.py:149 is still there. The plain branch just never receives it —</text>
+  <text class="note" x="30" y="453">env.shutdown() takes no timeout argument, so the caller's value has nowhere to go.</text>
+  <text class="note" x="30" y="478">Six call sites now hand the helper a shard set, including run_grpo.py:264 and grpo.py:4088.</text>
+
+  <defs><marker id="a1" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto">
+    <path d="M0,0 L0,6 L7,3 z" fill="var(--dim)"/></marker></defs>
+</svg>
+
+<h2>Why the wait has no floor either</h2>
+
+<p>An unbounded wait would still be fine if the thing being waited on always finished. It does
+not have to. Gym's own teardown stops each child server on a 1-second then 2-second timer, so
+that part ends — but the last step waits on the head server with no timer at all, and that wait
+can never be cut short:</p>
+
+<div class="mono"># Gym: nemo_gym/cli/env.py:622-623
+self._head_server.should_exit = True
+self._head_server_thread.join()          # no timeout
+
+# Gym builds the server without a shutdown limit — server_utils.py:793-797
+uvicorn.Config(app, host=..., port=...)  # timeout_graceful_shutdown not passed -> None
+
+# uvicorn 0.37.0: server.py:281 passes that None straight through
+await asyncio.wait_for(self._wait_tasks_to_complete(),
+                       timeout=self.config.timeout_graceful_shutdown)   # None
+
+# uvicorn 0.37.0: server.py:300 — the loop has no clock in it
+while self.server_state.connections and not self.force_exit:
+    await asyncio.sleep(0.1)
+
+# force_exit is set only from a signal handler (server.py:336), and uvicorn
+# refuses to install one off the main thread (server.py:316). Gym runs this
+# server in a daemon thread, so force_exit stays False forever.</div>
+
+<p>So the loop's only exit is every open connection closing by itself
+(<a href="https://github.com/encode/uvicorn/blob/0.37.0/uvicorn/server.py#L300">uvicorn server.py:300</a>,
+<a href="https://github.com/encode/uvicorn/blob/0.37.0/uvicorn/server.py#L316">:316</a>,
+<a href="https://github.com/encode/uvicorn/blob/0.37.0/uvicorn/server.py#L336">:336</a>,
+<a href="https://github.com/NVIDIA-NeMo/Gym/blob/c3bac96314a59f28b896f597eb9845d175bb0252/nemo_gym/cli/env.py#L622-L623">Gym env.py:622-623</a>).
+One request that cannot finish — say a call to a vLLM endpoint whose workers are already gone,
+which is the state teardown runs in after a crash — and nothing on the path ever returns.
+Nobody has reproduced that hang; what is certain is that no step between the
+<code>finally</code> block and that loop sets any limit.</p>
+
+<h2>The fix: pass the limit down</h2>
+
+<p>The 10-second value already exists and the caller already has it. It just stops one function
+short. Two edits carry it the rest of the way:</p>
+
+<div class="mono"># 1. nemo_rl/environments/utils.py:187 — hand the owner object the caller's limit
+-    env.shutdown()
++    env.shutdown(timeout=timeout)          # timeout = 10.0 by default (utils.py:149)
+
+# 2. nemo_rl/environments/nemo_gym.py:1276 — accept it instead of hardcoding None
+-def shutdown(self) -> None:
++def shutdown(self, timeout: float | None = DEFAULT_ENV_SHUTDOWN_TIMEOUT_SECONDS) -> None:
+         shutdown_environments(
+             {...one entry per actor...},
+-            timeout=None,
++            timeout=timeout,
+         )</div>
+
+<p>That second call already holds real Ray actor handles, so once a limit reaches it the normal
+<code>ray.get(..., timeout=…)</code> and <code>ray.kill()</code> path works again with no other
+change. One existing assertion moves with it —
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/f93ba52988756807f0ede4336ca3e75e463cd18f/tests/unit/environments/test_nemo_gym_utils.py#L1043">test_nemo_gym_utils.py:1043</a>
+currently pins <code>timeout=None</code>, and it predates this PR.</p>
+
+<div class="warn">
+<strong>Worth knowing even if nothing ever hangs.</strong> Gym stops each child server on a
+1-second wait, then a kill, then a 2-second wait. A stack with many child servers therefore
+spends minutes shutting down, where the old path gave up after 10 seconds and killed the actor.
+So the change is visible on every ordinary run, not just the bad one — and on a bad one, the
+error that actually ended training is the thing left unprinted.
+</div>
+
+</div>
+</body>
+</html>
