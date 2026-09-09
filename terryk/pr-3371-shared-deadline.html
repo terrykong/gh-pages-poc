@@ -76,7 +76,8 @@ svg a text{text-decoration:underline;fill:var(--accent);font:11px ui-monospace,M
 <h1>Why a slow NeMo-Gym startup reports a tokenizer error</h1>
 <p class="sub">
 <a href="https://github.com/NVIDIA-NeMo/RL/pull/3371">NVIDIA-NeMo/RL #3371</a>
-— one clock is shared by two waits. All permalinks pin the PR head <code>917ffc3</code>.</p>
+— the startup budget is shared on purpose; it is the error message that needs fixing.
+All permalinks pin the PR head <code>917ffc3</code>.</p>
 
 <nav class="chain">
   <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-3371-shard-actors.html">one actor per node</a>
@@ -92,6 +93,9 @@ for those. Both waits read the <strong>same</strong> clock, set once before the 
 <a href="https://github.com/NVIDIA-NeMo/RL/blob/917ffc3ec18b9ec85ca25158628b2b9cf0b38bfc/nemo_rl/environments/nemo_gym.py#L1474"><code>deadline = monotonic() + spinup_timeout</code></a>.
 So the second pass gets whatever the first pass left over — and on a cold node the first
 pass is <em>meant</em> to use nearly all of it.</p>
+
+<p>That sharing is deliberate and correct: one knob should bound the whole startup. The problem
+is only what the operator is told when the budget runs out.</p>
 
 <h2>One budget, two consumers</h2>
 
@@ -141,43 +145,55 @@ So the install does not wait at all; it raises immediately, and the message the 
 <a href="https://github.com/NVIDIA-NeMo/RL/blob/917ffc3ec18b9ec85ca25158628b2b9cf0b38bfc/nemo_rl/environments/nemo_gym.py#L1506-L1509"><code>shard 'tools' (replica 2) did not accept the tokenizer</code></a>
 — which points at the tokenizer, when the real story is that startup used up the clock.</p>
 
-<h2>The fix, and what actually changes</h2>
+<h2>Sharing the clock is right — the message is not</h2>
 
-<p>One line. The install pass starts its own clock instead of reading the one the startup
-pass has already spent. Everything else in the block is unchanged — it only appears in the
-suggestion because a GitHub suggestion has to re-state the lines it replaces.</p>
+<p>The tempting fix is to give the install pass a clock of its own. That is the wrong fix.
+<code>spinup_timeout</code> is meant to bound the <em>whole</em> job of getting shards up, and
+handing over the tokenizer is part of that job. Two independent budgets would mean one knob set
+to 1800s can hang for 3600s — nobody sets a timeout expecting that.</p>
 
-<div class="mono"><span class="cmt">  # nemo_gym.py, the tokenizer-install pass</span>
-<span class="add">+ install_deadline = monotonic() + spinup_timeout</span>   <span class="cmt">← new clock, starts now</span>
-  for shard_name, replica, reference in installs:
+<p>So the budget should stay shared, and running out of it should still fail. What has to change
+is what the failure <em>says</em>.</p>
+
+<div class="mono"><span class="cmt">today</span>
+  NeMo-Gym shard 'tools' (replica 2) did not accept the tokenizer: ...
+  <span class="del">↑ names a shard and the tokenizer. Neither is at fault, and which</span>
+  <span class="del">  replica gets named changes from run to run.</span>
+
+<span class="cmt">better</span>
+  NeMo-Gym shards used the whole 1800s startup budget before the tokenizer
+  reached every replica. Raise env.nemo_gym.spinup_timeout, or bake the Gym
+  venvs into the image so a cold node starts faster.
+  <span class="add">↑ names the budget, and what to do about it. No shard to chase.</span>
+</div>
+
+<p>The code change is one branch: ask how much budget was left, and if the answer was none, say
+so instead of blaming the tokenizer.</p>
+
+<div class="mono">  for shard_name, replica, reference in installs:
+<span class="add">+     remaining = max(0.0, deadline - monotonic())</span>
       try:
-<span class="del">-         ray.get(reference, timeout=max(0.0, deadline - monotonic()))</span>
-<span class="add">+         ray.get(reference, timeout=max(0.0, install_deadline - monotonic()))</span>
+<span class="add">+         ray.get(reference, timeout=remaining)</span>
+      except BaseException as error:
+<span class="add">+         if remaining &lt;= 0.0:</span>
+<span class="add">+             raise ShardSetupError(  <span class="cmt"># the budget ran out</span></span>
+<span class="add">+                 f"... used the whole {spinup_timeout}s startup budget ..."</span>
+<span class="add">+             ) from error</span>
+          raise ShardSetupError(  <span class="cmt"># a real tokenizer failure, unchanged</span>
+              f"NeMo-Gym shard '{shard_name}' (replica {replica}) did not "
+              f"accept the tokenizer: {error}"
+          ) from error
 </div>
 
-<p>Read as values, with the same cold-node run as above:</p>
-
-<div class="mono"><span class="cmt">at the moment pass 2 begins, 1798s into an 1800s budget</span>
-
-  today        deadline - monotonic()          = 1800 - 1798 =    2s  <span class="cmt">← shared, nearly gone</span>
-               ... after replica 0 and 1                       =    0s  <span class="cmt">← replica 2 raises</span>
-
-  with the fix install_deadline - monotonic()  = 1800 - 0    = 1800s  <span class="cmt">← fresh, full budget</span>
-               ... after replica 0 and 1                      = 1798s  <span class="cmt">← replica 2 installs</span>
-</div>
-
-<p>The two passes stop competing for one clock. A genuine tokenizer failure still reports
-<em>"did not accept the tokenizer"</em>, which is now true when you read it; and a startup that
-really does overrun still fails in pass 1, where the error names the shard that was slow.</p>
+<p>A genuine tokenizer failure still reports <em>"did not accept the tokenizer"</em> — and now
+that sentence is true whenever you read it.</p>
 
 <div class="warn">
-<strong>Why this is worth fixing rather than tuning.</strong> Raising
-<code>spinup_timeout</code> does not help — pass 1 grows to use it and pass 2 is still last
-in line. The failure also moves around: installs that already finished still return at
-<code>timeout=0</code>, so which replica trips depends on timing, and the operator sees a
-different shard named each run. The cost of hitting it is the whole set torn down after
-roughly half an hour of virtual-environment building, with an error pointing at the wrong
-thing.
+<strong>What this costs today.</strong> Not a hang, and not a wrong result — the run fails,
+which is what an exhausted budget should do. The cost is diagnosis. An operator loses roughly
+half an hour of virtual-environment building and is then pointed at a tokenizer that is fine and
+a shard picked by timing, so the natural next move is to go looking at serialization rather than
+to raise <code>spinup_timeout</code> or bake the venvs into the image.
 </div>
 
 </div>
