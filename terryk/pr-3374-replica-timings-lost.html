@@ -71,13 +71,13 @@ svg a text{text-decoration:underline;fill:var(--accent);font:11.5px ui-monospace
 <p class="sub">Companion illustration for
 <a href="https://github.com/NVIDIA-NeMo/RL/pull/3374">NVIDIA-NeMo/RL #3374</a>
 (preserve replica identity during routing). All permalinks pin the PR head
-<code>020a5d3</code>; "before" links pin the branch point <code>f93ba52</code>.</p>
+<code>46ae651</code>; "before" links pin the branch point <code>8b97de9</code>.</p>
 
 <p>A NeMo-Gym <strong>shard</strong> is one group of Gym servers running in one Ray actor.
 Setting <code>replicas: 2</code> on a shard starts two identical copies of it on two nodes, and
 the router hands each prompt group to one of them in turn. Every actor reports how long it
 spent, and those numbers are collected into a dictionary
-<a href="https://github.com/NVIDIA-NeMo/RL/blob/f93ba52988756807f0ede4336ca3e75e463cd18f/nemo_rl/experience/rollouts.py#L2675">keyed by whatever label the router attached</a>.
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/8b97de9e84f86051f345c7ba2bfe471489507096/nemo_rl/experience/rollouts.py#L2797">keyed by whatever label the router attached</a>.
 Before this PR that label was the <em>shard</em> name. Two replicas of one shard therefore
 shared a key — so the second one to finish overwrote the first, and nobody was told.</p>
 
@@ -151,13 +151,13 @@ shared a key — so the second one to finish overwrote the first, and nobody was
   <rect class="gone" x="210" y="356" width="14" height="14" rx="3"/>
   <text class="note" x="230" y="368">never produced</text>
 
-  <a href="https://github.com/NVIDIA-NeMo/RL/blob/f93ba52988756807f0ede4336ca3e75e463cd18f/nemo_rl/experience/rollouts.py#L2355">
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/8b97de9e84f86051f345c7ba2bfe471489507096/nemo_rl/experience/rollouts.py#L2467">
     <text x="16" y="398">before: rollouts.py:2355 — label = shard name</text></a>
-  <a href="https://github.com/NVIDIA-NeMo/RL/blob/020a5d3ce73081f4558df728a98c79333e1962d8/nemo_rl/experience/rollouts.py#L2359">
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/46ae6519f929fc679c85ac88ceec719875e21a9b/nemo_rl/experience/rollouts.py#L2471">
     <text x="16" y="416">after: rollouts.py:2359 — label = instance_label(handle)</text></a>
-  <a href="https://github.com/NVIDIA-NeMo/RL/blob/020a5d3ce73081f4558df728a98c79333e1962d8/nemo_rl/experience/rollouts.py#L2471">
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/46ae6519f929fc679c85ac88ceec719875e21a9b/nemo_rl/experience/rollouts.py#L2589">
     <text x="470" y="398">rollouts.py:2471 — the one-entry short circuit</text></a>
-  <a href="https://github.com/NVIDIA-NeMo/RL/blob/020a5d3ce73081f4558df728a98c79333e1962d8/nemo_rl/environments/nemo_gym.py#L1262">
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/46ae6519f929fc679c85ac88ceec719875e21a9b/nemo_rl/environments/nemo_gym.py#L1584">
     <text x="470" y="416">nemo_gym.py:1262 — instance_label</text></a>
 
   <defs>
@@ -187,8 +187,8 @@ it did before replicas existed:</p>
                 # 1 replica  -> "tools"
                 # 2 replicas -> "tools/0", "tools/1"
                 return shard_name if len(replicas) == 1 else f"{shard_name}/{index}"</div>
-<p class="sub"><a href="https://github.com/NVIDIA-NeMo/RL/blob/020a5d3ce73081f4558df728a98c79333e1962d8/nemo_rl/environments/nemo_gym.py#L1262">nemo_gym.py:1262</a>
-— replaces <a href="https://github.com/NVIDIA-NeMo/RL/blob/f93ba52988756807f0ede4336ca3e75e463cd18f/nemo_rl/environments/nemo_gym.py#L1261">the old <code>shard_name_of</code></a>, which returned the shard name for every replica.</p>
+<p class="sub"><a href="https://github.com/NVIDIA-NeMo/RL/blob/46ae6519f929fc679c85ac88ceec719875e21a9b/nemo_rl/environments/nemo_gym.py#L1584">nemo_gym.py:1262</a>
+— replaces <a href="https://github.com/NVIDIA-NeMo/RL/blob/8b97de9e84f86051f345c7ba2bfe471489507096/nemo_rl/environments/nemo_gym.py#L1583">the old <code>shard_name_of</code></a>, which returned the shard name for every replica.</p>
 
 <p>With two distinct keys the merge step now takes its other branch. It writes one entry per
 replica <em>and</em> keeps the combined number, using the maximum rather than the sum, because the
@@ -198,7 +198,7 @@ replicas run at the same time and the step waits for the slowest:</p>
     for key, value in metrics.items():
         merged[f"{timer_prefix}/shard/{instance_label}/{suffix}"] = value   # 4.0 and 9.0, both kept
         merged[key] = max(merged[key], value) if key in merged else value   # max(4.0, 9.0) = 9.0</div>
-<p class="sub"><a href="https://github.com/NVIDIA-NeMo/RL/blob/020a5d3ce73081f4558df728a98c79333e1962d8/nemo_rl/experience/rollouts.py#L2475-L2481">rollouts.py:2475-2481</a>.
+<p class="sub"><a href="https://github.com/NVIDIA-NeMo/RL/blob/46ae6519f929fc679c85ac88ceec719875e21a9b/nemo_rl/experience/rollouts.py#L2593-L2599">rollouts.py:2475-2481</a>.
 The same label is also used for the log directory, the round-robin bucket, and the text of a
 failure — so a slow replica, its logs and its error all carry one name.</p>
 
