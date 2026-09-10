@@ -108,7 +108,9 @@ different ways.
 <p><code>num_prompts_per_step = 2</code>, so prompts go out two at a time and a step trains on at most two groups.
 <code>max_lookahead_versions = max_staleness_versions = 1</code>, so generation may run one batch ahead of the trainer
 and the window the window-based modes select from is <code>[2 − 1, 2] = [1, 2]</code>. The trainer will run a step on
-as few as one group (<code>min_groups_for_streaming_train</code> is below <code>num_prompts_per_step</code>).</p>
+as few as one group, because <code>min_groups_for_streaming_train</code> is set below <code>num_prompts_per_step</code>.
+That last one is a streaming setting — both shipped <code>in_order</code> recipes instead set the two equal, which
+changes what <code>in_order</code> does here. <a href="#floor">More on that below.</a></p>
 
 <svg viewBox="0 0 1000 940" role="img" aria-label="A four-slot async run, then five samplers picking from the same buffer">
   <!-- ══ setup: slots over time ══════════════════════════════════════ -->
@@ -327,7 +329,7 @@ running the entire time — two weight versions late, with the step it was meant
 <h2>The rule each mode applies</h2>
 <table>
 <tr><th>Mode</th><th>Selection key</th><th>Picks here</th><th>What it drops</th></tr>
-<tr><td><code>in_order</code></td><td><code>target_step == 2</code></td><td><strong>C</strong></td><td>A — its step has gone by, so it can never be picked (<a href="https://github.com/NVIDIA-NeMo/RL/blob/fd45cb8e44782c6ad3e218f47415d42c976b793c/nemo_rl/algorithms/async_utils/staleness_sampler.py#L606">evict L606</a>)</td></tr>
+<tr><td><code>in_order</code></td><td><code>target_step == 2</code></td><td><strong>C</strong></td><td>A — step 0 closed without it, so its stamp points at a step in the past (<a href="https://github.com/NVIDIA-NeMo/RL/blob/fd45cb8e44782c6ad3e218f47415d42c976b793c/nemo_rl/algorithms/async_utils/staleness_sampler.py#L606">evict L606</a>). Only reachable with a streaming floor — see below</td></tr>
 <tr><td><code>weight_fifo</code></td><td>oldest <code>start_weight</code> in <code>[1,2]</code> = 1</td><td><strong>C</strong></td><td>A — below the window (<a href="https://github.com/NVIDIA-NeMo/RL/blob/fd45cb8e44782c6ad3e218f47415d42c976b793c/nemo_rl/algorithms/async_utils/staleness_sampler.py#L231">evict L231</a>)</td></tr>
 <tr><td><code>ready_first</code></td><td>ready and <code>start_weight ≤ 2</code></td><td><strong>A + C</strong></td><td><strong>nothing</strong> — <code>evict</code> returns 0 (<a href="https://github.com/NVIDIA-NeMo/RL/blob/fd45cb8e44782c6ad3e218f47415d42c976b793c/nemo_rl/algorithms/async_utils/staleness_sampler.py#L500">evict L500</a>)</td></tr>
 <tr><td><code>windowed</code></td><td><code>start_weight ∈ [1,2]</code>, buffer order</td><td><strong>C + D</strong></td><td>A — below the window</td></tr>
@@ -344,13 +346,21 @@ weight from <em>every</em> slot in the window, ready or not, so unready B pins t
 wait even though they are sitting there finished
 (<a href="https://github.com/NVIDIA-NeMo/RL/blob/fd45cb8e44782c6ad3e218f47415d42c976b793c/nemo_rl/algorithms/async_utils/staleness_sampler.py#L528">L528-540</a>).</div>
 
-<div class="card"><div class="card-title">Why every step here is a short step</div>
-<code>min_groups_for_streaming_train</code> is the floor. Set it below <code>num_prompts_per_step</code> and
+<div class="card" id="floor"><div class="card-title">Why every step here is short — and the only reason <code>in_order</code> throws A away</div>
+<p style="margin:0 0 8px"><code>min_groups_for_streaming_train</code> is the floor. Set it below <code>num_prompts_per_step</code> and
 <a href="https://github.com/NVIDIA-NeMo/RL/blob/fd45cb8e44782c6ad3e218f47415d42c976b793c/nemo_rl/algorithms/async_utils/staleness_sampler.py#L280"><code>_finalize_selection</code></a>
-hands back whatever is ready, so step 0 runs on A′ alone rather than waiting for A. Set it equal to
-<code>num_prompts_per_step</code> and the same code returns <code>None</code> until the whole batch has landed — that is
-the sync recipe, and it is the setting that makes <code>in_order</code> waste nothing at all. The cost is the mirror
-image: the trainer then idles on the slowest rollout in every batch.</div>
+hands back whatever is ready, so step 0 runs on A′ alone rather than waiting for A.</p>
+<p style="margin:0 0 8px">That is the <em>only</em> thing that makes <code>in_order</code> evict. A group's target step is stamped once, at
+dispatch, and never updated. As long as every step waits for its whole batch, no stamp can ever fall behind the
+trainer, so nothing is ever stale. Let a step close early and the stamps it left behind point at a step in the
+past, which <code>select</code> can never match again — so <code>evict</code> drops them.</p>
+<p style="margin:0"><strong>Both shipped <code>in_order</code> recipes set the floor equal to <code>num_prompts_per_step</code></strong>
+(<code>min_groups_for_streaming_train: ${grpo.num_prompts_per_step}</code> in
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/fd45cb8e44782c6ad3e218f47415d42c976b793c/examples/configs/grpo_math_1B_megatron_single_controller.yaml#L32">the async exemplar</a> and
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/fd45cb8e44782c6ad3e218f47415d42c976b793c/examples/configs/recipes/llm/grpo-qwen2.5-math-1.5b-instruct-1n8g-megatron-single-controller-sync.yaml#L32">the sync one</a>),
+so as shipped <code>in_order</code> wastes nothing: step 0 would have waited for A and trained on A + A′. The cost is
+the mirror image — the trainer idles on the slowest rollout in every batch. The run drawn above turns that floor
+down so all five modes can be compared side by side on one buffer.</p></div>
 
 <div class="warn">
 <strong>Pick <code>ready_first</code> when throwing away rollouts is the thing you cannot afford.</strong> It is the only
