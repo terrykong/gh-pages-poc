@@ -6,13 +6,15 @@
 :root{--bg:#0d1117;--panel:#161b22;--panel2:#1c2128;--border:#30363d;--text:#e6edf3;
  --muted:#8b949e;--dim:#8b949e;--surface:#161b22;--surface2:#1c2128;--accent:#58a6ff;
  --green:#76b900;--orange:#ffa657;--purple:#d2a8ff;--red:#ff7b72;--yellow:#e3b341;
- --ok:#1c3a1c;--ok-br:#76b900;--waste:#3d1d1d;--waste-br:#ff7b72;--hold:#2a2a1a;--hold-br:#e3b341;
- --done:#21262d;--done-br:#8b949e;--run:#1a2b3d;--run-br:#58a6ff;}
+ --ok:#1c3a1c;--ok-br:#76b900;--waste:#3d1d1d;--waste-br:#ff7b72;
+ --done:#21262d;--done-br:#8b949e;--run:#1a2b3d;--run-br:#58a6ff;
+ --b0f:rgba(88,166,255,.20);--b1f:rgba(210,168,255,.20);--b2f:rgba(255,166,87,.20);--b3f:rgba(118,185,0,.20);}
 :root[data-theme="light"]{--bg:#fff;--panel:#f6f8fa;--panel2:#eef1f5;--border:#d0d7de;
  --text:#1f2328;--muted:#59636e;--dim:#59636e;--surface:#f6f8fa;--surface2:#eef1f5;
  --accent:#0969da;--green:#4c8a00;--orange:#bc4c00;--purple:#8250df;--red:#cf222e;--yellow:#9a6700;
- --ok:#dafbe1;--ok-br:#4c8a00;--waste:#ffebe9;--waste-br:#cf222e;--hold:#fff8c5;--hold-br:#9a6700;
- --done:#eef1f5;--done-br:#8c959f;--run:#ddf4ff;--run-br:#0969da;}
+ --ok:#dafbe1;--ok-br:#4c8a00;--waste:#ffebe9;--waste-br:#cf222e;
+ --done:#eef1f5;--done-br:#8c959f;--run:#ddf4ff;--run-br:#0969da;
+ --b0f:rgba(9,105,218,.13);--b1f:rgba(130,80,223,.13);--b2f:rgba(188,76,0,.13);--b3f:rgba(76,138,0,.15);}
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--text);
  font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;padding:0 16px 80px}
@@ -47,17 +49,27 @@ svg{width:100%;height:auto;display:block;margin:6px 0}
 svg text{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;fill:var(--text);font-size:12px}
 svg .ttl{font-weight:700;font-size:13.5px}
 svg .sm{font-size:10.5px;fill:var(--muted)}
-svg .band{fill:var(--panel);stroke:var(--border);stroke-width:1}
+svg .lane{fill:none;stroke:var(--border);stroke-width:1;stroke-dasharray:2 4}
+svg .step{fill:var(--panel2);stroke:var(--border);stroke-width:1}
 svg .dec{stroke:var(--red);stroke-width:2.5}
-svg .div{stroke:var(--border);stroke-width:1;stroke-dasharray:3 4}
 svg .decs{stroke:var(--red);stroke-width:1.5}
+svg .div{stroke:var(--border);stroke-width:1;stroke-dasharray:3 4}
 svg a text{text-decoration:underline;fill:var(--accent);font-size:10.5px}
-svg .f-base{fill:var(--run);stroke:var(--run-br);stroke-width:2}
+/* setup timeline: color = which dispatch batch */
+svg .b0{fill:var(--b0f);stroke:var(--accent);stroke-width:2}
+svg .b1{fill:var(--b1f);stroke:var(--purple);stroke-width:2}
+svg .b2{fill:var(--b2f);stroke:var(--orange);stroke-width:2}
+svg .b3{fill:var(--b3f);stroke:var(--green);stroke-width:2}
+svg .used{opacity:.40}
+svg .runn{stroke-dasharray:5 3}
+svg .idle{fill:none;stroke:var(--border);stroke-width:1.5;stroke-dasharray:4 4}
+svg .lbl{font-size:10.5px}
+/* panels: color = what the mode does */
 svg .f-sel {fill:var(--ok);stroke:var(--ok-br);stroke-width:3}
 svg .f-ev  {fill:var(--waste);stroke:var(--waste-br);stroke-width:3}
 svg .f-na  {fill:var(--run);stroke:var(--run-br);stroke-width:2;stroke-dasharray:5 3;opacity:.55}
-svg .cell{fill:none;stroke:var(--border);stroke-width:1.5}
 svg .f-no{fill:var(--panel2);stroke:var(--border);stroke-width:1.5}
+svg .cell{fill:none;stroke:var(--border);stroke-width:1.5}
 svg .v-no{fill:var(--muted);font-size:9.5px}
 svg .v-sel{fill:var(--green);font-weight:700;font-size:9.5px}
 svg .v-ev{fill:var(--red);font-weight:700;font-size:9.5px}
@@ -88,251 +100,262 @@ all line links pinned to <code>main</code> @ <code>fd45cb8</code></p>
 <div class="hl">
 Rollouts for one step do <strong>not</strong> finish together — a long generation can outlive the weights it
 started from. Every sampler is one answer to <em>"what do I do with a group that finished at an awkward
-moment?"</em> Five groups, one decision point, five rules.
+moment?"</em> Run three training steps and the buffer already holds five groups that five rules sort four
+different ways.
 </div>
 
-<h2>All five modes at once</h2>
-<p>Trainer is at <strong>weight 3</strong>. <code>num_prompts_per_step = 2</code> (so a step trains on at most 2 groups),
-<code>max_staleness_versions = max_lookahead_versions = 1</code>, and the trainer will run a step on as few as one group
-(<code>min_groups_for_streaming_train</code> is below <code>num_prompts_per_step</code>).
-The weight window the window-based modes use is <code>[3 − 1, 3] = [2, 3]</code>.</p>
+<h2>A run, three steps in</h2>
+<p><code>num_prompts_per_step = 2</code>, so prompts go out two at a time and a step trains on at most two groups.
+<code>max_lookahead_versions = max_staleness_versions = 1</code>, so generation may run one batch ahead of the trainer
+and the window the window-based modes select from is <code>[2 − 1, 2] = [1, 2]</code>. The trainer will run a step on
+as few as one group (<code>min_groups_for_streaming_train</code> is below <code>num_prompts_per_step</code>).</p>
 
-<svg viewBox="0 0 1000 1006" role="img" aria-label="Five sampler modes select four different sets from one buffer">
-  <!-- ── setup timeline ──────────────────────────────────────────────── -->
-  <text class="ttl" x="8" y="22">The setup — one of the two groups promised to step 3 has not landed</text>
-  <rect class="band" x="150" y="38" width="170" height="170" rx="4" opacity="0.5"/>
-  <rect class="band" x="320" y="38" width="170" height="170" rx="4" opacity="0.4"/>
-  <rect class="band" x="490" y="38" width="170" height="170" rx="4" opacity="0.28"/>
-  <rect class="band" x="660" y="38" width="170" height="170" rx="4" opacity="0.16"/>
-  <text class="sm" x="217" y="33">trainer at weight 0</text>
-  <text class="sm" x="387" y="33">trainer at weight 1</text>
-  <text class="sm" x="557" y="33">trainer at weight 2</text>
-  <text class="sm" x="727" y="33">trainer at weight 3</text>
+<svg viewBox="0 0 1000 940" role="img" aria-label="A four-slot async run, then five samplers picking from the same buffer">
+  <!-- ══ setup: slots over time ══════════════════════════════════════ -->
+  <text class="ttl" x="8" y="22">Four slots, three training steps — and one rollout that lands far too late</text>
+  <text class="sm" x="152" y="38">trainer at weight 0</text>
+  <text class="sm" x="384" y="38">→ weight 1</text>
+  <text class="sm" x="504" y="38">→ weight 2</text>
 
-  <text x="8" y="62" style="font-size:11px">A  sw 0 / target 1</text>
-  <rect class="f-base" x="170" y="50" width="630" height="17" rx="4"/>
-  <text class="sm" x="840" y="62">ready</text>
+  <!-- training-step bands, drawn behind the rollout bars -->
+  <rect class="step" x="310" y="46" width="70" height="124" rx="4" opacity="0.6"/>
+  <rect class="step" x="408" y="46" width="92" height="124" rx="4" opacity="0.6"/>
+  <rect class="step" x="795" y="46" width="35" height="124" rx="4" opacity="0.6"/>
 
-  <text x="8" y="92" style="font-size:11px">B  sw 2 / target 3</text>
-  <rect class="f-na" x="510" y="80" width="320" height="17" rx="4"/>
-  <text class="sm" x="840" y="92">still generating →</text>
+  <!-- slot rails -->
+  <text class="sm" x="8" y="66">slot 1</text><line class="lane" x1="150" y1="62" x2="830" y2="62"/>
+  <text class="sm" x="8" y="96">slot 2</text><line class="lane" x1="150" y1="92" x2="830" y2="92"/>
+  <text class="sm" x="8" y="126">slot 3</text><line class="lane" x1="150" y1="122" x2="830" y2="122"/>
+  <text class="sm" x="8" y="156">slot 4</text><line class="lane" x1="150" y1="152" x2="830" y2="152"/>
 
-  <text x="8" y="122" style="font-size:11px">C  sw 2 / target 3</text>
-  <rect class="f-base" x="530" y="110" width="260" height="17" rx="4"/>
-  <text class="sm" x="840" y="122">ready</text>
+  <!-- slot 1 -->
+  <rect class="b0" x="150" y="54" width="620" height="17" rx="4"/>
+  <text class="lbl" x="156" y="66">A — sw 0 · target 0 — lands only now</text>
 
-  <text x="8" y="152" style="font-size:11px">D  sw 3 / target 4</text>
-  <rect class="f-base" x="680" y="140" width="90" height="17" rx="4"/>
-  <text class="sm" x="840" y="152">ready</text>
+  <!-- slot 2 -->
+  <rect class="b0 used" x="150" y="84" width="146" height="17" rx="4"/>
+  <text class="lbl used" x="156" y="96">A′ sw 0 · t 0</text>
+  <rect class="b2 runn" x="392" y="84" width="438" height="17" rx="4"/>
+  <text class="lbl" x="398" y="96">B — sw 1 · target 2 — still generating</text>
 
-  <text x="8" y="182" style="font-size:11px">E  sw 3 / target 4</text>
-  <rect class="f-base" x="700" y="170" width="110" height="17" rx="4"/>
-  <text class="sm" x="840" y="182">ready</text>
+  <!-- slot 3 -->
+  <rect class="b1 used" x="150" y="114" width="190" height="17" rx="4"/>
+  <text class="lbl used" x="156" y="126">P sw 0 · t 1</text>
+  <rect class="b2" x="392" y="114" width="198" height="17" rx="4"/>
+  <text class="lbl" x="398" y="126">C — sw 1 · t 2</text>
+  <rect class="b3" x="606" y="114" width="120" height="17" rx="4"/>
+  <text class="lbl" x="612" y="126">D sw 2 · t 3</text>
 
-  <line class="dec" x1="830" y1="38" x2="830" y2="208"/>
-  <text class="ttl" x="700" y="226" style="fill:var(--red)">step-3 select()</text>
+  <!-- slot 4 -->
+  <rect class="b1 used" x="150" y="144" width="218" height="17" rx="4"/>
+  <text class="lbl used" x="156" y="156">Q sw 0 · t 1</text>
+  <rect class="idle" x="368" y="144" width="238" height="17" rx="4"/>
+  <text class="sm" x="374" y="156">slot free — the next batch needs 2</text>
+  <rect class="b3" x="606" y="144" width="106" height="17" rx="4"/>
+  <text class="lbl" x="612" y="156">E sw 2 · t 3</text>
 
-  <text class="sm" x="8" y="246">sw = the weight version the rollout started from.  target = the step the batch was dispatched for.</text>
-  <text class="sm" x="8" y="261">B and C are the batch for step 3; D and E the batch for step 4 — the one batch of lookahead the gate allows.</text>
-  <text class="sm" x="8" y="276">A is what is left of the batch for step 1: its partner trained at step 1, and A finished three weight versions late.</text>
+  <line class="dec" x1="795" y1="46" x2="795" y2="170"/>
+  <text class="sm" x="345" y="186" text-anchor="middle">step 0: A′</text>
+  <text class="sm" x="454" y="186" text-anchor="middle">step 1: P + Q</text>
+  <text class="sm" x="830" y="186" text-anchor="end" style="fill:var(--red);font-weight:700">train step 2 — select() runs here</text>
 
-  <!-- ── panels ──────────────────────────────────────────────────────── -->
-  <text class="ttl" x="8" y="298">The five modes, plus the one flag that changes windowed's answer</text>
-  <text class="sm" x="8" y="313">Every panel reuses the timeline above — same bars, same positions — recolored by what that mode decides. The red line is now.</text>
+  <text class="sm" x="8" y="208">Four slots — that is num_prompts_per_step × (lookahead + 1) = 2 × 2. A batch of 2 starts only when 2 slots are free, so slot 4 sits idle for a while.</text>
+  <text class="sm" x="8" y="223">Bar color marks which dispatch batch a rollout came from. sw = the weight version it started from; target = the step its batch was dispatched for.</text>
+  <text class="sm" x="8" y="238">Faded bars were already trained on and are gone from the buffer. Five groups are left when step 2 runs: A, B (still going), C, D and E.</text>
 
-  <!-- panel 1: in_order ───────────────────────────────────── px=8 py=322 -->
-  <rect class="cell" x="8" y="322" width="488" height="196" rx="9"/>
-  <text class="ttl" x="20" y="344" style="fill:var(--green)">in_order</text>
-  <text class="sm" x="20" y="360">key: target_step == 3</text>
-  <line class="div" x1="196" y1="368" x2="196" y2="486"/>
-  <line class="div" x1="292" y1="368" x2="292" y2="486"/>
-  <line class="div" x1="388" y1="368" x2="388" y2="486"/>
-  <line class="decs" x1="484" y1="368" x2="484" y2="486"/>
-  <text x="18" y="382" style="font-size:10.5px">A</text><text class="sm" x="34" y="382" style="font-size:9px">sw 0 · t 1</text>
-  <rect class="f-ev" x="111" y="371" width="356" height="16" rx="3"/>
-  <text class="v-ev" x="117" y="382">target 1 has gone by → evicted, rollout wasted</text>
-  <text x="18" y="405" style="font-size:10.5px">B</text><text class="sm" x="34" y="405" style="font-size:9px">sw 2 · t 3</text>
-  <rect class="f-na" x="303" y="394" width="181" height="16" rx="3"/>
-  <text class="v-na" x="309" y="405">not ready</text>
-  <text x="18" y="428" style="font-size:10.5px">C</text><text class="sm" x="34" y="428" style="font-size:9px">sw 2 · t 3</text>
-  <rect class="f-sel" x="315" y="417" width="146" height="16" rx="3"/>
-  <text class="v-sel" x="321" y="428">target 3 ✓</text>
-  <text x="18" y="451" style="font-size:10.5px">D</text><text class="sm" x="34" y="451" style="font-size:9px">sw 3 · t 4</text>
-  <rect class="f-no" x="399" y="440" width="51" height="16" rx="3"/>
-  <text class="v-no" x="393" y="451" text-anchor="end">target 4 ≠ 3</text>
-  <text x="18" y="474" style="font-size:10.5px">E</text><text class="sm" x="34" y="474" style="font-size:9px">sw 3 · t 4</text>
-  <rect class="f-no" x="411" y="463" width="62" height="16" rx="3"/>
-  <text class="v-no" x="405" y="474" text-anchor="end">target 4 ≠ 3</text>
-  <text x="20" y="500" style="font-size:12px;font-weight:700;fill:var(--green)">→ trains on C — a half-size step</text>
-  <a href="https://github.com/NVIDIA-NeMo/RL/blob/fd45cb8e44782c6ad3e218f47415d42c976b793c/nemo_rl/algorithms/async_utils/staleness_sampler.py#L589"><text x="330" y="500">select L589</text></a>
+  <!-- ══ panels ═════════════════════════════════════════════════════ -->
+  <text class="ttl" x="8" y="262">The five modes, plus the one flag that changes windowed's answer</text>
+  <text class="sm" x="8" y="277">Same five bars, same positions as above — now colored by what each mode does with them. The red line is step 2.</text>
 
-  <!-- panel 2: weight_fifo ─────────────────────────────── px=504 py=322 -->
-  <rect class="cell" x="504" y="322" width="488" height="196" rx="9"/>
-  <text class="ttl" x="516" y="344" style="fill:var(--green)">weight_fifo</text>
-  <text class="sm" x="516" y="360">key: oldest start_weight inside [2, 3] = 2</text>
-  <line class="div" x1="692" y1="368" x2="692" y2="486"/>
-  <line class="div" x1="788" y1="368" x2="788" y2="486"/>
-  <line class="div" x1="884" y1="368" x2="884" y2="486"/>
-  <line class="decs" x1="980" y1="368" x2="980" y2="486"/>
-  <text x="514" y="382" style="font-size:10.5px">A</text><text class="sm" x="530" y="382" style="font-size:9px">sw 0 · t 1</text>
-  <rect class="f-ev" x="607" y="371" width="356" height="16" rx="3"/>
-  <text class="v-ev" x="613" y="382">sw 0 is below the window → evicted, rollout wasted</text>
-  <text x="514" y="405" style="font-size:10.5px">B</text><text class="sm" x="530" y="405" style="font-size:9px">sw 2 · t 3</text>
-  <rect class="f-na" x="799" y="394" width="181" height="16" rx="3"/>
-  <text class="v-na" x="805" y="405">not ready</text>
-  <text x="514" y="428" style="font-size:10.5px">C</text><text class="sm" x="530" y="428" style="font-size:9px">sw 2 · t 3</text>
-  <rect class="f-sel" x="811" y="417" width="146" height="16" rx="3"/>
-  <text class="v-sel" x="817" y="428">weight 2 ✓</text>
-  <text x="514" y="451" style="font-size:10.5px">D</text><text class="sm" x="530" y="451" style="font-size:9px">sw 3 · t 4</text>
-  <rect class="f-no" x="895" y="440" width="51" height="16" rx="3"/>
-  <text class="v-no" x="889" y="451" text-anchor="end">weight 3 — waits</text>
-  <text x="514" y="474" style="font-size:10.5px">E</text><text class="sm" x="530" y="474" style="font-size:9px">sw 3 · t 4</text>
-  <rect class="f-no" x="907" y="463" width="62" height="16" rx="3"/>
-  <text class="v-no" x="901" y="474" text-anchor="end">weight 3 — waits</text>
-  <text x="516" y="500" style="font-size:12px;font-weight:700;fill:var(--green)">→ trains on C — unready B pins weight 2</text>
-  <a href="https://github.com/NVIDIA-NeMo/RL/blob/fd45cb8e44782c6ad3e218f47415d42c976b793c/nemo_rl/algorithms/async_utils/staleness_sampler.py#L519"><text x="900" y="500">select L519</text></a>
+  <!-- panel 1: in_order ───────────────────────────────── px=8 py=286 -->
+  <rect class="cell" x="8" y="286" width="488" height="196" rx="9"/>
+  <text class="ttl" x="20" y="308" style="fill:var(--green)">in_order</text>
+  <text class="sm" x="20" y="324">key: target_step == 2</text>
+  <line class="div" x1="230" y1="332" x2="230" y2="450"/>
+  <line class="div" x1="298" y1="332" x2="298" y2="450"/>
+  <line class="decs" x1="464" y1="332" x2="464" y2="450"/>
+  <text x="18" y="346" style="font-size:10.5px">A</text><text class="sm" x="34" y="346" style="font-size:9px">sw 0 · t 0</text>
+  <rect class="f-ev" x="100" y="335" width="350" height="16" rx="3"/>
+  <text class="v-ev" x="106" y="346">target 0 has gone by → evicted, rollout wasted</text>
+  <text x="18" y="369" style="font-size:10.5px">B</text><text class="sm" x="34" y="369" style="font-size:9px">sw 1 · t 2</text>
+  <rect class="f-na" x="237" y="358" width="247" height="16" rx="3"/>
+  <text class="v-na" x="243" y="369">not ready</text>
+  <text x="18" y="392" style="font-size:10.5px">C</text><text class="sm" x="34" y="392" style="font-size:9px">sw 1 · t 2</text>
+  <rect class="f-sel" x="237" y="381" width="112" height="16" rx="3"/>
+  <text class="v-sel" x="243" y="392">target 2 ✓</text>
+  <text x="18" y="415" style="font-size:10.5px">D</text><text class="sm" x="34" y="415" style="font-size:9px">sw 2 · t 3</text>
+  <rect class="f-no" x="358" y="404" width="67" height="16" rx="3"/>
+  <text class="v-no" x="352" y="415" text-anchor="end">target 3 ≠ 2</text>
+  <text x="18" y="438" style="font-size:10.5px">E</text><text class="sm" x="34" y="438" style="font-size:9px">sw 2 · t 3</text>
+  <rect class="f-no" x="358" y="427" width="59" height="16" rx="3"/>
+  <text class="v-no" x="352" y="438" text-anchor="end">target 3 ≠ 2</text>
+  <text x="20" y="464" style="font-size:12px;font-weight:700;fill:var(--green)">→ trains on C — a half-size step</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/fd45cb8e44782c6ad3e218f47415d42c976b793c/nemo_rl/algorithms/async_utils/staleness_sampler.py#L589"><text x="330" y="464">select L589</text></a>
 
-  <!-- panel 3: ready_first ─────────────────────────────────── px=8 py=530 -->
-  <rect class="cell" x="8" y="530" width="488" height="196" rx="9"/>
-  <text class="ttl" x="20" y="552" style="fill:var(--green)">ready_first</text>
-  <text class="sm" x="20" y="568">key: any ready group with start_weight ≤ 3</text>
-  <line class="div" x1="196" y1="576" x2="196" y2="694"/>
-  <line class="div" x1="292" y1="576" x2="292" y2="694"/>
-  <line class="div" x1="388" y1="576" x2="388" y2="694"/>
-  <line class="decs" x1="484" y1="576" x2="484" y2="694"/>
-  <text x="18" y="590" style="font-size:10.5px">A</text><text class="sm" x="34" y="590" style="font-size:9px">sw 0 · t 1</text>
-  <rect class="f-sel" x="111" y="579" width="356" height="16" rx="3"/>
-  <text class="v-sel" x="117" y="590">sw 0 ≤ 3 ✓ — the late straggler is used, not thrown away</text>
-  <text x="18" y="613" style="font-size:10.5px">B</text><text class="sm" x="34" y="613" style="font-size:9px">sw 2 · t 3</text>
-  <rect class="f-na" x="303" y="602" width="181" height="16" rx="3"/>
-  <text class="v-na" x="309" y="613">not ready</text>
-  <text x="18" y="636" style="font-size:10.5px">C</text><text class="sm" x="34" y="636" style="font-size:9px">sw 2 · t 3</text>
-  <rect class="f-sel" x="315" y="625" width="146" height="16" rx="3"/>
-  <text class="v-sel" x="321" y="636">sw 2 ≤ 3 ✓</text>
-  <text x="18" y="659" style="font-size:10.5px">D</text><text class="sm" x="34" y="659" style="font-size:9px">sw 3 · t 4</text>
-  <rect class="f-no" x="399" y="648" width="51" height="16" rx="3"/>
-  <text class="v-no" x="393" y="659" text-anchor="end">eligible — kept for the next step</text>
-  <text x="18" y="682" style="font-size:10.5px">E</text><text class="sm" x="34" y="682" style="font-size:9px">sw 3 · t 4</text>
-  <rect class="f-no" x="411" y="671" width="62" height="16" rx="3"/>
-  <text class="v-no" x="405" y="682" text-anchor="end">eligible — kept for the next step</text>
-  <text x="20" y="708" style="font-size:12px;font-weight:700;fill:var(--green)">→ trains on A + C — nothing is ever evicted</text>
-  <a href="https://github.com/NVIDIA-NeMo/RL/blob/fd45cb8e44782c6ad3e218f47415d42c976b793c/nemo_rl/algorithms/async_utils/staleness_sampler.py#L483"><text x="360" y="708">select L483</text></a>
+  <!-- panel 2: weight_fifo ─────────────────────────── px=504 py=286 -->
+  <rect class="cell" x="504" y="286" width="488" height="196" rx="9"/>
+  <text class="ttl" x="516" y="308" style="fill:var(--green)">weight_fifo</text>
+  <text class="sm" x="516" y="324">key: oldest start_weight inside [1, 2] = 1</text>
+  <line class="div" x1="726" y1="332" x2="726" y2="450"/>
+  <line class="div" x1="794" y1="332" x2="794" y2="450"/>
+  <line class="decs" x1="960" y1="332" x2="960" y2="450"/>
+  <text x="514" y="346" style="font-size:10.5px">A</text><text class="sm" x="530" y="346" style="font-size:9px">sw 0 · t 0</text>
+  <rect class="f-ev" x="596" y="335" width="350" height="16" rx="3"/>
+  <text class="v-ev" x="602" y="346">sw 0 is below the window → evicted, rollout wasted</text>
+  <text x="514" y="369" style="font-size:10.5px">B</text><text class="sm" x="530" y="369" style="font-size:9px">sw 1 · t 2</text>
+  <rect class="f-na" x="733" y="358" width="247" height="16" rx="3"/>
+  <text class="v-na" x="739" y="369">not ready — its weight 1 sets the target</text>
+  <text x="514" y="392" style="font-size:10.5px">C</text><text class="sm" x="530" y="392" style="font-size:9px">sw 1 · t 2</text>
+  <rect class="f-sel" x="733" y="381" width="112" height="16" rx="3"/>
+  <text class="v-sel" x="739" y="392">weight 1 ✓</text>
+  <text x="514" y="415" style="font-size:10.5px">D</text><text class="sm" x="530" y="415" style="font-size:9px">sw 2 · t 3</text>
+  <rect class="f-no" x="854" y="404" width="67" height="16" rx="3"/>
+  <text class="v-no" x="848" y="415" text-anchor="end">weight 2 — waits its turn</text>
+  <text x="514" y="438" style="font-size:10.5px">E</text><text class="sm" x="530" y="438" style="font-size:9px">sw 2 · t 3</text>
+  <rect class="f-no" x="854" y="427" width="59" height="16" rx="3"/>
+  <text class="v-no" x="848" y="438" text-anchor="end">weight 2 — waits its turn</text>
+  <text x="516" y="464" style="font-size:12px;font-weight:700;fill:var(--green)">→ trains on C — unready B pins weight 1</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/fd45cb8e44782c6ad3e218f47415d42c976b793c/nemo_rl/algorithms/async_utils/staleness_sampler.py#L519"><text x="900" y="464">select L519</text></a>
 
-  <!-- panel 4: windowed ───────────────────────────────── px=504 py=530 -->
-  <rect class="cell" x="504" y="530" width="488" height="196" rx="9"/>
-  <text class="ttl" x="516" y="552" style="fill:var(--green)">windowed</text>
-  <text class="sm" x="516" y="568">key: start_weight inside [2, 3], then buffer order</text>
-  <line class="div" x1="692" y1="576" x2="692" y2="694"/>
-  <line class="div" x1="788" y1="576" x2="788" y2="694"/>
-  <line class="div" x1="884" y1="576" x2="884" y2="694"/>
-  <line class="decs" x1="980" y1="576" x2="980" y2="694"/>
-  <text x="514" y="590" style="font-size:10.5px">A</text><text class="sm" x="530" y="590" style="font-size:9px">sw 0 · t 1</text>
-  <rect class="f-ev" x="607" y="579" width="356" height="16" rx="3"/>
-  <text class="v-ev" x="613" y="590">sw 0 is below the window → evicted, rollout wasted</text>
-  <text x="514" y="613" style="font-size:10.5px">B</text><text class="sm" x="530" y="613" style="font-size:9px">sw 2 · t 3</text>
-  <rect class="f-na" x="799" y="602" width="181" height="16" rx="3"/>
-  <text class="v-na" x="805" y="613">not ready</text>
-  <text x="514" y="636" style="font-size:10.5px">C</text><text class="sm" x="530" y="636" style="font-size:9px">sw 2 · t 3</text>
-  <rect class="f-sel" x="811" y="625" width="146" height="16" rx="3"/>
-  <text class="v-sel" x="817" y="636">in window, 1st ready ✓</text>
-  <text x="514" y="659" style="font-size:10.5px">D</text><text class="sm" x="530" y="659" style="font-size:9px">sw 3 · t 4</text>
-  <rect class="f-sel" x="895" y="648" width="51" height="16" rx="3"/>
-  <text class="v-sel" x="889" y="659" text-anchor="end">in window, 2nd ready ✓</text>
-  <text x="514" y="682" style="font-size:10.5px">E</text><text class="sm" x="530" y="682" style="font-size:9px">sw 3 · t 4</text>
-  <rect class="f-no" x="907" y="671" width="62" height="16" rx="3"/>
-  <text class="v-no" x="901" y="682" text-anchor="end">in window, but the step is full</text>
-  <text x="516" y="708" style="font-size:12px;font-weight:700;fill:var(--green)">→ trains on C + D</text>
-  <a href="https://github.com/NVIDIA-NeMo/RL/blob/fd45cb8e44782c6ad3e218f47415d42c976b793c/nemo_rl/algorithms/async_utils/staleness_sampler.py#L372"><text x="900" y="708">select L372</text></a>
+  <!-- panel 3: ready_first ───────────────────────────── px=8 py=494 -->
+  <rect class="cell" x="8" y="494" width="488" height="196" rx="9"/>
+  <text class="ttl" x="20" y="516" style="fill:var(--green)">ready_first</text>
+  <text class="sm" x="20" y="532">key: any ready group with start_weight ≤ 2</text>
+  <line class="div" x1="230" y1="540" x2="230" y2="658"/>
+  <line class="div" x1="298" y1="540" x2="298" y2="658"/>
+  <line class="decs" x1="464" y1="540" x2="464" y2="658"/>
+  <text x="18" y="554" style="font-size:10.5px">A</text><text class="sm" x="34" y="554" style="font-size:9px">sw 0 · t 0</text>
+  <rect class="f-sel" x="100" y="543" width="350" height="16" rx="3"/>
+  <text class="v-sel" x="106" y="554">sw 0 ≤ 2 ✓ — the late lander is used, not thrown away</text>
+  <text x="18" y="577" style="font-size:10.5px">B</text><text class="sm" x="34" y="577" style="font-size:9px">sw 1 · t 2</text>
+  <rect class="f-na" x="237" y="566" width="247" height="16" rx="3"/>
+  <text class="v-na" x="243" y="577">not ready</text>
+  <text x="18" y="600" style="font-size:10.5px">C</text><text class="sm" x="34" y="600" style="font-size:9px">sw 1 · t 2</text>
+  <rect class="f-sel" x="237" y="589" width="112" height="16" rx="3"/>
+  <text class="v-sel" x="243" y="600">sw 1 ≤ 2 ✓</text>
+  <text x="18" y="623" style="font-size:10.5px">D</text><text class="sm" x="34" y="623" style="font-size:9px">sw 2 · t 3</text>
+  <rect class="f-no" x="358" y="612" width="67" height="16" rx="3"/>
+  <text class="v-no" x="352" y="623" text-anchor="end">eligible — kept for the next step</text>
+  <text x="18" y="646" style="font-size:10.5px">E</text><text class="sm" x="34" y="646" style="font-size:9px">sw 2 · t 3</text>
+  <rect class="f-no" x="358" y="635" width="59" height="16" rx="3"/>
+  <text class="v-no" x="352" y="646" text-anchor="end">eligible — kept for the next step</text>
+  <text x="20" y="672" style="font-size:12px;font-weight:700;fill:var(--green)">→ trains on A + C — nothing is ever evicted</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/fd45cb8e44782c6ad3e218f47415d42c976b793c/nemo_rl/algorithms/async_utils/staleness_sampler.py#L483"><text x="360" y="672">select L483</text></a>
 
-  <!-- panel 5: windowed + freshest ──────────────────────────── px=8 py=738 -->
-  <rect class="cell" x="8" y="738" width="488" height="196" rx="9"/>
-  <text class="ttl" x="20" y="760" style="fill:var(--green)">windowed + sample_freshest_first</text>
-  <text class="sm" x="20" y="776">key: same window, sorted by how far behind the trainer</text>
-  <line class="div" x1="196" y1="784" x2="196" y2="902"/>
-  <line class="div" x1="292" y1="784" x2="292" y2="902"/>
-  <line class="div" x1="388" y1="784" x2="388" y2="902"/>
-  <line class="decs" x1="484" y1="784" x2="484" y2="902"/>
-  <text x="18" y="798" style="font-size:10.5px">A</text><text class="sm" x="34" y="798" style="font-size:9px">sw 0 · t 1</text>
-  <rect class="f-ev" x="111" y="787" width="356" height="16" rx="3"/>
-  <text class="v-ev" x="117" y="798">sw 0 is below the window → evicted, rollout wasted</text>
-  <text x="18" y="821" style="font-size:10.5px">B</text><text class="sm" x="34" y="821" style="font-size:9px">sw 2 · t 3</text>
-  <rect class="f-na" x="303" y="810" width="181" height="16" rx="3"/>
-  <text class="v-na" x="309" y="821">not ready</text>
-  <text x="18" y="844" style="font-size:10.5px">C</text><text class="sm" x="34" y="844" style="font-size:9px">sw 2 · t 3</text>
-  <rect class="f-ev" x="315" y="833" width="146" height="16" rx="3"/>
-  <text class="v-ev" x="321" y="844">1 behind → sorts last</text>
-  <text x="18" y="867" style="font-size:10.5px">D</text><text class="sm" x="34" y="867" style="font-size:9px">sw 3 · t 4</text>
-  <rect class="f-sel" x="399" y="856" width="51" height="16" rx="3"/>
-  <text class="v-sel" x="393" y="867" text-anchor="end">0 behind ✓</text>
-  <text x="18" y="890" style="font-size:10.5px">E</text><text class="sm" x="34" y="890" style="font-size:9px">sw 3 · t 4</text>
-  <rect class="f-sel" x="411" y="879" width="62" height="16" rx="3"/>
-  <text class="v-sel" x="405" y="890" text-anchor="end">0 behind ✓</text>
-  <text x="20" y="916" style="font-size:12px;font-weight:700;fill:var(--green)">→ trains on D + E — C is left over, then ages out</text>
-  <a href="https://github.com/NVIDIA-NeMo/RL/blob/fd45cb8e44782c6ad3e218f47415d42c976b793c/nemo_rl/algorithms/async_utils/staleness_sampler.py#L387"><text x="382" y="916">sort L387</text></a>
+  <!-- panel 4: windowed ───────────────────────────── px=504 py=494 -->
+  <rect class="cell" x="504" y="494" width="488" height="196" rx="9"/>
+  <text class="ttl" x="516" y="516" style="fill:var(--green)">windowed</text>
+  <text class="sm" x="516" y="532">key: start_weight inside [1, 2], then buffer order</text>
+  <line class="div" x1="726" y1="540" x2="726" y2="658"/>
+  <line class="div" x1="794" y1="540" x2="794" y2="658"/>
+  <line class="decs" x1="960" y1="540" x2="960" y2="658"/>
+  <text x="514" y="554" style="font-size:10.5px">A</text><text class="sm" x="530" y="554" style="font-size:9px">sw 0 · t 0</text>
+  <rect class="f-ev" x="596" y="543" width="350" height="16" rx="3"/>
+  <text class="v-ev" x="602" y="554">sw 0 is below the window → evicted, rollout wasted</text>
+  <text x="514" y="577" style="font-size:10.5px">B</text><text class="sm" x="530" y="577" style="font-size:9px">sw 1 · t 2</text>
+  <rect class="f-na" x="733" y="566" width="247" height="16" rx="3"/>
+  <text class="v-na" x="739" y="577">not ready</text>
+  <text x="514" y="600" style="font-size:10.5px">C</text><text class="sm" x="530" y="600" style="font-size:9px">sw 1 · t 2</text>
+  <rect class="f-sel" x="733" y="589" width="112" height="16" rx="3"/>
+  <text class="v-sel" x="739" y="600">1st ready ✓</text>
+  <text x="514" y="623" style="font-size:10.5px">D</text><text class="sm" x="530" y="623" style="font-size:9px">sw 2 · t 3</text>
+  <rect class="f-sel" x="854" y="612" width="67" height="16" rx="3"/>
+  <text class="v-sel" x="848" y="623" text-anchor="end">in window, 2nd ready ✓</text>
+  <text x="514" y="646" style="font-size:10.5px">E</text><text class="sm" x="530" y="646" style="font-size:9px">sw 2 · t 3</text>
+  <rect class="f-no" x="854" y="635" width="59" height="16" rx="3"/>
+  <text class="v-no" x="848" y="646" text-anchor="end">in window, but the step is full</text>
+  <text x="516" y="672" style="font-size:12px;font-weight:700;fill:var(--green)">→ trains on C + D</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/fd45cb8e44782c6ad3e218f47415d42c976b793c/nemo_rl/algorithms/async_utils/staleness_sampler.py#L372"><text x="900" y="672">select L372</text></a>
 
-  <!-- panel 6: custom ────────────────────────────────── px=504 py=738 -->
-  <rect class="cell" x="504" y="738" width="488" height="196" rx="9"/>
-  <text class="ttl" x="516" y="760" style="fill:var(--muted)">custom</text>
-  <text class="sm" x="516" y="776">key: whatever your class says</text>
-  <text class="sm" x="516" y="800">No fixed picture — this mode is an escape hatch. Set</text>
-  <text class="sm" x="516" y="816">sampler.name: custom and sampler.target: "module:ClassName"</text>
-  <text class="sm" x="516" y="832">and the factory imports your class and checks it against the</text>
-  <text class="sm" x="516" y="848">PromptGroupSampler interface before the run allocates any GPU.</text>
-  <text class="sm" x="516" y="872">Your class must also set supports_buffer_checkpoint = True</text>
-  <text class="sm" x="516" y="888">to have buffered groups restored on a restart, and</text>
-  <text class="sm" x="516" y="904">supports_training_claims = True for periodic rollout snapshots.</text>
-  <a href="https://github.com/NVIDIA-NeMo/RL/blob/fd45cb8e44782c6ad3e218f47415d42c976b793c/nemo_rl/algorithms/async_utils/staleness_sampler.py#L796"><text x="516" y="924">create_sampler L796</text></a>
+  <!-- panel 5: windowed + freshest ──────────────────── px=8 py=702 -->
+  <rect class="cell" x="8" y="702" width="488" height="196" rx="9"/>
+  <text class="ttl" x="20" y="724" style="fill:var(--green)">windowed + sample_freshest_first</text>
+  <text class="sm" x="20" y="740">key: same window, least behind the trainer first</text>
+  <line class="div" x1="230" y1="748" x2="230" y2="866"/>
+  <line class="div" x1="298" y1="748" x2="298" y2="866"/>
+  <line class="decs" x1="464" y1="748" x2="464" y2="866"/>
+  <text x="18" y="762" style="font-size:10.5px">A</text><text class="sm" x="34" y="762" style="font-size:9px">sw 0 · t 0</text>
+  <rect class="f-ev" x="100" y="751" width="350" height="16" rx="3"/>
+  <text class="v-ev" x="106" y="762">sw 0 is below the window → evicted, rollout wasted</text>
+  <text x="18" y="785" style="font-size:10.5px">B</text><text class="sm" x="34" y="785" style="font-size:9px">sw 1 · t 2</text>
+  <rect class="f-na" x="237" y="774" width="247" height="16" rx="3"/>
+  <text class="v-na" x="243" y="785">not ready</text>
+  <text x="18" y="808" style="font-size:10.5px">C</text><text class="sm" x="34" y="808" style="font-size:9px">sw 1 · t 2</text>
+  <rect class="f-ev" x="237" y="797" width="112" height="16" rx="3"/>
+  <text class="v-ev" x="243" y="808">1 behind ✗</text>
+  <text x="18" y="831" style="font-size:10.5px">D</text><text class="sm" x="34" y="831" style="font-size:9px">sw 2 · t 3</text>
+  <rect class="f-sel" x="358" y="820" width="67" height="16" rx="3"/>
+  <text class="v-sel" x="352" y="831" text-anchor="end">0 behind ✓</text>
+  <text x="18" y="854" style="font-size:10.5px">E</text><text class="sm" x="34" y="854" style="font-size:9px">sw 2 · t 3</text>
+  <rect class="f-sel" x="358" y="843" width="59" height="16" rx="3"/>
+  <text class="v-sel" x="352" y="854" text-anchor="end">0 behind ✓</text>
+  <text x="20" y="880" style="font-size:12px;font-weight:700;fill:var(--green)">→ trains on D + E — C is left over</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/fd45cb8e44782c6ad3e218f47415d42c976b793c/nemo_rl/algorithms/async_utils/staleness_sampler.py#L387"><text x="330" y="880">sort L387</text></a>
+
+  <!-- panel 6: custom ───────────────────────────────── px=504 py=702 -->
+  <rect class="cell" x="504" y="702" width="488" height="196" rx="9"/>
+  <text class="ttl" x="516" y="724" style="fill:var(--muted)">custom</text>
+  <text class="sm" x="516" y="740">key: whatever your class says</text>
+  <text class="sm" x="516" y="764">No fixed picture — this mode is an escape hatch. Set</text>
+  <text class="sm" x="516" y="780">sampler.name: custom and sampler.target: "module:ClassName"</text>
+  <text class="sm" x="516" y="796">and the factory imports your class and checks it against the</text>
+  <text class="sm" x="516" y="812">PromptGroupSampler interface before the run allocates any GPU.</text>
+  <text class="sm" x="516" y="836">Your class must also set supports_buffer_checkpoint = True</text>
+  <text class="sm" x="516" y="852">to have buffered groups restored on a restart, and</text>
+  <text class="sm" x="516" y="868">supports_training_claims = True for periodic rollout snapshots.</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/fd45cb8e44782c6ad3e218f47415d42c976b793c/nemo_rl/algorithms/async_utils/staleness_sampler.py#L796"><text x="516" y="888">create_sampler L796</text></a>
 
   <!-- legend -->
-  <rect class="f-sel" x="10" y="954" width="16" height="14" rx="3"/>
-  <text class="sm" x="32" y="966">trained on this step</text>
-  <rect class="f-no" x="200" y="954" width="16" height="14" rx="3"/>
-  <text class="sm" x="222" y="966">eligible, not taken this step</text>
-  <rect class="f-ev" x="430" y="954" width="16" height="14" rx="3"/>
-  <text class="sm" x="452" y="966">dropped — the rollout compute is wasted</text>
-  <rect class="f-na" x="740" y="954" width="16" height="14" rx="3"/>
-  <text class="sm" x="762" y="966">still generating</text>
+  <rect class="f-sel" x="10" y="910" width="16" height="14" rx="3"/>
+  <text class="sm" x="32" y="922">trained on this step</text>
+  <rect class="f-no" x="200" y="910" width="16" height="14" rx="3"/>
+  <text class="sm" x="222" y="922">eligible, not taken this step</text>
+  <rect class="f-ev" x="430" y="910" width="16" height="14" rx="3"/>
+  <text class="sm" x="452" y="922">dropped — the rollout compute is wasted</text>
+  <rect class="f-na" x="740" y="910" width="16" height="14" rx="3"/>
+  <text class="sm" x="762" y="922">still generating</text>
 </svg>
 
-<div class="card"><div class="card-title">What the picture is really showing</div>
-Only one thing is different between the panels: <strong>which rule the sampler consults.</strong> The buffer is
-identical in all five, and so are the bars — they sit exactly where they sit in the timeline at the top.
-<code>in_order</code> asks "was this meant for step 3?", <code>weight_fifo</code> asks "is this the oldest weight still
-in the window?", <code>ready_first</code> asks "is this finished and not from the future?", and <code>windowed</code>
-asks "is this inside the window?" — with <code>sample_freshest_first</code> changing which end of the window it
-takes from.</div>
+<div class="card"><div class="card-title">How the run got here</div>
+At weight 0 the gate lets two batches out at once, which fills all four slots: A and A′ for step 0, P and Q for
+step 1. A′ lands early and A does not, so <strong>step 0 trains on A′ alone</strong> — that is what
+<code>min_groups_for_streaming_train</code> below <code>num_prompts_per_step</code> buys you. Freed slots take the next
+batch, B and C for step 2. Step 1 gets both of its groups and the trainer reaches weight 2. Batch 3 (D and E) is
+allowed out but has to wait for a second free slot, so slot 4 idles until C lands. Then A finally lands, after
+running the entire time — two weight versions late, with the step it was meant for long gone.</div>
 
 <h2>The rule each mode applies</h2>
 <table>
 <tr><th>Mode</th><th>Selection key</th><th>Picks here</th><th>What it drops</th></tr>
-<tr><td><code>in_order</code></td><td><code>target_step == 3</code></td><td><strong>C</strong></td><td>A — its step has gone by, so it can never be picked (<a href="https://github.com/NVIDIA-NeMo/RL/blob/fd45cb8e44782c6ad3e218f47415d42c976b793c/nemo_rl/algorithms/async_utils/staleness_sampler.py#L606">evict L606</a>)</td></tr>
-<tr><td><code>weight_fifo</code></td><td>oldest <code>start_weight</code> in <code>[2,3]</code> = 2</td><td><strong>C</strong></td><td>A — below the window (<a href="https://github.com/NVIDIA-NeMo/RL/blob/fd45cb8e44782c6ad3e218f47415d42c976b793c/nemo_rl/algorithms/async_utils/staleness_sampler.py#L231">evict L231</a>)</td></tr>
-<tr><td><code>ready_first</code></td><td>ready and <code>start_weight ≤ 3</code></td><td><strong>A + C</strong></td><td><strong>nothing</strong> — <code>evict</code> returns 0 (<a href="https://github.com/NVIDIA-NeMo/RL/blob/fd45cb8e44782c6ad3e218f47415d42c976b793c/nemo_rl/algorithms/async_utils/staleness_sampler.py#L500">evict L500</a>)</td></tr>
-<tr><td><code>windowed</code></td><td><code>start_weight ∈ [2,3]</code>, buffer order</td><td><strong>C + D</strong></td><td>A — below the window</td></tr>
-<tr><td><code>windowed</code> + <code>sample_freshest_first</code></td><td>same window, least-behind first</td><td><strong>D + E</strong></td><td>A now, and C next step once the window moves to <code>[3,4]</code></td></tr>
+<tr><td><code>in_order</code></td><td><code>target_step == 2</code></td><td><strong>C</strong></td><td>A — its step has gone by, so it can never be picked (<a href="https://github.com/NVIDIA-NeMo/RL/blob/fd45cb8e44782c6ad3e218f47415d42c976b793c/nemo_rl/algorithms/async_utils/staleness_sampler.py#L606">evict L606</a>)</td></tr>
+<tr><td><code>weight_fifo</code></td><td>oldest <code>start_weight</code> in <code>[1,2]</code> = 1</td><td><strong>C</strong></td><td>A — below the window (<a href="https://github.com/NVIDIA-NeMo/RL/blob/fd45cb8e44782c6ad3e218f47415d42c976b793c/nemo_rl/algorithms/async_utils/staleness_sampler.py#L231">evict L231</a>)</td></tr>
+<tr><td><code>ready_first</code></td><td>ready and <code>start_weight ≤ 2</code></td><td><strong>A + C</strong></td><td><strong>nothing</strong> — <code>evict</code> returns 0 (<a href="https://github.com/NVIDIA-NeMo/RL/blob/fd45cb8e44782c6ad3e218f47415d42c976b793c/nemo_rl/algorithms/async_utils/staleness_sampler.py#L500">evict L500</a>)</td></tr>
+<tr><td><code>windowed</code></td><td><code>start_weight ∈ [1,2]</code>, buffer order</td><td><strong>C + D</strong></td><td>A — below the window</td></tr>
+<tr><td><code>windowed</code> + <code>sample_freshest_first</code></td><td>same window, least-behind first</td><td><strong>D + E</strong></td><td>A now, and C next step once the window moves to <code>[2,3]</code></td></tr>
 <tr><td><code>custom</code></td><td>whatever the imported class does</td><td>—</td><td>—</td></tr>
 </table>
 
 <div class="card"><div class="card-title">Why <code>in_order</code> and <code>weight_fifo</code> agree here</div>
 They agree most of the time. <code>start_weight</code> and <code>target_step</code> are both stamped when the batch is
-dispatched, so "the batch meant for step 3" and "the oldest weight still in the window" usually name the same
+dispatched, so "the batch meant for step 2" and "the oldest weight still in the window" usually name the same
 groups. They come apart when a weight bump lands part-way through reserving a batch, or when a batch is
 dispatched with no lookahead left to use. Note the small asymmetry in <code>weight_fifo</code>: it picks the target
-weight from <em>every</em> slot in the window, ready or not, so unready B pins the target at weight 2 and D and E
+weight from <em>every</em> slot in the window, ready or not, so unready B pins the target at weight 1 and D and E
 wait even though they are sitting there finished
 (<a href="https://github.com/NVIDIA-NeMo/RL/blob/fd45cb8e44782c6ad3e218f47415d42c976b793c/nemo_rl/algorithms/async_utils/staleness_sampler.py#L528">L528-540</a>).</div>
 
-<div class="card"><div class="card-title">Every mode here runs a short step, and that is on purpose</div>
+<div class="card"><div class="card-title">Why every step here is a short step</div>
 <code>min_groups_for_streaming_train</code> is the floor. Set it below <code>num_prompts_per_step</code> and
 <a href="https://github.com/NVIDIA-NeMo/RL/blob/fd45cb8e44782c6ad3e218f47415d42c976b793c/nemo_rl/algorithms/async_utils/staleness_sampler.py#L280"><code>_finalize_selection</code></a>
-hands back whatever is ready, so <code>in_order</code> trains on C alone instead of waiting for B. Set it equal to
+hands back whatever is ready, so step 0 runs on A′ alone rather than waiting for A. Set it equal to
 <code>num_prompts_per_step</code> and the same code returns <code>None</code> until the whole batch has landed — that is
-the sync recipe, and it is the setting that makes <code>in_order</code> waste nothing at all.</div>
+the sync recipe, and it is the setting that makes <code>in_order</code> waste nothing at all. The cost is the mirror
+image: the trainer then idles on the slowest rollout in every batch.</div>
 
 <div class="warn">
 <strong>Pick <code>ready_first</code> when throwing away rollouts is the thing you cannot afford.</strong> It is the only
-mode whose <code>evict</code> never drops anything: a group that finishes late is still trained on, however far behind
-it is. The price is that its staleness has no bound — A was generated three weight versions ago and is used
+mode whose <code>evict</code> never drops anything: a group that lands late is still trained on, however far behind
+it is. The price is that its staleness has no bound — A was generated two weight versions ago and is used
 anyway. That is why setup makes <code>ready_first</code> require
 <code>loss_fn.use_importance_sampling_correction: true</code> and <code>force_on_policy_ratio: false</code> at <em>any</em>
 staleness setting, unlike the other modes, which only need the correction once you raise their staleness knob above 0
