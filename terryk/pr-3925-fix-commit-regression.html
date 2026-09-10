@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NVIDIA-NeMo/RL #3925 — what the fix commit broke</title>
+<style>
+:root{
+  --bg:#0d1117; --surface:#161b22; --surface2:#1c2128; --border:#30363d;
+  --text:#e6edf3; --dim:#8b949e; --accent:#58a6ff; --green:#3fb950;
+  --orange:#d29922; --red:#f85149; --teal:#39c5cf;
+}
+:root[data-theme="light"]{
+  --bg:#ffffff; --surface:#f6f8fa; --surface2:#eaeef2; --border:#d0d7de;
+  --text:#1f2328; --dim:#59636e; --accent:#0969da; --green:#1a7f37;
+  --orange:#9a6700; --red:#cf222e; --teal:#0e7490;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:28px 20px 70px}
+h1{font-size:22px;margin:0 0 8px;line-height:1.3}
+h2{font-size:18px;margin:30px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;
+  font:12.5px ui-monospace,SFMono-Regular,Menlo,monospace}
+.sub{color:var(--dim);font-size:13.5px;margin:0 0 10px}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);
+  border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;
+  font:13px/1 ui-monospace,Menlo,monospace;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.18)}
+nav.chain{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 6px;padding:0}
+nav.chain a,nav.chain span{display:inline-block;padding:5px 11px;border:1px solid var(--border);
+  border-radius:20px;background:var(--surface);text-decoration:none;color:var(--accent);
+  font-size:12.5px;line-height:1.3;white-space:nowrap}
+nav.chain a:hover{background:var(--surface2)}
+nav.chain span.here{background:var(--accent);color:var(--bg);border-color:var(--accent);font-weight:600}
+p.chainnote{color:var(--dim);font-size:12px;margin:0 0 18px}
+table{border-collapse:collapse;width:100%;margin:14px 0;font-size:13.5px}
+th,td{border:1px solid var(--border);padding:7px 10px;text-align:left;vertical-align:top}
+th{background:var(--surface2);font-weight:600}
+.mono{font:12.5px ui-monospace,SFMono-Regular,Menlo,monospace;
+  background:var(--surface);border:1px solid var(--border);border-radius:8px;
+  padding:13px;overflow-x:auto;white-space:pre;margin:14px 0}
+.mono .c{color:var(--dim)}
+.mono .r{color:var(--red)}
+.mono .g{color:var(--green)}
+.warn{border-left:3px solid var(--orange);background:var(--surface);
+  padding:12px 16px;margin:18px 0;border-radius:0 8px 8px 0}
+svg{max-width:100%;height:auto;display:block;margin:16px 0}
+svg .hd{fill:var(--accent);font:bold 11px ui-monospace,Menlo,monospace}
+svg .note{fill:var(--dim);font:11.5px -apple-system,sans-serif}
+svg .ttl{fill:var(--text);font:bold 13px -apple-system,sans-serif}
+svg .lbl{fill:var(--text);font:12px ui-monospace,Menlo,monospace}
+svg .box{fill:var(--surface);stroke:var(--border);stroke-width:1.2}
+svg .boxok{fill:var(--surface);stroke:var(--green);stroke-width:1.6}
+svg .boxbad{fill:var(--surface);stroke:var(--red);stroke-width:2}
+svg .boxwarn{fill:var(--surface);stroke:var(--orange);stroke-width:1.8;stroke-dasharray:5 3}
+svg .ok{fill:var(--green);font:bold 13px -apple-system,sans-serif}
+svg .no{fill:var(--red);font:bold 13px -apple-system,sans-serif}
+svg .wn{fill:var(--orange);font:bold 13px -apple-system,sans-serif}
+svg .arr{stroke:var(--dim);stroke-width:1.6;fill:none}
+svg a text{text-decoration:underline}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+  document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head>
+<body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+  function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+  function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
+    b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
+      else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+  document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+<div class="wrap">
+
+<h1>What the fix commit got right, what it broke, and what it left uneven</h1>
+<p class="sub">Follow-up on
+<a href="https://github.com/NVIDIA-NeMo/RL/pull/3925">NVIDIA-NeMo/RL #3925</a>, fix commit
+<a href="https://github.com/NVIDIA-NeMo/RL/pull/3925/commits/195df040781dae2588c2e1fe9c9e2017fe316b0e"><code>195df04</code></a>.
+All permalinks pin the current head <code>a3dfa6c</code>.</p>
+
+<nav class="chain">
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-3925-split-recovery-rows.html">recovery counters</a>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-3925-replacement-reserve.html">dropped prompts</a>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-3925-can-restore-drop-data.html">can restore drop data</a>
+  <span class="here">what the fix broke</span>
+</nav>
+<p class="chainnote">Four pages from the #3925 review — this one: the two problems left after the fix commit.</p>
+
+<p><strong>Three review comments, two problems.</strong> The
+<a href="https://github.com/NVIDIA-NeMo/RL/pull/3925#discussion_r3982249682">thread reply</a> and the
+first pending comment describe the <em>same</em> thing from two anchors — the thread where the ask was
+made, and the new code that answers it. The second pending comment is separate and small. Both are about
+one new guard, so the page shows that guard first.</p>
+
+<p>The fix commit adds
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/a3dfa6ca8c96f34d674ee2e854bc1e09c066ccc0/nemo_rl/algorithms/single_controller.py#L987-L1009"><code>_validate_restored_sampler_cursor</code></a>,
+called once in <code>run()</code> right after the three restores
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/a3dfa6ca8c96f34d674ee2e854bc1e09c066ccc0/nemo_rl/algorithms/single_controller.py#L598-L605">:598-605</a>).
+It collects every <code>target_step</code> stamp from the restored replay buffer and from the recovery
+ledger, and refuses to start if the sampler cursor is behind the largest one — the one state that used
+to make re-admission drop prompts. The guard is correct, and two new tests pin it
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/a3dfa6ca8c96f34d674ee2e854bc1e09c066ccc0/tests/unit/single_controller/test_checkpointing.py#L950-L983">reject and accept</a>).</p>
+
+<h2>Problem 1 — the guard reads a field the test double does not have</h2>
+
+<svg viewBox="0 0 940 300" role="img" aria-label="run() restores the buffer, the ledger and the spare pool, then the new guard reads self._buffer.target_step_list. Against the real TQReplayBuffer that is a list and the check passes. Against the _FakeTQBuffer used by five tests it is an AttributeError.">
+  <text class="ttl" x="14" y="18">run() at restore, after the fix commit</text>
+
+  <rect class="box" x="14" y="34" width="150" height="40" rx="6"/>
+  <text class="lbl" x="26" y="58">restore buffer</text>
+  <path class="arr" d="M164 54 L186 54"/>
+  <rect class="box" x="188" y="34" width="150" height="40" rx="6"/>
+  <text class="lbl" x="200" y="58">restore ledger</text>
+  <path class="arr" d="M338 54 L360 54"/>
+  <rect class="box" x="362" y="34" width="150" height="40" rx="6"/>
+  <text class="lbl" x="374" y="58">restore pool</text>
+  <path class="arr" d="M512 54 L534 54"/>
+  <rect class="boxwarn" x="536" y="34" width="390" height="40" rx="6"/>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/a3dfa6ca8c96f34d674ee2e854bc1e09c066ccc0/nemo_rl/algorithms/single_controller.py#L605"><text class="lbl" x="548" y="58">_validate_restored_sampler_cursor()   new, :605</text></a>
+
+  <path class="arr" d="M731 74 L731 100"/>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/a3dfa6ca8c96f34d674ee2e854bc1e09c066ccc0/nemo_rl/algorithms/single_controller.py#L989-L993"><text class="lbl" x="560" y="120">reads  self._buffer.target_step_list   :991</text></a>
+
+  <line x1="14" y1="140" x2="926" y2="140" stroke="var(--border)" stroke-width="1"/>
+
+  <text class="hd" x="14" y="166">production: the real TQReplayBuffer</text>
+  <rect class="boxok" x="14" y="176" width="440" height="88" rx="6"/>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/a3dfa6ca8c96f34d674ee2e854bc1e09c066ccc0/nemo_rl/algorithms/async_utils/replay_buffer.py#L1200"><text class="lbl" x="26" y="200">target_step_list = [None, 7]     one entry per slot</text></a>
+  <text class="note" x="26" y="222">cursor 8 ≥ max stamp 7  →  the check passes and the run starts</text>
+  <text class="note" x="26" y="242">cursor 7 &lt; stamp 8         →  RuntimeError at startup, by design</text>
+  <text class="ok" x="26" y="258">works — the two new unit tests cover both rows</text>
+
+  <text class="hd" x="486" y="166">five existing tests: _FakeTQBuffer</text>
+  <rect class="boxbad" x="486" y="176" width="440" height="88" rx="6"/>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/a3dfa6ca8c96f34d674ee2e854bc1e09c066ccc0/tests/unit/single_controller/test_checkpointing.py#L531-L548"><text class="lbl" x="498" y="200">has _metadata_state, _num_groups, recorders</text></a>
+  <text class="note" x="498" y="222">no target_step_list at all — the fake predates the guard</text>
+  <text class="note" x="498" y="242">every test that reaches run() with it stops here</text>
+  <text class="no" x="498" y="258">AttributeError — 5 tests fail at a3dfa6c</text>
+
+  <text class="note" x="14" y="290">green = works as intended · red = the regression · dashed orange = the new code both sides run through</text>
+</svg>
+
+<div class="mono"><span class="r">AttributeError: '_FakeTQBuffer' object has no attribute 'target_step_list'</span>   <span class="c">single_controller.py:991</span>
+  TestReplayBufferPersistence::test_run_restores_native_tq_replay_metadata_without_payload_reput
+  TestReplayBufferPersistence::test_run_missing_native_replay_metadata_starts_empty
+  TestReplayBufferPersistence::test_run_restores_native_replay_state_with_in_order_sampler
+  TestReplacementReservePersistence::test_run_restores_the_pool_when_replay_metadata_is_absent
+  TestReplacementReservePersistence::test_run_without_a_reserve_file_starts_with_an_empty_pool
+
+<span class="c">tests/unit/single_controller + test_logger.py + test_rollout_manager.py at a3dfa6c:</span>  5 failed, 1084 passed</div>
+
+<p>The fix is one line in the fake, right after
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/a3dfa6ca8c96f34d674ee2e854bc1e09c066ccc0/tests/unit/single_controller/test_checkpointing.py#L541-L548"><code>self._metadata_state</code> is set</a>,
+derived from the same state the fake's <code>count_for_target_step</code> already reads, so the guard sees
+what the real buffer would report:</p>
+
+<div class="mono">self.target_step_list = [group["target_step"] for group in self._metadata_state["groups"]]
+<span class="c"># default state has groups=[]  →  []  →  the guard finds nothing to check and returns</span></div>
+
+<h2>Problem 2 — two of the three admission sites got the new guard</h2>
+
+<p>The same commit replaces the old “drop the surplus prompts” branch with
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/a3dfa6ca8c96f34d674ee2e854bc1e09c066ccc0/nemo_rl/algorithms/single_controller.py#L1011-L1022"><code>_require_unoccupied_target_step</code></a>,
+which raises if a freshly admitted step already has groups in the buffer. A target step is minted in
+three places; the guard landed in two.</p>
+
+<svg viewBox="0 0 940 210" role="img" aria-label="Three places a target step is minted. Recovery on, via _admit_reserved_prompt_groups: guarded. Recovery off, live batch: guarded. Recovery off, spare-pool drain: not guarded.">
+  <text class="ttl" x="14" y="18">Where a new target step is handed out</text>
+
+  <rect class="boxok" x="14" y="34" width="296" height="120" rx="6"/>
+  <text class="hd" x="26" y="56">recovery on — any batch</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/a3dfa6ca8c96f34d674ee2e854bc1e09c066ccc0/nemo_rl/algorithms/single_controller.py#L1131"><text class="lbl" x="26" y="82">_admit_reserved_prompt_groups</text></a>
+  <text class="note" x="26" y="102">live batches and the spare-pool drain</text>
+  <text class="note" x="26" y="120">both go through _commit → guard at :1131</text>
+  <text class="ok" x="26" y="144">guarded</text>
+
+  <rect class="boxok" x="322" y="34" width="296" height="120" rx="6"/>
+  <text class="hd" x="334" y="56">recovery off — live batch</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/a3dfa6ca8c96f34d674ee2e854bc1e09c066ccc0/nemo_rl/algorithms/single_controller.py#L2105-L2110"><text class="lbl" x="334" y="82">sampler.admit()  then guard</text></a>
+  <text class="note" x="334" y="102">the rollout pump's dataloader loop</text>
+  <text class="note" x="334" y="120">guard at :2110</text>
+  <text class="ok" x="334" y="144">guarded</text>
+
+  <rect class="boxwarn" x="630" y="34" width="296" height="120" rx="6"/>
+  <text class="hd" x="642" y="56">recovery off — spare-pool drain</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/a3dfa6ca8c96f34d674ee2e854bc1e09c066ccc0/nemo_rl/algorithms/single_controller.py#L2274-L2276"><text class="lbl" x="642" y="82">sampler.admit()  then dispatch</text></a>
+  <text class="note" x="642" y="102">_drain_reserve_into_steps, after the</text>
+  <text class="note" x="642" y="120">dataloader is exhausted — no guard</text>
+  <text class="wn" x="642" y="144">not guarded</text>
+
+  <text class="note" x="14" y="184">It cannot collide today for the same reason the other two cannot — but the guard exists for the case nobody expects,</text>
+  <text class="note" x="14" y="202">and this is the one branch a reader would now assume is covered and is not. One line: the same call after the admit() at :2274.</text>
+</svg>
+
+<div class="warn">
+<p style="margin:0 0 8px"><strong>Severity.</strong> Problem 1 blocks: it turns the lane that runs
+<code>tests/unit</code> (<code>L0_Unit_Tests_Other</code>) red, and the fix is one line in a test
+double. Problem 2 is a low-severity consistency note, not a bug. Neither changes production behaviour.</p>
+<p style="margin:0">One intended consequence of the guard is worth a sentence in the
+<code>RolloutCheckpointConfig</code> docstring: a checkpoint written before the sampler cursor was saved
+(pre-#3480) whose buffer has stamps now fails at startup instead of silently dropping prompts later.
+That is the right trade — it should just be written where someone hitting the error will look.</p>
+</div>
+
+</div>
+</body>
+</html>
