@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NVIDIA-NeMo/RL #3380 — why a conversation that exactly fills the pack crashes training</title>
+<style>
+:root{
+  --bg:#0d1117; --surface:#161b22; --surface2:#1c2128; --border:#30363d;
+  --text:#e6edf3; --dim:#8b949e; --accent:#58a6ff; --green:#3fb950;
+  --orange:#d29922; --red:#f85149;
+}
+:root[data-theme="light"]{
+  --bg:#ffffff; --surface:#f6f8fa; --surface2:#eaeef2; --border:#d0d7de;
+  --text:#1f2328; --dim:#59636e; --accent:#0969da; --green:#1a7f37;
+  --orange:#9a6700; --red:#cf222e;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:28px 20px 70px}
+h1{font-size:22px;margin:0 0 8px;line-height:1.3}
+h2{font-size:18px;margin:32px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;
+  font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
+.sub{color:var(--dim);font-size:13.5px;margin:0 0 16px}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);
+  border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;
+  font:13px/1 ui-monospace,Menlo,monospace;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.18)}
+.mono{font:12.5px ui-monospace,SFMono-Regular,Menlo,monospace;
+  background:var(--surface);border:1px solid var(--border);border-radius:8px;
+  padding:13px;overflow-x:auto;white-space:pre;line-height:1.55}
+.warn{border-left:3px solid var(--red);background:var(--surface);
+  padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0}
+.hl{border-left:3px solid var(--green);background:var(--surface);
+  padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0}
+.cm{color:var(--dim)}
+.ok{color:var(--green);font-weight:700}
+.bad{color:var(--red);font-weight:700}
+svg{max-width:100%;height:auto;display:block;margin:16px 0}
+svg .lbl{fill:var(--text);font:12.5px ui-monospace,Menlo,monospace}
+svg .lbl-b{fill:var(--text);font:bold 13px -apple-system,sans-serif}
+svg .note{fill:var(--dim);font:11.5px -apple-system,sans-serif}
+svg .hdr{fill:var(--accent);font:bold 12.5px -apple-system,sans-serif}
+svg .tokA{fill:var(--green);opacity:.5;stroke:var(--green)}
+svg .tokB{fill:var(--orange);opacity:.5;stroke:var(--orange)}
+svg .tokP{fill:var(--dim);opacity:.25;stroke:var(--dim)}
+svg .c-txt{fill:var(--text);font:10.5px ui-monospace,Menlo,monospace}
+svg .mark{stroke:var(--accent);stroke-width:2;fill:none}
+svg .markbad{stroke:var(--red);stroke-width:2.6;fill:none}
+svg .redtxt{fill:var(--red);font:bold 12px -apple-system,sans-serif}
+svg .greentxt{fill:var(--green);font:bold 12px -apple-system,sans-serif}
+svg .arrow{stroke:var(--dim);stroke-width:1.3;fill:none}
+svg a text{text-decoration:underline;fill:var(--accent);font:11px ui-monospace,Menlo,monospace}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+  document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head>
+<body>
+<button id="theme-toggle">light</button>
+<div class="wrap">
+
+<h1>Why one conversation that exactly fills the pack crashes SFT training</h1>
+<p class="sub">
+  <a href="https://github.com/NVIDIA-NeMo/RL/pull/3380">NVIDIA-NeMo/RL #3380</a> — direct path for Megatron-LM prepacked SFT inputs.
+  All links pinned to <code>b84eba1</code>.
+</p>
+
+<p>
+This PR reads SFT data that was already packed offline: one row holds several conversations
+laid end to end, and a list of boundaries says where each one starts and stops. That list is
+<code>cu_seqlens</code> — "cumulative sequence lengths" — and the attention kernel uses it to keep
+conversations from reading each other.
+</p>
+<p>
+The packing loop adds one boundary per conversation, then asks "am I full?". The check is
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/b84eba11606ffbfb3c05654ce283f47fe8c69834/nemo_rl/data/megatron_sft_packed.py#L291"><code>len(pack_tokens) &gt;= pack_length + 1</code></a>.
+A pack sitting at <em>exactly</em> the length limit does not pass that check, so the loop takes one more
+conversation — and the cleanup that follows writes a boundary that is already there. Two identical
+boundaries in a row mean a conversation of length zero.
+</p>
+
+<svg viewBox="0 0 940 400" role="img" aria-label="Packing 6 tokens then 3 more produces a duplicate boundary">
+  <text class="hdr" x="0" y="14">Pack length limit = 6 tokens. Conversation A is 6 tokens; conversation B is 3.</text>
+
+  <!-- STEP 1 -->
+  <text class="lbl-b" x="0" y="44">1. Add A (6 tokens)</text>
+  <g>
+    <rect class="tokA" x="150" y="30" width="34" height="22" rx="3"/>
+    <rect class="tokA" x="186" y="30" width="34" height="22" rx="3"/>
+    <rect class="tokA" x="222" y="30" width="34" height="22" rx="3"/>
+    <rect class="tokA" x="258" y="30" width="34" height="22" rx="3"/>
+    <rect class="tokA" x="294" y="30" width="34" height="22" rx="3"/>
+    <rect class="tokA" x="330" y="30" width="34" height="22" rx="3"/>
+  </g>
+  <text class="lbl" x="380" y="46">cu_seqlens = [0, 6]</text>
+  <text class="note" x="545" y="46">full? 6 &gt;= 7 is false → keep going</text>
+
+  <!-- STEP 2 -->
+  <text class="lbl-b" x="0" y="94">2. Add B (3 tokens)</text>
+  <g>
+    <rect class="tokA" x="150" y="80" width="34" height="22" rx="3"/>
+    <rect class="tokA" x="186" y="80" width="34" height="22" rx="3"/>
+    <rect class="tokA" x="222" y="80" width="34" height="22" rx="3"/>
+    <rect class="tokA" x="258" y="80" width="34" height="22" rx="3"/>
+    <rect class="tokA" x="294" y="80" width="34" height="22" rx="3"/>
+    <rect class="tokA" x="330" y="80" width="34" height="22" rx="3"/>
+    <rect class="tokB" x="366" y="80" width="34" height="22" rx="3"/>
+    <rect class="tokB" x="402" y="80" width="34" height="22" rx="3"/>
+    <rect class="tokB" x="438" y="80" width="34" height="22" rx="3"/>
+  </g>
+  <text class="lbl" x="490" y="96">cu_seqlens = [0, 6, 9]</text>
+  <text class="note" x="660" y="96">full? 9 &gt;= 7 is true → cut it down</text>
+
+  <!-- STEP 3 -->
+  <text class="lbl-b" x="0" y="150">3. Cut to 6, add 1 pad</text>
+  <g>
+    <rect class="tokA" x="150" y="136" width="34" height="22" rx="3"/>
+    <rect class="tokA" x="186" y="136" width="34" height="22" rx="3"/>
+    <rect class="tokA" x="222" y="136" width="34" height="22" rx="3"/>
+    <rect class="tokA" x="258" y="136" width="34" height="22" rx="3"/>
+    <rect class="tokA" x="294" y="136" width="34" height="22" rx="3"/>
+    <rect class="tokA" x="330" y="136" width="34" height="22" rx="3"/>
+    <rect class="tokP" x="366" y="136" width="34" height="22" rx="3"/>
+  </g>
+  <text class="note" x="368" y="176">pad</text>
+  <!-- boundary markers -->
+  <line class="mark" x1="150" y1="128" x2="150" y2="166"/>
+  <text class="c-txt" x="143" y="124">0</text>
+  <line class="markbad" x1="366" y1="124" x2="366" y2="170"/>
+  <text class="redtxt" x="352" y="118">6</text>
+  <line class="markbad" x1="372" y1="124" x2="372" y2="170"/>
+  <text class="redtxt" x="380" y="118">6</text>
+
+  <text class="lbl" x="430" y="152">cu_seqlens = [0, 6, </text>
+  <text class="redtxt" x="565" y="152">6</text>
+  <text class="lbl" x="574" y="152">]</text>
+  <text class="note" x="430" y="172">the last write set 6 — but 6 was already the previous boundary</text>
+
+  <!-- resulting segments -->
+  <text class="lbl-b" x="0" y="228">Conversations this describes</text>
+  <rect class="tokA" x="150" y="214" width="216" height="22" rx="3"/>
+  <text class="c-txt" x="232" y="229">A: 6 tokens</text>
+  <text class="greentxt" x="380" y="229">fine</text>
+  <line class="markbad" x1="366" y1="208" x2="366" y2="242"/>
+  <text class="redtxt" x="440" y="229">B: 0 tokens — a conversation with nothing in it</text>
+
+  <!-- pipeline -->
+  <text class="hdr" x="0" y="288">Where the row goes next</text>
+
+  <rect x="0" y="300" width="196" height="54" rx="7" fill="var(--surface)" stroke="var(--green)" stroke-width="1.5"/>
+  <text class="lbl-b" x="14" y="320">collate step</text>
+  <text class="note" x="14" y="338">allows equal neighbours</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/b84eba11606ffbfb3c05654ce283f47fe8c69834/nemo_rl/data/collate_fn.py#L115"><text x="14" y="352">collate_fn.py:115</text></a>
+  <text class="greentxt" x="163" y="320">pass</text>
+
+  <path class="arrow" d="M200 327 L 246 327" marker-end="url(#ah)"/>
+
+  <rect x="250" y="300" width="214" height="54" rx="7" fill="var(--surface)" stroke="var(--green)" stroke-width="1.5"/>
+  <text class="lbl-b" x="264" y="320">length-divisible check</text>
+  <text class="note" x="264" y="338">0 divides by anything</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/b84eba11606ffbfb3c05654ce283f47fe8c69834/nemo_rl/data/megatron_sft_packed.py#L327"><text x="264" y="352">megatron_sft_packed.py:327</text></a>
+  <text class="greentxt" x="424" y="320">pass</text>
+
+  <path class="arrow" d="M468 327 L 514 327" marker-end="url(#ah)"/>
+
+  <rect x="518" y="300" width="230" height="54" rx="7" fill="var(--surface)" stroke="var(--red)" stroke-width="2"/>
+  <text class="lbl-b" x="532" y="320">worker check</text>
+  <text class="note" x="532" y="338">rejects length ≤ 0</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/b84eba11606ffbfb3c05654ce283f47fe8c69834/nemo_rl/models/megatron/data.py#L178"><text x="532" y="352">megatron/data.py:178</text></a>
+  <text class="redtxt" x="700" y="320">raise</text>
+
+  <text class="note" x="518" y="376">happens on a GPU worker, after the model has loaded</text>
+
+  <defs>
+    <marker id="ah" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto">
+      <path d="M0,0 L7,3.5 L0,7 z" fill="var(--dim)"/>
+    </marker>
+  </defs>
+</svg>
+
+<p>
+Two earlier checks wave the row through. The collate step only asks that boundaries never go
+<em>down</em>, so <code>6</code> followed by <code>6</code> is acceptable to it. The divisibility check asks
+that each conversation length divides evenly by twice the context-parallel size — and zero divides
+by anything. Only the last check, which runs on a GPU worker after the model is in memory, asks for
+lengths above zero. That is where the run dies:
+</p>
+
+<div class="mono">ValueError: packed_cu_seqlens must contain increasing boundaries from 0 through the packed row length</div>
+
+<h2>Why Megatron-LM itself never hits this</h2>
+
+<p>
+The loop is a faithful copy of Megatron-LM's, duplicate boundary and all. What is not copied is
+what upstream does next. Upstream pads its boundary list out to a fixed width using copies of the
+pack length, then, when reading it back, keeps everything up to <strong>the first</strong> copy of
+that value and throws away the rest. A real duplicate looks exactly like that padding, so it gets
+thrown away too, and the attention kernel never sees the empty conversation.
+</p>
+<p>
+This PR uses a variable-length list with an explicit count instead — cleaner, and it does not need
+the padding trick. But dropping the padding also dropped the accidental cleanup that came with it.
+So the producer now emits something its own checker refuses.
+</p>
+
+<h2>The fix: drop the repeat</h2>
+
+<p>
+Same numbers as above. The one thing to add is a check for whether the boundary just written
+repeats the one before it.
+</p>
+
+<div class="mono"><span class="cm"># megatron_sft_packed.py, inside the "pack is full" branch (line 291)</span>
+pack_tokens = pack_tokens[:pack_length]       <span class="cm"># 9 tokens -> 6</span>
+pack_tokens.append(pad)                       <span class="cm"># 6 -> 7 (one pad on the end)</span>
+cu_seqlens[-1] = len(pack_tokens) - 1         <span class="cm"># writes 6 ... but [0, 6] already ended in 6</span>
+
+<span class="cm"># add this:</span>
+if len(cu_seqlens) &gt; 1 and cu_seqlens[-1] == cu_seqlens[-2]:
+    cu_seqlens.pop()                          <span class="cm"># [0, 6, 6] -> [0, 6]</span>
+</div>
+<p class="sub">
+  the branch to change:
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/b84eba11606ffbfb3c05654ce283f47fe8c69834/nemo_rl/data/megatron_sft_packed.py#L291-L298">megatron_sft_packed.py:291-298</a>
+</p>
+
+<p>Running the loop before and after, on the same row:</p>
+
+<div class="mono">                                     cu_seqlens      conversation lengths
+before   A=6 (fills exactly), B=3    [0, 6, 6]       [6, <span class="bad">0</span>]   <span class="bad">crashes</span>
+after    A=6 (fills exactly), B=3    [0, 6]          [6]      <span class="ok">ok</span>
+
+rows that were already fine are untouched:
+before   A=4, B=3                    [0, 4, 6]       [4, 2]   <span class="ok">ok</span>
+after    A=4, B=3                    [0, 4, 6]       [4, 2]   <span class="ok">ok</span>
+</div>
+
+<p>
+The other branch that closes out a pack — the one that pads a short row up to length — cannot
+produce a repeat, because reaching it means the previous boundary was below the pack length. So
+this one branch is the only place that needs the check.
+</p>
+
+<div class="warn">
+<strong>What this costs today.</strong> Any row where some conversation lands the pack on exactly
+<code>max_total_sequence_length</code>, with at least one conversation still to come, kills the job.
+It fails loudly rather than training on bad data, but it fails late — on a GPU worker, after
+startup, on whichever step first draws that row. Turning on context parallelism makes it more
+likely, not less: conversations get padded up to a multiple of twice the context-parallel size,
+so there are fewer distinct lengths to land on and exact landings come up more often. Worth fixing
+before merge; the check is one line and rejects nothing real, since a conversation of length zero
+has no meaning.
+</div>
+
+<script>
+(function(){
+  var b=document.getElementById('theme-toggle');
+  function cur(){return document.documentElement.getAttribute('data-theme')==='light'?'light':'dark';}
+  function paint(){b.textContent=cur()==='light'?'dark':'light';}
+  paint();
+  b.addEventListener('click',function(){
+    var next=cur()==='light'?'dark':'light';
+    if(next==='light')document.documentElement.setAttribute('data-theme','light');
+    else document.documentElement.removeAttribute('data-theme');
+    try{localStorage.setItem('gh-pages-theme',next);}catch(e){}
+    paint();
+  });
+})();
+</script>
+</div>
+</body>
+</html>
