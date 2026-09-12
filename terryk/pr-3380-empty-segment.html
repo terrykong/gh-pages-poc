@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>NVIDIA-NeMo/RL #3380 — why a conversation that exactly fills the pack crashes training</title>
+<title>NVIDIA-NeMo/RL #3380 — why a conversation that exactly fills the pack crashed training (fixed)</title>
 <style>
 :root{
   --bg:#0d1117; --surface:#161b22; --surface2:#1c2128; --border:#30363d;
@@ -69,17 +69,26 @@ svg a text{text-decoration:underline;fill:var(--accent);font:11px ui-monospace,M
 <button id="theme-toggle">light</button>
 <div class="wrap">
 
-<h1>Why one conversation that exactly fills the pack crashes SFT training</h1>
+<h1>Why one conversation that exactly fills the pack crashed SFT training</h1>
 <p class="sub">
   <a href="https://github.com/NVIDIA-NeMo/RL/pull/3380">NVIDIA-NeMo/RL #3380</a> — direct path for Megatron-LM prepacked SFT inputs.
-  All links pinned to <code>b84eba1</code>.
+  Code links pinned to <code>ed4d534</code>, the commit this was found on.
 </p>
+
+<div class="hl" style="border-left-color:var(--green)">
+<strong>Fixed — this page is kept as a record of the bug, not an open issue.</strong>
+The author closed it in <a href="https://github.com/NVIDIA-NeMo/RL/commit/789a2cf9ca">789a2cf9c</a>
+("fix(sft): validate direct packed inputs") by adding one line above the truncation branch:
+<code>if len(pack_tokens) == pack_length: break</code>. That catches the exact-fill case before it
+can reach the code that wrote the duplicate boundary. Everything below describes the behaviour
+before that commit.
+</div>
 
 <nav class="chain">
   <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-3380-two-packers.html">1 · the two packers</a>
-  <span class="here">2 · the empty-conversation crash</span>
+  <span class="here">2 · the empty-conversation crash (fixed)</span>
 </nav>
-<p class="chainnote">Two pages on this PR — this one: a row that crashes training, and the one-line fix.</p>
+<p class="chainnote">Two pages on this PR — this one: a row that crashed training, and how it was fixed.</p>
 
 <p>
 This PR reads SFT data that was already packed offline: one row holds several conversations
@@ -89,7 +98,7 @@ conversations from reading each other.
 </p>
 <p>
 The packing loop adds one boundary per conversation, then asks "am I full?". The check is
-<a href="https://github.com/NVIDIA-NeMo/RL/blob/b84eba11606ffbfb3c05654ce283f47fe8c69834/nemo_rl/data/megatron_sft_packed.py#L291"><code>len(pack_tokens) &gt;= pack_length + 1</code></a>.
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/ed4d53429012f13aa8236d7780a1c3afe3e1146f/nemo_rl/data/megatron_sft_packed.py#L291"><code>len(pack_tokens) &gt;= pack_length + 1</code></a>.
 A pack sitting at <em>exactly</em> the length limit does not pass that check, so the loop takes one more
 conversation — and the cleanup that follows writes a boundary that is already there. Two identical
 boundaries in a row mean a conversation of length zero.
@@ -166,7 +175,7 @@ boundaries in a row mean a conversation of length zero.
   <rect x="0" y="300" width="196" height="54" rx="7" fill="var(--surface)" stroke="var(--green)" stroke-width="1.5"/>
   <text class="lbl-b" x="14" y="320">collate step</text>
   <text class="note" x="14" y="338">allows equal neighbours</text>
-  <a href="https://github.com/NVIDIA-NeMo/RL/blob/b84eba11606ffbfb3c05654ce283f47fe8c69834/nemo_rl/data/collate_fn.py#L115"><text x="14" y="352">collate_fn.py:115</text></a>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/ed4d53429012f13aa8236d7780a1c3afe3e1146f/nemo_rl/data/collate_fn.py#L115"><text x="14" y="352">collate_fn.py:115</text></a>
   <text class="greentxt" x="163" y="320">pass</text>
 
   <path class="arrow" d="M200 327 L 246 327" marker-end="url(#ah)"/>
@@ -174,7 +183,7 @@ boundaries in a row mean a conversation of length zero.
   <rect x="250" y="300" width="214" height="54" rx="7" fill="var(--surface)" stroke="var(--green)" stroke-width="1.5"/>
   <text class="lbl-b" x="264" y="320">length-divisible check</text>
   <text class="note" x="264" y="338">0 divides by anything</text>
-  <a href="https://github.com/NVIDIA-NeMo/RL/blob/b84eba11606ffbfb3c05654ce283f47fe8c69834/nemo_rl/data/megatron_sft_packed.py#L327"><text x="264" y="352">megatron_sft_packed.py:327</text></a>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/ed4d53429012f13aa8236d7780a1c3afe3e1146f/nemo_rl/data/megatron_sft_packed.py#L327"><text x="264" y="352">megatron_sft_packed.py:327</text></a>
   <text class="greentxt" x="424" y="320">pass</text>
 
   <path class="arrow" d="M468 327 L 514 327" marker-end="url(#ah)"/>
@@ -182,7 +191,7 @@ boundaries in a row mean a conversation of length zero.
   <rect x="518" y="300" width="230" height="54" rx="7" fill="var(--surface)" stroke="var(--red)" stroke-width="2"/>
   <text class="lbl-b" x="532" y="320">worker check</text>
   <text class="note" x="532" y="338">rejects length ≤ 0</text>
-  <a href="https://github.com/NVIDIA-NeMo/RL/blob/b84eba11606ffbfb3c05654ce283f47fe8c69834/nemo_rl/models/megatron/data.py#L178"><text x="532" y="352">megatron/data.py:178</text></a>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/ed4d53429012f13aa8236d7780a1c3afe3e1146f/nemo_rl/models/megatron/data.py#L178"><text x="532" y="352">megatron/data.py:178</text></a>
   <text class="redtxt" x="700" y="320">raise</text>
 
   <text class="note" x="518" y="376">happens on a GPU worker, after the model has loaded</text>
@@ -219,11 +228,11 @@ the padding trick. But dropping the padding also dropped the accidental cleanup 
 So the producer now emits something its own checker refuses.
 </p>
 
-<h2>The fix: drop the repeat</h2>
+<h2>How it was fixed</h2>
 
 <p>
-Same numbers as above. The one thing to add is a check for whether the boundary just written
-repeats the one before it.
+Same numbers as above. Two ways to close it: reject the duplicate after it is written (what this
+page originally suggested), or never reach that code at all — which is what the author did.
 </p>
 
 <div class="mono"><span class="cm"># megatron_sft_packed.py, inside the "pack is full" branch (line 291)</span>
@@ -237,7 +246,7 @@ if len(cu_seqlens) &gt; 1 and cu_seqlens[-1] == cu_seqlens[-2]:
 </div>
 <p class="sub">
   the branch to change:
-  <a href="https://github.com/NVIDIA-NeMo/RL/blob/b84eba11606ffbfb3c05654ce283f47fe8c69834/nemo_rl/data/megatron_sft_packed.py#L291-L298">megatron_sft_packed.py:291-298</a>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/ed4d53429012f13aa8236d7780a1c3afe3e1146f/nemo_rl/data/megatron_sft_packed.py#L291-L298">megatron_sft_packed.py:291-298</a>
 </p>
 
 <p>Running the loop before and after, on the same row:</p>
@@ -258,14 +267,12 @@ this one branch is the only place that needs the check.
 </p>
 
 <div class="warn">
-<strong>What this costs today.</strong> Any row where some conversation lands the pack on exactly
+<strong>What this cost before the fix.</strong> Any row where some conversation lands the pack on exactly
 <code>max_total_sequence_length</code>, with at least one conversation still to come, kills the job.
 It fails loudly rather than training on bad data, but it fails late — on a GPU worker, after
 startup, on whichever step first draws that row. Turning on context parallelism makes it more
 likely, not less: conversations get padded up to a multiple of twice the context-parallel size,
-so there are fewer distinct lengths to land on and exact landings come up more often. Worth fixing
-before merge; the check is one line and rejects nothing real, since a conversation of length zero
-has no meaning.
+so there are fewer distinct lengths to land on and exact landings come up more often. The fix is one line and rejects nothing real, since a conversation of length zero has no meaning.
 </div>
 
 <script>
