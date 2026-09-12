@@ -1,0 +1,383 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NVIDIA-NeMo/RL #3380 — offline prepacked SFT vs online sequence packing</title>
+<style>
+:root{
+  --bg:#0d1117; --surface:#161b22; --surface2:#1c2128; --border:#30363d;
+  --text:#e6edf3; --dim:#8b949e; --accent:#58a6ff; --green:#3fb950;
+  --orange:#d29922; --red:#f85149; --purple:#bc8cff;
+}
+:root[data-theme="light"]{
+  --bg:#ffffff; --surface:#f6f8fa; --surface2:#eaeef2; --border:#d0d7de;
+  --text:#1f2328; --dim:#59636e; --accent:#0969da; --green:#1a7f37;
+  --orange:#9a6700; --red:#cf222e; --purple:#8250df;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:1040px;margin:0 auto;padding:28px 20px 70px}
+h1{font-size:23px;margin:0 0 8px;line-height:1.3}
+h2{font-size:19px;margin:38px 0 12px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+h3{font-size:15.5px;margin:24px 0 8px;color:var(--accent)}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;
+  font:12.8px ui-monospace,SFMono-Regular,Menlo,monospace}
+.sub{color:var(--dim);font-size:13.5px;margin:0 0 14px}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);
+  border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;
+  font:13px/1 ui-monospace,Menlo,monospace;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.18)}
+.mono{font:12.3px ui-monospace,SFMono-Regular,Menlo,monospace;
+  background:var(--surface);border:1px solid var(--border);border-radius:8px;
+  padding:13px;overflow-x:auto;white-space:pre;line-height:1.55}
+.warn{border-left:3px solid var(--red);background:var(--surface);
+  padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0}
+.hl{border-left:3px solid var(--accent);background:var(--surface);
+  padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0}
+.ok{border-left:3px solid var(--green);background:var(--surface);
+  padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0}
+.cm{color:var(--dim)}
+.gA{color:var(--green);font-weight:700}
+.gB{color:var(--orange);font-weight:700}
+.bad{color:var(--red);font-weight:700}
+table{border-collapse:collapse;width:100%;margin:14px 0;font-size:13.6px}
+th,td{border:1px solid var(--border);padding:7px 10px;text-align:left;vertical-align:top}
+th{background:var(--surface2);font-weight:600}
+td code{font-size:12.2px}
+nav.chain{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 6px;padding:0}
+nav.chain a,nav.chain span{display:inline-block;padding:5px 11px;border:1px solid var(--border);
+  border-radius:20px;background:var(--surface);text-decoration:none;color:var(--accent);
+  font-size:12.5px;line-height:1.3;white-space:nowrap}
+nav.chain a:hover{background:var(--surface2)}
+nav.chain span.here{background:var(--accent);color:var(--bg);border-color:var(--accent);font-weight:600}
+p.chainnote{color:var(--dim);font-size:12px;margin:0 0 18px}
+svg{max-width:100%;height:auto;display:block;margin:16px 0}
+svg .lbl{fill:var(--text);font:12px ui-monospace,Menlo,monospace}
+svg .lbl-b{fill:var(--text);font:bold 12.5px -apple-system,sans-serif}
+svg .note{fill:var(--dim);font:11px -apple-system,sans-serif}
+svg .hdr{fill:var(--accent);font:bold 12.5px -apple-system,sans-serif}
+svg .boxA{fill:var(--surface);stroke:var(--green);stroke-width:1.6}
+svg .boxB{fill:var(--surface);stroke:var(--orange);stroke-width:1.6}
+svg .boxM{fill:var(--surface2);stroke:var(--accent);stroke-width:2}
+svg .tokA{fill:var(--green);opacity:.5;stroke:var(--green)}
+svg .tokB{fill:var(--orange);opacity:.5;stroke:var(--orange)}
+svg .tokC{fill:var(--purple);opacity:.5;stroke:var(--purple)}
+svg .tokP{fill:var(--dim);opacity:.22;stroke:var(--dim)}
+svg .c-txt{fill:var(--text);font:10px ui-monospace,Menlo,monospace}
+svg .arrow{stroke:var(--dim);stroke-width:1.4;fill:none}
+svg .arrowA{stroke:var(--green);stroke-width:1.6;fill:none}
+svg .arrowB{stroke:var(--orange);stroke-width:1.6;fill:none}
+svg .greentxt{fill:var(--green);font:bold 11.5px -apple-system,sans-serif}
+svg .orangetxt{fill:var(--orange);font:bold 11.5px -apple-system,sans-serif}
+svg .acctxt{fill:var(--accent);font:bold 12px -apple-system,sans-serif}
+svg a text{text-decoration:underline;fill:var(--accent);font:10.5px ui-monospace,Menlo,monospace}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+  document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head>
+<body>
+<button id="theme-toggle">light</button>
+<div class="wrap">
+
+<h1>Two packers in one codebase: how prepacked SFT data differs from NeMo-RL's own packing</h1>
+<p class="sub">
+  <a href="https://github.com/NVIDIA-NeMo/RL/pull/3380">NVIDIA-NeMo/RL #3380</a> — all links pinned to <code>b84eba1</code>.
+</p>
+
+<nav class="chain">
+  <span class="here">1 · the two packers</span>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-3380-empty-segment.html">2 · the empty-conversation crash</a>
+</nav>
+<p class="chainnote">Two pages on this PR — this one: how the new path compares with the packing NeMo-RL already had.</p>
+
+<p>
+"Packing" means putting several short conversations into one long row so the GPU is not padding
+its way through a batch. NeMo-RL already did this at training time. This PR adds a second way:
+read rows that were packed <em>ahead of time</em> and use them as-is.
+</p>
+<p>
+Both ways end up handing the model the same kind of object. What changes is who decides the
+boundaries, when they are decided, and how much work happens per step. Below: where each one
+packs, what the data looks like at each hop, and the exact line where the two paths become one.
+</p>
+
+<h2>Where each path packs</h2>
+
+<p>
+Both start from the same driver — <a href="https://github.com/NVIDIA-NeMo/RL/blob/b84eba11606ffbfb3c05654ce283f47fe8c69834/examples/run_sft.py#L178"><code>run_sft.py</code></a>
+builds the dataset, <a href="https://github.com/NVIDIA-NeMo/RL/blob/b84eba11606ffbfb3c05654ce283f47fe8c69834/nemo_rl/algorithms/sft.py#L644"><code>sft_train</code></a>
+pulls batches and calls <code>policy.train()</code>, and the policy fans the batch out to one Megatron
+worker per data-parallel rank. The difference is which box does the packing.
+</p>
+
+<svg viewBox="0 0 1000 470" role="img" aria-label="Both paths from dataset to model, showing where packing happens">
+  <text class="hdr" x="0" y="13">ONLINE PACKING (already in NeMo-RL)</text>
+  <text class="hdr" x="0" y="248">OFFLINE PREPACKED (added by this PR)</text>
+
+  <!-- ONLINE ROW -->
+  <rect class="boxB" x="0" y="26" width="150" height="56" rx="7"/>
+  <text class="lbl-b" x="12" y="46">dataset</text>
+  <text class="note" x="12" y="62">one conversation</text>
+  <text class="note" x="12" y="75">per row</text>
+
+  <path class="arrowB" d="M154 54 L 192 54" marker-end="url(#ab)"/>
+
+  <rect class="boxB" x="196" y="26" width="164" height="56" rx="7"/>
+  <text class="lbl-b" x="208" y="46">rl_collate_fn</text>
+  <text class="note" x="208" y="62">stacks message logs</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/b84eba11606ffbfb3c05654ce283f47fe8c69834/nemo_rl/data/collate_fn.py#L208"><text x="208" y="77">collate_fn.py:208</text></a>
+
+  <path class="arrowB" d="M364 54 L 402 54" marker-end="url(#ab)"/>
+
+  <rect class="boxB" x="406" y="26" width="186" height="56" rx="7"/>
+  <text class="lbl-b" x="418" y="46">_shard_for_train</text>
+  <text class="note" x="418" y="62">bin-packs by token budget</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/b84eba11606ffbfb3c05654ce283f47fe8c69834/nemo_rl/models/policy/lm_policy.py#L678"><text x="418" y="77">lm_policy.py:678</text></a>
+
+  <path class="arrowB" d="M596 54 L 634 54" marker-end="url(#ab)"/>
+
+  <rect class="boxB" x="638" y="26" width="200" height="56" rx="7" stroke-width="2.6"/>
+  <text class="lbl-b" x="650" y="46">_pack_sequences_for_megatron</text>
+  <text class="orangetxt" x="650" y="62">PACKS HERE, every step</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/b84eba11606ffbfb3c05654ce283f47fe8c69834/nemo_rl/models/megatron/data.py#L1381"><text x="650" y="77">megatron/data.py:1381</text></a>
+
+  <path class="arrowB" d="M842 54 L 880 54" marker-end="url(#ab)"/>
+  <text class="orangetxt" x="884" y="50">to the</text>
+  <text class="orangetxt" x="884" y="64">merge</text>
+
+  <text class="note" x="0" y="104">runs inside the GPU worker, once per microbatch</text>
+
+  <!-- ONLINE data shapes -->
+  <text class="lbl" x="0" y="134">rows in:</text>
+  <rect class="tokB" x="90" y="122" width="70" height="16" rx="3"/><text class="c-txt" x="105" y="134">conv A</text>
+  <rect class="tokP" x="160" y="122" width="90" height="16" rx="3"/><text class="c-txt" x="186" y="134">padding</text>
+  <text class="note" x="258" y="134">4 real tokens in a row of 10</text>
+
+  <rect class="tokC" x="90" y="142" width="52" height="16" rx="3"/><text class="c-txt" x="103" y="154">conv B</text>
+  <rect class="tokP" x="142" y="142" width="108" height="16" rx="3"/><text class="c-txt" x="180" y="154">padding</text>
+  <text class="note" x="258" y="154">3 real tokens in a row of 10</text>
+
+  <text class="lbl" x="0" y="184">packed:</text>
+  <rect class="tokB" x="90" y="172" width="70" height="16" rx="3"/><text class="c-txt" x="105" y="184">conv A</text>
+  <rect class="tokC" x="160" y="172" width="52" height="16" rx="3"/><text class="c-txt" x="173" y="184">conv B</text>
+  <rect class="tokP" x="212" y="172" width="18" height="16" rx="3"/>
+  <text class="note" x="240" y="184">cu_seqlens = [0, 4, 7] — built now, thrown away after the step</text>
+
+  <line x1="0" y1="212" x2="1000" y2="212" stroke="var(--border)" stroke-width="1"/>
+
+  <!-- OFFLINE ROW -->
+  <rect class="boxA" x="0" y="262" width="150" height="56" rx="7" stroke-width="2.6"/>
+  <text class="lbl-b" x="12" y="282">dataset build</text>
+  <text class="greentxt" x="12" y="298">PACKS HERE, once</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/b84eba11606ffbfb3c05654ce283f47fe8c69834/nemo_rl/data/megatron_sft_packed.py#L228"><text x="12" y="313">megatron_sft_packed.py:228</text></a>
+
+  <path class="arrowA" d="M154 290 L 192 290" marker-end="url(#aa)"/>
+
+  <rect class="boxA" x="196" y="262" width="164" height="56" rx="7"/>
+  <text class="lbl-b" x="208" y="282">rl_collate_fn</text>
+  <text class="note" x="208" y="298">stacks ready tensors</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/b84eba11606ffbfb3c05654ce283f47fe8c69834/nemo_rl/data/collate_fn.py#L45"><text x="208" y="313">collate_fn.py:45</text></a>
+
+  <path class="arrowA" d="M364 290 L 402 290" marker-end="url(#aa)"/>
+
+  <rect class="boxA" x="406" y="262" width="186" height="56" rx="7"/>
+  <text class="lbl-b" x="418" y="282">_shard_for_train</text>
+  <text class="note" x="418" y="298">deals rows out, no packing</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/b84eba11606ffbfb3c05654ce283f47fe8c69834/nemo_rl/models/policy/lm_policy.py#L626"><text x="418" y="313">lm_policy.py:626</text></a>
+
+  <path class="arrowA" d="M596 290 L 634 290" marker-end="url(#aa)"/>
+
+  <rect class="boxA" x="638" y="262" width="200" height="56" rx="7"/>
+  <text class="lbl-b" x="650" y="282">CP-shard only</text>
+  <text class="note" x="650" y="298">boundaries already known</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/b84eba11606ffbfb3c05654ce283f47fe8c69834/nemo_rl/models/megatron/data.py#L490"><text x="650" y="313">megatron/data.py:490</text></a>
+
+  <path class="arrowA" d="M842 290 L 880 290" marker-end="url(#aa)"/>
+  <text class="greentxt" x="884" y="286">to the</text>
+  <text class="greentxt" x="884" y="300">merge</text>
+
+  <text class="note" x="0" y="340">runs on CPU when the dataset is built, not during training</text>
+
+  <text class="lbl" x="0" y="370">row on disk:</text>
+  <rect class="tokA" x="90" y="358" width="70" height="16" rx="3"/><text class="c-txt" x="105" y="370">conv A</text>
+  <rect class="tokC" x="160" y="358" width="52" height="16" rx="3"/><text class="c-txt" x="173" y="370">conv B</text>
+  <rect class="tokP" x="212" y="358" width="18" height="16" rx="3"/>
+  <text class="note" x="240" y="370">cu_seqlens = [0, 4, 7] — stored in the row, reused every epoch</text>
+
+  <!-- MERGE -->
+  <rect class="boxM" x="300" y="404" width="400" height="50" rx="8"/>
+  <text class="acctxt" x="316" y="424">both arrive here: PackedSeqParams(qkv_format="thd")</text>
+  <text class="note" x="316" y="440">handed to GPTModel.forward with a CP-sharded token tensor</text>
+  <path class="arrowB" d="M930 70 L 960 70 L 960 396 L 700 396 L 700 402" marker-end="url(#ab)"/>
+  <path class="arrowA" d="M930 306 L 946 306 L 946 390 L 300 390 L 300 402" marker-end="url(#aa)"/>
+
+  <defs>
+    <marker id="ab" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto">
+      <path d="M0,0 L7,3.5 L0,7 z" fill="var(--orange)"/>
+    </marker>
+    <marker id="aa" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto">
+      <path d="M0,0 L7,3.5 L0,7 z" fill="var(--green)"/>
+    </marker>
+  </defs>
+</svg>
+
+<div class="hl">
+<strong>The one-sentence difference.</strong> Online packing decides which conversations share a row
+<em>while the step is running</em>, from whatever happened to land in that batch. Offline packing
+decided it once, before training started, and the row is replayed the same way every epoch.
+</div>
+
+<h2>What the data looks like at each hop</h2>
+
+<p>Same two conversations — A is 4 tokens, B is 3 — carried through both paths.</p>
+
+<h3>Online: a padded rectangle that gets squeezed at the last moment</h3>
+
+<div class="mono"><span class="cm"># after rl_collate_fn — nothing is packed yet, just a list of message logs</span>
+message_log      list of 2 conversations
+length           tensor([4, 3])
+
+<span class="cm"># after sft.py flattens it into token tensors: a padded rectangle</span>
+input_ids        [2, 10]   <span class="cm"># 2 rows of 10; 13 of the 20 slots are padding</span>
+input_lengths    tensor([4, 3])
+
+<span class="cm"># inside the worker, _pack_sequences_for_megatron squeezes the padding out</span>
+packed_input_ids [1, 7]    <span class="cm"># A and B end to end</span>
+cu_seqlens       [0, 4, 7] <span class="cm"># built right now, from input_lengths</span>
+</div>
+<p class="sub">
+  the squeeze: <a href="https://github.com/NVIDIA-NeMo/RL/blob/b84eba11606ffbfb3c05654ce283f47fe8c69834/nemo_rl/models/megatron/data.py#L1381">megatron/data.py:1381</a>
+</p>
+
+<h3>Offline: the squeeze already happened, and the labels came with it</h3>
+
+<div class="mono"><span class="cm"># what the preprocessor wrote when the dataset was built</span>
+input_ids        [7]       <span class="cm"># A and B already end to end</span>
+target_ids       [7]       <span class="cm"># next-token labels, already shifted by one</span>
+token_mask       [7]       <span class="cm"># 1 where the token counts toward the loss</span>
+position_ids     [7]       <span class="cm"># restart at 0 for each conversation</span>
+packed_cu_seqlens [0, 4, 7]
+
+<span class="cm"># after _collate_megatron_sft_packed stacks a batch of 2 such rows</span>
+input_ids         [2, 7]
+target_ids        [2, 7]
+token_mask        [2, 7]
+position_ids      [2, 7]
+packed_cu_seqlens [2, K]   <span class="cm"># padded to the widest row with -1</span>
+packed_cu_seqlens_lengths tensor([3, 3])   <span class="cm"># how much of each K row is real</span>
+packed_max_seqlen tensor([4, 4])
+</div>
+<p class="sub">
+  the stack: <a href="https://github.com/NVIDIA-NeMo/RL/blob/b84eba11606ffbfb3c05654ce283f47fe8c69834/nemo_rl/data/collate_fn.py#L174">collate_fn.py:174</a>
+</p>
+
+<p>
+Three fields exist only on the offline path — <code>target_ids</code>, <code>token_mask</code> and
+<code>position_ids</code> — because the preprocessor computed them when it built the pack. On the
+online path the labels are derived later, from the message log, and the loss is computed by NeMo-RL
+rather than by the model.
+</p>
+
+<p>
+Note the shape of <code>packed_cu_seqlens</code>: a batch is a rectangle, but different rows can hold
+different numbers of conversations. So the list is padded to the widest row with <code>-1</code>, and
+<code>packed_cu_seqlens_lengths</code> says how much of each row to read. Online packing never needs
+this, because it re-derives one exact-length list per microbatch.
+</p>
+
+<h2>Side by side</h2>
+
+<table>
+<tr><th>&nbsp;</th><th>Online packing</th><th>Offline prepacked (this PR)</th></tr>
+<tr><td>When boundaries are chosen</td><td>every step, from the batch at hand</td><td>once, at dataset build</td></tr>
+<tr><td>Who chooses them</td><td><a href="https://github.com/NVIDIA-NeMo/RL/blob/b84eba11606ffbfb3c05654ce283f47fe8c69834/nemo_rl/distributed/batched_data_dict.py#L457"><code>shard_by_batch_size</code></a>, fitting rows to a token budget</td><td>the offline packer that wrote the file</td></tr>
+<tr><td>Same row each epoch?</td><td>no — depends on batch order</td><td>yes</td></tr>
+<tr><td>Microbatch size</td><td>1 pack, holding as many rows as fit</td><td>forced to 1 row, which is itself one pack</td></tr>
+<tr><td>Labels</td><td>derived later from the message log</td><td><code>target_ids</code> carried with the row</td></tr>
+<tr><td>Who computes the loss</td><td>NeMo-RL's loss function, from logprobs</td><td>the model, via <a href="https://github.com/NVIDIA-NeMo/RL/blob/b84eba11606ffbfb3c05654ce283f47fe8c69834/nemo_rl/models/megatron/train.py#L212"><code>labels=</code></a></td></tr>
+<tr><td><code>cu_seqlens</code> shape</td><td>exact length, rebuilt per microbatch</td><td><code>[B, K]</code> padded with <code>-1</code> + a lengths tensor</td></tr>
+<tr><td><code>total_tokens</code> in <code>PackedSeqParams</code></td><td>the whole packed row, <a href="https://github.com/NVIDIA-NeMo/RL/blob/b84eba11606ffbfb3c05654ce283f47fe8c69834/nemo_rl/models/megatron/data.py#L1557">before CP splitting</a></td><td>this rank's share, <a href="https://github.com/NVIDIA-NeMo/RL/blob/b84eba11606ffbfb3c05654ce283f47fe8c69834/nemo_rl/models/megatron/data.py#L562">after CP splitting</a></td></tr>
+<tr><td>Per-step CPU work</td><td>bin-pack, concatenate, build boundaries</td><td>read the row</td></tr>
+</table>
+
+<h2>Where the two become one</h2>
+
+<p>
+They meet inside <a href="https://github.com/NVIDIA-NeMo/RL/blob/b84eba11606ffbfb3c05654ce283f47fe8c69834/nemo_rl/models/megatron/data.py#L567"><code>process_microbatch</code></a>,
+which has one branch per path and a shared exit. The check that picks the branch is simply whether
+the batch carries a <code>packed_cu_seqlens</code> key:
+</p>
+
+<div class="mono">if "packed_cu_seqlens" in data_dict:   <span class="cm"># offline: boundaries came with the row</span>
+    ... CP-shard the tensors, reuse the stored boundaries
+elif pack_sequences:                  <span class="cm"># online: pack now</span>
+    ... bin-pack, concatenate, build boundaries, CP-shard
+
+<span class="cm"># both arrive here holding the same two things:</span>
+<span class="cm">#   a CP-sharded token tensor, and a PackedSeqParams(qkv_format="thd")</span>
+</div>
+<p class="sub">
+  the branch: <a href="https://github.com/NVIDIA-NeMo/RL/blob/b84eba11606ffbfb3c05654ce283f47fe8c69834/nemo_rl/models/megatron/data.py#L623">megatron/data.py:623</a> ·
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/b84eba11606ffbfb3c05654ce283f47fe8c69834/nemo_rl/models/megatron/data.py#L669">:669</a>
+</p>
+
+<p>
+From there on the attention kernel cannot tell them apart. <code>qkv_format="thd"</code> means
+"tokens, height, depth" — one flat run of tokens plus a boundary list, instead of a rectangle of
+rows. The kernel reads <code>cu_seqlens</code> to know where one conversation stops and the next
+starts, so it never lets them attend to each other. Both paths produce exactly that.
+</p>
+
+<div class="ok">
+<strong>So they do match — but only at the last hop, and not in every field.</strong> The tensors and
+the boundary list line up. Two things still differ past the merge: <code>total_tokens</code> (the whole
+row on the online path, this rank's share on the offline one), and who computes the loss — the offline
+path hands <code>labels</code> to the model and lets Megatron do it, the online path brings logprobs
+back out and lets NeMo-RL's loss function do it.
+</div>
+
+<h2>Why keep both</h2>
+
+<p>
+They are not the same feature wearing two hats. Online packing solves "my batch has short rows and
+I do not want to pay for the padding". Offline packing solves "someone else already decided the
+layout, reproduce it exactly" — which is what makes a run comparable against a Megatron-LM baseline
+that used the same file.
+</p>
+<p>
+That is also why the offline path is so restrictive. It forces microbatch size 1, refuses dynamic
+batching, and rejects a mixed batch of packed and unpacked rows
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/b84eba11606ffbfb3c05654ce283f47fe8c69834/nemo_rl/algorithms/sft.py#L145"><code>_validate_direct_megatron_sft_setup</code></a>).
+Every one of those would let the framework re-group rows, and re-grouping is the one thing this path
+exists to avoid.
+</p>
+
+<div class="warn">
+<strong>One catch worth knowing.</strong> Because the boundaries are fixed on disk, a bad row is bad
+every epoch — there is no re-packing step to smooth it over. That is what makes the empty-conversation
+bug on the <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-3380-empty-segment.html">next page</a>
+worth fixing before merge: one unlucky row kills the job on whichever step first draws it, and it
+will draw it again on every pass through the data.
+</div>
+
+<script>
+(function(){
+  var b=document.getElementById('theme-toggle');
+  function cur(){return document.documentElement.getAttribute('data-theme')==='light'?'light':'dark';}
+  function paint(){b.textContent=cur()==='light'?'dark':'light';}
+  paint();
+  b.addEventListener('click',function(){
+    var next=cur()==='light'?'dark':'light';
+    if(next==='light')document.documentElement.setAttribute('data-theme','light');
+    else document.documentElement.removeAttribute('data-theme');
+    try{localStorage.setItem('gh-pages-theme',next);}catch(e){}
+    paint();
+  });
+})();
+</script>
+</div>
+</body>
+</html>
