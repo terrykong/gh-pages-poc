@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NVIDIA-NeMo/RL #4106 — two ways to hand images to the model: pad to the biggest, or cut into patches</title>
+<style>
+:root{
+  --bg:#0d1117; --surface:#161b22; --surface2:#1c2128; --border:#30363d;
+  --text:#e6edf3; --dim:#8b949e; --accent:#58a6ff; --green:#3fb950;
+  --orange:#d29922; --red:#f85149; --purple:#a371f7;
+}
+:root[data-theme="light"]{
+  --bg:#ffffff; --surface:#f6f8fa; --surface2:#eaeef2; --border:#d0d7de;
+  --text:#1f2328; --dim:#59636e; --accent:#0969da; --green:#1a7f37;
+  --orange:#9a6700; --red:#cf222e; --purple:#8250df;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:28px 20px 70px}
+h1{font-size:22px;margin:0 0 8px;line-height:1.3}
+h2{font-size:18px;margin:32px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;
+  font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
+.sub{color:var(--dim);font-size:13.5px;margin:0 0 16px}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);
+  border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;
+  font:13px/1 ui-monospace,Menlo,monospace;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.18)}
+.mono{font:12.5px ui-monospace,SFMono-Regular,Menlo,monospace;
+  background:var(--surface);border:1px solid var(--border);border-radius:8px;
+  padding:13px;overflow-x:auto;white-space:pre;line-height:1.55}
+.hl{border-left:3px solid var(--accent);background:var(--surface);
+  padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0}
+.warn{border-left:3px solid var(--orange);background:var(--surface);
+  padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0}
+.cmt{color:var(--dim)}
+.gn{color:var(--green);font-weight:700}
+.rd{color:var(--red);font-weight:700}
+svg{max-width:100%;height:auto;display:block;margin:16px 0}
+svg .box{fill:var(--surface);stroke:var(--border);stroke-width:1.4}
+svg .lbl{fill:var(--text);font:12.5px ui-monospace,Menlo,monospace}
+svg .lbl-b{fill:var(--text);font:bold 13px -apple-system,sans-serif}
+svg .note{fill:var(--dim);font:11.5px -apple-system,sans-serif}
+svg .hdr{fill:var(--accent);font:bold 12.5px -apple-system,sans-serif}
+svg .real{fill:var(--green);opacity:.5;stroke:var(--green);stroke-width:1}
+svg .padfill{fill:var(--red);opacity:.28;stroke:var(--red);stroke-width:1}
+svg .pa{fill:var(--green);opacity:.55;stroke:var(--green);stroke-width:.8}
+svg .pb{fill:var(--purple);opacity:.55;stroke:var(--purple);stroke-width:.8}
+svg .arrow{stroke:var(--dim);stroke-width:1.6;fill:none}
+svg .divider{stroke:var(--border);stroke-width:1.2;stroke-dasharray:4 4}
+svg .grid{stroke:var(--border);stroke-width:.7;fill:none;opacity:.8}
+svg a text{text-decoration:underline;fill:var(--accent);font:11.5px ui-monospace,Menlo,monospace}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+  document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head>
+<body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+  function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+  function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
+    b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
+      else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+  document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+<div class="wrap">
+
+<h1>Two ways to hand images to the model: pad them to the biggest, or cut them into patches</h1>
+<p class="sub">Companion illustration for
+<a href="https://github.com/NVIDIA-NeMo/RL/pull/4106">NVIDIA-NeMo/RL #4106</a>
+(add PackedTensor preprocessing modes).
+All NeMo-RL permalinks pin the PR head <code>e347801</code>;
+Megatron-Bridge links pin the submodule at <code>5ed9799</code>.</p>
+
+<p>A vision model is fed a batch of images, but the images are not the same size. Something has to
+turn a ragged pile into one tensor. NeMo-RL does that inside
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/e347801924d50e0108660e39b5e8f9d35f2f283e/nemo_rl/data/multimodal_utils.py#L559"><code>PackedTensor.as_tensor()</code></a>.
+Until this PR there was one way: pad every image out to the tallest and widest in the batch, then
+stack them. This PR adds a second way: cut each image into 16&times;16 pixel squares at its own size,
+and lay all the squares end to end. The choice is made by
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/e347801924d50e0108660e39b5e8f9d35f2f283e/nemo_rl/data/multimodal_utils.py#L1271"><code>get_preprocess()</code></a>,
+which turns the new way on for the Nemotron Omni family.</p>
+
+<svg viewBox="0 0 960 640" role="img" aria-label="Same two images processed by pad-to-max versus patchify">
+
+  <text class="lbl-b" x="330" y="20">Same input: two images, different sizes</text>
+
+  <!-- image A: 32x64 px = 2 rows x 4 cols of 16px patches -->
+  <rect class="real" x="300" y="32" width="88" height="44"/>
+  <path class="grid" d="M322 32V76 M344 32V76 M366 32V76 M300 54H388"/>
+  <text class="lbl" x="300" y="92">image A</text>
+  <text class="note" x="300" y="106">32 x 64 px</text>
+
+  <!-- image B: 80x48 px = 5 rows x 3 cols -->
+  <rect class="real" x="440" y="32" width="66" height="110"/>
+  <path class="grid" d="M462 32V142 M484 32V142 M440 54H506 M440 76H506 M440 98H506 M440 120H506"/>
+  <text class="lbl" x="440" y="158">image B</text>
+  <text class="note" x="440" y="172">80 x 48 px</text>
+
+  <text class="note" x="530" y="60">each small square</text>
+  <text class="note" x="530" y="76">is one 16 x 16</text>
+  <text class="note" x="530" y="92">pixel patch</text>
+
+  <!-- split arrows -->
+  <path class="arrow" d="M380 186 L210 214" marker-end="url(#ah)"/>
+  <path class="arrow" d="M430 186 L700 214" marker-end="url(#ah)"/>
+  <defs>
+    <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0 0 L10 5 L0 10 z" fill="var(--dim)"/>
+    </marker>
+  </defs>
+
+  <line class="divider" x1="480" y1="205" x2="480" y2="620"/>
+
+  <!-- ================= LEFT: pad_to_max_shape ================= -->
+  <text class="hdr" x="20" y="232">BEFORE  —  preprocess_mode = "pad_to_max_shape"</text>
+  <text class="note" x="20" y="250">every image grows to the batch's tallest and widest</text>
+  <text class="note" x="20" y="266">then they stack</text>
+
+  <!-- padded A: real 88x44 on top, red pad 88x66 below -->
+  <rect class="real" x="60" y="266" width="88" height="44"/>
+  <rect class="padfill" x="60" y="310" width="88" height="66"/>
+  <rect class="box" x="60" y="266" width="88" height="110" fill="none"/>
+  <text class="lbl" x="60" y="394">A padded</text>
+  <text class="note" x="60" y="408">80 x 64</text>
+
+  <!-- padded B: real 66x110 left, red pad 22x110 right -->
+  <rect class="real" x="240" y="266" width="66" height="110"/>
+  <rect class="padfill" x="306" y="266" width="22" height="110"/>
+  <rect class="box" x="240" y="266" width="88" height="110" fill="none"/>
+  <text class="lbl" x="240" y="394">B padded</text>
+  <text class="note" x="240" y="408">80 x 64</text>
+
+  <rect class="real" x="60" y="436" width="14" height="12"/>
+  <text class="note" x="82" y="446">real pixels</text>
+  <rect class="padfill" x="176" y="436" width="14" height="12"/>
+  <text class="note" x="198" y="446">padding the model must ignore</text>
+
+  <text class="lbl-b" x="20" y="486">result: [2, 3, 80, 64]</text>
+  <text class="lbl" x="20" y="508">30720 values stored</text>
+  <text class="note" x="20" y="530">17664 are real pixels</text>
+  <text class="note" x="20" y="546">13056 are padding — 42% of the tensor</text>
+
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/e347801924d50e0108660e39b5e8f9d35f2f283e/nemo_rl/data/multimodal_utils.py#L588">
+    <text x="20" y="578">multimodal_utils.py:588</text>
+  </a>
+  <text class="note" x="20" y="596">the padding branch of as_tensor()</text>
+
+  <!-- ================= RIGHT: patchify ================= -->
+  <text class="hdr" x="508" y="232">AFTER  —  preprocess_mode = "patchify"</text>
+  <text class="note" x="508" y="250">each image is cut into 16 x 16 patches at its own size</text>
+  <text class="note" x="508" y="266">then all the patches queue up</text>
+
+  <text class="lbl" x="508" y="282">A gives 2 x 4 = 8 patches</text>
+  <g>
+    <rect class="pa" x="508" y="292" width="14" height="20"/>
+    <rect class="pa" x="524" y="292" width="14" height="20"/>
+    <rect class="pa" x="540" y="292" width="14" height="20"/>
+    <rect class="pa" x="556" y="292" width="14" height="20"/>
+    <rect class="pa" x="572" y="292" width="14" height="20"/>
+    <rect class="pa" x="588" y="292" width="14" height="20"/>
+    <rect class="pa" x="604" y="292" width="14" height="20"/>
+    <rect class="pa" x="620" y="292" width="14" height="20"/>
+  </g>
+
+  <text class="lbl" x="508" y="336">B gives 5 x 3 = 15 patches</text>
+  <g>
+    <rect class="pb" x="508" y="346" width="14" height="20"/>
+    <rect class="pb" x="524" y="346" width="14" height="20"/>
+    <rect class="pb" x="540" y="346" width="14" height="20"/>
+    <rect class="pb" x="556" y="346" width="14" height="20"/>
+    <rect class="pb" x="572" y="346" width="14" height="20"/>
+    <rect class="pb" x="588" y="346" width="14" height="20"/>
+    <rect class="pb" x="604" y="346" width="14" height="20"/>
+    <rect class="pb" x="620" y="346" width="14" height="20"/>
+    <rect class="pb" x="636" y="346" width="14" height="20"/>
+    <rect class="pb" x="652" y="346" width="14" height="20"/>
+    <rect class="pb" x="668" y="346" width="14" height="20"/>
+    <rect class="pb" x="684" y="346" width="14" height="20"/>
+    <rect class="pb" x="700" y="346" width="14" height="20"/>
+    <rect class="pb" x="716" y="346" width="14" height="20"/>
+    <rect class="pb" x="732" y="346" width="14" height="20"/>
+  </g>
+
+  <text class="note" x="508" y="390">laid end to end, A first, then B:</text>
+  <rect class="pa" x="508" y="400" width="112" height="18"/>
+  <rect class="pb" x="620" y="400" width="210" height="18"/>
+  <text class="note" x="508" y="434">23 patches, each 3 x 16 x 16 = 768 numbers wide</text>
+
+  <text class="lbl-b" x="508" y="486">result: [1, 23, 768]</text>
+  <text class="lbl" x="508" y="508">17664 values stored</text>
+  <text class="note" x="508" y="530">all 17664 are real pixels</text>
+  <text class="note" x="508" y="546">nothing is padding</text>
+
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/e347801924d50e0108660e39b5e8f9d35f2f283e/nemo_rl/data/multimodal_utils.py#L288">
+    <text x="508" y="578">multimodal_utils.py:288</text>
+  </a>
+  <text class="note" x="508" y="596">_patchify_segments(), the new helper</text>
+
+</svg>
+
+<p>These numbers come from running both modes on exactly these two images. The padded tensor holds
+30720 numbers, of which 13056 are padding the model has to throw away. The patch sequence holds
+17664 — exactly the pixel count of the two images, with nothing added.</p>
+
+<h2>Where the two paths meet again</h2>
+
+<p>Both paths end at the same model, and the model already knew how to do this. Megatron-Bridge's
+Nemotron Omni model patchifies raw pixels itself on every forward pass:</p>
+
+<div class="mono">
+<span class="cmt"># Megatron-Bridge, modeling_nemotron_omni.py:432</span>
+if imgs_sizes is not None and imgs_sizes.numel() &gt; 0:
+    images = self._patchify_dynamic_images(images, imgs_sizes)
+</div>
+<p class="sub"><a href="https://github.com/NVIDIA-NeMo/Megatron-Bridge/blob/5ed97996cc2b422904d18179375b6d7366915097/src/megatron/bridge/models/nemotron_omni/modeling_nemotron_omni.py#L432">modeling_nemotron_omni.py:432</a>
+&middot;
+<a href="https://github.com/NVIDIA-NeMo/Megatron-Bridge/blob/5ed97996cc2b422904d18179375b6d7366915097/src/megatron/bridge/models/nemotron_omni/modeling_nemotron_omni.py#L558">the function itself, :558</a></p>
+
+<p>That function takes both shapes. Hand it padded pixels and it crops each image back down using
+<code>imgs_sizes</code>, then cuts the patches. Hand it patches already, and it returns them
+untouched — its own docstring says <em>"Already-patchified inputs remain accepted for Bridge/SFT
+callers."</em> So the two paths converge here, at
+<code>_patchify_dynamic_images</code>, and after that point nothing differs. Following the same two
+images through:</p>
+
+<div class="mono">
+<span class="cmt"># BEFORE — the model does the cutting</span>
+images     = [2, 3, 80, 64]      <span class="cmt"># 30720 numbers, <span class="rd">13056 of them padding</span></span>
+imgs_sizes = [[32, 64], [80, 48]]
+  -&gt; crop A back to 32x64, crop B back to 80x48
+  -&gt; cut both into 16px patches
+  = [1, 23, 768]                 <span class="cmt"># <span class="gn">17664 numbers</span></span>
+
+<span class="cmt"># AFTER — NeMo-RL does the cutting, the model passes it through</span>
+images     = [1, 23, 768]        <span class="cmt"># <span class="gn">17664 numbers</span>, already patches</span>
+  -&gt; returned unchanged
+  = [1, 23, 768]                 <span class="cmt"># same answer, same numbers</span>
+</div>
+
+<p>The patch order is the same too. NeMo-RL's
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/e347801924d50e0108660e39b5e8f9d35f2f283e/nemo_rl/data/multimodal_utils.py#L327"><code>permute(0, 2, 4, 1, 3, 5)</code></a>
+and the model's own <code>permute(1, 3, 0, 2, 4)</code> produce the same layout once you account for
+the extra leading dimension — patches left to right, then top to bottom, with each patch flattened
+colour-channel first.</p>
+
+<h2>What you give up</h2>
+
+<div class="hl">
+<p style="margin:0 0 8px"><strong>What it buys:</strong> the padding disappears. In the example above that is
+13056 of 30720 numbers, 42% of the tensor, and it grows with how much the image sizes differ.
+That memory is saved everywhere the tensor lives — worker memory, and the copies moved between
+processes each step.</p>
+<p style="margin:0"><strong>What it costs:</strong> the output is no longer a picture. It is
+<code>[1, 23, 768]</code> — one row of patches, with no height or width left. Any code that expects
+<code>[images, channels, height, width]</code> can no longer read it, and the spatial shape cannot be
+recovered from the tensor alone. Whether that is safe depends entirely on which model receives it:
+the Megatron path accepts patches by design, so the choice of which mode to use has to follow the
+model, not just the processor that produced the pixels.</p>
+</div>
+
+</div>
+</body>
+</html>
