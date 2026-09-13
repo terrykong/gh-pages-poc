@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NVIDIA-NeMo/RL #4108 — why setting the failure tolerance to 0 makes a bad dataset hang instead of fail</title>
+<style>
+:root{
+  --bg:#0d1117; --surface:#161b22; --surface2:#1c2128; --border:#30363d;
+  --text:#e6edf3; --dim:#8b949e; --accent:#58a6ff; --green:#3fb950;
+  --orange:#d29922; --red:#f85149;
+}
+:root[data-theme="light"]{
+  --bg:#ffffff; --surface:#f6f8fa; --surface2:#eaeef2; --border:#d0d7de;
+  --text:#1f2328; --dim:#59636e; --accent:#0969da; --green:#1a7f37;
+  --orange:#9a6700; --red:#cf222e;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:28px 20px 70px}
+h1{font-size:22px;margin:0 0 8px;line-height:1.3}
+h2{font-size:18px;margin:32px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;
+  font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
+.sub{color:var(--dim);font-size:13.5px;margin:0 0 16px}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);
+  border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;
+  font:13px/1 ui-monospace,Menlo,monospace;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.18)}
+.mono{font:12.5px ui-monospace,SFMono-Regular,Menlo,monospace;
+  background:var(--surface);border:1px solid var(--border);border-radius:8px;
+  padding:13px;overflow-x:auto;white-space:pre}
+.warn{border-left:3px solid var(--red);background:var(--surface);
+  padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0}
+nav.chain{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 6px;padding:0}
+nav.chain a,nav.chain span{display:inline-block;padding:5px 11px;border:1px solid var(--border);
+  border-radius:20px;background:var(--surface);text-decoration:none;color:var(--accent);
+  font-size:12.5px;line-height:1.3;white-space:nowrap}
+nav.chain a:hover{background:var(--surface2)}
+nav.chain span.here{background:var(--accent);color:var(--bg);border-color:var(--accent);font-weight:600}
+p.chainnote{color:var(--dim);font-size:12px;margin:0 0 18px}
+svg{max-width:100%;height:auto;display:block;margin:16px 0}
+svg .box{fill:var(--surface);stroke:var(--border);stroke-width:1.4}
+svg .box-dead{fill:var(--surface);stroke:var(--dim);stroke-width:1.4;stroke-dasharray:5 4}
+svg .lbl{fill:var(--text);font:12px ui-monospace,Menlo,monospace}
+svg .lbl-s{fill:var(--text);font:11px ui-monospace,Menlo,monospace}
+svg .lbl-b{fill:var(--text);font:bold 12.5px -apple-system,sans-serif}
+svg .note{fill:var(--dim);font:11px -apple-system,sans-serif}
+svg .bad{fill:var(--red);font:bold 12px ui-monospace,Menlo,monospace}
+svg .badbox{fill:var(--red);opacity:.5;stroke:var(--red)}
+svg .deadtxt{fill:var(--dim);font:11px -apple-system,sans-serif}
+svg .arw{stroke:var(--dim);stroke-width:1.5;fill:none}
+svg .arw-r{stroke:var(--red);stroke-width:1.8;fill:none}
+svg a text{text-decoration:underline;fill:var(--accent);font:11px ui-monospace,Menlo,monospace}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+  document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head>
+<body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+  function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+  function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
+    b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
+      else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+  document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+<div class="wrap">
+
+<h1>Why setting the failure tolerance to 0 makes a broken dataset hang instead of fail</h1>
+<p class="sub">Companion illustration for
+<a href="https://github.com/NVIDIA-NeMo/RL/pull/4108">NVIDIA-NeMo/RL #4108</a>
+— permalinks pinned to
+<a href="https://github.com/NVIDIA-NeMo/RL/tree/124ca9105a7f5764274fb30c1f91b881219ddb01"><code>124ca91</code></a>,
+library behaviour read from <code>megatron-energon 7.4.0</code>, the version pinned in <code>uv.lock</code>.</p>
+
+<nav class="chain">
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4108-nemotron-vs-generic.html">1 · nemotron vs generic</a>
+  <span class="here">2 · why a bad dataset now hangs</span>
+</nav>
+<p class="chainnote">Two pages on this PR, one question each — this one: one changed number and what it switches off.</p>
+
+<p>Energon, the dataset library underneath this loader, counts how many samples fail to
+decode in a row. Past a limit it gives up and raises, so a run against a broken dataset
+dies quickly with an error. That limit is one number on the task encoder. This PR
+changes it from <code>1</code> to <code>0</code> at
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/124ca9105a7f5764274fb30c1f91b881219ddb01/nemo_rl/data/energon/multimodal/task_encoders/generic_sft.py#L259">generic_sft.py:259</a>
+— and in Energon, <code>0</code> does not mean "give up immediately". It means
+<strong>stop counting</strong>. The same commit deletes the three-line comment that said so.</p>
+
+<h2>What the deleted comment said, and what 0 does</h2>
+
+<p>At the base commit these four lines sat together
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/2b9e7fc7777241454c6dbe2699c55825eeaf8caf/nemo_rl/data/energon/multimodal/task_encoders/generic_sft.py#L258-L261">base, where they still exist</a>):</p>
+
+<div class="mono"># Energon reads 0 as "disable tolerance checking" (megatron/energon/errors.py),
+# which would let a systematically broken dataset retry forever. 1 fails on the
+# first bad sample; raise it to tolerate transient decode errors.
+__default_failure_tolerance__ = 1</div>
+
+<p>The comment is right. In <code>megatron-energon 7.4.0</code>, <code>ErrorContext</code> documents
+the field as "Maximum number of consecutive failures before raising <code>FatalSampleError</code>.
+Set to 0 to disable tolerance checking", and the raise is guarded by
+<code>if self.tolerance &gt; 0 and self._consecutive_failures &gt;= self.tolerance:</code>.
+At 0 that test is never true. Energon's own default for this field is <strong>100</strong>.</p>
+
+<svg viewBox="0 0 940 336" role="img" aria-label="A run hitting four bad samples in a row, with the guard that used to stop it now disabled">
+  <text x="8" y="18" class="lbl-b">A dataset where every sample fails to decode — wrong prompt_format, or the wrong processor</text>
+
+  <!-- attempts -->
+  <text x="8" y="52" class="note">sample attempts, left to right</text>
+
+  <rect x="20" y="64" width="86" height="44" rx="6" class="badbox"/>
+  <text x="38" y="83" class="bad">fail</text>
+  <text x="30" y="100" class="lbl-s">count 1</text>
+
+  <rect x="130" y="64" width="86" height="44" rx="6" class="badbox"/>
+  <text x="148" y="83" class="bad">fail</text>
+  <text x="140" y="100" class="lbl-s">count 2</text>
+
+  <rect x="240" y="64" width="86" height="44" rx="6" class="badbox"/>
+  <text x="258" y="83" class="bad">fail</text>
+  <text x="250" y="100" class="lbl-s">count 3</text>
+
+  <rect x="350" y="64" width="86" height="44" rx="6" class="badbox"/>
+  <text x="368" y="83" class="bad">fail</text>
+  <text x="360" y="100" class="lbl-s">count 4</text>
+
+  <text x="462" y="92" class="bad">… forever</text>
+
+  <path d="M106 86 H130" class="arw" marker-end="url(#b4)"/>
+  <path d="M216 86 H240" class="arw" marker-end="url(#b4)"/>
+  <path d="M326 86 H350" class="arw" marker-end="url(#b4)"/>
+  <path d="M436 86 H456" class="arw" marker-end="url(#b4)"/>
+
+  <!-- loop back -->
+  <path d="M560 86 H600 V132 H60 V112" class="arw-r" marker-end="url(#b4r)"/>
+  <text x="330" y="148" class="note">handler prints a traceback and returns, so the loop just continues</text>
+
+  <!-- old guard, now dead -->
+  <rect x="20" y="172" width="420" height="58" rx="6" class="box-dead"/>
+  <text x="32" y="192" class="deadtxt">before this PR — tolerance = 1</text>
+  <text x="32" y="210" class="deadtxt">raised FatalSampleError here, at the first failure</text>
+  <text x="32" y="226" class="deadtxt">the run stopped with an error you could read</text>
+
+  <rect x="470" y="172" width="450" height="58" rx="6" class="box"/>
+  <text x="482" y="192" class="lbl-s">after this PR — tolerance = 0</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/124ca9105a7f5764274fb30c1f91b881219ddb01/nemo_rl/data/energon/sft_dataloader.py#L61">
+    <text x="482" y="212">compact_sample_error_handler()</text></a>
+  <text x="482" y="228" class="note">prints, returns, counter climbs, nothing ever raises</text>
+
+  <!-- second dead guard -->
+  <text x="8" y="264" class="lbl-b">The same number switches off a second stop, in the packing loop</text>
+  <rect x="20" y="276" width="900" height="50" rx="6" class="box-dead"/>
+  <text x="32" y="296" class="deadtxt">pre_packer_failure_tolerance &gt; 0 also guards "did not yield any packs after N rounds" — dead at 0,</text>
+  <text x="32" y="314" class="deadtxt">so if the pre-packer returns nothing, its while-loop spins with no round limit either.</text>
+
+  <defs>
+    <marker id="b4" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto">
+      <path d="M0,0 L7,3 L0,6 Z" fill="var(--dim)"/>
+    </marker>
+    <marker id="b4r" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto">
+      <path d="M0,0 L7,3 L0,6 Z" fill="var(--red)"/>
+    </marker>
+  </defs>
+</svg>
+
+<h2>The fix</h2>
+
+<p>Put the number back above zero, and put the comment back with it. Energon's own
+default is 100, which is also what the deleted comment suggested — tolerate a run of
+transient decode errors, but still stop on a dataset that is simply wrong.</p>
+
+<div class="mono"># Energon reads 0 as "disable tolerance checking" (megatron/energon/errors.py),
+# which would let a systematically broken dataset retry forever. 1 fails on the
+# first bad sample; raise it to tolerate transient decode errors.
+__default_failure_tolerance__ = 100</div>
+
+<p>The three values worth keeping apart: <strong>1</strong> was the old setting, stop at the
+first bad sample. <strong>100</strong> is Energon's default, stop after a hundred in a row.
+<strong>0</strong> is not between them — it is off the scale in the other direction, and never
+stops at all.</p>
+
+<div class="warn">
+<strong>What this costs if it ships.</strong> A misconfigured run — wrong <code>prompt_format</code>,
+wrong processor, a dataset path pointing at the wrong shards — no longer fails. It sits
+at step 0 printing tracebacks, holding its GPUs, until someone notices and kills it. The
+larger the job, the more expensive that silence is. Nobody has run this code path: no unit
+or functional CI job executed on this commit, and the review that found this had no GPU, so
+this is read from the library source rather than from an observed hang.
+</div>
+
+</div>
+</body>
+</html>

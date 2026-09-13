@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NVIDIA-NeMo/RL #4108 — what the Nemotron SFT path adds next to the generic one</title>
+<style>
+:root{
+  --bg:#0d1117; --surface:#161b22; --surface2:#1c2128; --border:#30363d;
+  --text:#e6edf3; --dim:#8b949e; --accent:#58a6ff; --green:#3fb950;
+  --orange:#d29922; --red:#f85149;
+}
+:root[data-theme="light"]{
+  --bg:#ffffff; --surface:#f6f8fa; --surface2:#eaeef2; --border:#d0d7de;
+  --text:#1f2328; --dim:#59636e; --accent:#0969da; --green:#1a7f37;
+  --orange:#9a6700; --red:#cf222e;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:28px 20px 70px}
+h1{font-size:22px;margin:0 0 8px;line-height:1.3}
+h2{font-size:18px;margin:32px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;
+  font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
+.sub{color:var(--dim);font-size:13.5px;margin:0 0 16px}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);
+  border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;
+  font:13px/1 ui-monospace,Menlo,monospace;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.18)}
+.mono{font:12.5px ui-monospace,SFMono-Regular,Menlo,monospace;
+  background:var(--surface);border:1px solid var(--border);border-radius:8px;
+  padding:13px;overflow-x:auto;white-space:pre}
+.hl{border-left:3px solid var(--accent);background:var(--surface);
+  padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0}
+nav.chain{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 6px;padding:0}
+nav.chain a,nav.chain span{display:inline-block;padding:5px 11px;border:1px solid var(--border);
+  border-radius:20px;background:var(--surface);text-decoration:none;color:var(--accent);
+  font-size:12.5px;line-height:1.3;white-space:nowrap}
+nav.chain a:hover{background:var(--surface2)}
+nav.chain span.here{background:var(--accent);color:var(--bg);border-color:var(--accent);font-weight:600}
+p.chainnote{color:var(--dim);font-size:12px;margin:0 0 18px}
+svg{max-width:100%;height:auto;display:block;margin:16px 0}
+svg .box{fill:var(--surface);stroke:var(--border);stroke-width:1.4}
+svg .box-diff{fill:var(--surface);stroke:var(--accent);stroke-width:2.2}
+svg .box-share{fill:var(--surface);stroke:var(--green);stroke-width:2}
+svg .lbl{fill:var(--text);font:12px ui-monospace,Menlo,monospace}
+svg .lbl-s{fill:var(--text);font:11px ui-monospace,Menlo,monospace}
+svg .lbl-b{fill:var(--text);font:bold 12.5px -apple-system,sans-serif}
+svg .note{fill:var(--dim);font:11px -apple-system,sans-serif}
+svg .hdr{fill:var(--accent);font:bold 12px -apple-system,sans-serif}
+svg .hdr-g{fill:var(--green);font:bold 12px -apple-system,sans-serif}
+svg .arw{stroke:var(--dim);stroke-width:1.5;fill:none}
+svg a text{text-decoration:underline;fill:var(--accent);font:11px ui-monospace,Menlo,monospace}
+table{border-collapse:collapse;width:100%;margin:14px 0;font-size:13.5px}
+th,td{border:1px solid var(--border);padding:7px 10px;text-align:left;vertical-align:top}
+th{background:var(--surface2)}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+  document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head>
+<body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+  function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+  function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
+    b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
+      else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+  document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+<div class="wrap">
+
+<h1>What the new Nemotron SFT path adds, next to the generic one that already existed</h1>
+<p class="sub">Companion illustration for
+<a href="https://github.com/NVIDIA-NeMo/RL/pull/4108">NVIDIA-NeMo/RL #4108</a>
+— all permalinks pinned to
+<a href="https://github.com/NVIDIA-NeMo/RL/tree/124ca9105a7f5764274fb30c1f91b881219ddb01"><code>124ca91</code></a>.</p>
+
+<nav class="chain">
+  <span class="here">1 · nemotron vs generic</span>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4108-retry-forever.html">2 · why a bad dataset now hangs</a>
+</nav>
+<p class="chainnote">Two pages on this PR, one question each — this one: what the new path is and where it rejoins the old one.</p>
+
+<p>NeMo-RL already had one way to turn a multimodal SFT dataset into training batches:
+a <em>cooker</em> that reads the raw sample, and a <em>task encoder</em> that tokenizes it.
+This PR adds a second family for Nemotron models — ten new cookers and one new task
+encoder. The interesting part is how little of the pipeline it actually replaces.
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/124ca9105a7f5764274fb30c1f91b881219ddb01/nemo_rl/data/energon/multimodal/task_encoders/nemotron_multimodal.py#L869"><code>NemotronMultiModalTaskEncoder</code></a>
+subclasses the generic encoder and overrides exactly two methods, then sets one flag —
+and that flag is what decides who builds the training loss mask.</p>
+
+<h2>Both paths, and where they become one</h2>
+
+<svg viewBox="0 0 940 452" role="img" aria-label="Generic and Nemotron SFT paths running in parallel and merging at the shared packing step">
+  <text x="8" y="18" class="lbl-b">One sample → one packed batch. Blue = new here, green = inherited.</text>
+
+  <!-- legend -->
+  <rect x="600" y="8" width="13" height="13" class="box-diff"/>
+  <text x="620" y="19" class="note">differs</text>
+  <rect x="678" y="8" width="13" height="13" class="box-share"/>
+  <text x="698" y="19" class="note">shared</text>
+
+  <!-- GENERIC LANE -->
+  <text x="8" y="48" class="hdr">generic path (already existed)</text>
+  <rect x="20" y="58" width="210" height="52" rx="6" class="box"/>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/124ca9105a7f5764274fb30c1f91b881219ddb01/nemo_rl/data/energon/multimodal/cookers/generic.py#L98">
+    <text x="30" y="78">cook_conversation</text></a>
+  <text x="30" y="96" class="note">reads messages[] + media manifest</text>
+
+  <rect x="256" y="58" width="210" height="52" rx="6" class="box"/>
+  <text x="266" y="78" class="lbl-s">preencode_sample</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/124ca9105a7f5764274fb30c1f91b881219ddb01/nemo_rl/data/energon/multimodal/task_encoders/generic_sft.py#L285">
+    <text x="266" y="96">adapter.encode()</text></a>
+
+  <rect x="492" y="58" width="210" height="52" rx="6" class="box"/>
+  <text x="502" y="78" class="lbl-s">postencode_sample</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/124ca9105a7f5764274fb30c1f91b881219ddb01/nemo_rl/data/energon/multimodal/task_encoders/generic_sft.py#L289">
+    <text x="502" y="96">returns it unchanged</text></a>
+
+  <path d="M230 84 H256" class="arw" marker-end="url(#a4)"/>
+  <path d="M466 84 H492" class="arw" marker-end="url(#a4)"/>
+
+  <!-- NEMOTRON LANE -->
+  <text x="8" y="146" class="hdr">nemotron path (new in this PR)</text>
+  <rect x="20" y="156" width="210" height="52" rx="6" class="box-diff"/>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/124ca9105a7f5764274fb30c1f91b881219ddb01/nemo_rl/data/energon/multimodal/cookers/nemotron.py#L526">
+    <text x="30" y="176">cook_nemotron_conversation</text></a>
+  <text x="30" y="194" class="note">reads conversation[].fragments[]</text>
+
+  <rect x="256" y="156" width="210" height="52" rx="6" class="box-diff"/>
+  <text x="266" y="176" class="lbl-s">preencode_sample</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/124ca9105a7f5764274fb30c1f91b881219ddb01/nemo_rl/data/energon/multimodal/task_encoders/nemotron_multimodal.py#L956">
+    <text x="266" y="194">omni.preencode()</text></a>
+
+  <rect x="492" y="156" width="210" height="52" rx="6" class="box-diff"/>
+  <text x="502" y="176" class="lbl-s">postencode_sample</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/124ca9105a7f5764274fb30c1f91b881219ddb01/nemo_rl/data/energon/multimodal/task_encoders/nemotron_multimodal.py#L960">
+    <text x="502" y="194">omni.postencode()</text></a>
+
+  <path d="M230 182 H256" class="arw" marker-end="url(#a4)"/>
+  <path d="M466 182 H492" class="arw" marker-end="url(#a4)"/>
+
+  <!-- merge -->
+  <path d="M702 84 H746 V240" class="arw" marker-end="url(#a4)"/>
+  <path d="M702 182 H746 V240" class="arw"/>
+  <text x="756" y="140" class="note">both continue into</text>
+  <text x="756" y="156" class="note">the same code</text>
+
+  <!-- SHARED -->
+  <text x="8" y="264" class="hdr-g">shared — the Nemotron encoder inherits all of this</text>
+  <rect x="20" y="276" width="300" height="52" rx="6" class="box-share"/>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/124ca9105a7f5764274fb30c1f91b881219ddb01/nemo_rl/data/energon/multimodal/task_encoders/generic_sft.py#L298">
+    <text x="30" y="296">select_samples_to_pack()</text></a>
+  <text x="30" y="314" class="note">groups samples into packs — not overridden</text>
+
+  <rect x="348" y="276" width="340" height="52" rx="6" class="box-share"/>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/124ca9105a7f5764274fb30c1f91b881219ddb01/nemo_rl/data/energon/multimodal/packing.py#L89">
+    <text x="358" y="296">prepare_packed_sft_batch()</text></a>
+  <text x="358" y="314" class="note">builds the tensors — one branch differs, below</text>
+
+  <path d="M320 302 H348" class="arw" marker-end="url(#a4)"/>
+
+  <!-- the one remaining fork -->
+  <path d="M518 328 V352" class="arw"/>
+  <path d="M250 352 H790" class="arw"/>
+  <path d="M250 352 V372" class="arw" marker-end="url(#a4)"/>
+  <path d="M790 352 V372" class="arw" marker-end="url(#a4)"/>
+
+  <rect x="70" y="376" width="360" height="56" rx="6" class="box"/>
+  <text x="80" y="396" class="lbl-s">loss_mask_mode is None  → generic</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/124ca9105a7f5764274fb30c1f91b881219ddb01/nemo_rl/data/energon/multimodal/packing.py#L136">
+    <text x="80" y="414">add_loss_mask_to_message_log() builds it</text></a>
+
+  <rect x="610" y="376" width="360" height="56" rx="6" class="box-diff"/>
+  <text x="620" y="396" class="lbl-s">= "precomputed"  → nemotron</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/124ca9105a7f5764274fb30c1f91b881219ddb01/nemo_rl/data/energon/multimodal/packing.py#L118">
+    <text x="620" y="414">only checks the mask the encoder wrote</text></a>
+
+  <defs>
+    <marker id="a4" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto">
+      <path d="M0,0 L7,3 L0,6 Z" fill="var(--dim)"/>
+    </marker>
+  </defs>
+</svg>
+
+<p><strong>They merge at the task encoder itself.</strong> Packing, grouping and batching are
+inherited, not rewritten. After the merge exactly one thing still differs: the flag
+<code>loss_mask_mode</code>, which the Nemotron encoder sets to <code>"precomputed"</code> at
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/124ca9105a7f5764274fb30c1f91b881219ddb01/nemo_rl/data/energon/multimodal/task_encoders/nemotron_multimodal.py#L951">construction</a>
+and the generic one leaves as <code>None</code>
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/124ca9105a7f5764274fb30c1f91b881219ddb01/nemo_rl/data/energon/multimodal/task_encoders/generic_sft.py#L273">default</a>).</p>
+
+<h2>The same tiny sample down both paths</h2>
+
+<p>One conversation: 2 turns, 1 image, 7 tokens after tokenizing, of which 3 are the
+assistant's answer and so are the only ones training should learn from.</p>
+
+<div class="mono">                        generic                      nemotron
+after preencode     token_ids = 7 tokens         token_ids = 7 tokens
+                    (no mask yet)                token_loss_mask = 7 values
+
+after postencode    unchanged                    mask filled in by the encoder
+                    (still no mask)              [0,0,0,0,1,1,1]  ← 3 ones
+
+in prepare_packed_  reads the roles and          checks the mask is 7 long
+sft_batch           builds [0,0,0,0,1,1,1]       and only 0s and 1s, then uses it
+                    from "assistant"</div>
+
+<p>Both paths hand the trainer the same 7 tokens and the same 3 unmasked positions.
+The difference is only <em>who computed the mask</em>. The generic path derives it at batch
+time from the message roles; the Nemotron path carries it from the encoder, because
+its source format marks trainable spans per fragment rather than per whole turn.</p>
+
+<h2>Why keep both</h2>
+
+<table>
+<tr><th></th><th>generic</th><th>nemotron</th></tr>
+<tr><td>Source format</td><td><code>messages[]</code> plus a media manifest, in one webdataset sample</td><td><code>conversation[].fragments[]</code>, with separate media stores and a cache pool</td></tr>
+<tr><td>Loss mask</td><td>derived from roles at batch time</td><td>computed in the encoder, checked at batch time</td></tr>
+<tr><td>Media</td><td>images</td><td>images, video and audio</td></tr>
+<tr><td>Packing</td><td colspan="2" style="text-align:center">same code for both</td></tr>
+</table>
+
+<p>They are not two versions of one thing. They read datasets produced by different
+teams in different shapes, so they change for different reasons — which is why the
+PR subclasses rather than adding <code>if model_family == …</code> branches to the
+generic encoder. The cost is that a third family would need edits in more than one
+place, because the typed options block
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/124ca9105a7f5764274fb30c1f91b881219ddb01/nemo_rl/data/energon/config.py#L55"><code>EnergonTaskEncoderOptions</code></a>)
+is shared by every encoder but documents itself as Nemotron's, and the loader only
+forwards it when the encoder is named <code>nemotron_multimodal</code>
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/124ca9105a7f5764274fb30c1f91b881219ddb01/nemo_rl/data/energon/sft_dataloader.py#L381">sft_dataloader.py:381</a>).</p>
+
+<div class="hl">
+<strong>What to take away.</strong> The new Nemotron path is a two-method subclass, not a
+parallel pipeline — packing and batching are shared, so a change there still only has
+to be made once. The one behaviour that genuinely forks is the loss mask, and it forks
+on a single flag. If you are reviewing this PR, that flag and the two overridden
+methods are where the real new logic lives; everything downstream is code that was
+already there.
+</div>
+
+</div>
+</body>
+</html>
