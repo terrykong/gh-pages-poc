@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Who packs the sequences: the loader, or the trainer?</title>
+<style>
+:root{--bg:#0d1117;--surface:#161b22;--surface2:#21262d;--border:#30363d;--text:#e6edf3;
+--dim:#8b949e;--accent:#58a6ff;--green:#3fb950;--red:#f85149;--yellow:#d29922;--purple:#bc8cff}
+html[data-theme=light]{--bg:#fff;--surface:#f6f8fa;--surface2:#eaeef2;--border:#d0d7de;
+--text:#1f2328;--dim:#636c76;--accent:#0969da;--green:#1a7f37;--red:#cf222e;--yellow:#9a6700;--purple:#8250df}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:30px 20px 70px}
+h1{font-size:25px;line-height:1.3;margin:0 0 6px}
+h2{font-size:18px;margin:34px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+p.sub{color:var(--dim);font-size:13px;margin:0 0 14px}
+a{color:var(--accent)}
+code{background:var(--surface2);padding:1px 5px;border-radius:5px;font-size:13px;
+font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+pre{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:13px 15px;
+overflow-x:auto;font-size:12.5px;line-height:1.55;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+pre .c{color:var(--dim)}
+pre .g{color:var(--green)}
+pre .r{color:var(--red)}
+pre .y{color:var(--yellow)}
+figure{margin:20px 0}
+figcaption{color:var(--dim);font-size:12.5px;margin-top:8px}
+.warn{background:color-mix(in srgb,var(--yellow) 12%,transparent);
+border:1px solid color-mix(in srgb,var(--yellow) 45%,transparent);
+border-radius:8px;padding:13px 16px;margin:18px 0}
+.hl{background:color-mix(in srgb,var(--accent) 11%,transparent);
+border:1px solid color-mix(in srgb,var(--accent) 42%,transparent);
+border-radius:8px;padding:13px 16px;margin:18px 0}
+table{border-collapse:collapse;width:100%;font-size:13.5px;margin:14px 0}
+th,td{border:1px solid var(--border);padding:7px 10px;text-align:left;vertical-align:top}
+th{background:var(--surface2);font-weight:600}
+svg{width:100%;height:auto;display:block}
+svg text{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+svg a text{text-decoration:underline}
+.t-lbl{fill:var(--text);font-size:12px}
+.t-sm{fill:var(--dim);font-size:10.5px}
+.t-hd{fill:var(--text);font-size:13px;font-weight:700}
+.bx{fill:var(--surface);stroke:var(--border)}
+.bx-g{fill:color-mix(in srgb,var(--green) 18%,transparent);stroke:var(--green)}
+.bx-p{fill:color-mix(in srgb,var(--purple) 18%,transparent);stroke:var(--purple)}
+.bx-a{fill:color-mix(in srgb,var(--accent) 15%,transparent);stroke:var(--accent)}
+.ar{stroke:var(--dim);stroke-width:1.5;fill:none;marker-end:url(#a)}
+nav.chain{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 6px;padding:0}
+nav.chain a,nav.chain span{display:inline-block;padding:5px 11px;border:1px solid var(--border);
+border-radius:20px;background:var(--surface);text-decoration:none;color:var(--accent);
+font-size:12.5px;line-height:1.3;white-space:nowrap}
+nav.chain a:hover{background:var(--surface2)}
+nav.chain span.here{background:var(--accent);color:var(--bg);border-color:var(--accent);font-weight:600}
+p.chainnote{color:var(--dim);font-size:12px;margin:0 0 18px}
+#theme-toggle{position:fixed;z-index:200;top:12px;right:12px;background:var(--surface);color:var(--text);
+border:1px solid var(--border);border-radius:6px;padding:5px 11px;cursor:pointer;font-size:12px}
+</style><script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head><body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">&#9681; dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'◑ light':'◐ dark';}
+function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
+b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
+else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+<div class="wrap">
+
+<h1>Who packs the sequences: the loader, or the trainer?</h1>
+<p class="sub">
+<a href="https://github.com/NVIDIA-NeMo/RL/pull/4105">PR #4105</a> ·
+predecessor <a href="https://github.com/NVIDIA-NeMo/RL/pull/4070">#4070</a> ·
+all links pinned to <code>5356062</code>
+</p>
+
+<nav class="chain">
+  <span class="here">who packs</span>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4105-first-pack-decides.html">the first-pack bug</a>
+</nav>
+<p class="chainnote">Two pages on this PR, one question each — this one: what the new packing path is, and how it differs from the one that already existed.</p>
+
+<p>
+Sequence packing glues several short training examples into one long row so the GPU
+is not padding its way through mostly-empty tokens. NeMo-RL already did this
+<strong>inside the trainer</strong>: the batch arrived as separate rows and the policy worker
+packed them. This PR adds a second way, where
+<a href="https://github.com/NVIDIA/Megatron-Energon">Energon</a> — the data loader —
+does the packing and hands the trainer a row that is already packed. Both paths end up
+calling the same Megatron entry point with the same kind of argument; they differ in
+who does the work and what the trainer is still allowed to decide.
+</p>
+
+<figure>
+<svg viewBox="0 0 940 340" role="img" aria-label="Two packing paths, converging at PackedSeqParams">
+<defs><marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+<path d="M0,0 L10,5 L0,10 z" fill="var(--dim)"/></marker></defs>
+
+<text x="0" y="14" class="t-hd">Existing: the trainer packs</text>
+<rect x="0" y="26" width="150" height="46" rx="7" class="bx"/>
+<text x="12" y="46" class="t-lbl">HF dataset</text>
+<text x="12" y="62" class="t-sm">separate rows</text>
+<path class="ar" d="M154,49 L186,49"/>
+<rect x="190" y="26" width="228" height="46" rx="7" class="bx-g"/>
+<text x="202" y="45" class="t-lbl">policy worker packs here</text>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/5356062ead372ca5a815360d671f65e8ec99d362/nemo_rl/distributed/batched_data_dict.py#L625-L634"><text x="202" y="62" class="t-sm">batched_data_dict.py: get_packer</text></a>
+<path class="ar" d="M422,49 L454,49"/>
+<rect x="458" y="26" width="250" height="46" rx="7" class="bx"/>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/5356062ead372ca5a815360d671f65e8ec99d362/nemo_rl/models/megatron/data.py#L626"><text x="470" y="45" class="t-lbl">_pack_sequences_for_megatron</text></a>
+<text x="470" y="62" class="t-sm">builds the boundaries</text>
+
+<text x="0" y="118" class="t-hd">New in this PR: the loader packs</text>
+<rect x="0" y="130" width="150" height="46" rx="7" class="bx-p"/>
+<text x="12" y="150" class="t-lbl">Energon loader</text>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/5356062ead372ca5a815360d671f65e8ec99d362/nemo_rl/data/energon/multimodal/packing.py#L89"><text x="12" y="166" class="t-sm">packs here</text></a>
+<path class="ar" d="M154,153 L186,153"/>
+<rect x="190" y="130" width="228" height="46" rx="7" class="bx"/>
+<text x="202" y="149" class="t-lbl">worker passes it through</text>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/5356062ead372ca5a815360d671f65e8ec99d362/nemo_rl/data/energon/sft_worker.py#L176-L180"><text x="202" y="166" class="t-sm">sft_worker.py: shapes attached</text></a>
+<path class="ar" d="M422,153 L454,153"/>
+<rect x="458" y="130" width="250" height="46" rx="7" class="bx"/>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/5356062ead372ca5a815360d671f65e8ec99d362/nemo_rl/models/megatron/data.py#L404"><text x="470" y="149" class="t-lbl">_prepare_prepacked</text></a>
+<text x="470" y="166" class="t-sm">reuses the loader's boundaries</text>
+
+<path class="ar" d="M712,49 C760,49 760,88 786,88"/>
+<path class="ar" d="M712,153 C760,153 760,100 786,100"/>
+<rect x="790" y="62" width="146" height="62" rx="7" class="bx-a"/>
+<text x="800" y="82" class="t-lbl">both arrive at</text>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/5356062ead372ca5a815360d671f65e8ec99d362/nemo_rl/models/megatron/data.py#L636"><text x="800" y="99" class="t-sm">PackedSeqParams</text></a>
+<text x="800" y="115" class="t-sm">qkv_format="thd"</text>
+
+<rect x="0" y="212" width="936" height="1" fill="var(--border)"/>
+<text x="0" y="238" class="t-hd">Same two conversations, 5 and 10 tokens, padded to a multiple of 4</text>
+<text x="0" y="262" class="t-lbl">true boundaries, both paths</text>
+<text x="330" y="262" class="t-lbl" style="fill:var(--green)">cu_seqlens = [0, 5, 15]</text>
+<text x="0" y="284" class="t-lbl">trainer packs &#8594; padded to the batch</text>
+<text x="330" y="284" class="t-lbl" style="fill:var(--green)">cu_seqlens_padded = [0, 8, 20]</text>
+<text x="0" y="306" class="t-lbl">loader packs &#8594; padded to a fixed 36</text>
+<text x="330" y="306" class="t-lbl" style="fill:var(--purple)">cu_seqlens_padded = [0, 8, 36]</text>
+<text x="0" y="330" class="t-sm">Green = what both agree on. Purple = the one number the new path changes: every pack is filled to the same width.</text>
+</svg>
+<figcaption>Both paths hand Megatron the same kind of argument. They disagree on one entry of one array.</figcaption>
+</figure>
+
+<h2>Where they stop being the same</h2>
+
+<p>
+The two paths meet at <code>PackedSeqParams</code> and from there the model code is identical.
+What still differs is what each one puts inside it.
+</p>
+
+<pre><span class="c"># existing path — the trainer packed, so it knows where the real tokens end</span>
+PackedSeqParams(
+    cu_seqlens_q        = <span class="g">[0, 5, 15]</span>,   <span class="c"># true ends</span>
+    cu_seqlens_q_padded = <span class="g">[0, 8, 20]</span>,   <span class="c"># padded ends</span>
+    pad_between_seqs    = <span class="g">True</span>,          <span class="c"># the two arrays differ, so: yes</span>
+)
+</pre>
+<p class="sub"><a href="https://github.com/NVIDIA-NeMo/RL/blob/5356062ead372ca5a815360d671f65e8ec99d362/nemo_rl/models/megatron/data.py#L636-L657">data.py:636-657</a></p>
+
+<pre><span class="c"># new path — the loader packed, and it passes the same array twice</span>
+PackedSeqParams(
+    cu_seqlens_q        = <span class="y">[0, 8, 36]</span>,   <span class="c"># padded ends, not true ends</span>
+    cu_seqlens_q_padded = <span class="y">[0, 8, 36]</span>,   <span class="c"># the same tensor object</span>
+    pad_between_seqs    = <span class="y">False</span>,         <span class="c"># they are equal, so: no</span>
+)
+</pre>
+<p class="sub"><a href="https://github.com/NVIDIA-NeMo/RL/blob/5356062ead372ca5a815360d671f65e8ec99d362/nemo_rl/models/megatron/data.py#L439-L448">data.py:439-448</a> — the true ends <code>[0, 5, 15]</code> are still computed, and used to <a href="https://github.com/NVIDIA-NeMo/RL/blob/5356062ead372ca5a815360d671f65e8ec99d362/nemo_rl/models/megatron/data.py#L416-L424">check the batch is well formed</a>, but they are not passed on.</p>
+
+<p>
+That is deliberate, and the code says why: a comment at
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/5356062ead372ca5a815360d671f65e8ec99d362/nemo_rl/models/megatron/data.py#L436-L438">data.py:436-438</a>
+explains that some consumers read <code>cu_seqlens_q</code> as the wrap-around point, so
+handing them the true ends would let a value roll into the padding. Because the two arrays
+are then equal, <code>pad_between_seqs=False</code> is the consistent answer — the attention
+kernel simply treats each padded stretch as the sequence. Causal masking means real tokens
+never look at the pad tokens behind them, and the loss mask zeroes them.
+</p>
+
+<h2>Why keep both</h2>
+
+<table>
+<tr><th></th><th>Trainer packs (existing)</th><th>Loader packs (new)</th></tr>
+<tr><td>Turned on by</td><td><code>policy.sequence_packing.enabled</code></td><td>that, plus <code>data.energon.packing_buffer_size</code></td></tr>
+<tr><td>Rows per microbatch</td><td>several</td><td><a href="https://github.com/NVIDIA-NeMo/RL/blob/5356062ead372ca5a815360d671f65e8ec99d362/nemo_rl/models/megatron/data.py#L291-L294">exactly one pack</a></td></tr>
+<tr><td>Pack width</td><td>whatever the batch needs</td><td>always the full <code>max_input_seq_length</code></td></tr>
+<tr><td>Works for</td><td>text and images</td><td>multimodal SFT through Energon</td></tr>
+<tr><td>Cost</td><td>the trainer re-does the work every step</td><td>every pack carries its padding to the GPU</td></tr>
+</table>
+
+<p>
+The new path exists because Energon streams multimodal samples and already knows their
+sizes as it reads them, so it can group them once instead of the trainer regrouping them
+every step. The price is the fixed width: a pack that only half fills
+<code>max_input_seq_length</code> still ships a full-width row. That is why the choice of
+packing algorithm matters more here than it did before — fewer, fuller packs is now
+directly fewer forward passes.
+</p>
+
+<div class="hl">
+<strong>If you are reviewing this:</strong> the new path short-circuits
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/5356062ead372ca5a815360d671f65e8ec99d362/nemo_rl/models/megatron/data.py#L292">ahead of the existing one</a>,
+so the alignment checks that the old path ran at batch time
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/5356062ead372ca5a815360d671f65e8ec99d362/nemo_rl/models/megatron/data.py#L1540">FP8 divisors, context-parallel multiples</a>)
+never run. The PR moves them to startup instead, in
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/5356062ead372ca5a815360d671f65e8ec99d362/nemo_rl/algorithms/sft_v2.py#L448-L484">setup_sft_v2</a>,
+where a bad config is rejected before a GPU is touched. Worth checking that list against
+the one it replaces — it is the part of this design most likely to drift.
+</div>
+
+</div></body></html>
