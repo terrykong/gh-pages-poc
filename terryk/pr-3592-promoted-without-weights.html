@@ -70,6 +70,11 @@ svg .work{fill:var(--accent);opacity:.3;stroke:var(--accent);stroke-width:1.2}
 svg .tick{stroke:var(--border);stroke-width:1;stroke-dasharray:3 3}
 svg .evt{stroke:var(--red);stroke-width:1.8}
 svg a text{text-decoration:underline;fill:var(--accent);font:11px ui-monospace,Menlo,monospace}
+svg .tick{stroke:var(--border);stroke-width:1.2;stroke-dasharray:3 3}
+svg .band-bad{fill:var(--red);opacity:.34;stroke:var(--red);stroke-width:1.2}
+svg .band-ok{fill:var(--green);opacity:.4;stroke:var(--green);stroke-width:1.2}
+svg .bad{fill:var(--red);font:bold 12px -apple-system,sans-serif}
+svg .ok{fill:var(--green);font:bold 12px -apple-system,sans-serif}
 </style>
 <script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
   document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
@@ -128,88 +133,59 @@ sent weights to?"</em> Before this PR those two questions always had the same an
 a way for a shard to turn <code>STALE</code> in the middle of a refit, so it now asks both — and
 the figure below is the case that still slips through.</p>
 
-<svg viewBox="0 0 940 428" role="img" aria-label="Shard 2 finishes restarting in the middle of a refit it was never part of, and the end of that refit promotes it to healthy anyway">
-  <text class="hdr" x="150" y="20" text-anchor="middle">membership settled</text>
-  <text class="hdr" x="400" y="20" text-anchor="middle">transfer in flight</text>
-  <text class="hdr" x="600" y="20" text-anchor="middle">restart finishes</text>
-  <text class="hdr" x="845" y="20" text-anchor="middle">refit ends</text>
-  <line class="tick" x1="150" y1="28" x2="150" y2="150"/>
-  <line class="evt"  x1="600" y1="28" x2="600" y2="150"/>
-  <line class="evt"  x1="810" y1="28" x2="810" y2="150"/>
+<svg viewBox="0 0 940 436" role="img" aria-label="Two timelines of one refit. Before the PR a shard finishing its restart in either window was promoted. After the PR only the second window is blocked; a shard finishing during the communicator rebuild is still promoted.">
+  <text class="lbl-b" x="14" y="20">One refit, and the two moments shard 2 can finish restarting</text>
+  <text class="note" x="14" y="38">Shards 0, 1 and 3 are healthy. Shard 2 died earlier and has been reloading for minutes.</text>
 
-  <text class="lbl-b" x="20" y="64">the refit</text>
-  <rect class="work" x="150" y="46" width="660" height="26" rx="5"/>
-  <text class="note" x="480" y="63" text-anchor="middle">sending the new weights to shards 0, 1 and 3 — shard 2 is not in the group</text>
+  <!-- ===== marker columns ===== -->
+  <line class="tick" x1="150" y1="58" x2="150" y2="386"/>
+  <line class="tick" x1="420" y1="58" x2="420" y2="386"/>
+  <line class="tick" x1="720" y1="58" x2="720" y2="386"/>
 
-  <text class="lbl-b" x="20" y="114">shard 2</text>
-  <rect class="s-rest"  x="60" y="96" width="540" height="26" rx="5"/>
-  <text class="note" x="330" y="113" text-anchor="middle">RESTARTING since an earlier step — absent, correctly left out</text>
-  <rect class="s-stale" x="600" y="96" width="210" height="26" rx="5"/>
-  <text class="note" x="705" y="113" text-anchor="middle">STALE</text>
-  <rect class="s-ok"    x="810" y="96" width="100" height="26" rx="5"/>
-  <text class="note" x="860" y="113" text-anchor="middle">HEALTHY</text>
+  <text class="hdr" x="150" y="52" text-anchor="middle">communicator built</text>
+  <text class="hdr" x="420" y="52" text-anchor="middle">participants read</text>
+  <text class="hdr" x="720" y="52" text-anchor="middle">promote</text>
 
-  <text class="bad" x="600" y="140" text-anchor="middle">the reload lands here</text>
-  <a href="https://github.com/NVIDIA-NeMo/RL/blob/a815a8cb6570d5f80caf7407d012717e919cd5aa/nemo_rl/models/generation/engine_supervisor.py#L174" target="_blank" rel="noopener">
-    <text x="600" y="155" text-anchor="middle">engine_supervisor.py L128</text></a>
-  <text class="bad" x="810" y="140" text-anchor="middle">promote every STALE shard</text>
-  <a href="https://github.com/NVIDIA-NeMo/RL/blob/a815a8cb6570d5f80caf7407d012717e919cd5aa/nemo_rl/algorithms/single_controller.py#L3647" target="_blank" rel="noopener">
-    <text x="810" y="155" text-anchor="middle">single_controller.py L2629</text></a>
+  <!-- ===== BEFORE ===== -->
+  <text class="lbl-b" x="14" y="92">Before this PR</text>
+  <rect class="band-bad" x="150" y="104" width="270" height="40" rx="4"/>
+  <rect class="band-bad" x="420" y="104" width="300" height="40" rx="4"/>
+  <text class="c-txt" x="285" y="129" text-anchor="middle">A · rebuilding</text>
+  <text class="c-txt" x="570" y="129" text-anchor="middle">B · weight transfer</text>
+  <text class="bad" x="150" y="164">shard 2 finishing in A → promoted</text>
+  <text class="bad" x="420" y="164">shard 2 finishing in B → promoted</text>
+  <text class="note" x="150" y="182">the promotion asked only "are you STALE?", so any reload that had landed counted</text>
 
-  <rect class="s-rest"  x="14"  y="172" width="16" height="11" rx="2"/>
-  <text class="note" x="36"  y="181">RESTARTING — absent</text>
-  <rect class="s-stale" x="175" y="172" width="16" height="11" rx="2"/>
-  <text class="note" x="197" y="181">STALE — not serving</text>
-  <rect class="s-ok"    x="340" y="172" width="16" height="11" rx="2"/>
-  <text class="note" x="362" y="181">HEALTHY — serving</text>
-  <rect class="s-dead"  x="495" y="172" width="16" height="11" rx="2"/>
-  <text class="note" x="517" y="181">wrong</text>
+  <!-- ===== AFTER ===== -->
+  <text class="lbl-b" x="14" y="232">After this PR</text>
+  <rect class="band-bad" x="150" y="244" width="270" height="40" rx="4"/>
+  <rect class="band-ok" x="420" y="244" width="300" height="40" rx="4"/>
+  <text class="c-txt" x="285" y="269" text-anchor="middle">A · rebuilding</text>
+  <text class="c-txt" x="570" y="269" text-anchor="middle">B · weight transfer</text>
+  <text class="bad" x="150" y="304">still promoted</text>
+  <text class="ok" x="420" y="304">skipped — not in participants</text>
+  <text class="note" x="150" y="322">shard 2 turned STALE before the participants read, so it is in the set the promotion trusts</text>
+  <text class="note" x="420" y="322">shard 2 turned STALE after that read, so the promotion skips it</text>
 
-  <text class="lbl-b" x="14" y="210">what each shard got out of this refit, and what the ledger believes afterwards</text>
-  <text class="hdr" x="225" y="236" text-anchor="middle">what this refit gave it</text>
-  <text class="hdr" x="460" y="236" text-anchor="middle">what the ledger says</text>
-  <text class="hdr" x="670" y="236" text-anchor="middle">shard_weight_version reads</text>
+  <!-- ===== the two reads ===== -->
+  <text class="lbl" x="14" y="362">Both windows exist because the set is read twice:</text>
+  <text class="lbl" x="14" y="382">L3443 builds the communicator · L4705 builds participants · an await sits between them</text>
 
-  <text class="lbl" x="14" y="264">shard 0</text>
-  <rect class="s-ok"   x="100" y="246" width="250" height="26" rx="5"/>
-  <text class="note" x="225" y="264" text-anchor="middle">the new weights</text>
-  <rect class="s-ok"   x="360" y="246" width="200" height="26" rx="5"/>
-  <text class="note" x="460" y="264" text-anchor="middle">HEALTHY</text>
-  <rect class="cell-n" x="570" y="246" width="200" height="26" rx="5"/>
-  <text class="note" x="670" y="264" text-anchor="middle">0</text>
-
-  <text class="lbl" x="14" y="294">shard 1</text>
-  <rect class="s-ok"   x="100" y="276" width="250" height="26" rx="5"/>
-  <text class="note" x="225" y="294" text-anchor="middle">the new weights</text>
-  <rect class="s-ok"   x="360" y="276" width="200" height="26" rx="5"/>
-  <text class="note" x="460" y="294" text-anchor="middle">HEALTHY</text>
-  <rect class="cell-n" x="570" y="276" width="200" height="26" rx="5"/>
-  <text class="note" x="670" y="294" text-anchor="middle">0</text>
-
-  <text class="lbl" x="14" y="324">shard 2</text>
-  <rect class="s-dead" x="100" y="306" width="250" height="26" rx="5"/>
-  <text class="note" x="225" y="324" text-anchor="middle">nothing at all</text>
-  <rect class="s-dead" x="360" y="306" width="200" height="26" rx="5"/>
-  <text class="note" x="460" y="324" text-anchor="middle">HEALTHY</text>
-  <rect class="s-dead" x="570" y="306" width="200" height="26" rx="5"/>
-  <text class="note" x="670" y="324" text-anchor="middle">the current version</text>
-
-  <text class="lbl" x="14" y="354">shard 3</text>
-  <rect class="s-ok"   x="100" y="336" width="250" height="26" rx="5"/>
-  <text class="note" x="225" y="354" text-anchor="middle">the new weights</text>
-  <rect class="s-ok"   x="360" y="336" width="200" height="26" rx="5"/>
-  <text class="note" x="460" y="354" text-anchor="middle">HEALTHY</text>
-  <rect class="cell-n" x="570" y="336" width="200" height="26" rx="5"/>
-  <text class="note" x="670" y="354" text-anchor="middle">0</text>
-
-  <text class="note" x="14" y="386">Shard 2 now serves training rollouts from the checkpoint it read off disk at startup, while the trainer is many steps ahead.</text>
-  <text class="note" x="14" y="402">The three shards that did receive the weights read 0, because only the promotion ever writes that number — see below.</text>
+  <!-- legend -->
+  <rect class="band-bad" x="640" y="352" width="18" height="14" rx="3"/>
+  <text class="note" x="666" y="364">wrongly promoted</text>
+  <rect class="band-ok" x="640" y="372" width="18" height="14" rx="3"/>
+  <text class="note" x="666" y="384">correctly skipped</text>
 </svg>
-<p class="cap">Shard 2 did not fail during this refit. It died in an earlier step and has been
-reloading ever since, so when this refit fixed its membership shard 2 was already
-<code>RESTARTING</code> — absent, and correctly left out. That part works. The new thing is
-<em>when</em> the reload finishes: it takes minutes and nothing blocks it, so it can land at any
-moment, including in the middle of a refit it was never part of.</p>
+
+<p>
+The window that closed is the big one. <code>participants</code> is read before the transfer, so a
+reload that lands while weights are moving — which is where it usually lands, because the transfer
+is the long part — no longer counts. What is left is the narrow window before that read, while the
+communicator is still being rebuilt. A shard that turns STALE there is in <code>participants</code>
+but not in the communicator, so the promotion still lets it out on the strength of a transfer it
+never received.
+</p>
 
 <h2>Why nothing catches it</h2>
 
