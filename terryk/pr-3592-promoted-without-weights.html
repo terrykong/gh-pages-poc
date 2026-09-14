@@ -33,6 +33,14 @@ nav.chain a,nav.chain span{display:inline-block;padding:5px 11px;border:1px soli
 nav.chain a:hover{background:var(--surface2)}
 nav.chain span.here{background:var(--accent);color:var(--bg);border-color:var(--accent);font-weight:600}
 p.chainnote{color:var(--dim);font-size:12px;margin:0 0 18px}
+.status{border:1px solid var(--border);border-radius:10px;background:var(--surface);
+  padding:2px 16px 10px;margin:0 0 20px}
+.status dl{display:grid;grid-template-columns:max-content 1fr;gap:4px 14px;margin:12px 0 0}
+.status dt{color:var(--dim);font-size:12px;text-transform:uppercase;letter-spacing:.04em;
+  white-space:nowrap;padding-top:2px}
+.status dd{margin:0;font-size:14px}
+.verdict{font-weight:700}
+.verdict.partial{color:var(--orange)}
 #theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);
   border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;
   font:13px/1 ui-monospace,Menlo,monospace;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.18)}
@@ -79,7 +87,7 @@ svg a text{text-decoration:underline;fill:var(--accent);font:11px ui-monospace,M
 <h1>How a shard gets marked healthy by a refit that never sent it any weights</h1>
 <p class="sub">Companion illustration for
 <a href="https://github.com/NVIDIA-NeMo/RL/pull/3592">NVIDIA-NeMo/RL #3592</a>.
-Permalinks pin the PR head <code>5b4a732</code>.</p>
+Permalinks pin the PR head <code>a815a8cb</code>.</p>
 
 <nav class="chain">
   <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-3592-shard-comes-back.html">why it never came back</a>
@@ -92,16 +100,33 @@ Permalinks pin the PR head <code>5b4a732</code>.</p>
 </nav>
 <p class="chainnote">Seven pages on this PR, one question each — this one: one bug, start to finish.</p>
 
+<div class="status">
+<dl>
+  <dt>Before</dt>
+  <dd>The promotion asked each shard only "are you STALE?", so a shard that finished restarting
+      in the middle of a refit was marked healthy holding the checkpoint it read off disk.</dd>
+  <dt>This PR</dt>
+  <dd>Adds <code>participants</code> — the shards eligible for this refit — and promotes only
+      shards that are STALE <em>and</em> in that set.</dd>
+  <dt>Status</dt>
+  <dd><span class="verdict partial">Partly fixed.</span> The guard landed and closes the wide
+      version of this. It builds its set from a second read of the fleet rather than from the set
+      the communicator was built over, so a narrower window is still open — raised in review, not
+      yet addressed.</dd>
+</dl>
+</div>
+
 <p>A generation engine that restarts comes back holding whatever weights it read off disk at
 startup, so the ledger parks it in <code>STALE</code>: the process is alive and can join a weight
 transfer, but it is not allowed to answer requests. The
-<a href="https://github.com/NVIDIA-NeMo/RL/blob/5b4a732d9fcc2034381d146f752e4983d062bed3/nemo_rl/models/generation/fleet_health.py#L15">module docstring</a>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/a815a8cb6570d5f80caf7407d012717e919cd5aa/nemo_rl/models/generation/fleet_health.py#L15">module docstring</a>
 is firm that a completed weight transfer — a <em>refit</em> — is the only way out of
 <code>STALE</code>. The code that does the letting-out,
-<a href="https://github.com/NVIDIA-NeMo/RL/blob/5b4a732d9fcc2034381d146f752e4983d062bed3/nemo_rl/algorithms/single_controller.py#L2612"><code>_promote_refit_shards</code></a>,
-asks each shard <em>"are you STALE?"</em> and never <em>"were you in the group I just sent weights
-to?"</em> Before this PR those two questions always had the same answer. This PR adds a way for a
-shard to turn <code>STALE</code> in the middle of a refit, and the question was never updated.</p>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/a815a8cb6570d5f80caf7407d012717e919cd5aa/nemo_rl/algorithms/single_controller.py#L3603"><code>_record_refit_landed</code></a>,
+used to ask each shard only <em>"are you STALE?"</em> and never <em>"were you in the group I just
+sent weights to?"</em> Before this PR those two questions always had the same answer. This PR adds
+a way for a shard to turn <code>STALE</code> in the middle of a refit, so it now asks both — and
+the figure below is the case that still slips through.</p>
 
 <svg viewBox="0 0 940 428" role="img" aria-label="Shard 2 finishes restarting in the middle of a refit it was never part of, and the end of that refit promotes it to healthy anyway">
   <text class="hdr" x="150" y="20" text-anchor="middle">membership settled</text>
@@ -125,10 +150,10 @@ shard to turn <code>STALE</code> in the middle of a refit, and the question was 
   <text class="note" x="860" y="113" text-anchor="middle">HEALTHY</text>
 
   <text class="bad" x="600" y="140" text-anchor="middle">the reload lands here</text>
-  <a href="https://github.com/NVIDIA-NeMo/RL/blob/5b4a732d9fcc2034381d146f752e4983d062bed3/nemo_rl/models/generation/engine_supervisor.py#L128" target="_blank" rel="noopener">
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/a815a8cb6570d5f80caf7407d012717e919cd5aa/nemo_rl/models/generation/engine_supervisor.py#L174" target="_blank" rel="noopener">
     <text x="600" y="155" text-anchor="middle">engine_supervisor.py L128</text></a>
   <text class="bad" x="810" y="140" text-anchor="middle">promote every STALE shard</text>
-  <a href="https://github.com/NVIDIA-NeMo/RL/blob/5b4a732d9fcc2034381d146f752e4983d062bed3/nemo_rl/algorithms/single_controller.py#L2629" target="_blank" rel="noopener">
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/a815a8cb6570d5f80caf7407d012717e919cd5aa/nemo_rl/algorithms/single_controller.py#L3647" target="_blank" rel="noopener">
     <text x="810" y="155" text-anchor="middle">single_controller.py L2629</text></a>
 
   <rect class="s-rest"  x="14"  y="172" width="16" height="11" rx="2"/>
@@ -194,45 +219,64 @@ publishes a per-shard weight version with the comment
 trainer is a correctness bug, not a capacity problem."</em></p>
 
 <p>It cannot catch it, because the number is written by the promotion rather than by the transfer.
-<a href="https://github.com/NVIDIA-NeMo/RL/blob/5b4a732d9fcc2034381d146f752e4983d062bed3/nemo_rl/models/generation/fleet_health.py#L476"><code>report_refit</code> L476</a>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/a815a8cb6570d5f80caf7407d012717e919cd5aa/nemo_rl/models/generation/fleet_health.py#L499"><code>report_refit</code> L476</a>
 is the only line in the repo that assigns it, and <code>report_refit</code> is only ever called
 from the promotion, only for shards that are <code>STALE</code>. So a shard that has never been
 restarted never goes through it and reads <code>0</code> forever, however many refits it has
 received — and the one shard that got nothing reads the current version, because the promotion is
 what put it there. The metric says the opposite of the truth in both directions.</p>
 
-<h2>The fix: promote the shards you actually sent weights to</h2>
+<h2>What shipped, and where it still leaks</h2>
 
-<p>The right set is already computed and already at hand. Every rebuild produces a
-<a href="https://github.com/NVIDIA-NeMo/RL/blob/5b4a732d9fcc2034381d146f752e4983d062bed3/nemo_rl/weight_sync/membership.py#L47"><code>RefitMembership.surviving_shards</code></a>
-— the shards the communicator was built over — and the synchronizer keeps it in
-<a href="https://github.com/NVIDIA-NeMo/RL/blob/5b4a732d9fcc2034381d146f752e4983d062bed3/nemo_rl/weight_sync/collective_weight_synchronizer.py#L347"><code>_built_membership</code></a>.
-It is the list of shards that received the weights.</p>
+<p>
+The PR takes the right shape. It computes the eligible set once, before the transfer, and promotes
+against it:
+</p>
 
-<div class="mono"><span class="c"># today — single_controller.py L2612</span>
-for health in self._gen_fleet.snapshot():
-    if health.state is ShardState.STALE:          <span class="bad"># shard 2 is STALE, so it is promoted</span>
-        self._gen_fleet.report_refit(health.dp_shard_idx,
-                                     weight_version=self._trainer_version)
-<span class="c">#   shard 0 -> HEALTHY   shard 1 -> HEALTHY   shard 3 -> HEALTHY   (never STALE, so skipped)</span>
-<span class="bad">#   shard 2 -> HEALTHY   with the current weight_version stamped on it</span></div>
+<div class="mono"><span class="c"># single_controller.py L4705 — before the transfer</span>
+participants = self._refit_participants()
+<span class="c"># ... weight transfer ...</span>
+self._record_refit_landed(participants)   <span class="c"># STALE *and* in participants</span></div>
 
-<div class="mono"><span class="c"># with the group that was actually refit</span>
-refitted = membership.surviving_shards            <span class="good"># [0, 1, 3] — shard 2 was absent</span>
-for health in self._gen_fleet.snapshot():
-    if health.state is ShardState.STALE and health.dp_shard_idx in refitted:
-        self._gen_fleet.report_refit(...)
-<span class="c">#   shard 2 stays STALE. It is not absent, so the next refit includes it,</span>
-<span class="good">#   receives the weights, and promotes it then — a few seconds later, and correct.</span></div>
+<p>
+The comment above it names the hazard exactly: <em>"a restart takes minutes and nothing blocks it,
+so mark_loaded can turn a shard STALE mid-transfer."</em> Right idea. The gap is where
+<code>participants</code> gets its answer.
+</p>
 
-<p>There are two windows where this happens, not one. The membership is fixed at the
-<a href="https://github.com/NVIDIA-NeMo/RL/blob/5b4a732d9fcc2034381d146f752e4983d062bed3/nemo_rl/algorithms/single_controller.py#L3065">last reconcile before the transfer</a>
-and the promotion runs at
-<a href="https://github.com/NVIDIA-NeMo/RL/blob/5b4a732d9fcc2034381d146f752e4983d062bed3/nemo_rl/algorithms/single_controller.py#L3107">L3107</a>.
-On the recovery path there is a second gap, between the rebuild and the
-<a href="https://github.com/NVIDIA-NeMo/RL/blob/5b4a732d9fcc2034381d146f752e4983d062bed3/nemo_rl/algorithms/single_controller.py#L3100">promotion after the retry</a>.
-The recovery one is the more likely of the two: the shard is restarting <em>because</em> that
-refit just failed, so a reload landing inside the retry is the expected case rather than bad luck.</p>
+<div class="mono"><span class="c"># _reconcile_refit_membership — the communicator is built from THIS read</span>
+absent = self._gen_fleet.absent_shards()            <span class="c"># shard 2 absent -> excluded</span>
+await asyncio.to_thread(reconcile_communicator, absent, force)
+<span class="c">#      ^ this await yields the loop. mark_loaded runs here. shard 2 -> STALE</span>
+
+<span class="c"># back in _sync_weights — participants asks the fleet AGAIN</span>
+participants = self._refit_participants()           <span class="c"># reads absent_shards() a second time</span>
+<span class="c">#      shard 2 is STALE now, and STALE is not absent -> shard 2 IS in participants</span></div>
+
+<p>
+So the two sets come from two different reads with an <code>await</code> between them. A reload
+landing in that gap puts shard 2 in <code>participants</code> while the communicator was built
+without it — and the promotion lets it out on the strength of a transfer it never received.
+</p>
+
+<h2>The fix — proposed, not in the PR</h2>
+
+<p>
+Nothing below is implemented. The right set is the one the reconcile already used. Have
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/a815a8cb6570d5f80caf7407d012717e919cd5aa/nemo_rl/algorithms/single_controller.py#L3422"><code>_reconcile_refit_membership</code></a> return the <code>absent</code>
+set it reconciled against, and have
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/a815a8cb6570d5f80caf7407d012717e919cd5aa/nemo_rl/algorithms/single_controller.py#L3583"><code>_refit_participants</code></a> take that set instead of calling
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/a815a8cb6570d5f80caf7407d012717e919cd5aa/nemo_rl/algorithms/single_controller.py#L3596"><code>absent_shards()</code></a> itself. Then one read feeds both, and there
+is no gap to land in.
+</p>
+
+<p>
+Both call sites need it — the main one at
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/a815a8cb6570d5f80caf7407d012717e919cd5aa/nemo_rl/algorithms/single_controller.py#L4705">L4705</a> and the recovery re-snapshot at
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/a815a8cb6570d5f80caf7407d012717e919cd5aa/nemo_rl/algorithms/single_controller.py#L4739">L4739</a>, where the rebuild happens inside the recovery and
+<code>participants</code> is read after it returns. By the code's own note the recovery one is the
+likelier of the two: the shard is restarting <em>because</em> that refit just failed.
+</p>
 
 <div class="warn">
 <p><strong>What this costs.</strong> The shard serves training rollouts generated from an old
