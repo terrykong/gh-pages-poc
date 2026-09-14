@@ -56,6 +56,7 @@ svg .aS{stroke:var(--green);stroke-width:1.7;fill:none}
 svg .aP{stroke:var(--orange);stroke-width:1.5;fill:none;stroke-dasharray:5 3}
 svg .tokA{fill:var(--orange);opacity:.5;stroke:var(--orange)}
 svg .tokC{fill:var(--purple);opacity:.5;stroke:var(--purple)}
+svg .tokT{fill:var(--red);opacity:.22;stroke:var(--red)}
 svg .tokP{fill:var(--dim);opacity:.22;stroke:var(--dim)}
 svg .greentxt{fill:var(--green);font:bold 11px -apple-system,sans-serif}
 svg .orangetxt{fill:var(--orange);font:bold 11px -apple-system,sans-serif}
@@ -88,14 +89,19 @@ current-main links pinned to <code>f31f793</code>, #3380 links to <code>b84eba1<
 
 <p>
 Packing puts several short conversations into one long row so the GPU is not multiplying through
-padding. NeMo-RL has one way to do this today and two more proposed in open PRs. They differ only in
+padding. NeMo-RL has one way to do this today and two more proposed in open PRs. They differ in
 <em>when</em> the boundaries are decided — at dataset build, at data load, or at the training step —
-and they all hand the model the same object in the end.
+and in how much padding that decision leaves behind.
+</p>
+<p>
+The map below carries the same two conversations through all three: <strong>A is 5 tokens, B is
+10</strong>. Watch the third column — every path produces the same real boundaries and a differently
+sized row.
 </p>
 
 <h2>The map</h2>
 
-<svg viewBox="0 0 1000 560" role="img" aria-label="Three packing paths on a time axis, converging on PackedSeqParams">
+<svg viewBox="0 0 1000 560" role="img" aria-label="Three packing paths: what each starts from, where it packs, and what comes out">
   <defs>
     <marker id="gs" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto">
       <path d="M0,0 L7,3.5 L0,7 z" fill="var(--green)"/></marker>
@@ -103,57 +109,97 @@ and they all hand the model the same object in the end.
       <path d="M0,0 L7,3.5 L0,7 z" fill="var(--orange)"/></marker>
   </defs>
 
-  <text class="tick" x="0" y="14">BEFORE TRAINING</text>
-  <text class="tick" x="330" y="14">WHILE READING DATA</text>
-  <text class="tick" x="660" y="14">INSIDE THE TRAINING STEP</text>
-  <line class="lane" x1="0" y1="24" x2="1000" y2="24"/>
-  <line class="lane" x1="322" y1="24" x2="322" y2="330"/>
-  <line class="lane" x1="652" y1="24" x2="652" y2="330"/>
+  <text class="tick" x="104" y="13">WHAT IT STARTS FROM</text>
+  <text class="tick" x="356" y="13">WHERE IT PACKS</text>
+  <text class="tick" x="616" y="13">THE ROW IT HANDS ON</text>
+  <line class="lane" x1="0" y1="20" x2="1000" y2="20"/>
+  <line class="lane" x1="96" y1="20" x2="96" y2="400"/>
+  <line class="lane" x1="348" y1="20" x2="348" y2="400"/>
+  <line class="lane" x1="608" y1="20" x2="608" y2="400"/>
 
-  <text class="orangetxt" x="0" y="48">1 · OFFLINE PREPACKED</text>
-  <text class="note" x="0" y="64">proposed in #3380, not on main</text>
-  <rect class="boxP" x="0" y="74" width="290" height="58" rx="7"/>
-  <text class="lbl-b" x="12" y="94">dataset build packs</text>
-  <text class="note" x="12" y="110">boundaries written into the row</text>
-  <text class="note" x="12" y="124">and replayed every epoch</text>
-  <path class="aP" d="M294 103 L 960 103 L 960 392" marker-end="url(#op)"/>
-  <text class="note" x="300" y="98">row is read as-is, nothing re-packs</text>
+  <text class="orangetxt" x="0" y="52">1 OFFLINE</text>
+  <text class="note" x="0" y="68">#3380</text>
+  <text class="note" x="0" y="82">not on main</text>
+  <rect class="tokA" x="104" y="40" width="46" height="15" rx="2"/><text class="c-txt" x="112" y="52">conv A</text>
+  <rect class="tokC" x="104" y="60" width="78" height="15" rx="2"/><text class="c-txt" x="118" y="72">conv B</text>
+  <text class="note" x="196" y="52">raw conversations,</text>
+  <text class="note" x="196" y="68">before any training run</text>
+  <rect class="boxP" x="356" y="36" width="240" height="46" rx="6"/>
+  <text class="lbl-b" x="368" y="55">a preprocessing script</text>
+  <text class="note" x="368" y="71">writes the packed row to disk</text>
+  <rect class="tokA" x="616" y="44" width="35" height="16" rx="2"/>
+  <rect class="tokC" x="651" y="44" width="70" height="16" rx="2"/>
+  <rect class="tokP" x="721" y="44" width="7" height="16" rx="2"/>
+  <text class="note" x="738" y="56">16 wide, chosen when written</text>
+  <text class="lbl" x="616" y="78">cu_seqlens [0, 5, 15] — stored in the row</text>
+  <text class="note" x="616" y="94">re-read identically every epoch</text>
 
-  <text class="orangetxt" x="330" y="160">2 · LOADER PACKS</text>
-  <text class="note" x="330" y="176">proposed in #4105, not on main</text>
-  <rect class="boxP" x="330" y="186" width="290" height="74" rx="7"/>
-  <text class="lbl-b" x="342" y="206">Energon packs</text>
-  <text class="note" x="342" y="222">buffers samples, fills bins,</text>
-  <text class="note" x="342" y="236">pads each pack to the full width</text>
-  <a href="https://github.com/NVIDIA-NeMo/RL/blob/f31f7930bbbc222a87c17e16f448900bc0e99ed9/nemo_rl/data/energon/multimodal/packing.py#L89"><text x="342" y="252">packing.py:89</text></a>
-  <path class="aP" d="M624 215 L 930 215 L 930 392" marker-end="url(#op)"/>
-  <text class="note" x="630" y="210">worker passes it through</text>
+  <line class="lane" x1="96" y1="110" x2="1000" y2="110"/>
 
-  <text class="greentxt" x="660" y="272">3 · TRAINER PACKS</text>
-  <text class="note" x="660" y="288">on main today</text>
-  <rect class="boxS" x="660" y="298" width="290" height="74" rx="7"/>
-  <text class="lbl-b" x="672" y="318">policy worker packs</text>
-  <text class="note" x="672" y="334">bin-packs whatever landed in</text>
-  <text class="note" x="672" y="348">this batch, every step</text>
-  <a href="https://github.com/NVIDIA-NeMo/RL/blob/f31f7930bbbc222a87c17e16f448900bc0e99ed9/nemo_rl/models/megatron/data.py#L1284"><text x="672" y="364">megatron/data.py:1284</text></a>
-  <path class="aS" d="M805 376 L 805 392" marker-end="url(#gs)"/>
+  <text class="orangetxt" x="0" y="146">2 LOADER</text>
+  <text class="note" x="0" y="162">#4105</text>
+  <text class="note" x="0" y="176">not on main</text>
+  <rect class="tokA" x="104" y="134" width="46" height="15" rx="2"/>
+  <rect class="tokC" x="154" y="134" width="60" height="15" rx="2"/>
+  <rect class="tokA" x="104" y="154" width="54" height="15" rx="2"/>
+  <rect class="tokC" x="162" y="154" width="44" height="15" rx="2"/>
+  <text class="note" x="222" y="146">samples streaming in,</text>
+  <text class="note" x="222" y="162">buffered a window at a time</text>
+  <rect class="boxP" x="356" y="130" width="240" height="46" rx="6"/>
+  <text class="lbl-b" x="368" y="149">the Energon loader</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/f31f7930bbbc222a87c17e16f448900bc0e99ed9/nemo_rl/data/energon/multimodal/packing.py#L89"><text x="368" y="167">packing.py:89</text></a>
+  <rect class="tokA" x="616" y="138" width="35" height="16" rx="2"/>
+  <rect class="tokP" x="651" y="138" width="21" height="16" rx="2"/>
+  <rect class="tokC" x="672" y="138" width="70" height="16" rx="2"/>
+  <rect class="tokP" x="742" y="138" width="14" height="16" rx="2"/>
+  <rect class="tokT" x="756" y="138" width="112" height="16" rx="2"/><text class="c-txt" x="786" y="150">tail pad</text>
+  <text class="note" x="876" y="150">36 wide</text>
+  <text class="lbl" x="616" y="172">cu_seqlens [0, 5, 15]</text>
+  <text class="lbl" x="800" y="172">padded [0, 8, 36]</text>
+  <text class="note" x="616" y="188">always the full max_input_seq_length</text>
 
-  <rect class="boxM" x="600" y="396" width="400" height="54" rx="8"/>
-  <text class="acctxt" x="616" y="418">PackedSeqParams(qkv_format="thd")</text>
-  <text class="note" x="616" y="436">one flat token run + a boundary list</text>
+  <line class="lane" x1="96" y1="204" x2="1000" y2="204"/>
 
-  <text class="lbl-b" x="0" y="404">What every path must produce</text>
-  <rect class="tokA" x="0" y="416" width="52" height="15" rx="2"/><text class="c-txt" x="10" y="428">conv A</text>
-  <rect class="tokP" x="52" y="416" width="20" height="15" rx="2"/>
-  <rect class="tokC" x="72" y="416" width="78" height="15" rx="2"/><text class="c-txt" x="92" y="428">conv B</text>
-  <rect class="tokP" x="150" y="416" width="18" height="15" rx="2"/>
-  <text class="note" x="0" y="450">a flat row, plus cu_seqlens saying where each conversation ends</text>
+  <text class="greentxt" x="0" y="240">3 TRAINER</text>
+  <text class="note" x="0" y="256">on main</text>
+  <text class="note" x="0" y="270">today</text>
+  <rect class="tokA" x="104" y="228" width="35" height="15" rx="2"/>
+  <rect class="tokP" x="139" y="228" width="35" height="15" rx="2"/>
+  <rect class="tokC" x="104" y="248" width="70" height="15" rx="2"/>
+  <text class="note" x="188" y="240">a padded rectangle,</text>
+  <text class="note" x="188" y="256">2 rows of 10</text>
+  <rect class="boxS" x="356" y="224" width="240" height="46" rx="6"/>
+  <text class="lbl-b" x="368" y="243">the policy worker, per step</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/f31f7930bbbc222a87c17e16f448900bc0e99ed9/nemo_rl/models/megatron/data.py#L1284"><text x="368" y="261">megatron/data.py:1284</text></a>
+  <rect class="tokA" x="616" y="232" width="35" height="16" rx="2"/>
+  <rect class="tokP" x="651" y="232" width="21" height="16" rx="2"/>
+  <rect class="tokC" x="672" y="232" width="70" height="16" rx="2"/>
+  <rect class="tokP" x="742" y="232" width="14" height="16" rx="2"/>
+  <text class="note" x="772" y="244">20 wide, sized to this batch</text>
+  <text class="lbl" x="616" y="266">cu_seqlens [0, 5, 15]</text>
+  <text class="lbl" x="800" y="266">padded [0, 8, 20]</text>
+  <text class="note" x="616" y="282">rebuilt every step, discarded after</text>
 
-  <line class="lane" x1="0" y1="476" x2="1000" y2="476"/>
-  <text class="lbl-b" x="0" y="500">The trade, in one line each</text>
-  <text class="note" x="0" y="520">1 · decided once, identical every epoch — reproducible, but a bad row stays bad</text>
-  <text class="note" x="0" y="536">2 · decided as data streams in — no per-step cost, but every pack ships at full width</text>
-  <text class="note" x="0" y="552">3 · decided from the batch at hand — tightest rows, paid for on the GPU every step</text>
+  <line class="lane" x1="0" y1="300" x2="1000" y2="300"/>
+
+  <text class="lbl-b" x="0" y="324">All three agree on the real boundaries — cu_seqlens [0, 5, 15]. They disagree only on the padding.</text>
+
+  <path class="aP" d="M960 96 L 984 96 L 984 348 L 706 348" marker-end="url(#op)"/>
+  <path class="aP" d="M960 190 L 972 190 L 972 340 L 706 340" marker-end="url(#op)"/>
+  <path class="aS" d="M960 284 L 966 284 L 966 332 L 706 332" marker-end="url(#gs)"/>
+
+  <rect class="boxM" x="300" y="326" width="400" height="54" rx="8"/>
+  <text class="acctxt" x="316" y="348">PackedSeqParams(qkv_format="thd")</text>
+  <text class="note" x="316" y="366">one flat token run + a boundary list</text>
+
+  <text class="lbl-b" x="0" y="420">Reading the row</text>
+  <rect class="tokA" x="112" y="410" width="16" height="13" rx="2"/><text class="note" x="134" y="420">conversation A, 5 tokens</text>
+  <rect class="tokC" x="284" y="410" width="16" height="13" rx="2"/><text class="note" x="306" y="420">conversation B, 10 tokens</text>
+  <rect class="tokP" x="462" y="410" width="16" height="13" rx="2"/><text class="note" x="484" y="420">padding between them</text>
+  <rect class="tokT" x="628" y="410" width="16" height="13" rx="2"/><text class="note" x="650" y="420">tail padding, path 2 only</text>
+
+  <text class="note" x="0" y="450">Bar width is token count, so the three output rows are drawn to the same scale: 16, 36 and 20 tokens wide.</text>
+  <text class="note" x="0" y="468">Path 1 picks its width once. Path 2 always uses the configured maximum. Path 3 uses only what this batch needs.</text>
 </svg>
 
 <h2>Side by side</h2>
