@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>NVIDIA-NeMo/RL #3929 — what happens to a half-finished request when the weights change</title>
+<title>NVIDIA-NeMo/RL #3929 — the KV-cache reset flag did nothing on SingleController, and this PR makes it work</title>
 <style>
 :root{
   --bg:#0d1117; --surface:#161b22; --surface2:#1c2128; --border:#30363d;
@@ -33,6 +33,14 @@ nav.chain a,nav.chain span{display:inline-block;padding:5px 11px;border:1px soli
 nav.chain a:hover{background:var(--surface2)}
 nav.chain span.here{background:var(--accent);color:var(--bg);border-color:var(--accent);font-weight:600}
 p.chainnote{color:var(--dim);font-size:12px;margin:0 0 18px}
+.status{border:1px solid var(--border);border-radius:10px;background:var(--surface);
+  padding:2px 16px 10px;margin:0 0 20px}
+.status dl{display:grid;grid-template-columns:max-content 1fr;gap:4px 14px;margin:12px 0 0}
+.status dt{color:var(--dim);font-size:12px;text-transform:uppercase;letter-spacing:.04em;
+  white-space:nowrap;padding-top:2px}
+.status dd{margin:0;font-size:14px}
+.verdict{font-weight:700}
+.verdict.good{color:var(--green)}
 #theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);
   border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;
   font:13px/1 ui-monospace,Menlo,monospace;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.18)}
@@ -41,22 +49,19 @@ p.chainnote{color:var(--dim);font-size:12px;margin:0 0 18px}
   padding:13px;overflow-x:auto;white-space:pre;margin:10px 0}
 .warn{border-left:3px solid var(--red);background:var(--surface);
   padding:12px 16px;margin:18px 0;border-radius:0 8px 8px 0}
-.hl{border-left:3px solid var(--green);background:var(--surface);
-  padding:12px 16px;margin:18px 0;border-radius:0 8px 8px 0}
 .src{color:var(--dim);font:11.5px ui-monospace,Menlo,monospace;margin:-4px 0 14px}
 table{border-collapse:collapse;margin:12px 0;font-size:13.5px;width:100%}
-th,td{border:1px solid var(--border);padding:6px 10px;text-align:left}
+th,td{border:1px solid var(--border);padding:7px 10px;text-align:left;vertical-align:top}
 th{background:var(--surface2);font-weight:600}
+td.bad{color:var(--red);font-weight:600}
+td.ok{color:var(--green);font-weight:600}
 svg{max-width:100%;height:auto;display:block;margin:16px 0}
-svg .box{fill:var(--surface);stroke:var(--border);stroke-width:1.4}
 svg .lbl{fill:var(--text);font:12.5px ui-monospace,Menlo,monospace}
 svg .lbl-b{fill:var(--text);font:bold 13px -apple-system,sans-serif}
 svg .note{fill:var(--dim);font:11.5px -apple-system,sans-serif}
-svg .hdr{fill:var(--accent);font:bold 12.5px -apple-system,sans-serif}
 svg .c-old{fill:var(--red);opacity:.42;stroke:var(--red);stroke-width:1.3}
 svg .c-new{fill:var(--green);opacity:.5;stroke:var(--green);stroke-width:1.3}
 svg .c-pro{fill:var(--dim);opacity:.26;stroke:var(--dim);stroke-width:1.3}
-svg .c-gone{fill:none;stroke:var(--dim);stroke-width:1.3;stroke-dasharray:3 3}
 svg .c-txt{fill:var(--text);font:11px ui-monospace,Menlo,monospace}
 svg .mark{stroke:var(--orange);stroke-width:2.2;fill:none;stroke-dasharray:5 4}
 svg .mark-lbl{fill:var(--orange);font:bold 12px -apple-system,sans-serif}
@@ -78,36 +83,65 @@ svg a text{text-decoration:underline;fill:var(--accent);font:11.5px ui-monospace
 
 <div class="wrap">
 
-<h1>What happens to a half-finished request when the training weights change under it</h1>
+<h1>The KV-cache reset flag did nothing on SingleController — this PR makes it work</h1>
 <p class="sub">
 NVIDIA-NeMo/RL <a href="https://github.com/NVIDIA-NeMo/RL/pull/3929">#3929</a> ·
-all links pinned at <code>ae0ca278</code> ·
+all links pinned at <code>c877a8e2</code> ·
 the same feature on the legacy path is <a href="https://github.com/NVIDIA-NeMo/RL/pull/3839">#3839</a>
 </p>
 
 <nav class="chain">
-  <span class="here">1 · stale KV across a refit</span>
+  <span class="here">1 · does the reset flag work</span>
   <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-3929-frozen-failure.html">2 · when the refit fails</a>
 </nav>
-<p class="chainnote">Two pages on this PR, one question each — this one: why the freeze is needed at all.</p>
+<p class="chainnote">Two pages on this PR, one question each — this one: a bug the PR fixes.</p>
+
+<div class="status">
+<dl>
+  <dt>Before</dt>
+  <dd>On SingleController + vLLM, setting <code>recompute_kv_cache_after_weight_updates=true</code>
+      changed nothing. The code ran, cleared no cache, and reported success.</dd>
+  <dt>This PR</dt>
+  <dd>Freezes in-flight requests for the weight swap and hands the flag to vLLM's own pause, which
+      really does drop their cached attention state.</dd>
+  <dt>Status</dt>
+  <dd><span class="verdict good">Fixed by this PR.</span> Both cache modes now behave as documented.
+      Open problems on the <em>failure</em> path are
+      <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-3929-frozen-failure.html">page 2</a>.</dd>
+</dl>
+</div>
+
+<h2>Two ways to handle the cache, and both are legitimate</h2>
 
 <p>
 In async RL the model trains and generates at the same time. Every training step copies fresh
-weights into the generation engine — that copy is called a <b>refit</b>. Requests that are only
-part-way through generating do not stop for it. Each of those requests carries a KV cache: the
-saved attention state for every token so far, computed with whatever weights were loaded at the
-time. So after a refit, a request keeps decoding with new weights while reading a cache built by
-the old ones. NeMo-RL has a flag meant to deal with this,
-<code>recompute_kv_cache_after_weight_updates</code>. On the SingleController path it did nothing.
+weights into the generation engine — that copy is a <b>refit</b>. A request that is only part-way
+through generating carries a KV cache: the saved attention state for every token so far, computed
+with whatever weights were loaded at the time. After a refit that saved state is out of date, and
+there are two accepted answers to what you do about it. NeMo-RL names them both in its own code.
 </p>
 
-<h2>The old behavior</h2>
+<table>
+<tr><th>Mode</th><th>Setting</th><th>What it does</th></tr>
+<tr><td><b>Magistral</b></td><td><code>recompute_kv_cache_after_weight_updates: false</code></td>
+    <td>Keep the stale cache. Cheaper; the request finishes using attention state from the old weights.</td></tr>
+<tr><td><b>AREAL</b></td><td><code>recompute_kv_cache_after_weight_updates: true</code></td>
+    <td>Throw the cache away so it is rebuilt with the new weights. Costs a recompute; more correct.</td></tr>
+</table>
+<p class="src">the two names come from the repo —
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/c877a8e22970ac2dd79436cf4541637528bff7df/nemo_rl/algorithms/async_utils/trajectory_collector.py#L1121">trajectory_collector.py:1121-1122</a></p>
 
-<svg viewBox="0 0 900 306" role="img" aria-label="One request's KV cache across a refit: seven entries built with the old weights are still read by the two tokens decoded after the refit.">
+<p>
+Both should work. The bug was that on SingleController you got Magistral behavior no matter which
+one you picked.
+</p>
+
+<h2>What you actually got when you asked for AREAL</h2>
+
+<svg viewBox="0 0 900 300" role="img" aria-label="One request's KV cache across a refit: seven entries built with the old weights are still read by the two tokens decoded after the refit.">
   <text class="lbl-b" x="14" y="20">One request's KV cache, token by token</text>
   <text class="note" x="14" y="38">4-token prompt, 3 tokens decoded, then a refit, then 2 more. Every box is one cached token.</text>
 
-  <!-- prompt cells 0-3 -->
   <rect class="c-pro" x="60"  y="72" width="56" height="42" rx="4"/>
   <rect class="c-pro" x="120" y="72" width="56" height="42" rx="4"/>
   <rect class="c-pro" x="180" y="72" width="56" height="42" rx="4"/>
@@ -117,7 +151,6 @@ the old ones. NeMo-RL has a flag meant to deal with this,
   <text class="c-txt" x="208" y="98" text-anchor="middle">3</text>
   <text class="c-txt" x="268" y="98" text-anchor="middle">4</text>
 
-  <!-- decoded with v0, cells 4-6 -->
   <rect class="c-old" x="300" y="72" width="56" height="42" rx="4"/>
   <rect class="c-old" x="360" y="72" width="56" height="42" rx="4"/>
   <rect class="c-old" x="420" y="72" width="56" height="42" rx="4"/>
@@ -125,17 +158,14 @@ the old ones. NeMo-RL has a flag meant to deal with this,
   <text class="c-txt" x="388" y="98" text-anchor="middle">6</text>
   <text class="c-txt" x="448" y="98" text-anchor="middle">7</text>
 
-  <!-- decoded with v1, cells 7-8 -->
   <rect class="c-new" x="500" y="72" width="56" height="42" rx="4"/>
   <rect class="c-new" x="560" y="72" width="56" height="42" rx="4"/>
   <text class="c-txt" x="528" y="98" text-anchor="middle">8</text>
   <text class="c-txt" x="588" y="98" text-anchor="middle">9</text>
 
-  <!-- refit marker -->
   <line class="mark" x1="488" y1="58" x2="488" y2="130"/>
   <text class="mark-lbl" x="488" y="52" text-anchor="middle">refit: weights v0 → v1</text>
 
-  <!-- brace-ish spans -->
   <line class="arw" x1="60"  y1="124" x2="296" y2="124"/>
   <text class="note" x="178" y="140" text-anchor="middle">prompt — 4 tokens</text>
   <line class="arw" x1="300" y1="124" x2="476" y2="124"/>
@@ -143,118 +173,70 @@ the old ones. NeMo-RL has a flag meant to deal with this,
   <line class="arw" x1="500" y1="124" x2="616" y2="124"/>
   <text class="note" x="558" y="140" text-anchor="middle">decoded with v1 — 2</text>
 
-  <!-- the point -->
-  <path class="arw" d="M528 158 C 500 178, 300 178, 268 158" marker-end="url(#ah)"/>
-  <text class="lbl" x="60" y="200">tokens 8 and 9 are produced by the new weights, but they attend to all 7 boxes on the left —</text>
-  <text class="lbl" x="60" y="219">every one of which was computed by the old weights.</text>
+  <text class="lbl" x="60" y="184">Tokens 8 and 9 come from the new weights but read all 7 boxes on the left,</text>
+  <text class="lbl" x="60" y="203">every one of which was built by the old weights.</text>
+  <text class="note" x="60" y="228">This is correct behavior in Magistral mode. The bug: you got it in AREAL mode too.</text>
 
-  <!-- legend -->
-  <rect class="c-pro" x="60"  y="240" width="16" height="14" rx="3"/>
-  <text class="note" x="84" y="252">prompt</text>
-  <rect class="c-old" x="150" y="240" width="16" height="14" rx="3"/>
-  <text class="note" x="174" y="252">built with the old weights (v0)</text>
-  <rect class="c-new" x="366" y="240" width="16" height="14" rx="3"/>
-  <text class="note" x="390" y="252">built with the new weights (v1)</text>
-
-  <text class="note" x="60" y="284">The flag that was supposed to clear the red boxes returned success without clearing anything.</text>
-
-  <defs><marker id="ah" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto">
-    <path d="M0,0 L7,3.5 L0,7 z" fill="var(--dim)"/></marker></defs>
+  <rect class="c-pro" x="60"  y="252" width="16" height="14" rx="3"/>
+  <text class="note" x="84" y="264">prompt</text>
+  <rect class="c-old" x="150" y="252" width="16" height="14" rx="3"/>
+  <text class="note" x="174" y="264">built with the old weights (v0)</text>
+  <rect class="c-new" x="366" y="252" width="16" height="14" rx="3"/>
+  <text class="note" x="390" y="264">built with the new weights (v1)</text>
 </svg>
 
 <p>
-The flag's old path called vLLM's <code>reset_prefix_cache()</code> with no arguments. In
-vLLM v0.25.1 that resets the shared prefix cache only when nothing is running — its own docstring
-says it <i>"will only reset the KV prefix cache when there is no running requests taking KV
-cache."</i> During async RL something is always running, so it returned <code>False</code> and
-changed nothing. Two layers then hid that: the NeMo-RL worker method has no <code>return</code>
-statement, so every result was <code>None</code>, and the caller's <code>all(...)</code> ran over an
-empty sequence and reported <code>True</code>.
+Asking for AREAL called vLLM's <code>reset_prefix_cache()</code> with no arguments, which defaults
+to <code>reset_running_requests=False</code>. Upstream only clears the cache in that case
+<em>"when there is no running requests taking KV cache"</em> — and in async RL something is always
+running, so it did nothing and returned <code>False</code>. That <code>False</code> was then lost
+twice: the NeMo-RL worker method has no <code>return</code> statement, so every result was
+<code>None</code>, and the caller's <code>all(...)</code> ran over an empty sequence and reported
+<code>True</code>.
 </p>
 <p class="src">
-sources —
-<a href="https://github.com/vllm-project/vllm/blob/v0.25.1/vllm/v1/core/sched/scheduler.py#L2196-L2205">vLLM scheduler.reset_prefix_cache</a> ·
-<a href="https://github.com/NVIDIA-NeMo/RL/blob/ae0ca2787a012d02ba3f9af6eccf3a5c54dfe1c8/nemo_rl/models/generation/vllm/vllm_worker_async.py#L1601">the no-argument call</a> ·
-<a href="https://github.com/NVIDIA-NeMo/RL/blob/ae0ca2787a012d02ba3f9af6eccf3a5c54dfe1c8/nemo_rl/models/generation/vllm/vllm_generation.py#L1454">the <code>all(...)</code> over nothing</a>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/c877a8e22970ac2dd79436cf4541637528bff7df/nemo_rl/models/generation/vllm/vllm_worker_async.py#L2011">the no-argument call</a> ·
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/c877a8e22970ac2dd79436cf4541637528bff7df/nemo_rl/models/generation/vllm/vllm_generation.py#L1530">the <code>all(...)</code> over nothing</a> ·
+<a href="https://github.com/vllm-project/vllm/blob/v0.25.1/vllm/v1/core/sched/scheduler.py#L2196-L2205">upstream vLLM says when it clears</a>
 </p>
 
 <h2>What the PR changes</h2>
 
-<p>
-Instead of trying to clear the cache after the refit, the controller now freezes the engine before
-it. Same request, same 9 tokens:
-</p>
+<p>Same request, same 9 tokens. The flag is now handed to the engine's own pause:</p>
 
-<div class="mono"><span style="color:var(--dim)"># 1. the controller asks the engine to pause, and passes the flag straight through</span>
-clear_cache = self._async_cfg.recompute_kv_cache_after_weight_updates   <span style="color:var(--dim)"># True</span>
-await asyncio.to_thread(self._gen.pause_generation_for_refit,
-                        clear_cache=clear_cache)</div>
-<p class="src"><a href="https://github.com/NVIDIA-NeMo/RL/blob/ae0ca2787a012d02ba3f9af6eccf3a5c54dfe1c8/nemo_rl/algorithms/single_controller.py#L3113-L3117">single_controller.py:3113-3117</a></p>
+<div class="mono">clear_cache = self._async_cfg.recompute_kv_cache_after_weight_updates   <span style="color:var(--dim)"># True for AREAL</span>
+await asyncio.to_thread(self._gen.pause_generation_for_refit, clear_cache=clear_cache)
+<span style="color:var(--dim)">#   ... the weight swap happens here, with generation frozen ...</span>
+await asyncio.to_thread(self._gen.resume_generation_after_refit)</div>
+<p class="src"><a href="https://github.com/NVIDIA-NeMo/RL/blob/c877a8e22970ac2dd79436cf4541637528bff7df/nemo_rl/algorithms/single_controller.py#L4587">single_controller.py:4587-4642</a></p>
 
-<div class="mono"><span style="color:var(--dim)"># 2. each engine worker calls vLLM's own pause, in "keep" mode</span>
-await self.llm.pause_generation(mode="keep", clear_cache=clear_cache)
-<span style="color:var(--dim)">#   mode="keep"  -> the request is frozen, not cancelled: it resumes later
-#   clear_cache  -> True, so the 7 cached tokens are thrown away now</span></div>
-<p class="src"><a href="https://github.com/NVIDIA-NeMo/RL/blob/ae0ca2787a012d02ba3f9af6eccf3a5c54dfe1c8/nemo_rl/models/generation/vllm/vllm_worker_async.py#L1616">vllm_worker_async.py:1616</a></p>
-
-<div class="mono"><span style="color:var(--dim)"># 3. inside vLLM: this path DOES touch running requests, unlike the old one</span>
-reset_prefix_cache(reset_running_requests=True)    <span style="color:var(--dim)"># the old call left this False</span>
-<span style="color:var(--dim)">#   every running request is preempted back to the waiting queue,
-#   which drops its KV to a reference count of 0 -- the 7 boxes are gone.
-#   on resume the request re-reads its 7 tokens with v1, then decodes 8 and 9.</span></div>
+<div class="mono">await self.llm.pause_generation(mode="keep", clear_cache=clear_cache)
+<span style="color:var(--dim)">#   mode="keep"  -> the request is frozen, not cancelled: it continues later
+#   clear_cache  -> True reaches reset_prefix_cache(reset_running_requests=True),
+#                   which preempts the request and drops all 7 cached tokens.
+#                   False keeps them: that is Magistral, and it still works.</span></div>
 <p class="src">
-<a href="https://github.com/vllm-project/vllm/blob/v0.25.1/vllm/v1/engine/core.py#L707-L720">vLLM core._reset_caches</a> ·
-<a href="https://github.com/vllm-project/vllm/blob/v0.25.1/vllm/v1/core/sched/scheduler.py#L2206-L2224">the preempt loop</a>
-</p>
-
-<p>
-The refit runs while everything is frozen, then
-<a href="https://github.com/NVIDIA-NeMo/RL/blob/ae0ca2787a012d02ba3f9af6eccf3a5c54dfe1c8/nemo_rl/algorithms/single_controller.py#L3174-L3176"><code>resume_generation_after_refit()</code></a>
-unfreezes it. The request never dies — it just loses time and recomputes 7 tokens. Backends
-that cannot pause keep their old behavior, and if you asked for recomputation on one of those,
-the run now
-<a href="https://github.com/NVIDIA-NeMo/RL/blob/ae0ca2787a012d02ba3f9af6eccf3a5c54dfe1c8/nemo_rl/algorithms/single_controller.py#L3187">stops with an error</a>
-instead of quietly doing nothing.
-</p>
-
-<h2>Does it work?</h2>
-
-<p>
-The author ran the full 8B GRPO recipe twice on 16×H100 (2 nodes), 10 optimizer steps each, 64
-prompts × 32 generations, batch 2048, sequence length 4096 — once with recomputation on and once
-off. Both finished cleanly.
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/c877a8e22970ac2dd79436cf4541637528bff7df/nemo_rl/models/generation/vllm/vllm_worker_async.py#L2026">vllm_worker_async.py:2026</a> ·
+<a href="https://github.com/vllm-project/vllm/blob/v0.25.1/vllm/v1/engine/core.py#L707-L720">upstream <code>_reset_caches</code></a>
 </p>
 
 <table>
-<tr><th>What was measured</th><th>Result</th></tr>
-<tr><td>pause / refit / resume cycles</td><td>11 per run (one at startup, then one per step)</td></tr>
-<tr><td>in-flight requests preserved across a pause</td><td>58–64 groups on every training refit — none cancelled</td></tr>
-<tr><td>steps completed</td><td>10 / 10, both runs</td></tr>
-<tr><td>with recomputation off vs on</td><td>both ran to completion; W&amp;B curves posted</td></tr>
+<tr><th>Mode</th><th>Before this PR</th><th>After</th></tr>
+<tr><td><b>Magistral</b> (keep cache)</td>
+    <td class="ok">Worked — though the request kept decoding <em>during</em> the weight swap</td>
+    <td class="ok">Works; the request is frozen for the swap, then continues with its cache</td></tr>
+<tr><td><b>AREAL</b> (reset cache)</td>
+    <td class="bad">Silently did nothing, and reported success</td>
+    <td class="ok">Really clears the cache, so tokens 8 and 9 read state rebuilt with v1</td></tr>
 </table>
-<p class="src">run details and the W&amp;B links are in
-<a href="https://github.com/NVIDIA-NeMo/RL/pull/3929#issuecomment-5486191857">this PR comment</a></p>
-
-<p>
-That is a real run and it covers the case this PR is for: every refit succeeded. No shard was
-killed in either run, so nothing below was exercised.
-</p>
-
-<p>
-The freeze is a piece of state living on the engine processes, and a failed refit can leave it
-set. That is its own question — see
-<a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-3929-frozen-failure.html">page 2: what happens
-when the refit fails</a>.
-</p>
-
 
 <div class="warn">
-<b>What to watch out for.</b> If you set
-<code>recompute_kv_cache_after_weight_updates=true</code> on the SingleController path before this
-change, you were not getting recomputation — you were getting a success message. Any earlier result
-that assumed fresh KV after a refit was really running on stale KV, so it is worth re-checking
-before comparing against a run built on this PR. The freeze also costs wall-clock: a request now
-waits for the refit and then recomputes the tokens it had already done.
+<b>What to do about older results.</b> If you ran SingleController + vLLM with
+<code>recompute_kv_cache_after_weight_updates=true</code> before this change, you were not getting
+AREAL — you were getting Magistral with a success message. Any comparison that assumed a fresh
+cache after a refit was really measuring stale-cache behavior, so it is worth re-checking before
+putting it next to a run built on this PR. The freeze also costs wall-clock: in AREAL mode a
+request now waits for the refit and then recomputes the tokens it had already done.
 </div>
 
 </div>
