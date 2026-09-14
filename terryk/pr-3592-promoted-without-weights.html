@@ -133,58 +133,67 @@ sent weights to?"</em> Before this PR those two questions always had the same an
 a way for a shard to turn <code>STALE</code> in the middle of a refit, so it now asks both — and
 the figure below is the case that still slips through.</p>
 
-<svg viewBox="0 0 940 436" role="img" aria-label="Two timelines of one refit. Before the PR a shard finishing its restart in either window was promoted. After the PR only the second window is blocked; a shard finishing during the communicator rebuild is still promoted.">
+<svg viewBox="0 0 940 440" role="img" aria-label="Three timelines of one refit. Before the PR a shard finishing its restart in either window was promoted. After the PR the transfer window is blocked. With the proposed fix both windows are blocked.">
   <text class="lbl-b" x="14" y="20">One refit, and the two moments shard 2 can finish restarting</text>
   <text class="note" x="14" y="38">Shards 0, 1 and 3 are healthy. Shard 2 died earlier and has been reloading for minutes.</text>
 
-  <!-- ===== marker columns ===== -->
-  <line class="tick" x1="150" y1="58" x2="150" y2="386"/>
-  <line class="tick" x1="420" y1="58" x2="420" y2="386"/>
-  <line class="tick" x1="720" y1="58" x2="720" y2="386"/>
-
+  <line class="tick" x1="150" y1="58" x2="150" y2="348"/>
+  <line class="tick" x1="420" y1="58" x2="420" y2="348"/>
+  <line class="tick" x1="720" y1="58" x2="720" y2="348"/>
   <text class="hdr" x="150" y="52" text-anchor="middle">communicator built</text>
   <text class="hdr" x="420" y="52" text-anchor="middle">participants read</text>
   <text class="hdr" x="720" y="52" text-anchor="middle">promote</text>
 
-  <!-- ===== BEFORE ===== -->
-  <text class="lbl-b" x="14" y="92">Before this PR</text>
-  <rect class="band-bad" x="150" y="104" width="270" height="40" rx="4"/>
-  <rect class="band-bad" x="420" y="104" width="300" height="40" rx="4"/>
-  <text class="c-txt" x="285" y="129" text-anchor="middle">A · rebuilding</text>
-  <text class="c-txt" x="570" y="129" text-anchor="middle">B · weight transfer</text>
-  <text class="bad" x="150" y="164">shard 2 finishing in A → promoted</text>
-  <text class="bad" x="420" y="164">shard 2 finishing in B → promoted</text>
-  <text class="note" x="150" y="182">the promotion asked only "are you STALE?", so any reload that had landed counted</text>
+  <!-- row 1 -->
+  <text class="lbl-b" x="14" y="88">Before this PR</text>
+  <rect class="band-bad" x="150" y="96" width="270" height="32" rx="4"/>
+  <rect class="band-bad" x="420" y="96" width="300" height="32" rx="4"/>
+  <text class="c-txt" x="285" y="117" text-anchor="middle">A · rebuilding</text>
+  <text class="c-txt" x="570" y="117" text-anchor="middle">B · weight transfer</text>
+  <text class="bad" x="150" y="146">promoted</text>
+  <text class="bad" x="420" y="146">promoted</text>
+  <text class="note" x="150" y="163">the promotion asked only "are you STALE?", so any reload that had landed counted</text>
 
-  <!-- ===== AFTER ===== -->
-  <text class="lbl-b" x="14" y="232">After this PR</text>
-  <rect class="band-bad" x="150" y="244" width="270" height="40" rx="4"/>
-  <rect class="band-ok" x="420" y="244" width="300" height="40" rx="4"/>
-  <text class="c-txt" x="285" y="269" text-anchor="middle">A · rebuilding</text>
-  <text class="c-txt" x="570" y="269" text-anchor="middle">B · weight transfer</text>
-  <text class="bad" x="150" y="304">still promoted</text>
-  <text class="ok" x="420" y="304">skipped — not in participants</text>
-  <text class="note" x="150" y="322">shard 2 turned STALE before the participants read, so it is in the set the promotion trusts</text>
-  <text class="note" x="420" y="322">shard 2 turned STALE after that read, so the promotion skips it</text>
+  <!-- row 2 -->
+  <text class="lbl-b" x="14" y="196">After this PR</text>
+  <rect class="band-bad" x="150" y="204" width="270" height="32" rx="4"/>
+  <rect class="band-ok"  x="420" y="204" width="300" height="32" rx="4"/>
+  <text class="c-txt" x="285" y="225" text-anchor="middle">A · rebuilding</text>
+  <text class="c-txt" x="570" y="225" text-anchor="middle">B · weight transfer</text>
+  <text class="bad" x="150" y="254">still promoted</text>
+  <text class="ok"  x="420" y="254">skipped</text>
+  <text class="note" x="150" y="271">participants is captured before the transfer, so a reload during it no longer counts</text>
 
-  <!-- ===== the two reads ===== -->
-  <text class="lbl" x="14" y="362">Both windows exist because the set is read twice:</text>
-  <text class="lbl" x="14" y="382">L3443 builds the communicator · L4705 builds participants · an await sits between them</text>
+  <!-- row 3 -->
+  <text class="lbl-b" x="14" y="304">With the proposed fix — not in the PR</text>
+  <rect class="band-ok" x="150" y="312" width="270" height="32" rx="4"/>
+  <rect class="band-ok" x="420" y="312" width="300" height="32" rx="4"/>
+  <text class="c-txt" x="285" y="333" text-anchor="middle">A · rebuilding</text>
+  <text class="c-txt" x="570" y="333" text-anchor="middle">B · weight transfer</text>
+  <text class="ok" x="150" y="362">skipped</text>
+  <text class="ok" x="420" y="362">skipped</text>
+  <text class="note" x="150" y="379">participants comes from the same read that built the communicator — one read, no gap</text>
 
-  <!-- legend -->
-  <rect class="band-bad" x="640" y="352" width="18" height="14" rx="3"/>
-  <text class="note" x="666" y="364">wrongly promoted</text>
-  <rect class="band-ok" x="640" y="372" width="18" height="14" rx="3"/>
-  <text class="note" x="666" y="384">correctly skipped</text>
+  <text class="lbl" x="14" y="408">Shard 2 stays STALE in every green case, and the next refit picks it up properly.</text>
+
+  <rect class="band-bad" x="640" y="398" width="18" height="13" rx="3"/>
+  <text class="note" x="666" y="409">wrongly promoted</text>
+  <rect class="band-ok" x="640" y="418" width="18" height="13" rx="3"/>
+  <text class="note" x="666" y="429">correctly skipped</text>
 </svg>
 
 <p>
-The window that closed is the big one. <code>participants</code> is read before the transfer, so a
-reload that lands while weights are moving — which is where it usually lands, because the transfer
-is the long part — no longer counts. What is left is the narrow window before that read, while the
-communicator is still being rebuilt. A shard that turns STALE there is in <code>participants</code>
-but not in the communicator, so the promotion still lets it out on the strength of a transfer it
-never received.
+The middle row is what this PR bought: <code>participants</code> is captured before the transfer,
+so a reload landing while weights are moving — where it usually lands, because the transfer is the
+long part — no longer counts. The top and middle rows differ in exactly one band.
+</p>
+
+<p>
+The bottom row is what it would take to close the rest, and it is not implemented. The remaining
+window is narrow but it is the same bug: <code>participants</code> is built from a second read of
+the fleet, taken after the reconcile already did its own read and awaited. A shard that turns STALE
+in that gap is in <code>participants</code> but was never in the communicator. Derive the set from
+the read that built the communicator and there is no gap left to land in.
 </p>
 
 <h2>Why nothing catches it</h2>
