@@ -72,6 +72,7 @@ svg .evt{stroke:var(--red);stroke-width:1.8}
 svg a text{text-decoration:underline;fill:var(--accent);font:11px ui-monospace,Menlo,monospace}
 svg .tick{stroke:var(--border);stroke-width:1.2;stroke-dasharray:3 3}
 svg .band-bad{fill:var(--red);opacity:.34;stroke:var(--red);stroke-width:1.2}
+svg .band-mix{fill:var(--orange);opacity:.36;stroke:var(--orange);stroke-width:1.2}
 svg .band-ok{fill:var(--green);opacity:.4;stroke:var(--green);stroke-width:1.2}
 svg .bad{fill:var(--red);font:bold 12px -apple-system,sans-serif}
 svg .ok{fill:var(--green);font:bold 12px -apple-system,sans-serif}
@@ -133,67 +134,65 @@ sent weights to?"</em> Before this PR those two questions always had the same an
 a way for a shard to turn <code>STALE</code> in the middle of a refit, so it now asks both — and
 the figure below is the case that still slips through.</p>
 
-<svg viewBox="0 0 940 440" role="img" aria-label="Three timelines of one refit. Before the PR a shard finishing its restart in either window was promoted. After the PR the transfer window is blocked. With the proposed fix both windows are blocked.">
-  <text class="lbl-b" x="14" y="20">One refit, and the two moments shard 2 can finish restarting</text>
-  <text class="note" x="14" y="38">Shards 0, 1 and 3 are healthy. Shard 2 died earlier and has been reloading for minutes.</text>
+<svg viewBox="0 0 940 300" role="img" aria-label="One refit on a timeline, with the four moments a restarting shard can finish: before the membership read, during the communicator rebuild, during the weight transfer, and after the promotion.">
+  <text class="lbl-b" x="14" y="20">One refit, and the four moments shard 2's restart can finish</text>
+  <text class="note" x="14" y="38">Shard 2 died earlier. Its reload takes minutes and nothing waits for it, so it can land anywhere.</text>
 
-  <line class="tick" x1="150" y1="58" x2="150" y2="348"/>
-  <line class="tick" x1="420" y1="58" x2="420" y2="348"/>
-  <line class="tick" x1="720" y1="58" x2="720" y2="348"/>
-  <text class="hdr" x="150" y="52" text-anchor="middle">communicator built</text>
-  <text class="hdr" x="420" y="52" text-anchor="middle">participants read</text>
-  <text class="hdr" x="720" y="52" text-anchor="middle">promote</text>
+  <line class="tick" x1="200" y1="66" x2="200" y2="168"/>
+  <line class="tick" x1="430" y1="66" x2="430" y2="168"/>
+  <line class="tick" x1="700" y1="66" x2="700" y2="168"/>
+  <text class="hdr" x="200" y="60" text-anchor="middle">membership read · L3443</text>
+  <text class="hdr" x="430" y="60" text-anchor="middle">participants read · L4705</text>
+  <text class="hdr" x="700" y="60" text-anchor="middle">promote · L4745</text>
 
-  <!-- row 1 -->
-  <text class="lbl-b" x="14" y="88">Before this PR</text>
-  <rect class="band-bad" x="150" y="96" width="270" height="32" rx="4"/>
-  <rect class="band-bad" x="420" y="96" width="300" height="32" rx="4"/>
-  <text class="c-txt" x="285" y="117" text-anchor="middle">A · rebuilding</text>
-  <text class="c-txt" x="570" y="117" text-anchor="middle">B · weight transfer</text>
-  <text class="bad" x="150" y="146">promoted</text>
-  <text class="bad" x="420" y="146">promoted</text>
-  <text class="note" x="150" y="163">the promotion asked only "are you STALE?", so any reload that had landed counted</text>
+  <rect class="band-ok"  x="60"  y="78" width="140" height="34" rx="4"/>
+  <rect class="band-bad" x="200" y="78" width="230" height="34" rx="4"/>
+  <rect class="band-mix" x="430" y="78" width="270" height="34" rx="4"/>
+  <rect class="band-ok"  x="700" y="78" width="180" height="34" rx="4"/>
+  <text class="c-txt" x="130" y="100" text-anchor="middle">W1</text>
+  <text class="c-txt" x="315" y="100" text-anchor="middle">W2</text>
+  <text class="c-txt" x="565" y="100" text-anchor="middle">W3</text>
+  <text class="c-txt" x="790" y="100" text-anchor="middle">W4</text>
 
-  <!-- row 2 -->
-  <text class="lbl-b" x="14" y="196">After this PR</text>
-  <rect class="band-bad" x="150" y="204" width="270" height="32" rx="4"/>
-  <rect class="band-ok"  x="420" y="204" width="300" height="32" rx="4"/>
-  <text class="c-txt" x="285" y="225" text-anchor="middle">A · rebuilding</text>
-  <text class="c-txt" x="570" y="225" text-anchor="middle">B · weight transfer</text>
-  <text class="bad" x="150" y="254">still promoted</text>
-  <text class="ok"  x="420" y="254">skipped</text>
-  <text class="note" x="150" y="271">participants is captured before the transfer, so a reload during it no longer counts</text>
+  <text class="note" x="315" y="130" text-anchor="middle">communicator rebuild</text>
+  <text class="note" x="565" y="130" text-anchor="middle">weight transfer</text>
 
-  <!-- row 3 -->
-  <text class="lbl-b" x="14" y="304">With the proposed fix — not in the PR</text>
-  <rect class="band-ok" x="150" y="312" width="270" height="32" rx="4"/>
-  <rect class="band-ok" x="420" y="312" width="300" height="32" rx="4"/>
-  <text class="c-txt" x="285" y="333" text-anchor="middle">A · rebuilding</text>
-  <text class="c-txt" x="570" y="333" text-anchor="middle">B · weight transfer</text>
-  <text class="ok" x="150" y="362">skipped</text>
-  <text class="ok" x="420" y="362">skipped</text>
-  <text class="note" x="150" y="379">participants comes from the same read that built the communicator — one read, no gap</text>
+  <text class="lbl" x="60" y="164">the shard is RESTARTING until its reload lands, then STALE; the promotion is what makes it HEALTHY</text>
 
-  <text class="lbl" x="14" y="408">Shard 2 stays STALE in every green case, and the next refit picks it up properly.</text>
+  <text class="lbl-b" x="14" y="200">What each window means</text>
+  <text class="note" x="60" y="222">W1 — lands before the membership read: already STALE, so it joins the refit and really gets weights.</text>
+  <text class="note" x="60" y="240">W2 — lands during the rebuild: left out of the communicator, but counted as a participant.</text>
+  <text class="note" x="60" y="258">W3 — lands during the transfer: left out of both.</text>
+  <text class="note" x="60" y="276">W4 — lands after the promotion: sits out this refit entirely, and the next one takes it as a W1.</text>
 
-  <rect class="band-bad" x="640" y="398" width="18" height="13" rx="3"/>
-  <text class="note" x="666" y="409">wrongly promoted</text>
-  <rect class="band-ok" x="640" y="418" width="18" height="13" rx="3"/>
-  <text class="note" x="666" y="429">correctly skipped</text>
+  <rect class="band-ok" x="700" y="212" width="16" height="12" rx="3"/>
+  <text class="note" x="724" y="222">always correct</text>
+  <rect class="band-bad" x="700" y="232" width="16" height="12" rx="3"/>
+  <text class="note" x="724" y="242">still wrong today</text>
+  <rect class="band-mix" x="700" y="252" width="16" height="12" rx="3"/>
+  <text class="note" x="724" y="262">was wrong, fixed by this PR</text>
 </svg>
 
 <p>
-The middle row is what this PR bought: <code>participants</code> is captured before the transfer,
-so a reload landing while weights are moving — where it usually lands, because the transfer is the
-long part — no longer counts. The top and middle rows differ in exactly one band.
+Only <b>W2</b> and <b>W3</b> were ever wrong. Both were wrong before this PR; the PR fixes W3 and
+leaves W2. "Promoted" means the ledger moves the shard from <code>STALE</code> to
+<code>HEALTHY</code> — it starts answering rollout requests again.
 </p>
 
+<table>
+<tr><th>The reload finishes…</th><th>In the communicator?<br><span class="th-sub">(membership read, L3443)</span></th><th>In <code>participants</code>?<br><span class="th-sub">(second read, L4705)</span></th><th>Gets weights?</th><th>Before</th><th>After this PR</th><th>With the fix</th></tr>
+<tr><td><b>W1</b> before the membership read</td><td>yes</td><td>yes</td><td>yes</td><td class="ok">correct</td><td class="ok">correct</td><td class="ok">correct</td></tr>
+<tr><td><b>W2</b> during the rebuild</td><td><b>no</b></td><td><b>yes</b></td><td>no</td><td class="bad">promoted</td><td class="bad">promoted</td><td class="ok">skipped</td></tr>
+<tr><td><b>W3</b> during the transfer</td><td>no</td><td>no</td><td>no</td><td class="bad">promoted</td><td class="ok">skipped</td><td class="ok">skipped</td></tr>
+<tr><td><b>W4</b> after the promotion</td><td>no</td><td>no</td><td>no</td><td class="ok">correct</td><td class="ok">correct</td><td class="ok">correct</td></tr>
+</table>
+
 <p>
-The bottom row is what it would take to close the rest, and it is not implemented. The remaining
-window is narrow but it is the same bug: <code>participants</code> is built from a second read of
-the fleet, taken after the reconcile already did its own read and awaited. A shard that turns STALE
-in that gap is in <code>participants</code> but was never in the communicator. Derive the set from
-the read that built the communicator and there is no gap left to land in.
+W2 is the odd row, and the reason is the two reads. The communicator is built from
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/a815a8cb6570d5f80caf7407d012717e919cd5aa/nemo_rl/algorithms/single_controller.py#L3443">the membership read</a>; <code>participants</code> comes from
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/a815a8cb6570d5f80caf7407d012717e919cd5aa/nemo_rl/algorithms/single_controller.py#L4705">a second read</a> taken after that one has already awaited. A reload landing
+between them makes the shard <code>STALE</code> — and <a href="https://github.com/NVIDIA-NeMo/RL/blob/a815a8cb6570d5f80caf7407d012717e919cd5aa/nemo_rl/models/generation/fleet_health.py#L70"><code>STALE</code> is not
+absent</a> — so it is in the set the promotion trusts while the communicator was built without it.
 </p>
 
 <h2>Why nothing catches it</h2>
