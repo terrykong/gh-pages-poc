@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Three places NeMo-RL can pack SFT data, and where they all meet</title>
+<style>
+:root{--bg:#0d1117;--surface:#161b22;--surface2:#1c2128;--border:#30363d;--text:#e6edf3;
+--dim:#8b949e;--accent:#58a6ff;--green:#3fb950;--orange:#d29922;--red:#f85149;--purple:#bc8cff}
+:root[data-theme=light]{--bg:#fff;--surface:#f6f8fa;--surface2:#eaeef2;--border:#d0d7de;
+--text:#1f2328;--dim:#59636e;--accent:#0969da;--green:#1a7f37;--orange:#9a6700;--red:#cf222e;--purple:#8250df}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:1040px;margin:0 auto;padding:28px 20px 70px}
+h1{font-size:23px;margin:0 0 8px;line-height:1.3}
+h2{font-size:19px;margin:38px 0 12px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;
+font:12.8px ui-monospace,SFMono-Regular,Menlo,monospace}
+.sub{color:var(--dim);font-size:13.5px;margin:0 0 14px}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);
+border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;
+font:13px/1 ui-monospace,Menlo,monospace;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.18)}
+.mono{font:12.3px ui-monospace,SFMono-Regular,Menlo,monospace;
+background:var(--surface);border:1px solid var(--border);border-radius:8px;
+padding:13px;overflow-x:auto;white-space:pre;line-height:1.55}
+.warn{border-left:3px solid var(--red);background:var(--surface);
+padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0}
+.hl{border-left:3px solid var(--accent);background:var(--surface);
+padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0}
+.cm{color:var(--dim)}
+table{border-collapse:collapse;width:100%;margin:14px 0;font-size:13.4px}
+th,td{border:1px solid var(--border);padding:7px 10px;text-align:left;vertical-align:top}
+th{background:var(--surface2);font-weight:600}
+td code{font-size:12.1px}
+.ship{color:var(--green);font-weight:700}
+.prop{color:var(--orange);font-weight:700}
+nav.chain{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 6px;padding:0}
+nav.chain a,nav.chain span{display:inline-block;padding:5px 11px;border:1px solid var(--border);
+border-radius:20px;background:var(--surface);text-decoration:none;color:var(--accent);
+font-size:12.5px;line-height:1.3;white-space:nowrap}
+nav.chain a:hover{background:var(--surface2)}
+nav.chain span.here{background:var(--accent);color:var(--bg);border-color:var(--accent);font-weight:600}
+p.chainnote{color:var(--dim);font-size:12px;margin:0 0 18px}
+svg{max-width:100%;height:auto;display:block;margin:16px 0}
+svg .lbl{fill:var(--text);font:12px ui-monospace,Menlo,monospace}
+svg .lbl-b{fill:var(--text);font:bold 12.5px -apple-system,sans-serif}
+svg .note{fill:var(--dim);font:11px -apple-system,sans-serif}
+svg .hdr{fill:var(--accent);font:bold 12.5px -apple-system,sans-serif}
+svg .tick{fill:var(--text);font:bold 11.5px -apple-system,sans-serif}
+svg .boxS{fill:var(--surface);stroke:var(--green);stroke-width:2.2}
+svg .boxP{fill:var(--surface);stroke:var(--orange);stroke-width:1.6;stroke-dasharray:5 3}
+svg .boxM{fill:var(--surface2);stroke:var(--accent);stroke-width:2.2}
+svg .lane{fill:none;stroke:var(--border);stroke-width:1}
+svg .aS{stroke:var(--green);stroke-width:1.7;fill:none}
+svg .aP{stroke:var(--orange);stroke-width:1.5;fill:none;stroke-dasharray:5 3}
+svg .tokA{fill:var(--orange);opacity:.5;stroke:var(--orange)}
+svg .tokC{fill:var(--purple);opacity:.5;stroke:var(--purple)}
+svg .tokP{fill:var(--dim);opacity:.22;stroke:var(--dim)}
+svg .greentxt{fill:var(--green);font:bold 11px -apple-system,sans-serif}
+svg .orangetxt{fill:var(--orange);font:bold 11px -apple-system,sans-serif}
+svg .acctxt{fill:var(--accent);font:bold 12px -apple-system,sans-serif}
+svg .c-txt{fill:var(--text);font:10px ui-monospace,Menlo,monospace}
+svg a text{text-decoration:underline;fill:var(--accent);font:10.5px ui-monospace,Menlo,monospace}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head><body>
+<button id="theme-toggle">light</button>
+<div class="wrap">
+
+<h1>Three places NeMo-RL can pack SFT data, and where they all meet</h1>
+<p class="sub">
+spans <a href="https://github.com/NVIDIA-NeMo/RL/pull/3380">#3380</a> (offline prepacked, open) and
+<a href="https://github.com/NVIDIA-NeMo/RL/pull/4105">#4105</a> (Energon, open) —
+current-main links pinned to <code>f31f793</code>, #3380 links to <code>b84eba1</code>.
+</p>
+
+<nav class="chain">
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4105-who-packs.html">#4105 - who packs</a>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4105-packing-knobs.html">#4105 - config knobs</a>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4105-first-pack-decides.html">#4105 - the first-pack bug</a>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-3380-two-packers.html">#3380 - two packers</a>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-3380-empty-segment.html">#3380 - empty-segment bug</a>
+  <span class="here">all packing paths</span>
+</nav>
+<p class="chainnote">The map across both PRs — this one: every way a packed row can be produced, and the single place they converge.</p>
+
+<p>
+Packing puts several short conversations into one long row so the GPU is not multiplying through
+padding. NeMo-RL has one way to do this today and two more proposed in open PRs. They differ only in
+<em>when</em> the boundaries are decided — at dataset build, at data load, or at the training step —
+and they all hand the model the same object in the end.
+</p>
+
+<h2>The map</h2>
+
+<svg viewBox="0 0 1000 560" role="img" aria-label="Three packing paths on a time axis, converging on PackedSeqParams">
+  <defs>
+    <marker id="gs" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto">
+      <path d="M0,0 L7,3.5 L0,7 z" fill="var(--green)"/></marker>
+    <marker id="op" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto">
+      <path d="M0,0 L7,3.5 L0,7 z" fill="var(--orange)"/></marker>
+  </defs>
+
+  <text class="tick" x="0" y="14">BEFORE TRAINING</text>
+  <text class="tick" x="330" y="14">WHILE READING DATA</text>
+  <text class="tick" x="660" y="14">INSIDE THE TRAINING STEP</text>
+  <line class="lane" x1="0" y1="24" x2="1000" y2="24"/>
+  <line class="lane" x1="322" y1="24" x2="322" y2="330"/>
+  <line class="lane" x1="652" y1="24" x2="652" y2="330"/>
+
+  <text class="orangetxt" x="0" y="48">1 · OFFLINE PREPACKED</text>
+  <text class="note" x="0" y="64">proposed in #3380, not on main</text>
+  <rect class="boxP" x="0" y="74" width="290" height="58" rx="7"/>
+  <text class="lbl-b" x="12" y="94">dataset build packs</text>
+  <text class="note" x="12" y="110">boundaries written into the row</text>
+  <text class="note" x="12" y="124">and replayed every epoch</text>
+  <path class="aP" d="M294 103 L 960 103 L 960 392" marker-end="url(#op)"/>
+  <text class="note" x="300" y="98">row is read as-is, nothing re-packs</text>
+
+  <text class="orangetxt" x="330" y="160">2 · LOADER PACKS</text>
+  <text class="note" x="330" y="176">proposed in #4105, not on main</text>
+  <rect class="boxP" x="330" y="186" width="290" height="74" rx="7"/>
+  <text class="lbl-b" x="342" y="206">Energon packs</text>
+  <text class="note" x="342" y="222">buffers samples, fills bins,</text>
+  <text class="note" x="342" y="236">pads each pack to the full width</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/f31f7930bbbc222a87c17e16f448900bc0e99ed9/nemo_rl/data/energon/multimodal/packing.py#L89"><text x="342" y="252">packing.py:89</text></a>
+  <path class="aP" d="M624 215 L 930 215 L 930 392" marker-end="url(#op)"/>
+  <text class="note" x="630" y="210">worker passes it through</text>
+
+  <text class="greentxt" x="660" y="272">3 · TRAINER PACKS</text>
+  <text class="note" x="660" y="288">on main today</text>
+  <rect class="boxS" x="660" y="298" width="290" height="74" rx="7"/>
+  <text class="lbl-b" x="672" y="318">policy worker packs</text>
+  <text class="note" x="672" y="334">bin-packs whatever landed in</text>
+  <text class="note" x="672" y="348">this batch, every step</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/f31f7930bbbc222a87c17e16f448900bc0e99ed9/nemo_rl/models/megatron/data.py#L1284"><text x="672" y="364">megatron/data.py:1284</text></a>
+  <path class="aS" d="M805 376 L 805 392" marker-end="url(#gs)"/>
+
+  <rect class="boxM" x="600" y="396" width="400" height="54" rx="8"/>
+  <text class="acctxt" x="616" y="418">PackedSeqParams(qkv_format="thd")</text>
+  <text class="note" x="616" y="436">one flat token run + a boundary list</text>
+
+  <text class="lbl-b" x="0" y="404">What every path must produce</text>
+  <rect class="tokA" x="0" y="416" width="52" height="15" rx="2"/><text class="c-txt" x="10" y="428">conv A</text>
+  <rect class="tokP" x="52" y="416" width="20" height="15" rx="2"/>
+  <rect class="tokC" x="72" y="416" width="78" height="15" rx="2"/><text class="c-txt" x="92" y="428">conv B</text>
+  <rect class="tokP" x="150" y="416" width="18" height="15" rx="2"/>
+  <text class="note" x="0" y="450">a flat row, plus cu_seqlens saying where each conversation ends</text>
+
+  <line class="lane" x1="0" y1="476" x2="1000" y2="476"/>
+  <text class="lbl-b" x="0" y="500">The trade, in one line each</text>
+  <text class="note" x="0" y="520">1 · decided once, identical every epoch — reproducible, but a bad row stays bad</text>
+  <text class="note" x="0" y="536">2 · decided as data streams in — no per-step cost, but every pack ships at full width</text>
+  <text class="note" x="0" y="552">3 · decided from the batch at hand — tightest rows, paid for on the GPU every step</text>
+</svg>
+
+<h2>Side by side</h2>
+
+<table>
+<tr><th>&nbsp;</th><th>1 · Offline prepacked</th><th>2 · Loader packs</th><th>3 · Trainer packs</th></tr>
+<tr><td>Status</td><td class="prop">#3380, open</td><td class="prop">#4105, open</td><td class="ship">on main</td></tr>
+<tr><td>Boundaries decided</td><td>at dataset build</td><td>as the loader buffers</td><td>at the training step</td></tr>
+<tr><td>Where the work runs</td><td>CPU, once, offline</td><td>loader worker</td><td>GPU worker, every step</td></tr>
+<tr><td>Same row each epoch?</td><td>yes</td><td>no</td><td>no</td></tr>
+<tr><td>Row width</td><td>fixed when written</td><td>always <code>max_input_seq_length</code></td><td>as wide as the batch needs</td></tr>
+<tr><td>Rows per microbatch</td><td>one</td><td>one pack</td><td>several</td></tr>
+<tr><td>Built for</td><td>reproducing a Megatron-LM baseline exactly</td><td>multimodal SFT streamed through Energon</td><td>general use</td></tr>
+<tr><td>Detail page</td><td><a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-3380-two-packers.html">two packers</a></td><td><a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4105-who-packs.html">who packs</a></td><td>covered in both</td></tr>
+</table>
+
+<h2>Why they can converge at all</h2>
+
+<p>
+Because the thing the model needs is small: a flat run of tokens, and a list saying where each
+conversation ends — the shape <a href="https://github.com/NVIDIA-NeMo/RL/blob/f31f7930bbbc222a87c17e16f448900bc0e99ed9/nemo_rl/models/megatron/data.py#L448-L457">the Energon path builds</a> and <a href="https://github.com/NVIDIA-NeMo/RL/blob/f31f7930bbbc222a87c17e16f448900bc0e99ed9/nemo_rl/models/megatron/data.py#L646-L667">the trainer path builds</a>.
+Everything upstream is free to decide those two however it likes.
+</p>
+
+<div class="mono">PackedSeqParams(
+    cu_seqlens_q        = ...,   <span class="cm"># where the real tokens end</span>
+    cu_seqlens_q_padded = ...,   <span class="cm"># where each padded slot ends</span>
+    qkv_format          = "thd", <span class="cm"># flat tokens, not a rectangle of rows</span>
+)
+</div>
+
+<p>
+The attention kernel reads <code>cu_seqlens</code> to know where one conversation stops and the next
+starts, so it never lets them see each other. Whether that list was computed months ago by an offline
+script, a second ago by the loader, or right now by the trainer makes no difference to it.
+</p>
+
+<div class="hl">
+<strong>Reading the map.</strong> Two of these three are proposals. Only the trainer-side path is on
+main today, so a reader hitting this page from a search should not assume the other two are available —
+<a href="https://github.com/NVIDIA-NeMo/RL/pull/3380">#3380</a> and
+<a href="https://github.com/NVIDIA-NeMo/RL/pull/4105">#4105</a> were both still open when this was
+written. What the map is good for is seeing that they are not competing designs: they pick different
+moments on the same timeline, and they agree on the handoff.
+</div>
+
+<div class="warn">
+<strong>The one place a difference survives the merge.</strong> Paths 1 and 3 hand the kernel the real
+boundaries in <code>cu_seqlens_q</code> and the padded ones separately. Path 2 passes the padded array
+for both, on purpose — some consumers read <code>cu_seqlens_q</code> as a wrap-around point, and real
+boundaries would let a value roll into the padding. So <code>pad_between_seqs</code> is <code>False</code>
+there and <code>True</code> on the others. Same object, different contents, and the reason is worth
+knowing before adding a fourth path.
+</div>
+
+<script>
+(function(){
+  var b=document.getElementById('theme-toggle');
+  function cur(){return document.documentElement.getAttribute('data-theme')==='light'?'light':'dark';}
+  function paint(){b.textContent=cur()==='light'?'dark':'light';}
+  paint();
+  b.addEventListener('click',function(){
+    var next=cur()==='light'?'dark':'light';
+    if(next==='light')document.documentElement.setAttribute('data-theme','light');
+    else document.documentElement.removeAttribute('data-theme');
+    try{localStorage.setItem('gh-pages-theme',next);}catch(e){}
+    paint();
+  });
+})();
+</script>
+</div>
+</body>
+</html>
