@@ -195,6 +195,27 @@ Read the left column as "who is running right now".
 
 <h2>Why the split is worth knowing</h2>
 
+<p>
+The back and forth is not a choice this PR made. Upstream Energon's
+<code>PackingDataset</code> takes two separate callbacks — a <code>pre_packer</code> and a
+<code>final_packer</code> — and NeMo-RL's two hooks are
+<a href="https://github.com/NVIDIA/Megatron-Energon/blob/ace766d6edcb1e4e7ca53bd18014729e2d112c37/src/megatron/energon/task_encoder/base.py#L591-L596">wired straight into those two slots</a>.
+Energon
+<a href="https://github.com/NVIDIA/Megatron-Energon/blob/ace766d6edcb1e4e7ca53bd18014729e2d112c37/src/megatron/energon/task_encoder/base.py#L582-L584">asserts that both are overridden</a>
+as soon as you set <code>packing_buffer_size</code>. There is no one-callback form to
+switch to.
+</p>
+
+<p>
+The reason the two are separate is restart. When Energon rebuilds a single sample after a
+resume, it replays the <em>final</em> packer on a rebuilt group
+(<a href="https://github.com/NVIDIA/Megatron-Energon/blob/ace766d6edcb1e4e7ca53bd18014729e2d112c37/src/megatron/energon/wrappers/packing_dataset.py#L396-L398">packing_dataset.py:396-398</a>)
+and never replays the pre-packer — which samples were grouped is already written into the
+restore key. So "choose the group" has to be a different function from "build the row": one
+is replayed on restore and one is not. Merging them would break restore, which is the thing
+Energon is there to give you.
+</p>
+
 <div class="warn">
 <strong>The randomness lands on the seam.</strong> One of the packers NeMo-RL now exposes to
 this path is <code>first_fit_shuffle</code>, which calls the process-wide
@@ -214,6 +235,26 @@ nothing about step 4 happens in the policy. The
 <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4105-packing-knobs.html">config knobs page</a>
 walks through which key goes where, and which ones you can leave alone.
 </div>
+
+<p>
+What <em>is</em> still open: nothing forces the two hooks to agree. They are configured from
+two different config blocks and built in two different places — the algorithm from
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/f31f7930bbbc222a87c17e16f448900bc0e99ed9/nemo_rl/data/energon/sft_dataloader.py#L375-L382">one call to <code>get_packer</code></a>,
+the row layout from
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/f31f7930bbbc222a87c17e16f448900bc0e99ed9/nemo_rl/data/energon/multimodal/packing.py#L89">a function that takes its own padding arguments</a>.
+One object holding the whole packing policy, with the two hooks as methods on it, would keep
+the alternation Energon requires while leaving one place where the rules live. That is the
+improvement available here — not fewer handoffs, fewer sources of truth.
+</p>
+
+<p>
+The only way to remove the alternation altogether is to not use the callback protocol:
+prepack to disk before the run, or pack inside the trainer, which is what main does today.
+Both trade something real away — a prepacked row cannot react to the sampler, and a
+trainer-side pack cannot reach across a microbatch boundary. The
+<a href="https://terrykong.github.io/gh-pages-poc/terryk/packing-paths.html">all packing paths page</a>
+lays those three side by side.
+</p>
 
 <script>(function(){var r=document.documentElement,K='gh-pages-theme';
 function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'dark':'light';}
