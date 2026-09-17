@@ -191,7 +191,7 @@ compared the same value?</p>
   <text class="lbl-b" x="144" y="426">STEP 2 — the variance, corrected</text>
   <text class="lbl" x="400" y="426">× 7/6:  0.00000018 × 1.16666…</text>
   <text class="v3"  x="144" y="444">= 0.00000021</text>
-  <text class="note" x="144" y="464">7 peers, so × 7 ÷ (7−1) — Bessel's correction, the usual sample-variance adjustment</text>
+  <text class="note" x="144" y="464">E[r²]−(E[r])² already divided by 7, so × 7/(7−1) rescales it to the 1/(N−1) sample variance</text>
   <a href="https://github.com/NVIDIA-NeMo/RL/blob/986ef039a5980b4b97525f2ed00b187749e5954f/nemo_rl/algorithms/utils.py#L215">
     <text x="560" y="444">utils.py:215</text></a>
 
@@ -242,12 +242,20 @@ compared the same value?</p>
       <a href="https://github.com/NVIDIA-NeMo/RL/blob/986ef039a5980b4b97525f2ed00b187749e5954f/nemo_rl/algorithms/utils.py#L217">square root on the next line</a>
       turns that variance into the standard deviation. That same <code>num_valid</code> is what
       divides both sums, which is why they are divided by 7 and not 8.</dd>
+  <dt>Why N/(N−1)</dt>
+  <dd>Bessel's correction is usually written <code>1/(N−1)</code>, and that form applies to the raw
+      sum <code>S = Σ(r − r̄)²</code>. The code never has that sum — it has
+      <code>E[r²] − (E[r])²</code>, which is <code>S/N</code>, because the division by N already
+      happened inside both averages. Rescaling <code>S/N</code> up to the sample variance therefore
+      needs <code>× N/(N−1)</code>. It is the same correction applied one step later, and both routes
+      agree exactly: for seven rewards <code>[0.0, 0.95 ×6]</code>, <code>S/(N−1)</code> and
+      <code>(S/N) × 7/6</code> both give <code>0.128928571429</code>, which is also what
+      <code>torch.var(unbiased=True)</code> returns.</dd>
   <dt>Should it be 0</dt>
-  <dd>Yes. The true spread of seven identical numbers is exactly zero, so
+  <dd>Yes — seven identical numbers have exactly zero spread, so
       <span class="v4">0.00045675</span> is entirely wrong. It is non-zero only because
       <span class="v1">E[r²]</span> and <span class="v2">(E[r])²</span> reach nearly the same value
-      by different routes and round differently in the last few bits. But see below — computing
-      them more carefully does not fix the bug, it makes it worse.</dd>
+      by different routes and round differently in the last bits.</dd>
 </dl>
 </div>
 
@@ -270,7 +278,8 @@ std  = var.sqrt()                    <span class="v4"># 0.00045674530  the divis
 (0.0 - E_r) / (std + 1e-6)           # -2075.39       BEFORE this PR
 (0.0 - E_r)                          # -0.95          AFTER  this PR
 
-# the 7/6: 7 peers, so x 7/(7-1). Same as torch.var(unbiased=True):
+# the 7/6: E[r²]-(E[r])² is already S/N, so x N/(N-1) gives the 1/(N-1)
+# sample variance. Same answer as torch.var(unbiased=True):
 torch.tensor([0.0] + [0.95]*6).var(unbiased=True)   # 0.12892857
 ((lambda p: (p*p).sum()/7 - (p.sum()/7)**2)(torch.tensor([0.0] + [0.95]*6))) * (7/6)
 
@@ -366,12 +375,11 @@ the exact answer — seven equal numbers               0             −0.95  (n
 the arithmetic, the larger it gets. The only thing that helps is not dividing — which is what the PR
 does, decided by comparing the input rewards rather than by inspecting a rounded result.</p>
 
-<p>The repo hand-rolls the formula for a reason worth knowing: it needs a separate variance for
-<em>every</em> rollout, each leaving that rollout out. It gets all eight at once by multiplying with a
+<p>The repo hand-rolls the formula for a reason: it needs a separate variance for <em>every</em>
+rollout, each leaving that rollout out, and gets all eight at once by multiplying with a
 <code>1 − I</code> mask matrix
 (<a href="https://github.com/NVIDIA-NeMo/RL/blob/986ef039a5980b4b97525f2ed00b187749e5954f/nemo_rl/algorithms/utils.py#L160">utils.py:160</a>).
-<code>torch.var</code> cannot express that in one call, which is why the sum-of-squares form is there
-at all.</p>
+<code>torch.var</code> cannot express that in one call.</p>
 
 <div class="warn">
 <strong>Why this matters for training.</strong> An advantage of −2075 sitting next to seven values of
