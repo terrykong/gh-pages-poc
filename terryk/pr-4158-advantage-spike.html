@@ -112,11 +112,17 @@ With <em>leave-one-out</em> turned on, a rollout's baseline is the mean of the <
 rollouts for the same prompt — it never sees its own reward. With <code>normalize_rewards</code> also
 on, that advantage is then divided by the standard deviation of the same set of other rollouts
 (<a href="https://github.com/NVIDIA-NeMo/RL/blob/986ef039a5980b4b97525f2ed00b187749e5954f/nemo_rl/algorithms/advantage_estimator.py#L124">:124</a>).
-That division is where it goes wrong. The standard deviation is computed as
-<code>mean(x²) − mean(x)²</code>
-(<a href="https://github.com/NVIDIA-NeMo/RL/blob/986ef039a5980b4b97525f2ed00b187749e5954f/nemo_rl/algorithms/utils.py#L214">utils.py:214</a>),
-and when the values are all the same, those two numbers are nearly equal, so subtracting them
-throws away almost every digit and leaves noise.</p>
+When all seven of those other rollouts scored the same, their real spread is zero and that division
+should never happen at all. The old code decided by asking <code>is the computed std &gt; 0?</code>
+— and the answer came back yes, because a computed spread is never exactly zero in floating point.</p>
+
+<p><strong>This is not a claim that the variance formula is buggy, and not a claim that leave-one-out
+is wrong.</strong> Leave-one-out is doing exactly what it should. The problem is that
+<code>std &gt; 0</code> is a floating-point stand-in for the question we actually care about —
+<em>does this comparison set carry any signal?</em> — and that stand-in cannot work at any precision.
+Computing the spread <em>more</em> accurately makes the spike <em>bigger</em>, as the numbers below show.
+This PR replaces the stand-in with an exact question about the inputs: are all the rewards being
+compared the same value?</p>
 
 <h2>Where the number comes from</h2>
 
@@ -173,19 +179,22 @@ throws away almost every digit and leaves noise.</p>
   <path class="arrow" d="M670,304 L670,326"/>
 
   <rect class="step" x="130" y="328" width="640" height="50" rx="7"/>
-  <text class="lbl" x="144" y="350">subtract:  0.90250003 − 0.90249985</text>
+  <text class="lbl-b" x="144" y="350">STEP 1 — the variance, rough form</text>
+  <text class="lbl" x="400" y="350">subtract:  0.90250003 − 0.90249985</text>
   <text class="v3"  x="144" y="368">= 0.00000018</text>
   <text class="note" x="300" y="368">seven leading digits cancel — this should have been exactly 0</text>
 
   <path class="arrow" d="M450,378 L450,402"/>
   <rect class="step" x="130" y="404" width="640" height="68" rx="7"/>
-  <text class="lbl" x="144" y="426">× 7/6:  0.00000018 × 1.16666…</text>
+  <text class="lbl-b" x="144" y="426">STEP 2 — the variance, corrected</text>
+  <text class="lbl" x="400" y="426">× 7/6:  0.00000018 × 1.16666…</text>
   <text class="v3"  x="144" y="444">= 0.00000021</text>
-  <text class="note" x="144" y="464">7 peers, so × 7 ÷ (7−1) — the standard sample-variance correction, same as torch.var(unbiased=True)</text>
+  <text class="note" x="144" y="464">7 peers, so × 7 ÷ (7−1) — Bessel's correction, the usual sample-variance adjustment</text>
 
   <path class="arrow" d="M450,472 L450,496"/>
   <rect class="step" x="130" y="498" width="640" height="50" rx="7"/>
-  <text class="lbl" x="144" y="520">square root of 0.00000021</text>
+  <text class="lbl-b" x="144" y="520">STEP 3 — square root → standard deviation</text>
+  <text class="lbl" x="490" y="520">√0.00000021</text>
   <text class="v4"  x="144" y="538">= 0.00045675</text>
   <text class="note" x="300" y="538">the code divides by this — it is rounding error, not real spread</text>
 
@@ -291,15 +300,38 @@ is_trivial_distribution[prompt_idx] = comparison_min == comparison_max          
 normalize_mask = (std &gt; 0) &amp; ~is_trivial_distribution                                       # -> [False, True x7]
 advantages[normalize_mask] = advantages[normalize_mask] / (std.unsqueeze(-1)[normalize_mask] + epsilon)</div>
 
+<h2>Why a more accurate variance would be worse</h2>
+
+<p>The obvious repair is to compute the spread properly. <code>torch.var</code> does not use
+<code>E[r²] − (E[r])²</code> at all — it uses a two-pass method that is about 50 million times closer
+to zero on these seven numbers. Swapping it in makes the spike far worse, because a smaller divisor
+means a bigger quotient:</p>
+
+<div class="mono">how the spread of the seven 0.95s is computed        std           advantage
+------------------------------------------------------------------------------
+this repo:  (E[r²] − (E[r])²) × 7/6                  0.00045675      −2075.39
+torch.var(unbiased=True)                             0.000000064   −892,538
+the exact answer — seven equal numbers               0             −0.95  (no division)</div>
+
+<p>So precision is not the lever. Any positive number in that slot produces a spike, and the better
+the arithmetic, the larger it gets. The only thing that helps is not dividing — which is what the PR
+does, decided by comparing the input rewards rather than by inspecting a rounded result.</p>
+
+<p>The repo hand-rolls the formula for a reason worth knowing: it needs a separate variance for
+<em>every</em> rollout, each leaving that rollout out. It gets all eight at once by multiplying with a
+<code>1 − I</code> mask matrix
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/986ef039a5980b4b97525f2ed00b187749e5954f/nemo_rl/algorithms/utils.py#L160">utils.py:160</a>).
+<code>torch.var</code> cannot express that in one call, which is why the sum-of-squares form is there
+at all.</p>
+
 <div class="warn">
-<strong>Why this matters for training.</strong> An advantage of −2075 sitting next to seven values
-of about +0.38 does not just mispriced one rollout — it dominates the gradient for the whole batch,
-and the size of it is set by a rounding error rather than by anything the model did. It shows up
-most on easy datasets, where nearly every rollout is correct and a lone failure is common. Two
-tidier-looking fixes make it worse, not better: forcing the spread to exactly zero would drop that
-lone failing rollout out of the batch and leave the survivors all pushing the same direction, and
-computing the spread more accurately makes the number it divides by <em>smaller</em>, which on this
-same input turns −2075 into about −892,000.
+<strong>Why this matters for training.</strong> An advantage of −2075 sitting next to seven values of
+about +0.38 does not just misprice one rollout — it dominates the gradient for the whole batch, and
+its size is set by a rounding error rather than by anything the model did. It shows up most on easy
+datasets, where nearly every rollout is correct and a lone failure is common. Note also that forcing
+the spread to exactly zero is <em>not</em> a safe alternative: the batch filter drops zero-spread
+rollouts, so that would delete the one failing rollout and leave the survivors all pushing the same
+direction.
 </div>
 
 </div>
