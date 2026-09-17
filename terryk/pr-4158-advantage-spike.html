@@ -152,7 +152,8 @@ compared the same value?</p>
   <!-- brace under the seven peers -->
   <path class="brace" d="M86 98 L86 106 L540 106 L540 98"/>
   <path class="brace" d="M313 106 L313 114"/>
-  <text class="lbl-b" x="20" y="136">These seven are what rollout 1 is compared against. Leave-one-out means it never sees its own 0.0.</text>
+  <text class="lbl-b" x="20" y="128">These seven are what rollout 1 is compared against — leave-one-out excludes its own 0.0 from every sum below,</text>
+  <text class="lbl-b" x="20" y="146">which is also why each sum is divided by 7 and not by 8.</text>
 
   <!-- the arithmetic. r = each of the seven peers = 0.95 -->
   <defs><marker id="ah" markerWidth="9" markerHeight="9" refX="8" refY="3" orient="auto">
@@ -164,6 +165,7 @@ compared the same value?</p>
   <rect class="step" x="30"  y="180" width="390" height="50" rx="7"/>
   <text class="lbl" x="44" y="202">E[r²] = (0.95² + 0.95² + … 7 terms) ÷ 7</text>
   <text class="v1"  x="44" y="220">= 0.90250003</text>
+  <text class="note" x="210" y="220">no 0.0 term — that is rollout 1's own</text>
 
   <rect class="step" x="470" y="180" width="400" height="50" rx="7"/>
   <text class="lbl" x="484" y="202">E[r] = (0.95 + 0.95 + … 7 terms) ÷ 7</text>
@@ -201,6 +203,38 @@ compared the same value?</p>
   <a href="https://github.com/NVIDIA-NeMo/RL/blob/986ef039a5980b4b97525f2ed00b187749e5954f/nemo_rl/algorithms/utils.py#L214">
     <text x="700" y="146">utils.py:214</text></a>
 </svg>
+
+<div class="status">
+<dl>
+  <dt>Why no 0.0</dt>
+  <dd>The 0.0 is missing from those sums because of <strong>leave-one-out</strong>, not because
+      0² = 0. Rollout 1's baseline and spread are built from the <em>other</em> rollouts only, so its
+      own reward is excluded — and the divisor is 7 rather than 8 for the same reason. Had it been
+      dropped just for being zero, the divisor would still be 8. Including it changes everything:
+      <table style="border-collapse:collapse;margin:8px 0 2px;font-size:13px">
+      <tr><td style="padding:2px 18px 2px 0;color:var(--dim)"></td>
+          <td style="padding:2px 18px 2px 0"><strong>leave-one-out (what runs)</strong></td>
+          <td style="padding:2px 0"><strong>if the 0.0 were included</strong></td></tr>
+      <tr><td style="padding:2px 18px 2px 0;color:var(--dim)">E[r²]</td>
+          <td style="padding:2px 18px 2px 0"><span class="v1">0.90250003</span></td>
+          <td style="padding:2px 0">0.78968745</td></tr>
+      <tr><td style="padding:2px 18px 2px 0;color:var(--dim)">E[r]</td>
+          <td style="padding:2px 18px 2px 0"><span class="v2">0.94999993</span></td>
+          <td style="padding:2px 0">0.83125001</td></tr>
+      <tr><td style="padding:2px 18px 2px 0;color:var(--dim)">std</td>
+          <td style="padding:2px 18px 2px 0"><span class="v4">0.00045675</span></td>
+          <td style="padding:2px 0">0.33587566</td></tr>
+      </table>
+      That last row is the whole bug: taking rollout 1's own reward out leaves seven identical
+      numbers, which have no spread at all.</dd>
+  <dt>Should it be 0</dt>
+  <dd>Yes. The true spread of seven identical numbers is exactly zero, so
+      <span class="v4">0.00045675</span> is entirely wrong. It is non-zero only because
+      <span class="v1">E[r²]</span> and <span class="v2">(E[r])²</span> reach nearly the same value
+      by different routes and round differently in the last few bits. But see below — computing
+      them more carefully does not fix the bug, it makes it worse.</dd>
+</dl>
+</div>
 
 <p><strong>Colour key</strong> — the same colour means the same number wherever it appears:
 <span class="v1">E[r²] = 0.90250003</span> ·
