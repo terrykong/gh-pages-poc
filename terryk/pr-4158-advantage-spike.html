@@ -192,6 +192,8 @@ compared the same value?</p>
   <text class="lbl" x="400" y="426">× 7/6:  0.00000018 × 1.16666…</text>
   <text class="v3"  x="144" y="444">= 0.00000021</text>
   <text class="note" x="144" y="464">7 peers, so × 7 ÷ (7−1) — Bessel's correction, the usual sample-variance adjustment</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/986ef039a5980b4b97525f2ed00b187749e5954f/nemo_rl/algorithms/utils.py#L215">
+    <text x="560" y="444">utils.py:215</text></a>
 
   <path class="arrow" d="M450,472 L450,496"/>
   <rect class="step" x="130" y="498" width="640" height="50" rx="7"/>
@@ -199,6 +201,8 @@ compared the same value?</p>
   <text class="lbl" x="490" y="520">√0.00000021</text>
   <text class="v4"  x="144" y="538">= 0.00045675</text>
   <text class="note" x="300" y="538">the code divides by this — it is rounding error, not real spread</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/986ef039a5980b4b97525f2ed00b187749e5954f/nemo_rl/algorithms/utils.py#L217">
+    <text x="710" y="520">utils.py:217</text></a>
 
   <a href="https://github.com/NVIDIA-NeMo/RL/blob/986ef039a5980b4b97525f2ed00b187749e5954f/nemo_rl/algorithms/utils.py#L214">
     <text x="700" y="146">utils.py:214</text></a>
@@ -227,6 +231,17 @@ compared the same value?</p>
       </table>
       That last row is the whole bug: taking rollout 1's own reward out leaves seven identical
       numbers, which have no spread at all.</dd>
+  <dt>Where 7/6 is</dt>
+  <dd>In the code the factor is written
+      <code>* (num_valid / (num_valid - 1))</code>
+      (<a href="https://github.com/NVIDIA-NeMo/RL/blob/986ef039a5980b4b97525f2ed00b187749e5954f/nemo_rl/algorithms/utils.py#L215">utils.py:215</a>),
+      and <code>num_valid</code> is set to the number of valid rollouts minus one when leave-one-out
+      is on
+      (<a href="https://github.com/NVIDIA-NeMo/RL/blob/986ef039a5980b4b97525f2ed00b187749e5954f/nemo_rl/algorithms/utils.py#L171-L173">utils.py:171-173</a>)
+      — so here it is 8 − 1 = 7, and the factor is 7/6. The
+      <a href="https://github.com/NVIDIA-NeMo/RL/blob/986ef039a5980b4b97525f2ed00b187749e5954f/nemo_rl/algorithms/utils.py#L217">square root on the next line</a>
+      turns that variance into the standard deviation. That same <code>num_valid</code> is what
+      divides both sums, which is why they are divided by 7 and not 8.</dd>
   <dt>Should it be 0</dt>
   <dd>Yes. The true spread of seven identical numbers is exactly zero, so
       <span class="v4">0.00045675</span> is entirely wrong. It is non-zero only because
