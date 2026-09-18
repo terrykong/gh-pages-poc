@@ -70,8 +70,8 @@ svg a text{text-decoration:underline;fill:var(--accent);font:11.5px ui-monospace
 <h1>Why one replica's timing numbers disappeared, and how naming each actor fixes it</h1>
 <p class="sub">Companion illustration for
 <a href="https://github.com/NVIDIA-NeMo/RL/pull/3374">NVIDIA-NeMo/RL #3374</a>
-(preserve replica identity during routing). All permalinks pin the PR head
-<code>46ae651</code>; "before" links pin the branch point <code>8b97de9</code>.</p>
+(preserve replica identity during routing). Code links pin the PR head
+<code>435ca0f</code>; "before" links pin <code>8b97de9</code>, the last commit before the fix landed.</p>
 
 <p>A NeMo-Gym <strong>shard</strong> is one group of Gym servers running in one Ray actor.
 Setting <code>replicas: 2</code> on a shard starts two identical copies of it on two nodes, and
@@ -153,11 +153,11 @@ shared a key — so the second one to finish overwrote the first, and nobody was
 
   <a href="https://github.com/NVIDIA-NeMo/RL/blob/8b97de9e84f86051f345c7ba2bfe471489507096/nemo_rl/experience/rollouts.py#L2467">
     <text x="16" y="398">before: rollouts.py:2355 — label = shard name</text></a>
-  <a href="https://github.com/NVIDIA-NeMo/RL/blob/46ae6519f929fc679c85ac88ceec719875e21a9b/nemo_rl/experience/rollouts.py#L2471">
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/435ca0fc1bed26ee81c4d668fb3fb8282888c962/nemo_rl/experience/rollouts.py#L2465">
     <text x="16" y="416">after: rollouts.py:2359 — label = instance_label(handle)</text></a>
-  <a href="https://github.com/NVIDIA-NeMo/RL/blob/46ae6519f929fc679c85ac88ceec719875e21a9b/nemo_rl/experience/rollouts.py#L2589">
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/435ca0fc1bed26ee81c4d668fb3fb8282888c962/nemo_rl/experience/rollouts.py#L2588">
     <text x="470" y="398">rollouts.py:2471 — the one-entry short circuit</text></a>
-  <a href="https://github.com/NVIDIA-NeMo/RL/blob/46ae6519f929fc679c85ac88ceec719875e21a9b/nemo_rl/environments/nemo_gym.py#L1584">
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/435ca0fc1bed26ee81c4d668fb3fb8282888c962/nemo_rl/environments/nemo_gym.py#L1654">
     <text x="470" y="416">nemo_gym.py:1262 — instance_label</text></a>
 
   <defs>
@@ -187,7 +187,7 @@ it did before replicas existed:</p>
                 # 1 replica  -> "tools"
                 # 2 replicas -> "tools/0", "tools/1"
                 return shard_name if len(replicas) == 1 else f"{shard_name}/{index}"</div>
-<p class="sub"><a href="https://github.com/NVIDIA-NeMo/RL/blob/46ae6519f929fc679c85ac88ceec719875e21a9b/nemo_rl/environments/nemo_gym.py#L1584">nemo_gym.py:1262</a>
+<p class="sub"><a href="https://github.com/NVIDIA-NeMo/RL/blob/435ca0fc1bed26ee81c4d668fb3fb8282888c962/nemo_rl/environments/nemo_gym.py#L1654">nemo_gym.py:1262</a>
 — replaces <a href="https://github.com/NVIDIA-NeMo/RL/blob/8b97de9e84f86051f345c7ba2bfe471489507096/nemo_rl/environments/nemo_gym.py#L1583">the old <code>shard_name_of</code></a>, which returned the shard name for every replica.</p>
 
 <p>With two distinct keys the merge step now takes its other branch. It writes one entry per
@@ -198,7 +198,7 @@ replicas run at the same time and the step waits for the slowest:</p>
     for key, value in metrics.items():
         merged[f"{timer_prefix}/shard/{instance_label}/{suffix}"] = value   # 4.0 and 9.0, both kept
         merged[key] = max(merged[key], value) if key in merged else value   # max(4.0, 9.0) = 9.0</div>
-<p class="sub"><a href="https://github.com/NVIDIA-NeMo/RL/blob/46ae6519f929fc679c85ac88ceec719875e21a9b/nemo_rl/experience/rollouts.py#L2593-L2599">rollouts.py:2475-2481</a>.
+<p class="sub"><a href="https://github.com/NVIDIA-NeMo/RL/blob/435ca0fc1bed26ee81c4d668fb3fb8282888c962/nemo_rl/experience/rollouts.py#L2592-L2598">rollouts.py:2475-2481</a>.
 The same label is also used for the log directory, the round-robin bucket, and the text of a
 failure — so a slow replica, its logs and its error all carry one name.</p>
 
