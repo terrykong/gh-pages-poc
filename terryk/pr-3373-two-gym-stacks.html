@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NVIDIA-NeMo/RL #3373 — how one job runs two NeMo-Gym stacks instead of one</title>
+<style>
+:root{
+  --bg:#0d1117; --surface:#161b22; --surface2:#1c2128; --border:#30363d;
+  --text:#e6edf3; --dim:#8b949e; --accent:#58a6ff; --green:#3fb950;
+  --orange:#d29922; --red:#f85149; --purple:#bc8cff;
+}
+:root[data-theme="light"]{
+  --bg:#ffffff; --surface:#f6f8fa; --surface2:#eaeef2; --border:#d0d7de;
+  --text:#1f2328; --dim:#59636e; --accent:#0969da; --green:#1a7f37;
+  --orange:#9a6700; --red:#cf222e; --purple:#8250df;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:28px 20px 70px}
+h1{font-size:22px;margin:0 0 8px;line-height:1.3}
+h2{font-size:18px;margin:32px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;
+  font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
+.sub{color:var(--dim);font-size:13.5px;margin:0 0 14px}
+.status{border:1px solid var(--border);border-radius:10px;background:var(--surface);
+  padding:2px 16px 10px;margin:0 0 20px}
+.status dl{display:grid;grid-template-columns:max-content 1fr;gap:4px 14px;margin:12px 0 0}
+.status dt{color:var(--dim);font-size:12px;text-transform:uppercase;letter-spacing:.04em;
+  white-space:nowrap;padding-top:2px}
+.status dd{margin:0;font-size:14px}
+.verdict{font-weight:700}
+.verdict.good{color:var(--green)}
+.verdict.open{color:var(--red)}
+nav.chain{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 6px;padding:0}
+nav.chain a,nav.chain span{display:inline-block;padding:5px 11px;border:1px solid var(--border);
+  border-radius:20px;background:var(--surface);text-decoration:none;color:var(--accent);
+  font-size:12.5px;line-height:1.3;white-space:nowrap}
+nav.chain a:hover{background:var(--surface2)}
+nav.chain span.here{background:var(--accent);color:var(--bg);border-color:var(--accent);font-weight:600}
+p.chainnote{color:var(--dim);font-size:12px;margin:0 0 18px}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);
+  border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;
+  font:13px/1 ui-monospace,Menlo,monospace;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.18)}
+.mono{font:12.5px ui-monospace,SFMono-Regular,Menlo,monospace;
+  background:var(--surface);border:1px solid var(--border);border-radius:8px;
+  padding:13px;overflow-x:auto;white-space:pre}
+.warn{border-left:3px solid var(--accent);background:var(--surface);
+  padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0}
+svg{max-width:100%;height:auto;display:block;margin:16px 0}
+svg .box{fill:var(--surface);stroke:var(--border);stroke-width:1.4}
+svg .lbl{fill:var(--text);font:11.5px ui-monospace,Menlo,monospace}
+svg .lbl-b{fill:var(--text);font:bold 13px -apple-system,sans-serif}
+svg .note{fill:var(--dim);font:11px -apple-system,sans-serif}
+svg .hdr{fill:var(--accent);font:bold 12.5px -apple-system,sans-serif}
+svg .w-b{fill:var(--surface);stroke:var(--green);stroke-width:1.7}
+svg .m-b{fill:var(--surface);stroke:var(--purple);stroke-width:1.7}
+svg .w-t{fill:var(--green);font:bold 11.5px -apple-system,sans-serif}
+svg .m-t{fill:var(--purple);font:bold 11.5px -apple-system,sans-serif}
+svg .arw{stroke:var(--dim);stroke-width:1.5;fill:none}
+svg .arw-w{stroke:var(--green);stroke-width:1.7;fill:none}
+svg .arw-m{stroke:var(--purple);stroke-width:1.7;fill:none}
+svg a text{text-decoration:underline;fill:var(--accent);font:11px ui-monospace,Menlo,monospace}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+  document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head>
+<body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+  function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+  function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
+    b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
+      else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+  document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+<div class="wrap">
+
+<h1>How one job runs two NeMo-Gym stacks instead of one</h1>
+<p class="sub">Companion illustration for
+<a href="https://github.com/NVIDIA-NeMo/RL/pull/3373">NVIDIA-NeMo/RL #3373</a>
+— <em>wire sharded stacks into training</em>.
+All permalinks pin the PR head <code>252da6f</code>.</p>
+
+<div class="status">
+<dl>
+  <dt>Before</dt>
+  <dd>A job started exactly one NeMo-Gym actor. Every environment server it needed ran on that one node, so the whole job was capped by what one node could hold.</dd>
+  <dt>This PR</dt>
+  <dd>Lets a job declare several stacks (<code>shards</code>), starts one actor each, and sends every prompt to the shard that hosts the environment it names.</dd>
+  <dt>Status</dt>
+  <dd><span class="verdict good">New in this PR.</span> Open, not yet merged — it sits on top of #3372 in a stack.</dd>
+</dl>
+</div>
+
+<nav class="chain">
+  <span class="here">two stacks in one job</span>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-3373-teardown-timeout.html">keeping teardown bounded</a>
+</nav>
+<p class="chainnote">Two pages on #3373, one question each — this one: what the feature is and how it compares to the single-actor way.
+Background from the PRs below it in the stack:
+<a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-3371-shard-actors.html">how the actors get created</a> (#3371)
+and <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-3372-group-affinity.html">how rollouts get routed</a> (#3372).</p>
+
+<p>A NeMo-Gym stack is one Ray actor running a pile of environment servers — a tool server, a
+judge, whatever the recipe asks for. Training sends it prompts; it runs them and sends back
+rollouts. One actor was the only shape available, so adding a second heavy environment meant
+squeezing it onto the same node.
+This PR makes the count configurable. The thing every entrypoint now holds is a
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/252da6f7fdbe36661deddd344d6b40b3c112c3ad/nemo_rl/environments/nemo_gym.py#L1568"><code>NemoGymShardSet</code></a>
+— a set of actors plus a map from environment name to the actor hosting it.</p>
+
+<h2>Where the rows go, before and after</h2>
+
+<svg viewBox="0 0 900 430" role="img" aria-label="Five prompt rows, three naming workplace_assistant and two naming math_with_judge. Before this PR all five go to a single Gym actor. After, they are split by name: three to the workplace shard and two to the math shard. Both paths call the same shard_for_route function.">
+  <text class="hdr" x="16" y="18">Five prompt rows — 3 name workplace_assistant, 2 name math_with_judge</text>
+
+  <!-- rows -->
+  <rect class="w-b" x="16" y="34" width="86" height="24" rx="4"/><text class="w-t" x="24" y="51">workplace</text>
+  <rect class="w-b" x="16" y="62" width="86" height="24" rx="4"/><text class="w-t" x="24" y="79">workplace</text>
+  <rect class="w-b" x="16" y="90" width="86" height="24" rx="4"/><text class="w-t" x="24" y="107">workplace</text>
+  <rect class="m-b" x="16" y="118" width="86" height="24" rx="4"/><text class="m-t" x="24" y="135">math</text>
+  <rect class="m-b" x="16" y="146" width="86" height="24" rx="4"/><text class="m-t" x="24" y="163">math</text>
+
+  <!-- before -->
+  <text class="lbl-b" x="190" y="30">Before — one actor</text>
+  <path class="arw" d="M104 100 L186 100" marker-end="url(#g)"/>
+  <rect class="box" x="190" y="60" width="200" height="80" rx="6"/>
+  <text class="lbl" x="202" y="86">one Gym actor</text>
+  <text class="lbl" x="202" y="104">runs both environments</text>
+  <text class="lbl" x="202" y="122">on one node</text>
+  <text class="note" x="190" y="160">All 5 rows land here. The node has to</text>
+  <text class="note" x="190" y="176">hold every server the recipe names.</text>
+
+  <!-- after -->
+  <text class="lbl-b" x="560" y="30">Now — two shards</text>
+  <path class="arw-w" d="M104 76 C 420 76, 460 70, 556 70" marker-end="url(#gw)"/>
+  <path class="arw-m" d="M104 146 C 420 146, 460 160, 556 160" marker-end="url(#gm)"/>
+  <rect class="w-b" x="560" y="46" width="230" height="48" rx="6"/>
+  <text class="w-t" x="572" y="66">shard "workplace"</text>
+  <text class="lbl" x="572" y="84">ports 5000-5499 · own node</text>
+  <rect class="m-b" x="560" y="136" width="230" height="48" rx="6"/>
+  <text class="m-t" x="572" y="156">shard "math"</text>
+  <text class="lbl" x="572" y="174">ports 5500-5999 · own node</text>
+  <text class="note" x="560" y="208">3 rows go left, 2 go right. Each shard only</text>
+  <text class="note" x="560" y="224">runs the servers its own config_paths name.</text>
+
+  <!-- convergence -->
+  <rect class="box" x="16" y="250" width="868" height="76" rx="6"/>
+  <text class="lbl-b" x="30" y="272">Both paths call the same function</text>
+  <text class="lbl" x="30" y="294">shard_for_route(name) — if the map is empty, return the only actor; otherwise look the name up</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/252da6f7fdbe36661deddd344d6b40b3c112c3ad/nemo_rl/environments/nemo_gym.py#L1614"><text x="30" y="314">nemo_gym.py:1614</text></a>
+  <text class="note" x="210" y="314">An unsharded job is just the one-shard case, so there is no second code path to keep working.</text>
+
+  <text class="note" x="16" y="352">Green = rows and the shard that hosts them.  Purple = the other environment and its shard.</text>
+  <text class="note" x="16" y="372">"Route" is the name a row carries — a legacy agent_ref, or a task_source. Both resolve the same way.</text>
+  <text class="note" x="16" y="398">The PR deletes the old single-actor helpers outright, so every entrypoint holds a shard set whether or not it is sharded.</text>
+
+  <defs>
+    <marker id="g" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L0,6 L7,3 z" fill="var(--dim)"/></marker>
+    <marker id="gw" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L0,6 L7,3 z" fill="var(--green)"/></marker>
+    <marker id="gm" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L0,6 L7,3 z" fill="var(--purple)"/></marker>
+  </defs>
+</svg>
+
+<h2>The config that makes two stacks</h2>
+
+<p>The split is by environment, because a given environment lives on exactly one shard. Each
+shard names its own server configs and its own port window, so two stacks on one machine cannot
+collide:</p>
+
+<div class="mono">env:
+  nemo_gym:
+    config_paths: null        # retract the single-stack list inherited from the parent recipe
+    shards:
+      - name: workplace
+        port_range_low: 5000
+        port_range_high: 5499
+        config_paths: [ vllm_model_for_training.yaml, workplace_assistant.yaml ]
+      - name: math
+        port_range_low: 5500
+        port_range_high: 5999
+        config_paths: [ vllm_model_for_training.yaml, math_with_judge.yaml ]
+
+    common_inherited_overlays: [ policy_model ]   # every shard needs the model proxy
+    allowed_duplicate_entries: [ policy_model ]   # and it may appear in more than one</div>
+
+<p>Two details are easy to miss. <code>config_paths: null</code> is how a child recipe
+<em>removes</em> a key it inherited — a Hydra override can blank a key but cannot delete it, so
+the schema reads null as absent
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/252da6f7fdbe36661deddd344d6b40b3c112c3ad/examples/nemo_gym/grpo_sharded_gym_smoke.yaml#L37">smoke config:37</a>).
+And by default each shard gets its own node; <code>placement_strategy: PACK</code> relaxes that
+for a one-machine test, which is why the port windows have to be spelled out and must not
+overlap.</p>
+
+<h2>What setup now checks before training starts</h2>
+
+<p>With one actor, every prompt had somewhere to go. With several, a prompt can name an
+environment no shard runs — a typo, or a shard someone removed. That mistake used to surface
+when the first such prompt was dispatched, which can be hours in. Setup now scans the training
+and validation data and fails immediately
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/252da6f7fdbe36661deddd344d6b40b3c112c3ad/nemo_rl/environments/nemo_gym.py#L2089"><code>validate_dataset_agent_coverage</code></a>):</p>
+
+<div class="mono">hosted routes  = {"workplace_assistant", "math_with_judge"}     # from the 2 shards
+names in data  = {"workplace_assistant", "math_with_judge", "code_gen"}
+
+ShardSetupError: The training dataset references routes that no shard hosts:
+                 ['code_gen']. Hosted routes: ['math_with_judge', 'workplace_assistant'].</div>
+
+<p>Reading every row of a big dataset at startup would be its own cost, so the scan remembers a
+file by its path, size and timestamps and reads it once per process. If the file has changed
+underneath, it falls back to scanning the rows already in memory. Unsharded jobs skip the whole
+thing — one actor hosts everything, so there is nothing a scan could find
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/252da6f7fdbe36661deddd344d6b40b3c112c3ad/nemo_rl/environments/nemo_gym.py#L2110">the early return</a>).</p>
+
+<div class="warn">
+<strong>What this buys you.</strong> Two heavy environments no longer have to fit on one node —
+each gets its own, with its own port window. Nothing changes for existing single-stack recipes:
+they take the same code path with a one-shard set, and the old single-actor helpers are gone
+rather than kept alongside. The cost is that a sharded config has to say which shard owns each
+inherited setting, and setup will now stop a run whose data names an environment nobody hosts.
+</div>
+
+</div>
+</body>
+</html>
