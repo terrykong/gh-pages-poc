@@ -69,7 +69,10 @@ svg a text{text-decoration:underline;fill:var(--accent);font:11.5px ui-monospace
 — routing rollouts across sharded NeMo-Gym actors.
 All permalinks pin the PR head <code>3f5256a</code>.</p>
 
-<p>NeMo-Gym runs the environment that scores rollouts. Until this PR there was one Gym
+<p>NeMo-Gym runs the environment that scores rollouts. A <strong>row</strong> is one
+generation of one prompt — a single request sent to that environment, which comes back with a
+single reply. Training asks for several generations per prompt, so one prompt turns into several
+rows, and that set of rows is a <strong>prompt group</strong>. Until this PR there was one Gym
 actor, so every row went to it. This PR lets a job run several Gym actors — the config
 calls each one a <em>shard</em> — and splits the work between them. The split is not free
 to make: each training prompt is generated
@@ -167,7 +170,9 @@ group to the actor that serves the route name its rows carry
 out of order. Four steps turn that back into whole groups, all on the same 12 rows as
 the figure.</p>
 
-<div class="mono">1. Number every row by its place in the batch, before anything is sent.
+<div class="mono">1. Number every row by its place in the whole batch, before anything
+   is sent. The code stores that number on the row itself, under the key _rowidx.
+   Nothing renumbers it later, so it is the row's name from here on.
 
    rows[0]["_rowidx"] = 0 ... rows[11]["_rowidx"] = 11</div>
 <p class="src"><a href="https://github.com/NVIDIA-NeMo/RL/blob/3f5256a2b859bf7a8d5a3dc72484f6181b09de31/nemo_rl/experience/rollouts.py#L2359">rollouts.py:2359</a></p>
@@ -177,22 +182,26 @@ the figure.</p>
    The route name is the row's agent_ref.name, or its task_source if there
    is no agent_ref.
 
+   A "bucket" below is just the list of rows piling up for one actor: one
+   bucket per actor, always filled a whole group at a time, never a part of one.
+
    rows 0,1,2   -> all give "math"   -> math actor    (bucket keeps 0,1,2)
    rows 3,4,5   -> all give "tools"  -> tools actor   (bucket keeps 3,4,5)
    rows 6,7,8   -> all give "math"   -> math actor    (bucket becomes 0,1,2,6,7,8)
    rows 9,10,11 -> all give "tools"  -> tools actor   (bucket becomes 3,4,5,9,10,11)</div>
 <p class="src"><a href="https://github.com/NVIDIA-NeMo/RL/blob/3f5256a2b859bf7a8d5a3dc72484f6181b09de31/nemo_rl/experience/rollouts.py#L2453">rollouts.py:2453</a> — the same-route check · <a href="https://github.com/NVIDIA-NeMo/RL/blob/3f5256a2b859bf7a8d5a3dc72484f6181b09de31/nemo_rl/environments/nemo_gym.py#L1546">nemo_gym.py:1546</a> — where the route name comes from ·
-<a href="https://github.com/NVIDIA-NeMo/RL/blob/3f5256a2b859bf7a8d5a3dc72484f6181b09de31/nemo_rl/experience/rollouts.py#L2459">:2353</a> — pick the actor</p>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/3f5256a2b859bf7a8d5a3dc72484f6181b09de31/nemo_rl/experience/rollouts.py#L2459">:2459</a> — pick the actor</p>
 
 <div class="mono">3. Start both actors, then hand back whichever row finishes first.
    Two streams in, one stream out.
 
    tools row 4  ->  math row 0  ->  math row 6  ->  tools row 3  ->  ...</div>
 <p class="src"><a href="https://github.com/NVIDIA-NeMo/RL/blob/3f5256a2b859bf7a8d5a3dc72484f6181b09de31/nemo_rl/experience/rollouts.py#L2517">rollouts.py:2517</a> — wait for the first ready row ·
-<a href="https://github.com/NVIDIA-NeMo/RL/blob/3f5256a2b859bf7a8d5a3dc72484f6181b09de31/nemo_rl/experience/rollouts.py#L2539">:2431</a> — pass it on</p>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/3f5256a2b859bf7a8d5a3dc72484f6181b09de31/nemo_rl/experience/rollouts.py#L2539">:2539</a> — pass it on</p>
 
-<div class="mono">4. The collector files each row under row_number // 3 and releases a group
-   only once all 3 of its rows are in. It never sees an actor name.
+<div class="mono">4. The collector -- the object that holds finished rows until a whole
+   group has arrived -- files each row under row_number // 3 and releases a
+   group only once all 3 of its rows are in. It never sees an actor name.
 
    row 4  -> group 1, holding {4}          -> not ready
    row 0  -> group 0, holding {0}          -> not ready
@@ -200,7 +209,7 @@ the figure.</p>
    row 3  -> group 1, holding {3,4}        -> not ready
    row 5  -> group 1, holding {3,4,5}      -> group 1 complete, released</div>
 <p class="src"><a href="https://github.com/NVIDIA-NeMo/RL/blob/3f5256a2b859bf7a8d5a3dc72484f6181b09de31/nemo_rl/experience/rollouts.py#L1885">rollouts.py:1885</a> — row number to group number ·
-<a href="https://github.com/NVIDIA-NeMo/RL/blob/3f5256a2b859bf7a8d5a3dc72484f6181b09de31/nemo_rl/experience/rollouts.py#L1864">:1804</a> — the collector</p>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/3f5256a2b859bf7a8d5a3dc72484f6181b09de31/nemo_rl/experience/rollouts.py#L1864">:1864</a> — the collector</p>
 
 <p>Step 4 is why step 1 matters. Because the numbers are positions in the whole batch and
 no actor renumbers them, the collector that existed before this PR keeps working unchanged.
