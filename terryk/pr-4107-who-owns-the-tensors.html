@@ -60,6 +60,7 @@ svg{max-width:100%;height:auto;display:block;margin:16px 0}
 svg .box{fill:var(--surface);stroke:var(--border);stroke-width:1.4}
 svg .box-ok{fill:var(--surface);stroke:var(--green);stroke-width:1.8}
 svg .box-bad{fill:var(--surface);stroke:var(--red);stroke-width:1.8}
+svg .dict{fill:var(--surface2);stroke:var(--border);stroke-width:1.4}
 svg .lbl{fill:var(--text);font:12.5px ui-monospace,Menlo,monospace}
 svg .lbl-s{fill:var(--text);font:11px ui-monospace,Menlo,monospace}
 svg .note{fill:var(--dim);font:11.5px -apple-system,sans-serif}
@@ -68,6 +69,8 @@ svg .num{fill:var(--dim);font:bold 12px -apple-system,sans-serif}
 svg .t-ok{fill:var(--green);font:bold 12px -apple-system,sans-serif}
 svg .t-bad{fill:var(--red);font:bold 12px -apple-system,sans-serif}
 svg .arw{stroke:var(--dim);stroke-width:1.6;fill:none}
+svg .arw-ok{stroke:var(--green);stroke-width:2;fill:none}
+svg .arw-bad{stroke:var(--red);stroke-width:2;fill:none}
 svg a text{text-decoration:underline;fill:var(--accent);font:11.5px ui-monospace,Menlo,monospace}
 </style>
 <script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
@@ -86,7 +89,7 @@ All links pinned to <code>4fb9fbc</code>.
 <div class="status">
 <dl>
   <dt>Before</dt>
-  <dd>Every read from the in-process store handed back a fresh copy, so what a worker did to a batch stayed in that worker.</dd>
+  <dd>Every read from the store handed back a fresh copy, so what a training worker did to a batch stayed in that worker.</dd>
   <dt>This PR</dt>
   <dd>Drops the copy and returns the stored object itself. That is the speedup, and for plain tensors it is safe.</dd>
   <dt>Status</dt>
@@ -102,14 +105,18 @@ All links pinned to <code>4fb9fbc</code>.
 <p class="chainnote">Three pages on this PR, one question each — this one: what a worker can accidentally do to the store.</p>
 
 <p>
-Workers read training batches from a small store that lives in the same process. This PR removes
-the copy that used to happen on the way in and on the way out. Follow one batch from the writer to
-the GPU — every box below links to the line that does it.
+<strong>First, what &ldquo;the store&rdquo; is.</strong> It is an ordinary Python dictionary, held by
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/4fb9fbca541bcd62668651039f907acae4871050/nemo_rl/data_plane/adapters/local.py#L390"><code>LocalDataPlaneClient</code></a>,
+that maps a field name to that field's value — <code>{"input_ids": &lt;a Tensor&gt;,
+"pixel_values": &lt;a PackedTensor&gt;}</code>. No file, no network, no separate process: the data
+worker builds those values and the dictionary keeps them alive so a training worker in the
+<em>same process</em> can pick them up. Handing them over used to mean copying them. This PR stops
+copying, which means both sides now hold the same objects.
 </p>
 
-<h2>One batch, from the writer to the GPU</h2>
+<h2>Where the batch goes</h2>
 
-<svg viewBox="0 0 900 640" role="img" aria-label="A batch travelling from the data worker into the store, out to a policy worker, and onto the GPU, where the path forks by field type">
+<svg viewBox="0 0 900 360" role="img" aria-label="Four steps: the data worker publishes a batch, the store keeps that object, a training worker fetches it without a copy, and a worker moves the batch to the GPU">
 
   <text class="num" x="216" y="48">1</text>
   <rect class="box" x="240" y="20" width="420" height="52" rx="7"/>
@@ -121,7 +128,7 @@ the GPU — every box below links to the line that does it.
 
   <text class="num" x="216" y="124">2</text>
   <rect class="box-bad" x="240" y="96" width="420" height="52" rx="7"/>
-  <text class="lbl" x="256" y="117">the store keeps that exact object</text>
+  <text class="lbl" x="256" y="117">the store's dict keeps that exact object</text>
   <a href="https://github.com/NVIDIA-NeMo/RL/blob/4fb9fbca541bcd62668651039f907acae4871050/nemo_rl/data_plane/adapters/local.py#L390">
     <text x="256" y="137">local.py:390 — batch[name] = value</text>
   </a>
@@ -130,7 +137,7 @@ the GPU — every box below links to the line that does it.
 
   <text class="num" x="216" y="200">3</text>
   <rect class="box-bad" x="240" y="172" width="420" height="52" rx="7"/>
-  <text class="lbl" x="256" y="193">a worker asks for all of its rows</text>
+  <text class="lbl" x="256" y="193">a training worker fetches all its rows</text>
   <a href="https://github.com/NVIDIA-NeMo/RL/blob/4fb9fbca541bcd62668651039f907acae4871050/nemo_rl/data_plane/adapters/local.py#L104-L105">
     <text x="256" y="213">local.py:104 — returns it, still no copy</text>
   </a>
@@ -139,7 +146,7 @@ the GPU — every box below links to the line that does it.
 
   <text class="num" x="216" y="276">4</text>
   <rect class="box" x="240" y="248" width="530" height="96" rx="7"/>
-  <text class="lbl" x="256" y="269">a worker moves the batch to the GPU</text>
+  <text class="lbl" x="256" y="269">that worker moves its batch to the GPU</text>
   <a href="https://github.com/NVIDIA-NeMo/RL/blob/4fb9fbca541bcd62668651039f907acae4871050/nemo_rl/models/policy/workers/megatron_policy_worker.py#L1053">
     <text x="256" y="292">today it is always Megatron — microbatches first</text>
   </a>
@@ -148,50 +155,7 @@ the GPU — every box below links to the line that does it.
     <text x="256" y="314">a DTensor worker would do data.to(&quot;cuda&quot;)</text>
   </a>
   <text class="t-bad" x="640" y="314">gated off</text>
-  <text class="note" x="256" y="334">the fork below is what that top-level call would hit</text>
-
-  <path class="arw" d="M450 344 L450 360 L235 360 L235 378" marker-end="url(#a1)"/>
-  <path class="arw" d="M450 344 L450 360 L665 360 L665 378" marker-end="url(#a1)"/>
-  <text class="num" x="216" y="408">5</text>
-  <text class="note" x="466" y="356">the loop forks by field type</text>
-
-  <rect class="box" x="30" y="380" width="410" height="108" rx="7"/>
-  <text class="hdr" x="46" y="401">a plain Tensor — input_ids</text>
-  <a href="https://github.com/NVIDIA-NeMo/RL/blob/4fb9fbca541bcd62668651039f907acae4871050/nemo_rl/distributed/batched_data_dict.py#L1119">
-    <text x="46" y="421">batched_data_dict.py:1119</text>
-  </a>
-  <text class="lbl-s" x="46" y="442">self.data[k] = v.to(device)</text>
-  <text class="note" x="46" y="462">Tensor.to builds a NEW tensor, so</text>
-  <text class="note" x="46" y="478">the dict entry is repointed at it.</text>
-
-  <rect class="box" x="460" y="380" width="410" height="108" rx="7"/>
-  <text class="hdr" x="476" y="401">a PackedTensor — pixel_values</text>
-  <a href="https://github.com/NVIDIA-NeMo/RL/blob/4fb9fbca541bcd62668651039f907acae4871050/nemo_rl/distributed/batched_data_dict.py#L1121">
-    <text x="476" y="421">batched_data_dict.py:1121</text>
-  </a>
-  <text class="lbl-s" x="476" y="442">self.data[k] = v.to(device)</text>
-  <a href="https://github.com/NVIDIA-NeMo/RL/blob/4fb9fbca541bcd62668651039f907acae4871050/nemo_rl/data/multimodal_utils.py#L734-L737">
-    <text x="476" y="462">multimodal_utils.py:734 — same line, but</text>
-  </a>
-  <text class="note" x="476" y="478">.to() edits the object and returns self.</text>
-
-  <path class="arw" d="M235 488 L235 510" marker-end="url(#a1)"/>
-  <path class="arw" d="M665 488 L665 510" marker-end="url(#a1)"/>
-
-  <text class="num" x="216" y="540">6</text>
-  <rect class="box-ok" x="30" y="512" width="410" height="72" rx="7"/>
-  <text class="t-ok" x="46" y="534">The store is untouched.</text>
-  <text class="lbl-s" x="46" y="554">store still holds the CPU tensor</text>
-  <text class="lbl-s" x="46" y="572">worker holds a separate GPU one</text>
-
-  <rect class="box-bad" x="460" y="512" width="410" height="72" rx="7"/>
-  <text class="t-bad" x="476" y="534">The store moved to the GPU.</text>
-  <text class="lbl-s" x="476" y="554">the object the store still points at</text>
-  <text class="lbl-s" x="476" y="572">now holds GPU image data</text>
-
-  <rect class="box" x="30" y="600" width="840" height="34" rx="7"/>
-  <rect class="box-bad" x="46" y="609" width="14" height="14" rx="3"/>
-  <text class="note" x="68" y="621">red = a step where the worker and the store share one object</text>
+  <text class="note" x="256" y="334">the next figure is what that top-level call would do</text>
 
   <defs>
     <marker id="a1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
@@ -199,52 +163,105 @@ the GPU — every box below links to the line that does it.
     </marker>
   </defs>
 </svg>
+
+<h2>Why one field escapes and the other does not</h2>
+
+<p>
+After step 3 there are <strong>two dictionaries pointing at one set of objects</strong>: the store's
+and the worker's. What happens next depends on a single thing — whether
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/4fb9fbca541bcd62668651039f907acae4871050/nemo_rl/distributed/batched_data_dict.py#L1115-L1122"><code>.to("cuda")</code></a>
+builds a <em>new</em> object or edits the one it was given.
+</p>
+
+<svg viewBox="0 0 900 430" role="img" aria-label="Two panels. For a plain tensor, to() returns a new GPU tensor and only the worker's dictionary is repointed, so the store keeps the CPU tensor. For a PackedTensor, to() edits the object itself, so both dictionaries see GPU data.">
+
+  <!-- PANEL A -->
+  <text class="hdr" x="16" y="18">input_ids — a plain Tensor</text>
+
+  <rect class="dict" x="16" y="30" width="215" height="46" rx="7"/>
+  <text class="lbl-s" x="30" y="50">the store's dict</text>
+  <text class="note" x="30" y="67">"input_ids" →</text>
+
+  <rect class="dict" x="16" y="100" width="215" height="46" rx="7"/>
+  <text class="lbl-s" x="30" y="120">the worker's dict</text>
+  <text class="note" x="30" y="137">"input_ids" →</text>
+
+  <path class="arw-ok" d="M231 53 L470 53" marker-end="url(#ok)"/>
+  <path class="arw-ok" d="M231 123 L470 123" marker-end="url(#ok)"/>
+
+  <rect class="box-ok" x="472" y="30" width="300" height="46" rx="7"/>
+  <text class="lbl-s" x="486" y="50">the original Tensor · on CPU</text>
+  <text class="note" x="486" y="67">never touched</text>
+
+  <rect class="box-ok" x="472" y="100" width="300" height="46" rx="7"/>
+  <text class="lbl-s" x="486" y="120">a NEW Tensor · on GPU</text>
+  <text class="note" x="486" y="137">built by v.to(device)</text>
+
+  <text class="t-ok" x="786" y="88">safe</text>
+  <text class="note" x="16" y="172">Tensor.to() returns a new object, so only the worker's dict entry is repointed. Two dicts, two different objects.</text>
+
+  <!-- divider -->
+  <path class="arw" d="M16 196 L884 196" stroke-dasharray="4 4"/>
+
+  <!-- PANEL B -->
+  <text class="hdr" x="16" y="230">pixel_values — a PackedTensor</text>
+
+  <rect class="dict" x="16" y="244" width="215" height="46" rx="7"/>
+  <text class="lbl-s" x="30" y="264">the store's dict</text>
+  <text class="note" x="30" y="281">"pixel_values" →</text>
+
+  <rect class="dict" x="16" y="314" width="215" height="46" rx="7"/>
+  <text class="lbl-s" x="30" y="334">the worker's dict</text>
+  <text class="note" x="30" y="351">"pixel_values" →</text>
+
+  <path class="arw-bad" d="M231 267 L400 267 L400 300 L470 300" marker-end="url(#bad)"/>
+  <path class="arw-bad" d="M231 337 L400 337 L400 304 L470 304" marker-end="url(#bad)"/>
+
+  <rect class="box-bad" x="472" y="276" width="300" height="52" rx="7"/>
+  <text class="lbl-s" x="486" y="298">the SAME PackedTensor</text>
+  <text class="note" x="486" y="317">its images are now on the GPU</text>
+
+  <text class="t-bad" x="786" y="306">not safe</text>
+  <text class="note" x="16" y="356">PackedTensor.to() replaces the images inside the object and returns that same object.</text>
+  <text class="note" x="16" y="376">Both dicts still point at it, so the store's entry changed without the store doing anything.</text>
+  <text class="note" x="16" y="404">The two lines that call these — batched_data_dict.py:1119 and :1121 — are the same text.</text>
+
+  <defs>
+    <marker id="ok" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M0 0 L10 5 L0 10 z" fill="var(--green)"/>
+    </marker>
+    <marker id="bad" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M0 0 L10 5 L0 10 z" fill="var(--red)"/>
+    </marker>
+  </defs>
+</svg>
 <p class="src">
-Steps 2 and 3 are the two lines this PR changes. Step 5 is where the field types stop matching:
-<a href="https://github.com/NVIDIA-NeMo/RL/blob/4fb9fbca541bcd62668651039f907acae4871050/nemo_rl/distributed/batched_data_dict.py#L1115-L1122">lines 1119 and 1121</a>
-are the same text, and the whole difference sits inside each
-<a href="https://github.com/NVIDIA-NeMo/RL/blob/4fb9fbca541bcd62668651039f907acae4871050/nemo_rl/data/multimodal_utils.py#L734-L737"><code>.to()</code></a>.
+The difference in one line each:
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/4fb9fbca541bcd62668651039f907acae4871050/nemo_rl/data/multimodal_utils.py#L734-L737"><code>PackedTensor.to</code></a>
+does <code>self.tensors = [...]; return self</code> — it edits itself. <code>Tensor.to</code> is a
+normal PyTorch call that returns a new tensor and leaves the old one alone.
 </p>
 
-<h2>Why nothing fails today</h2>
+<h2>Why nothing fails today, and the one-line fix</h2>
 
 <p>
-Step 4 is the catch: that call lives in the DTensor worker, and this data never reaches it. The
-only shipped writer is Energon vision-language SFT, and
+Step 4 is the catch: the top-level <code>data.to("cuda")</code> lives in the DTensor worker, and this
+data never reaches it.
 <a href="https://github.com/NVIDIA-NeMo/RL/blob/4fb9fbca541bcd62668651039f907acae4871050/nemo_rl/algorithms/sft_v2.py#L399-L400"><code>sft_v2.py:399-400</code></a>
-raises <code>"SFTv2 supports only the Megatron policy backend."</code> The Megatron worker never moves
-a whole batch — it goes straight to
-<a href="https://github.com/NVIDIA-NeMo/RL/blob/4fb9fbca541bcd62668651039f907acae4871050/nemo_rl/models/policy/workers/megatron_policy_worker.py#L1053"><code>get_microbatch_iterator</code></a>,
-so its device moves land on slices it built itself. The only <code>.to("cuda")</code> in that whole
-file is
-<a href="https://github.com/NVIDIA-NeMo/RL/blob/4fb9fbca541bcd62668651039f907acae4871050/nemo_rl/models/policy/workers/megatron_policy_worker.py#L4350">optimizer state</a>,
-not batch data.
-</p>
-
-<p>
-The config side agrees. Exactly one shipped config asks for this store —
-<a href="https://github.com/NVIDIA-NeMo/RL/blob/4fb9fbca541bcd62668651039f907acae4871050/examples/configs/recipes/vlm/vlm_sft-qwen2.5-vl-3b-instruct-clevr-1n2g-megatrontp1-energon.v1.yaml#L48"><code>impl: local</code></a>
-— and it sets <code>dtensor_cfg.enabled: false</code>, <code>megatron_cfg.enabled: true</code>.
-It is not in the nightlies; it runs as
+raises <code>"SFTv2 supports only the Megatron policy backend."</code>, and the Megatron worker never
+moves a whole batch — it goes to
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/4fb9fbca541bcd62668651039f907acae4871050/nemo_rl/models/policy/workers/megatron_policy_worker.py#L1053"><code>get_microbatch_iterator</code></a>
+and moves slices it built itself. The configs agree: exactly one shipped config asks for this store
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/4fb9fbca541bcd62668651039f907acae4871050/examples/configs/recipes/vlm/vlm_sft-qwen2.5-vl-3b-instruct-clevr-1n2g-megatrontp1-energon.v1.yaml#L48"><code>impl: local</code></a>),
+and it sets <code>megatron_cfg.enabled: true</code>. It is not in the nightlies; it runs as
 <a href="https://github.com/NVIDIA-NeMo/RL/blob/4fb9fbca541bcd62668651039f907acae4871050/tests/functional/L1_Functional_Tests_SFT.sh#L40"><code>sft_v2_energon.sh</code></a>
 in the L1 SFT suite.
 </p>
 
 <p>
-So this is a hazard, not a failure — it starts costing the day someone lifts that one-backend
-limit. It also breaks an assumption already written down: the docstring on
-<a href="https://github.com/NVIDIA-NeMo/RL/blob/4fb9fbca541bcd62668651039f907acae4871050/nemo_rl/data/multimodal_utils.py#L716-L733"><code>PackedTensor.to</code></a>
-says a bad device move cannot happen because worker-side moves &ldquo;happen post-serialization on
-independent copies.&rdquo; Steps 2 and 3 are what made them independent.
-</p>
-
-<h2>What would fix it — proposed, not in the PR</h2>
-
-<p>Nothing below is implemented. This is the change suggested in review.</p>
-
-<p>
-Let the shortcut at step 3 skip <code>PackedTensor</code>, so that one type falls through to the
-branch below it, which already builds a new wrapper:
+So this is a hazard, not a failure. <strong>Nothing below is implemented</strong> — this is the change
+suggested in review. Let the shortcut at step 3 skip <code>PackedTensor</code>, so it falls through to
+the branch below, which already builds a new wrapper:
 </p>
 
 <div class="mono"><span class="cm"># nemo_rl/data_plane/adapters/local.py:104</span>
@@ -255,20 +272,11 @@ branch below it, which already builds a new wrapper:
        return value
 </div>
 <p class="src">
-One line. <code>PackedTensor</code> then reaches
-<a href="https://github.com/NVIDIA-NeMo/RL/blob/4fb9fbca541bcd62668651039f907acae4871050/nemo_rl/data_plane/adapters/local.py#L112"><code>local.py:112 — value.slice(indices)</code></a>.
-</p>
-
-<p>The speedup survives, because
+The worker then gets its own wrapper, so panel B starts looking like panel A. The images are still
+shared, so nothing is copied —
 <a href="https://github.com/NVIDIA-NeMo/RL/blob/4fb9fbca541bcd62668651039f907acae4871050/nemo_rl/data/multimodal_utils.py#L812"><code>slice</code></a>
-shares the image data instead of copying it:</p>
-
-<div class="mono">fetched = store.slice([0, 1, 2, 3, 4])
-
-fetched <span class="cm">is</span> store            <span class="bad">False</span>   <span class="cm"># a new wrapper — the store is safe</span>
-fetched.tensors[0] <span class="cm">is</span> rows[0] <span class="ok">True</span>    <span class="cm"># same image data — nothing copied</span>
-store.tensors[0].device        <span class="ok">cpu</span>     <span class="cm"># after the worker's move to the GPU</span>
-</div>
+puts the same image tensors into a new list.
+</p>
 
 <div class="hl">
 <strong>The fix costs less than the copy it replaces.</strong> Measured on one machine's CPU, so read
