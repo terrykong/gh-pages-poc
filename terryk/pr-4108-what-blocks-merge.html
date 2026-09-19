@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NVIDIA-NeMo/RL #4108 — what has to be fixed before this can merge</title>
+<style>
+:root{
+  --bg:#0d1117; --surface:#161b22; --surface2:#1c2128; --border:#30363d;
+  --text:#e6edf3; --dim:#8b949e; --accent:#58a6ff; --green:#3fb950;
+  --orange:#d29922; --red:#f85149;
+}
+:root[data-theme="light"]{
+  --bg:#ffffff; --surface:#f6f8fa; --surface2:#eaeef2; --border:#d0d7de;
+  --text:#1f2328; --dim:#59636e; --accent:#0969da; --green:#1a7f37;
+  --orange:#9a6700; --red:#cf222e;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:28px 20px 70px}
+h1{font-size:22px;margin:0 0 8px;line-height:1.3}
+h2{font-size:18px;margin:30px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;
+  font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
+.sub{color:var(--dim);font-size:13.5px;margin:0 0 16px}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);
+  border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;
+  font:13px/1 ui-monospace,Menlo,monospace;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.18)}
+.status{border:1px solid var(--border);border-radius:10px;background:var(--surface);
+  padding:2px 16px 10px;margin:0 0 20px}
+.status dl{display:grid;grid-template-columns:max-content 1fr;gap:4px 14px;margin:12px 0 0}
+.status dt{color:var(--dim);font-size:12px;text-transform:uppercase;letter-spacing:.04em;
+  white-space:nowrap;padding-top:2px}
+.status dd{margin:0;font-size:14px}
+.verdict{font-weight:700}
+.verdict.good{color:var(--green)}
+.verdict.open{color:var(--red)}
+.warn{border-left:3px solid var(--red);background:var(--surface);
+  padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0}
+nav.chain{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 6px;padding:0}
+nav.chain a,nav.chain span{display:inline-block;padding:5px 11px;border:1px solid var(--border);
+  border-radius:20px;background:var(--surface);text-decoration:none;color:var(--accent);
+  font-size:12.5px;line-height:1.3;white-space:nowrap}
+nav.chain a:hover{background:var(--surface2)}
+nav.chain span.here{background:var(--accent);color:var(--bg);border-color:var(--accent);font-weight:600}
+p.chainnote{color:var(--dim);font-size:12px;margin:0 0 18px}
+svg{max-width:100%;height:auto;display:block;margin:16px 0}
+svg .box-ci{fill:var(--surface);stroke:var(--red);stroke-width:2}
+svg .box-rt{fill:var(--surface);stroke:var(--orange);stroke-width:2}
+svg .ttl{fill:var(--text);font:bold 12px -apple-system,sans-serif}
+svg .note{fill:var(--dim);font:11px -apple-system,sans-serif}
+svg .hdr-r{fill:var(--red);font:bold 12px -apple-system,sans-serif}
+svg .hdr-o{fill:var(--orange);font:bold 12px -apple-system,sans-serif}
+svg .lbl-b{fill:var(--text);font:bold 12.5px -apple-system,sans-serif}
+svg a text{text-decoration:underline;fill:var(--accent);font:11px ui-monospace,Menlo,monospace}
+table{border-collapse:collapse;width:100%;margin:14px 0;font-size:13.5px}
+th,td{border:1px solid var(--border);padding:7px 10px;text-align:left;vertical-align:top}
+th{background:var(--surface2)}
+td code{white-space:nowrap}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+  document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head>
+<body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+  function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+  function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
+    b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
+      else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+  document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+<div class="wrap">
+
+<h1>What has to be fixed before #4108 can merge</h1>
+<p class="sub">Companion illustration for
+<a href="https://github.com/NVIDIA-NeMo/RL/pull/4108">NVIDIA-NeMo/RL #4108</a>
+— all permalinks pinned to
+<a href="https://github.com/NVIDIA-NeMo/RL/tree/d044f40cf04c34c6d8ef7a500ccf48ac50c9f024"><code>d044f40</code></a>.</p>
+
+<div class="status">
+<dl>
+  <dt>Before</dt>
+  <dd>The Energon SFT loader handled one family of multimodal datasets, through the generic cooker and task encoder.</dd>
+  <dt>This PR</dt>
+  <dd>Adds a second family for Nemotron models — ten cookers, three task-encoder modules, roughly 5,100 new lines.</dd>
+  <dt>Status</dt>
+  <dd><span class="verdict open">Open — none of the nine below are fixed.</span> All were re-checked against <code>d044f40</code> after the rebase and all are still present. Each has a 🔴 comment on the PR.</dd>
+</dl>
+</div>
+
+<nav class="chain">
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4108-nemotron-vs-generic.html">nemotron vs generic</a>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4108-retry-forever.html">why a bad dataset hangs</a>
+  <span class="here">what blocks merge</span>
+</nav>
+<p class="chainnote">Three pages on this PR, one question each — this one: the nine things that have to change first.</p>
+
+<p>The review left fourteen comments. Five are design cleanups that can land later. The other
+nine stop this from merging, and they split cleanly into two kinds: three that a CI job will
+refuse, and six that no CI job checks at all — those only show up once someone runs a real
+training job.</p>
+
+<h2>The nine, and what each one stops</h2>
+
+<svg viewBox="0 0 940 372" role="img" aria-label="Nine blocking issues in two groups: three caught by CI and six that only fail at runtime">
+
+  <text x="12" y="16" class="hdr-r">Caught by CI — red now, or red the first time the tests run</text>
+
+  <rect x="12" y="26" width="296" height="86" rx="7" class="box-ci"/>
+  <text x="26" y="46" class="ttl">Bridge submodule pin</text>
+  <text x="26" y="64" class="note">points at a commit not on Bridge main</text>
+  <text x="26" y="80" class="note">fast-forward check fails</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/pull/4108/files">
+    <text x="26" y="100">3rdparty/…/Megatron-Bridge</text></a>
+
+  <rect x="322" y="26" width="296" height="86" rx="7" class="box-ci"/>
+  <text x="336" y="46" class="ttl">secrets-detector</text>
+  <text x="336" y="64" class="note">one person's paths in a new soak config</text>
+  <text x="336" y="80" class="note">job is red right now</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/d044f40cf04c34c6d8ef7a500ccf48ac50c9f024/examples/configs/sft_v2_tests/sft-super67b-generalist.n16soak.yaml#L104">
+    <text x="336" y="100">n16soak.yaml:104</text></a>
+
+  <rect x="632" y="26" width="296" height="86" rx="7" class="box-ci"/>
+  <text x="646" y="46" class="ttl">29 of its own tests fail</text>
+  <text x="646" y="64" class="note">the Megatron unit lane collects them all</text>
+  <text x="646" y="80" class="note">no test job has run yet</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/d044f40cf04c34c6d8ef7a500ccf48ac50c9f024/tests/unit/conftest.py#L136">
+    <text x="646" y="100">conftest.py:136</text></a>
+
+  <text x="12" y="146" class="hdr-o">No CI job checks these — they show up in a real training run</text>
+
+  <rect x="12" y="156" width="296" height="86" rx="7" class="box-rt"/>
+  <text x="26" y="176" class="ttl">failure tolerance set to 0</text>
+  <text x="26" y="194" class="note">Energon reads 0 as "stop counting"</text>
+  <text x="26" y="210" class="note">a broken dataset runs forever</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/d044f40cf04c34c6d8ef7a500ccf48ac50c9f024/nemo_rl/data/energon/multimodal/task_encoders/generic_sft.py#L259">
+    <text x="26" y="230">generic_sft.py:259</text></a>
+
+  <rect x="322" y="156" width="296" height="86" rx="7" class="box-rt"/>
+  <text x="336" y="176" class="ttl">audio frontend never checked</text>
+  <text x="336" y="194" class="note">a vision-only processor passes setup</text>
+  <text x="336" y="210" class="note">the run trains with no audio</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/d044f40cf04c34c6d8ef7a500ccf48ac50c9f024/nemo_rl/data/energon/multimodal/task_encoders/nemotron_multimodal.py#L460">
+    <text x="336" y="230">nemotron_multimodal.py:460</text></a>
+
+  <rect x="632" y="156" width="296" height="86" rx="7" class="box-rt"/>
+  <text x="646" y="176" class="ttl">media decoded, then dropped</text>
+  <text x="646" y="194" class="note">opened before anything needs it</text>
+  <text x="646" y="210" class="note">every sample, when no cache pool</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/d044f40cf04c34c6d8ef7a500ccf48ac50c9f024/nemo_rl/data/energon/multimodal/cookers/nemotron.py#L371">
+    <text x="646" y="230">cookers/nemotron.py:371</text></a>
+
+  <rect x="12" y="256" width="296" height="86" rx="7" class="box-rt"/>
+  <text x="26" y="276" class="ttl">odd turn count crashes</text>
+  <text x="26" y="294" class="note">the guard rejects fewer than 2 markers,</text>
+  <text x="26" y="310" class="note">the loop then reads one past the end</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/d044f40cf04c34c6d8ef7a500ccf48ac50c9f024/nemo_rl/data/energon/multimodal/task_encoders/nemotron_tokenization.py#L399">
+    <text x="26" y="330">nemotron_tokenization.py:399</text></a>
+
+  <rect x="322" y="256" width="296" height="86" rx="7" class="box-rt"/>
+  <text x="336" y="276" class="ttl">packing_buffer_size retyped</text>
+  <text x="336" y="294" class="note">only null is accepted now</text>
+  <text x="336" y="310" class="note">three shipped recipes stop loading</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/d044f40cf04c34c6d8ef7a500ccf48ac50c9f024/nemo_rl/data/energon/config.py#L154">
+    <text x="336" y="330">energon/config.py:154</text></a>
+
+  <rect x="632" y="256" width="296" height="86" rx="7" class="box-rt"/>
+  <text x="646" y="276" class="ttl">librosa is not declared</text>
+  <text x="646" y="294" class="note">in no dependency list and no extra</text>
+  <text x="646" y="310" class="note">audio runs die after training starts</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/d044f40cf04c34c6d8ef7a500ccf48ac50c9f024/nemo_rl/data/energon/multimodal/task_encoders/nemotron_multimodal.py#L679">
+    <text x="646" y="330">nemotron_multimodal.py:679</text></a>
+
+  <text x="12" y="364" class="note">Red = a CI job refuses it.  Orange = nothing checks it; it fails during a run.</text>
+</svg>
+
+<h2>The six runtime ones, and the shape of each fix</h2>
+
+<p>None of these is implemented — the right-hand column is what the review asks for, not
+what the code does today.</p>
+
+<table>
+<tr><th>What goes wrong</th><th>Why</th><th>What the review asks for</th></tr>
+<tr>
+  <td><b>A broken dataset never stops</b><br><code>generic_sft.py:259</code></td>
+  <td>Energon treats a tolerance of <code>0</code> as "disable the check", not "fail on the first error". It also switches off a second stop in the packing loop.</td>
+  <td>Set it to <code>100</code>, Energon's own default, and put back the comment the change deleted.</td>
+</tr>
+<tr>
+  <td><b>Audio silently disappears</b><br><code>nemotron_multimodal.py:460</code></td>
+  <td>The code works out whether the processor has an audio frontend, then never uses the answer to reject anything. Each audio sample fails later and gets skipped.</td>
+  <td>Raise during setup when the frontend is missing. The value is already computed.</td>
+</tr>
+<tr>
+  <td><b>Media is decoded for nothing</b><br><code>cookers/nemotron.py:371</code></td>
+  <td>The file is opened before the code decides whether it needs it, and the result is thrown away when there is no cache pool.</td>
+  <td>Open only on the two paths that use the handle. Moving the call down alone breaks the metadata step, which also uses it.</td>
+</tr>
+<tr>
+  <td><b>Crash on an odd turn count</b><br><code>nemotron_tokenization.py:399</code></td>
+  <td>Both user and assistant turns emit the same marker, so a conversation ending on a user turn gives an odd number. The loop reads one past the last one.</td>
+  <td>Reject an odd count in the guard that already exists.</td>
+</tr>
+<tr>
+  <td><b>Three recipes stop loading</b><br><code>energon/config.py:154</code></td>
+  <td>The field now accepts only <code>null</code>. Two recipes still set it to <code>64</code> and a third inherits from one of them.</td>
+  <td>Move those recipes to the new <code>task_encoder.packing</code> block.</td>
+</tr>
+<tr>
+  <td><b>Audio runs die mid-training</b><br><code>nemotron_multimodal.py:679</code></td>
+  <td><code>librosa</code> is imported but appears in no dependency list, no extra, and not in the audio install script.</td>
+  <td>Declare <code>librosa</code> and <code>soxr</code>, and refresh the lock file.</td>
+</tr>
+</table>
+
+<div class="warn">
+<strong>What to do with this.</strong> The three CI ones are the gate: two are red in the checks
+list today and the third goes red the first time anyone comments <code>/ok to test</code>. The six
+runtime ones are the reason to care beyond the gate — none of them is caught by any job, so
+merging with them in place means the first person to run a real Nemotron training job finds them.
+Five further comments on the PR are design cleanups and can land afterwards.
+</div>
+
+</div>
+</body>
+</html>
