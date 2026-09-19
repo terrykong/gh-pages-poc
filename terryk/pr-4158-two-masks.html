@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NVIDIA-NeMo/RL #4158 — why one "all the same" check is not enough</title>
+<style>
+:root{
+  --bg:#0d1117; --surface:#161b22; --surface2:#1c2128; --border:#30363d;
+  --text:#e6edf3; --dim:#8b949e; --accent:#58a6ff; --green:#3fb950;
+  --orange:#d29922; --red:#f85149;
+  --v1:#79c0ff; --v2:#d2a8ff; --v3:#ffa657; --v4:#ff7b72;
+}
+:root[data-theme="light"]{
+  --bg:#ffffff; --surface:#f6f8fa; --surface2:#eaeef2; --border:#d0d7de;
+  --text:#1f2328; --dim:#59636e; --accent:#0969da; --green:#1a7f37;
+  --orange:#9a6700; --red:#cf222e;
+  --v1:#0550ae; --v2:#8250df; --v3:#953800; --v4:#cf222e;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:28px 20px 70px}
+h1{font-size:22px;margin:0 0 8px;line-height:1.3}
+h2{font-size:18px;margin:32px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;
+  font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
+.sub{color:var(--dim);font-size:13.5px;margin:0 0 10px}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);
+  border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;
+  font:13px/1 ui-monospace,Menlo,monospace;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.18)}
+.mono{font:12.5px ui-monospace,SFMono-Regular,Menlo,monospace;
+  background:var(--surface);border:1px solid var(--border);border-radius:8px;
+  padding:13px;overflow-x:auto;white-space:pre}
+.warn{border-left:3px solid var(--red);background:var(--surface);
+  padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0}
+.status{border:1px solid var(--border);border-radius:10px;background:var(--surface);
+  padding:2px 16px 10px;margin:0 0 20px}
+.status dl{display:grid;grid-template-columns:max-content 1fr;gap:4px 14px;margin:12px 0 0}
+.status dt{color:var(--dim);font-size:12px;text-transform:uppercase;letter-spacing:.04em;
+  white-space:nowrap;padding-top:2px}
+.status dd{margin:0;font-size:14px}
+.verdict{font-weight:700}
+.verdict.good{color:var(--green)}
+.verdict.open{color:var(--red)}
+nav.chain{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 6px;padding:0}
+nav.chain a,nav.chain span{display:inline-block;padding:5px 11px;border:1px solid var(--border);
+  border-radius:20px;background:var(--surface);text-decoration:none;color:var(--accent);
+  font-size:12.5px;line-height:1.3;white-space:nowrap}
+nav.chain a:hover{background:var(--surface2)}
+nav.chain span.here{background:var(--accent);color:var(--bg);border-color:var(--accent);font-weight:600}
+p.chainnote{color:var(--dim);font-size:12px;margin:0 0 18px}
+.cref{margin:6px 0 0;font-size:13px}
+.cref a{display:inline-block;padding:4px 10px;border:1px solid var(--border);
+  border-radius:16px;background:var(--surface);font:12.5px ui-monospace,Menlo,monospace}
+.cref a:hover{background:var(--surface2);text-decoration:none}
+svg{max-width:100%;height:auto;display:block;margin:16px 0}
+svg .lbl{fill:var(--text);font:12.5px ui-monospace,Menlo,monospace}
+svg .lbl-b{fill:var(--text);font:bold 13px -apple-system,sans-serif}
+svg .note{fill:var(--dim);font:11.5px -apple-system,sans-serif}
+svg .hdr{fill:var(--accent);font:bold 12.5px -apple-system,sans-serif}
+svg .num{fill:var(--text);font:12.5px ui-monospace,Menlo,monospace}
+svg .keep{fill:var(--green);font:bold 12.5px ui-monospace,Menlo,monospace}
+svg .drop{fill:var(--red);font:bold 12.5px ui-monospace,Menlo,monospace}
+svg .rule{stroke:var(--border);stroke-width:1}
+svg .step{fill:var(--surface);stroke:var(--border);stroke-width:1.3}
+svg .c-ok{fill:var(--green);opacity:.5;stroke:var(--green);stroke-width:1.4}
+svg .c-odd{fill:var(--red);opacity:.5;stroke:var(--red);stroke-width:1.4}
+svg .c-gone{fill:var(--dim);opacity:.22;stroke:var(--dim);stroke-width:1.2;stroke-dasharray:3 3}
+svg a text{text-decoration:underline;fill:var(--accent);font:11.5px ui-monospace,Menlo,monospace}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+  document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head>
+<body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+  function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+  function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
+    b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
+      else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+  document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+<div class="wrap">
+
+<h1>Why "are these rewards all the same?" needs two different answers</h1>
+<p class="sub">Companion illustration for
+<a href="https://github.com/NVIDIA-NeMo/RL/pull/4158">NVIDIA-NeMo/RL #4158</a>.
+All permalinks pin the PR head <code>70b70e7</code>.</p>
+
+<nav class="chain">
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4158-advantage-spike.html">the −2075 advantage</a>
+  <span class="here">one check or two</span>
+</nav>
+<p class="chainnote">Two pages on this PR, one question each — this one: why the same question needs a per-rollout answer and a per-group answer.</p>
+
+<div class="status">
+<dl>
+  <dt>Before</dt>
+  <dd>Dynamic sampling decided which prompt groups to keep by asking
+      <code>std != 0</code>. A group where every rollout scored the same non-exact reward
+      slipped through, because its std was rounding noise rather than zero.</dd>
+  <dt>This PR</dt>
+  <dd>Adds a second, separate check that compares a prompt's <em>whole</em> reward group, and
+      uses it for dynamic sampling. The per-rollout leave-one-out check stays, but is used only
+      to decide whether to normalize.</dd>
+  <dt>Status</dt>
+  <dd><span class="verdict good">Fixed by this PR.</span> The first attempt reused the
+      per-rollout check for both jobs; a reviewer showed that splits groups, and the author added
+      the separate whole-group check.</dd>
+</dl>
+</div>
+
+<p>Two different parts of GRPO want to ask "do these rewards carry any signal?", and they need
+different answers.
+<strong>Normalizing</strong> an advantage divides by the spread of the rewards a rollout is compared
+against — with leave-one-out, that is the <em>other</em> rollouts, so the question is per rollout
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/70b70e77fddc4ba9b2a66ac7715c1f72a583b447/nemo_rl/algorithms/advantage_estimator.py#L124">advantage_estimator.py:124</a>).
+<strong>Dynamic sampling</strong> throws away prompts that cannot teach the model anything, and it keeps
+or drops a whole prompt group together, so the question is per group
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/70b70e77fddc4ba9b2a66ac7715c1f72a583b447/nemo_rl/algorithms/grpo.py#L1957">grpo.py:1957</a>).
+Using one answer for both jobs breaks the second one.</p>
+
+<h2>The same eight rollouts, two questions</h2>
+
+<svg viewBox="0 0 900 430" role="img" aria-label="Two cases. When all eight rewards are 0.95 both checks say trivial and dynamic sampling drops the whole group. When one rollout scored 0 and seven scored 0.95, the per-rollout check flags only the odd one while the whole-group check flags nothing, so all eight are kept.">
+  <text class="hdr" x="16" y="20">Case A — all eight rollouts scored the same</text>
+  <rect class="c-ok" x="20" y="32" width="58" height="34" rx="6"/>
+  <rect class="c-ok" x="86" y="32" width="58" height="34" rx="6"/>
+  <rect class="c-ok" x="152" y="32" width="58" height="34" rx="6"/>
+  <rect class="c-ok" x="218" y="32" width="58" height="34" rx="6"/>
+  <rect class="c-ok" x="284" y="32" width="58" height="34" rx="6"/>
+  <rect class="c-ok" x="350" y="32" width="58" height="34" rx="6"/>
+  <rect class="c-ok" x="416" y="32" width="58" height="34" rx="6"/>
+  <rect class="c-ok" x="482" y="32" width="58" height="34" rx="6"/>
+  <text class="lbl" x="49"  y="54" text-anchor="middle">0.95</text>
+  <text class="lbl" x="115" y="54" text-anchor="middle">0.95</text>
+  <text class="lbl" x="181" y="54" text-anchor="middle">0.95</text>
+  <text class="lbl" x="247" y="54" text-anchor="middle">0.95</text>
+  <text class="lbl" x="313" y="54" text-anchor="middle">0.95</text>
+  <text class="lbl" x="379" y="54" text-anchor="middle">0.95</text>
+  <text class="lbl" x="445" y="54" text-anchor="middle">0.95</text>
+  <text class="lbl" x="511" y="54" text-anchor="middle">0.95</text>
+
+  <text class="lbl" x="20"  y="92">std of every rollout's peers</text>
+  <text class="drop" x="330" y="92">0.00045675</text>
+  <text class="note" x="460" y="92">rounding noise, not real spread</text>
+
+  <text class="lbl" x="20"  y="116">per-rollout check (leave-one-out)</text>
+  <text class="lbl" x="330" y="116">all True</text>
+  <text class="lbl" x="20"  y="140">whole-group check</text>
+  <text class="lbl" x="330" y="140">all True</text>
+  <text class="lbl" x="20"  y="164">dynamic sampling</text>
+  <text class="drop" x="330" y="164">drops all eight</text>
+  <text class="note" x="460" y="164">every advantage here is 0.0; the old std != 0 check kept them</text>
+
+  <line class="rule" x1="16" y1="190" x2="884" y2="190"/>
+
+  <text class="hdr" x="16" y="216">Case B — one rollout got it wrong</text>
+  <rect class="c-odd" x="20" y="228" width="58" height="34" rx="6"/>
+  <rect class="c-ok" x="86" y="228" width="58" height="34" rx="6"/>
+  <rect class="c-ok" x="152" y="228" width="58" height="34" rx="6"/>
+  <rect class="c-ok" x="218" y="228" width="58" height="34" rx="6"/>
+  <rect class="c-ok" x="284" y="228" width="58" height="34" rx="6"/>
+  <rect class="c-ok" x="350" y="228" width="58" height="34" rx="6"/>
+  <rect class="c-ok" x="416" y="228" width="58" height="34" rx="6"/>
+  <rect class="c-ok" x="482" y="228" width="58" height="34" rx="6"/>
+  <text class="lbl" x="49"  y="250" text-anchor="middle">0.0</text>
+  <text class="lbl" x="115" y="250" text-anchor="middle">0.95</text>
+  <text class="lbl" x="181" y="250" text-anchor="middle">0.95</text>
+  <text class="lbl" x="247" y="250" text-anchor="middle">0.95</text>
+  <text class="lbl" x="313" y="250" text-anchor="middle">0.95</text>
+  <text class="lbl" x="379" y="250" text-anchor="middle">0.95</text>
+  <text class="lbl" x="445" y="250" text-anchor="middle">0.95</text>
+  <text class="lbl" x="511" y="250" text-anchor="middle">0.95</text>
+
+  <text class="lbl" x="20"  y="288">per-rollout check (leave-one-out)</text>
+  <text class="lbl" x="330" y="288">True, then False ×7</text>
+  <text class="note" x="560" y="288">rollout 1's peers are all 0.95</text>
+
+  <text class="lbl" x="20"  y="312">whole-group check</text>
+  <text class="lbl" x="330" y="312">False ×8</text>
+  <text class="note" x="560" y="312">the group holds two values</text>
+
+  <text class="lbl" x="20"  y="336">dynamic sampling</text>
+  <text class="keep" x="330" y="336">keeps all eight</text>
+  <text class="note" x="560" y="336">right call — this group teaches something</text>
+
+  <text class="lbl" x="20"  y="360">normalizing</text>
+  <text class="lbl" x="330" y="360">skips rollout 1 only</text>
+  <text class="note" x="560" y="360">that is the −2075 fix, see the other page</text>
+
+  <text class="lbl-b" x="20" y="396">If the per-rollout check had also been used for dynamic sampling, rollout 1 alone would be dropped —</text>
+  <text class="lbl-b" x="20" y="414">leaving seven identical winners whose advantages all recompute to 0.0. The group would teach nothing.</text>
+
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/70b70e77fddc4ba9b2a66ac7715c1f72a583b447/nemo_rl/algorithms/utils.py#L211">
+    <text x="700" y="116">utils.py:211</text></a>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/70b70e77fddc4ba9b2a66ac7715c1f72a583b447/nemo_rl/algorithms/utils.py#L241">
+    <text x="700" y="140">utils.py:241</text></a>
+</svg>
+
+<p class="cref">🔴 <a href="https://github.com/NVIDIA-NeMo/RL/pull/4158#discussion_r4041282016">review comment that caught the group split — grpo.py</a></p>
+
+<h2>The two checks, side by side</h2>
+
+<p>They ask the same question of different sets. The per-rollout one excludes the rollout itself,
+because that is what leave-one-out means. The whole-group one never excludes anything, so it does not
+depend on the leave-one-out setting at all.</p>
+
+<div class="mono"># per rollout — compares each rollout against its PEERS   (utils.py:211)
+is_trivial_distribution[prompt_idx] = comparison_min == comparison_max
+#   case B -> [True, False, False, False, False, False, False, False]
+#   used only to decide whether to divide by the std
+
+# per prompt group — compares the WHOLE valid group       (utils.py:241)
+is_trivial = valid_rewards.numel() &lt;= 1 or (valid_rewards.amin() == valid_rewards.amax())
+#   case B -> False for every rollout in the group
+#   used only to decide whether dynamic sampling keeps the group</div>
+
+<p>The filter then reads the whole-group answer, falling back to the old
+<code>std != 0</code> when dynamic sampling is off
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/70b70e77fddc4ba9b2a66ac7715c1f72a583b447/nemo_rl/algorithms/grpo.py#L1957">grpo.py:1957</a>),
+and the whole-group mask is computed once per step next to the baseline
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/70b70e77fddc4ba9b2a66ac7715c1f72a583b447/nemo_rl/algorithms/grpo.py#L3298">grpo.py:3298</a>):</p>
+
+<div class="mono">non_trivial_reward_mask = (
+    std != 0.0
+    if is_trivial_prompt_distribution is None      # dynamic sampling off
+    else ~is_trivial_prompt_distribution           # dynamic sampling on
+)</div>
+
+<div class="warn">
+<strong>Why one check could not do both jobs.</strong> With leave-one-out, a rollout's peers can all
+be the same value while the group it belongs to is not. That is the whole point of the
+<code>[0.0, 0.95 ×7]</code> case: rollout 1 sees seven identical peers, so it must skip normalizing —
+but its group is exactly the mixed-reward group dynamic sampling most wants to train on. One answer
+cannot be both "do not divide this rollout" and "keep this group". Note also that the old
+<code>std != 0</code> filter was wrong in the other direction for case A: it kept a group whose
+advantages were all zero, which is the one thing dynamic sampling exists to prevent.
+</div>
+
+</div>
+</body>
+</html>
