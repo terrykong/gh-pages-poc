@@ -190,7 +190,7 @@ directly. Five are source bugs with their own sections below.</p>
 
 <h2>Nothing checks these — they appear during a real run</h2>
 
-<h3><span class="n">4</span> A broken dataset never stops the job</h3>
+<h3 id="s4"><span class="n">4</span> A broken dataset never stops the job</h3>
 <svg viewBox="0 0 900 118" role="img" aria-label="Four failing samples in a row with the stop that used to fire now disabled">
   <text x="10" y="16" class="n">every sample fails to decode — wrong prompt_format, or the wrong processor</text>
   <rect x="10" y="26" width="76" height="40" rx="6" class="bad"/><text x="30" y="51" class="r">fail</text>
@@ -215,30 +215,66 @@ explained all this.</p>
 <p class="cref">🔴 <a href="https://github.com/NVIDIA-NeMo/RL/pull/4108#discussion_r3998844981">review comment — generic_sft.py:259</a></p>
 
 <h3><span class="n">5</span> An omni run trains with no audio, and says nothing</h3>
-<svg viewBox="0 0 900 122" role="img" aria-label="Setup accepts a processor with no audio frontend, then every audio sample is skipped">
-  <rect x="10" y="30" width="200" height="54" rx="7" class="box"/>
-  <text x="24" y="52" class="t">vision-only processor</text>
-  <text x="24" y="72" class="n">no audio frontend</text>
-  <path d="M210 57 H276" class="arw" marker-end="url(#ar5)"/>
-  <rect x="282" y="30" width="188" height="54" rx="7" class="good"/>
-  <text x="296" y="52" class="g">setup passes</text>
-  <text x="296" y="72" class="n">the check never rejects</text>
-  <path d="M470 57 H536" class="arw" marker-end="url(#ar5)"/>
-  <rect x="542" y="30" width="180" height="54" rx="7" class="bad"/>
-  <text x="556" y="52" class="r">each audio sample</text>
-  <text x="556" y="72" class="n">raises, is caught, skipped</text>
-  <path d="M722 57 H774" class="arw" marker-end="url(#ar5)"/>
-  <rect x="780" y="30" width="110" height="54" rx="7" class="bad"/>
-  <text x="792" y="52" class="r">trains on</text>
-  <text x="792" y="70" class="r">text + images</text>
-  <text x="10" y="112" class="n">the tolerance of 0 above is what stops this from ever escalating into a real error</text>
-  <defs><marker id="ar5" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" fill="var(--dim)"/></marker></defs>
+<p>An "omni" model reads text, images <em>and</em> sound. Turning a sound file into something it
+can read takes three settings, and they come from the <em>processor</em> — the object that
+converts raw media into model inputs. The three are: what rate to resample the audio to, the step
+between analysis windows, and how much the audio part of the model shrinks the result. A
+processor built only for text and images carries none of them.</p>
+<svg viewBox="0 0 900 208" role="img" aria-label="The same three audio settings are checked at startup where nothing happens, and again per sample where it is too late">
+  <rect x="10" y="30" width="224" height="104" rx="7" class="box"/>
+  <text x="24" y="50" class="n">the processor it was given</text>
+  <text x="24" y="72" class="m">resample to</text><text x="160" y="72" class="r">—</text>
+  <text x="24" y="92" class="m">window step</text><text x="160" y="92" class="r">—</text>
+  <text x="24" y="112" class="m">shrink by</text><text x="160" y="112" class="r">—</text>
+  <text x="10" y="152" class="n">text-and-image only: all three missing</text>
+
+  <path d="M234 62 H286" class="arw" marker-end="url(#ar5)"/>
+  <path d="M234 104 H286" class="arwr" marker-end="url(#ar5r)"/>
+
+  <rect x="292" y="20" width="252" height="62" rx="7" class="dead"/>
+  <text x="306" y="40" class="n">at startup</text>
+  <text x="306" y="59" class="t">all three present? → no</text>
+  <text x="306" y="76" class="n">answer is never used to stop</text>
+
+  <rect x="292" y="94" width="252" height="62" rx="7" class="bad"/>
+  <text x="306" y="114" class="n">on every audio sample</text>
+  <text x="306" y="133" class="t">all three present? → no</text>
+  <text x="306" y="150" class="r">raises — but far too late</text>
+
+  <path d="M544 51 H596" class="arw" marker-end="url(#ar5)"/>
+  <path d="M544 125 H596" class="arwr" marker-end="url(#ar5r)"/>
+
+  <rect x="602" y="22" width="168" height="58" rx="7" class="good"/>
+  <text x="616" y="46" class="g">the run starts</text>
+  <text x="616" y="66" class="n">nothing complains</text>
+
+  <rect x="602" y="96" width="168" height="58" rx="7" class="bad"/>
+  <text x="616" y="120" class="r">caught, printed,</text>
+  <text x="616" y="140" class="r">sample skipped</text>
+
+  <path d="M770 125 H812" class="arwr" marker-end="url(#ar5r)"/>
+  <rect x="818" y="96" width="72" height="58" rx="7" class="bad"/>
+  <text x="832" y="120" class="r">audio</text>
+  <text x="832" y="140" class="r">gone</text>
+
+  <text x="292" y="184" class="n">the same question, asked twice — only the late one does anything, and by then it is swallowed</text>
+  <text x="292" y="202" class="n">job finishes normally: text and images trained, every sound file dropped</text>
+  <defs>
+    <marker id="ar5" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" fill="var(--dim)"/></marker>
+    <marker id="ar5r" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" fill="var(--red)"/></marker>
+  </defs>
 </svg>
-<p>The code works out whether the processor has an audio frontend, narrows that answer, reads it
-once to gate an unrelated check — and never uses it to reject anything. Those are its only three
-uses. The complaint happens per sample instead, deep in encoding, where the disabled tolerance
-swallows it. The PR's own test pins this and currently reports <code>DID NOT RAISE</code>.</p>
-<p class="fix"><b>Fix:</b> raise during setup when the frontend is missing — the value is already computed. Fix the code rather than deleting the assertion; deleting it ships the quiet half-run.</p>
+<p>Those three settings are checked in two places, and the checks are identical. At startup the
+loader asks whether all three are there, gets "no" — and then uses that answer only to decide
+whether to run an unrelated check on one of the numbers. It never refuses the run. The very same
+question is asked again on every audio sample, deep inside encoding, and there it does raise. By
+then it is useless: the error is caught, printed, and the sample is thrown away, and because the
+tolerance in <a href="#s4">section 4</a> is <code>0</code> it never adds up to a stop.</p>
+<p>So a run pointed at the wrong processor starts cleanly, prints a line per sound file, and
+finishes having trained on the text and the images with every piece of audio missing. The PR's
+own test tries to catch this — it blanks one of the three settings and expects startup to fail —
+and it currently reports <code>DID NOT RAISE</code>.</p>
+<p class="fix"><b>Fix:</b> refuse at startup when any of the three is missing. The loader has already worked out the answer; it just throws it away. Fix the code rather than deleting the test, since deleting it ships the quiet half-run.</p>
 <p class="cref">🔴 <a href="https://github.com/NVIDIA-NeMo/RL/pull/4108#discussion_r3998844985">review comment — nemotron_multimodal.py:460</a></p>
 
 <h3><span class="n">6</span> Every media file is decoded, then thrown away</h3>
