@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NVIDIA-NeMo/RL #4107 — who owns the tensors a worker fetched</title>
+<style>
+:root{
+  --bg:#0d1117; --surface:#161b22; --surface2:#1c2128; --border:#30363d;
+  --text:#e6edf3; --dim:#8b949e; --accent:#58a6ff; --green:#3fb950;
+  --orange:#d29922; --red:#f85149;
+}
+:root[data-theme="light"]{
+  --bg:#ffffff; --surface:#f6f8fa; --surface2:#eaeef2; --border:#d0d7de;
+  --text:#1f2328; --dim:#59636e; --accent:#0969da; --green:#1a7f37;
+  --orange:#9a6700; --red:#cf222e;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:28px 20px 70px}
+h1{font-size:22px;margin:0 0 8px;line-height:1.3}
+h2{font-size:18px;margin:32px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;
+  font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
+.sub{color:var(--dim);font-size:13.5px;margin:0 0 16px}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);
+  border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;
+  font:13px/1 ui-monospace,Menlo,monospace;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.18)}
+.mono{font:12.5px ui-monospace,SFMono-Regular,Menlo,monospace;
+  background:var(--surface);border:1px solid var(--border);border-radius:8px;
+  padding:13px;overflow-x:auto;white-space:pre}
+.mono .cm{color:var(--dim)}
+.mono .ok{color:var(--green)}
+.mono .bad{color:var(--red)}
+.src{font-size:12px;color:var(--dim);margin:-8px 0 18px}
+.warn{border-left:3px solid var(--red);background:var(--surface);
+  padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0}
+.hl{border-left:3px solid var(--green);background:var(--surface);
+  padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0}
+.status{border:1px solid var(--border);border-radius:10px;background:var(--surface);
+  padding:2px 16px 10px;margin:0 0 20px}
+.status dl{display:grid;grid-template-columns:max-content 1fr;gap:4px 14px;margin:12px 0 0}
+.status dt{color:var(--dim);font-size:12px;text-transform:uppercase;letter-spacing:.04em;
+  white-space:nowrap;padding-top:2px}
+.status dd{margin:0;font-size:14px}
+.verdict{font-weight:700}
+.verdict.good{color:var(--green)}
+.verdict.open{color:var(--red)}
+nav.chain{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 6px;padding:0}
+nav.chain a,nav.chain span{display:inline-block;padding:5px 11px;border:1px solid var(--border);
+  border-radius:20px;background:var(--surface);text-decoration:none;color:var(--accent);
+  font-size:12.5px;line-height:1.3;white-space:nowrap}
+nav.chain a:hover{background:var(--surface2)}
+nav.chain span.here{background:var(--accent);color:var(--bg);border-color:var(--accent);font-weight:600}
+p.chainnote{color:var(--dim);font-size:12px;margin:0 0 18px}
+svg{max-width:100%;height:auto;display:block;margin:16px 0}
+svg .box{fill:var(--surface);stroke:var(--border);stroke-width:1.4}
+svg .box-ok{fill:var(--surface);stroke:var(--green);stroke-width:1.8}
+svg .box-bad{fill:var(--surface);stroke:var(--red);stroke-width:1.8}
+svg .lbl{fill:var(--text);font:12.5px ui-monospace,Menlo,monospace}
+svg .lbl-s{fill:var(--text);font:11px ui-monospace,Menlo,monospace}
+svg .lbl-b{fill:var(--text);font:bold 13px -apple-system,sans-serif}
+svg .note{fill:var(--dim);font:11.5px -apple-system,sans-serif}
+svg .hdr{fill:var(--accent);font:bold 12.5px -apple-system,sans-serif}
+svg .t-ok{fill:var(--green);font:bold 11.5px -apple-system,sans-serif}
+svg .t-bad{fill:var(--red);font:bold 11.5px -apple-system,sans-serif}
+svg .arw{stroke:var(--dim);stroke-width:1.6;fill:none}
+svg a text{text-decoration:underline;fill:var(--accent);font:11.5px ui-monospace,Menlo,monospace}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+  document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head>
+<body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<div class="wrap">
+
+<h1>Who owns the tensors a worker just fetched?</h1>
+<p class="sub">
+On <a href="https://github.com/NVIDIA-NeMo/RL/pull/4107">NVIDIA-NeMo/RL #4107</a>.
+All links pinned to <code>4fb9fbc</code>.
+</p>
+
+<div class="status">
+<dl>
+  <dt>Before</dt>
+  <dd>The process-local store handed out a fresh copy of every field, so anything a worker did to a fetched batch stayed inside that worker.</dd>
+  <dt>This PR</dt>
+  <dd>Drops the copy and hands back the store's own objects, to save the copying cost. That is the point of the change, and for plain tensors it is safe.</dd>
+  <dt>Status</dt>
+  <dd><span class="verdict open">Open — not fixed in this PR.</span> No code path fails today; the one type that would break it is not reachable yet. Raised in review on #4107.</dd>
+</dl>
+</div>
+
+<nav class="chain">
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4107-header-and-payload.html">what the PR does</a>
+  <span class="here">who owns the tensors</span>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4107-a-test-that-pins-nothing.html">a test that pins nothing</a>
+</nav>
+<p class="chainnote">Three pages on this PR, one question each — this one: what a worker can accidentally do to the store.</p>
+
+<p>
+Workers read training batches from a small in-process store. Before this PR, a read copied every
+field on the way out. This PR removes that copy: when a worker asks for every row it already has,
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/4fb9fbca541bcd62668651039f907acae4871050/nemo_rl/data_plane/adapters/local.py#L104-L105"><code>_select_batch_value</code></a>
+returns the stored object itself, and
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/4fb9fbca541bcd62668651039f907acae4871050/nemo_rl/data_plane/adapters/local.py#L390"><code>put_samples</code></a>
+now keeps whatever the writer handed it. The worker then moves the batch to the GPU with
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/4fb9fbca541bcd62668651039f907acae4871050/nemo_rl/distributed/batched_data_dict.py#L1115-L1122"><code>BatchedDataDict.to()</code></a>.
+That last step treats two kinds of value differently, and only one of them leaves the store alone.
+</p>
+
+<h2>The same fetch, two kinds of field</h2>
+
+<svg viewBox="0 0 900 428" role="img" aria-label="Two lanes comparing a plain tensor and a PackedTensor through fetch and a device move">
+  <!-- lane headers -->
+  <text class="hdr" x="30" y="16">input_ids — a plain torch.Tensor</text>
+  <text class="hdr" x="470" y="16">pixel_values — a PackedTensor</text>
+
+  <!-- Row 1: store -->
+  <rect class="box" x="30" y="28" width="400" height="46" rx="7"/>
+  <text class="lbl" x="46" y="48">the store holds object T</text>
+  <text class="note" x="46" y="65">its tensor lives on the CPU</text>
+
+  <rect class="box" x="470" y="28" width="400" height="46" rx="7"/>
+  <text class="lbl" x="486" y="48">the store holds object P</text>
+  <text class="note" x="486" y="65">its image segments live on the CPU</text>
+
+  <path class="arw" d="M230 74 L230 100" marker-end="url(#a1)"/>
+  <path class="arw" d="M670 74 L670 100" marker-end="url(#a1)"/>
+
+  <!-- Row 2: fetch -->
+  <rect class="box" x="30" y="100" width="400" height="50" rx="7"/>
+  <text class="lbl" x="46" y="120">the worker fetches — and gets T</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/4fb9fbca541bcd62668651039f907acae4871050/nemo_rl/data_plane/adapters/local.py#L104-L105">
+    <text x="46" y="139">local.py:104 — the same object, not a copy</text>
+  </a>
+
+  <rect class="box" x="470" y="100" width="400" height="50" rx="7"/>
+  <text class="lbl" x="486" y="120">the worker fetches — and gets P</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/4fb9fbca541bcd62668651039f907acae4871050/nemo_rl/data_plane/adapters/local.py#L104-L105">
+    <text x="486" y="139">local.py:104 — the same object, not a copy</text>
+  </a>
+
+  <path class="arw" d="M230 150 L230 178" marker-end="url(#a1)"/>
+  <path class="arw" d="M670 150 L670 178" marker-end="url(#a1)"/>
+  <text class="note" x="238" y="168">.to(&quot;cuda&quot;)</text>
+  <text class="note" x="678" y="168">.to(&quot;cuda&quot;)</text>
+
+  <!-- Row 3: what .to does -->
+  <rect class="box" x="30" y="178" width="400" height="62" rx="7"/>
+  <text class="lbl-s" x="46" y="198">self.data[k] = v.to(device)</text>
+  <text class="note" x="46" y="216">Tensor.to returns a NEW tensor.</text>
+  <text class="note" x="46" y="232">The dict entry is repointed at it.</text>
+
+  <rect class="box" x="470" y="178" width="400" height="62" rx="7"/>
+  <text class="lbl-s" x="486" y="198">self.tensors = [...]; return self</text>
+  <text class="note" x="486" y="216">PackedTensor.to changes P itself</text>
+  <text class="note" x="486" y="232">and hands the same P back.</text>
+
+  <path class="arw" d="M230 240 L230 268" marker-end="url(#a1)"/>
+  <path class="arw" d="M670 240 L670 268" marker-end="url(#a1)"/>
+
+  <!-- Row 4: outcome -->
+  <rect class="box-ok" x="30" y="268" width="400" height="76" rx="7"/>
+  <text class="t-ok" x="46" y="290">The store is untouched.</text>
+  <text class="lbl-s" x="46" y="310">store still holds T, on the CPU</text>
+  <text class="lbl-s" x="46" y="328">the worker holds a separate GPU tensor</text>
+
+  <rect class="box-bad" x="470" y="268" width="400" height="76" rx="7"/>
+  <text class="t-bad" x="486" y="290">The store moved to the GPU.</text>
+  <text class="lbl-s" x="486" y="310">store still holds P — but P&#39;s segments</text>
+  <text class="lbl-s" x="486" y="328">are now GPU tensors, for every reader</text>
+
+  <!-- legend -->
+  <rect class="box" x="30" y="364" width="840" height="50" rx="7"/>
+  <rect class="box-ok" x="46" y="378" width="16" height="16" rx="3"/>
+  <text class="note" x="70" y="391">the worker changed only its own copy</text>
+  <rect class="box-bad" x="46" y="396" width="16" height="16" rx="3"/>
+  <text class="note" x="70" y="409">the worker changed something the store still owns</text>
+
+  <defs>
+    <marker id="a1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M0 0 L10 5 L0 10 z" fill="var(--dim)"/>
+    </marker>
+  </defs>
+</svg>
+<p class="src">
+Both lanes are the same call. The loop in
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/4fb9fbca541bcd62668651039f907acae4871050/nemo_rl/distributed/batched_data_dict.py#L1115-L1122">batched_data_dict.py:1115-1122</a>
+picks a branch by type, and lines 1119 and 1121 are the same text — the whole difference is inside
+each <code>.to()</code>.
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/4fb9fbca541bcd62668651039f907acae4871050/nemo_rl/data/multimodal_utils.py#L734-L737">multimodal_utils.py:734-737</a>
+is the one that rebinds its own list and returns <code>self</code>.
+</p>
+
+<h2>Why nothing fails today</h2>
+
+<p>
+The only shipped writer to this store is Energon vision-language SFT, and that path is pinned to
+one backend:
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/4fb9fbca541bcd62668651039f907acae4871050/nemo_rl/algorithms/sft_v2.py#L399-L400"><code>sft_v2.py:399-400</code></a>
+raises <code>"SFTv2 supports only the Megatron policy backend."</code> The Megatron worker cuts each
+batch into microbatches before moving anything, so its <code>.to()</code> lands on a slice it made
+itself, never on the stored object. The worker that does make the plain top-level
+<code>data.to("cuda")</code> call is the DTensor one, and no shipped config can route this data to it.
+</p>
+
+<p>
+So this is a hazard, not a failure. It costs nothing today, and it starts costing the day someone
+lifts that one-backend limit. There is also a written assumption it now breaks: the docstring on
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/4fb9fbca541bcd62668651039f907acae4871050/nemo_rl/data/multimodal_utils.py#L716-L733"><code>PackedTensor.to</code></a>
+argues that a bad device move cannot happen, and one of its reasons is that worker-side moves
+&ldquo;happen post-serialization on independent copies.&rdquo; The copy this PR deletes is what made
+them independent.
+</p>
+
+<h2>What would fix it — proposed, not in the PR</h2>
+
+<p>Nothing below is implemented. This is the change suggested in review.</p>
+
+<p>
+Let the shortcut apply to everything except a <code>PackedTensor</code>, so that one type falls
+through to the branch just below it, which already builds a new wrapper:
+</p>
+
+<div class="mono"><span class="cm"># nemo_rl/data_plane/adapters/local.py:104</span>
+<span class="bad">-  if _is_identity_indices(indices, _value_batch_size(value)):</span>
+<span class="ok">+  if not isinstance(value, PackedTensor) and _is_identity_indices(</span>
+<span class="ok">+      indices, _value_batch_size(value)</span>
+<span class="ok">+  ):</span>
+       return value
+</div>
+<p class="src">One line. <code>PackedTensor</code> then reaches
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/4fb9fbca541bcd62668651039f907acae4871050/nemo_rl/data_plane/adapters/local.py#L112"><code>value.slice(indices)</code></a> instead.</p>
+
+<p>The speedup survives, because <code>slice</code> shares the image data rather than copying it:</p>
+
+<div class="mono"><span class="cm"># what the worker gets back after the change</span>
+fetched = store.slice([0, 1, 2, 3, 4])
+
+fetched <span class="cm">is</span> store            <span class="bad">False</span>   <span class="cm"># a new wrapper — the store is safe</span>
+fetched.tensors[0] <span class="cm">is</span> rows[0] <span class="ok">True</span>    <span class="cm"># same image data — nothing was copied</span>
+
+<span class="cm"># and after the worker moves its batch to the GPU:</span>
+store.tensors[0].device        <span class="ok">cpu</span>     <span class="cm"># the store never followed it</span>
+</div>
+<p class="src">
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/4fb9fbca541bcd62668651039f907acae4871050/nemo_rl/data/multimodal_utils.py#L812"><code>multimodal_utils.py:812</code></a>
+appends <code>self.tensors[physical_index]</code> — the same tensor object, into a new list.
+</p>
+
+<div class="hl">
+<strong>The fix is cheaper than the copy it replaces.</strong> Measured on one machine's CPU, so read
+these as a ratio and not as throughput: for a 64-row value holding 86.7&nbsp;MB of images, the new
+<code>slice</code> call takes about 0.001&nbsp;ms, while the <code>deepcopy</code> this PR removes took
+about 3.2&nbsp;ms. Plain tensors skip the check entirely and keep their full speedup. Taking this
+line does not give back what the PR was for.
+</div>
+
+</div>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+  function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+  function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
+    b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
+      else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+  document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+</body>
+</html>
