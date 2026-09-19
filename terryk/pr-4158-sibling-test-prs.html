@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NVIDIA-NeMo/RL — two test-only PRs on the same function, and whether #4158 fixes them</title>
+<style>
+:root{
+  --bg:#0d1117; --surface:#161b22; --surface2:#1c2128; --border:#30363d;
+  --text:#e6edf3; --dim:#8b949e; --accent:#58a6ff; --green:#3fb950;
+  --orange:#d29922; --red:#f85149;
+  --v1:#79c0ff; --v2:#d2a8ff; --v3:#ffa657; --v4:#ff7b72;
+}
+:root[data-theme="light"]{
+  --bg:#ffffff; --surface:#f6f8fa; --surface2:#eaeef2; --border:#d0d7de;
+  --text:#1f2328; --dim:#59636e; --accent:#0969da; --green:#1a7f37;
+  --orange:#9a6700; --red:#cf222e;
+  --v1:#0550ae; --v2:#8250df; --v3:#953800; --v4:#cf222e;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:28px 20px 70px}
+h1{font-size:22px;margin:0 0 8px;line-height:1.3}
+h2{font-size:18px;margin:32px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;
+  font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
+.sub{color:var(--dim);font-size:13.5px;margin:0 0 10px}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);
+  border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;
+  font:13px/1 ui-monospace,Menlo,monospace;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.18)}
+.mono{font:12.5px ui-monospace,SFMono-Regular,Menlo,monospace;
+  background:var(--surface);border:1px solid var(--border);border-radius:8px;
+  padding:13px;overflow-x:auto;white-space:pre}
+.warn{border-left:3px solid var(--red);background:var(--surface);
+  padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0}
+.status{border:1px solid var(--border);border-radius:10px;background:var(--surface);
+  padding:2px 16px 10px;margin:0 0 20px}
+.status dl{display:grid;grid-template-columns:max-content 1fr;gap:4px 14px;margin:12px 0 0}
+.status dt{color:var(--dim);font-size:12px;text-transform:uppercase;letter-spacing:.04em;
+  white-space:nowrap;padding-top:2px}
+.status dd{margin:0;font-size:14px}
+.verdict{font-weight:700}
+.verdict.good{color:var(--green)}
+.verdict.open{color:var(--red)}
+nav.chain{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 6px;padding:0}
+nav.chain a,nav.chain span{display:inline-block;padding:5px 11px;border:1px solid var(--border);
+  border-radius:20px;background:var(--surface);text-decoration:none;color:var(--accent);
+  font-size:12.5px;line-height:1.3;white-space:nowrap}
+nav.chain a:hover{background:var(--surface2)}
+nav.chain span.here{background:var(--accent);color:var(--bg);border-color:var(--accent);font-weight:600}
+p.chainnote{color:var(--dim);font-size:12px;margin:0 0 18px}
+svg{max-width:100%;height:auto;display:block;margin:16px 0}
+svg .lbl{fill:var(--text);font:12.5px ui-monospace,Menlo,monospace}
+svg .lbl-b{fill:var(--text);font:bold 13px -apple-system,sans-serif}
+svg .note{fill:var(--dim);font:11.5px -apple-system,sans-serif}
+svg .hdr{fill:var(--accent);font:bold 12.5px -apple-system,sans-serif}
+svg .fixed{fill:var(--green);font:bold 12.5px ui-monospace,Menlo,monospace}
+svg .open{fill:var(--red);font:bold 12.5px ui-monospace,Menlo,monospace}
+svg .rule{stroke:var(--border);stroke-width:1}
+svg .step{fill:var(--surface);stroke:var(--border);stroke-width:1.3}
+svg .arrow{stroke:var(--dim);stroke-width:1.6;fill:none;marker-end:url(#ah2)}
+svg a text{text-decoration:underline;fill:var(--accent);font:11.5px ui-monospace,Menlo,monospace}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+  document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head>
+<body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+  function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+  function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
+    b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
+      else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+  document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+<div class="wrap">
+
+<h1>Two test-only PRs on the same function — does #4158 fix either of them?</h1>
+<p class="sub">
+<a href="https://github.com/NVIDIA-NeMo/RL/pull/3467">#3467</a> and
+<a href="https://github.com/NVIDIA-NeMo/RL/pull/3469">#3469</a>, read against
+<a href="https://github.com/NVIDIA-NeMo/RL/pull/4158">#4158</a> at head <code>70b70e7</code>.
+Both are open, unmerged, and contain only failing tests — no production fix.</p>
+
+<nav class="chain">
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4158-advantage-spike.html">the −2075 advantage</a>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4158-two-masks.html">one check or two</a>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4158-group-mask-function.html">the group check, line by line</a>
+  <span class="here">the two test-only PRs</span>
+</nav>
+<p class="chainnote">Four pages on this PR, one question each — this one: what the sibling PRs report, and what to do with them.</p>
+
+<div class="status">
+<dl>
+  <dt>#3469</dt>
+  <dd><span class="verdict good">Fixed by #4158.</span> It reports that dynamic sampling splits a
+      prompt group when leave-one-out makes one rollout's std exactly zero. The whole-group mask
+      added in #4158 keeps all four rollouts in both of its failing cases.</dd>
+  <dt>#3467</dt>
+  <dd><span class="verdict open">Not fixed, and not the same bug.</span> It reports that a response
+      whose tokens are fully masked still counts in the per-prompt baseline. #4158 does not touch
+      that path, and its four cases still fail on the branch.</dd>
+  <dt>Both tests</dt>
+  <dd><span class="verdict open">Neither runs today.</span> Both were written against APIs that have
+      since changed, and error out before reaching the assertion they were written to make.</dd>
+</dl>
+</div>
+
+<p>Both PRs change one file each, add no production code, and were opened as deliberately-red
+drafts. They look similar from the outside — same function, same author, same week — but they point
+at two different layers, and only one of them overlaps #4158.</p>
+
+<h2>What each one reports</h2>
+
+<svg viewBox="0 0 900 330" role="img" aria-label="Two bugs at two layers. PR 3469 is in the dynamic sampling filter, fixed by 4158's whole-group mask. PR 3467 is in whether callers pass valid_mask to the advantage estimator, untouched by 4158.">
+  <defs><marker id="ah2" markerWidth="9" markerHeight="9" refX="8" refY="3" orient="auto">
+    <path d="M0,0 L8,3 L0,6 z" fill="var(--dim)"/></marker></defs>
+
+  <text class="hdr" x="16" y="20">The two reports sit at different layers of the same call path</text>
+
+  <rect class="step" x="20" y="36" width="380" height="96" rx="7"/>
+  <text class="lbl-b" x="36" y="58">#3469 — dynamic sampling filter</text>
+  <text class="lbl" x="36" y="80">rewards [1, 0, 0, 0] with leave-one-out</text>
+  <text class="note" x="36" y="100">the single success sees three identical peers, so its</text>
+  <text class="note" x="36" y="116">std is exactly 0.0 and `std != 0` drops it alone</text>
+
+  <rect class="step" x="500" y="36" width="380" height="96" rx="7"/>
+  <text class="lbl-b" x="516" y="58">#3467 — who passes valid_mask</text>
+  <text class="lbl" x="516" y="80">rewards [1, 1, 0, 0], row 1 fully masked</text>
+  <text class="note" x="516" y="100">the masked row still counts in the per-prompt</text>
+  <text class="note" x="516" y="116">baseline, so the other three get the wrong number</text>
+
+  <path class="arrow" d="M210,132 L210,166"/>
+  <path class="arrow" d="M690,132 L690,166"/>
+
+  <rect class="step" x="20" y="168" width="380" height="76" rx="7"/>
+  <text class="lbl-b" x="36" y="190">#4158 adds a whole-group mask</text>
+  <text class="fixed" x="36" y="214">FIXED — all four rollouts kept</text>
+  <text class="note" x="36" y="234">verified on the branch for [1,0,0,0] and [1,1,1,0]</text>
+
+  <rect class="step" x="500" y="168" width="380" height="76" rx="7"/>
+  <text class="lbl-b" x="516" y="190">#4158 does not touch this path</text>
+  <text class="open" x="516" y="214">STILL FAILS — all four cases</text>
+  <text class="note" x="516" y="234">the estimator already supports it; callers do not use it</text>
+
+  <line class="rule" x1="16" y1="266" x2="884" y2="266"/>
+  <text class="lbl-b" x="20" y="292">Same function, different question: one is about which rows the filter keeps,</text>
+  <text class="lbl-b" x="20" y="310">the other is about which rows are counted in the first place.</text>
+
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/70b70e77fddc4ba9b2a66ac7715c1f72a583b447/nemo_rl/algorithms/grpo.py#L1957">
+    <text x="290" y="190">grpo.py:1957</text></a>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/70b70e77fddc4ba9b2a66ac7715c1f72a583b447/nemo_rl/algorithms/advantage_estimator.py#L116">
+    <text x="740" y="214">estimator:116</text></a>
+</svg>
+
+<h2>What running them actually showed</h2>
+
+<p>Both tests were applied to the #4158 branch at <code>70b70e7</code> and run. Neither reached its
+assertion on the first try — each had to be repaired first, and the repairs are the most useful
+finding here.</p>
+
+<div class="mono">#3467  test_grpo_sample_mask.py
+  as written   AttributeError: 'dict' object has no attribute 'use_leave_one_out_baseline'
+               (the estimator now takes an AdvEstimatorConfig, not a dict)
+  repaired     4 failed — the claim still holds
+               group-mean            expected [0.6667, -0.3333, -0.3333]  got [0.5, -0.5, -0.5]
+               leave-one-out         expected [1.0, -0.5, -0.5]           got [0.6667, -0.6667, -0.6667]
+
+#3469  test_grpo.py::...keeps_prompt_group_intact
+  drift 1      _default_grpo_save_state      -> _initial_grpo_save_state
+  drift 2      grpo_mod._should_use_async_rollouts -> should_use_async_rollouts (moved module)
+  drift 3      master_config.grpo.update({...}) -> GRPOConfig is a pydantic model now, no .update</div>
+
+<p>I stopped repairing #3469 after the third drift and checked its claim directly against the real
+functions instead. That is the table on the
+<a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4158-two-masks.html">other page</a>: for
+<code>[1, 0, 0, 0]</code> and <code>[1, 1, 1, 0]</code> the old filter keeps 3/4 and the whole-group
+mask keeps 4/4. <strong>#3469's bug is fixed.</strong></p>
+
+<p>For #3467 the repaired test still fails — but passing the parameter that already exists for this
+produces its expected numbers <em>exactly</em>, in all four cases:</p>
+
+<div class="mono">estimator.compute_advantage(prompt_ids, rewards, mask=...)                  -> [0.5,    -0.5,    -0.5   ]  differs
+estimator.compute_advantage(prompt_ids, rewards, mask=..., valid_mask=sm)  -> [0.6667, -0.3333, -0.3333]  MATCHES</div>
+
+<p>So the estimator is not broken. The gap is that most callers never pass <code>valid_mask</code>,
+so it defaults to all-ones and the masked row is counted:</p>
+
+<div class="mono">grpo.py:3580              valid_mask passed: NO
+grpo.py:5379              valid_mask passed: NO
+grpo_sync.py:998          valid_mask passed: NO
+ppo.py:1685, ppo.py:2701  valid_mask passed: NO
+single_controller.py:4988 valid_mask passed: YES   <- valid_mask=final_sample_mask</div>
+
+<h2>Recommendation for each</h2>
+
+<p><strong>#3469 — close it, but keep its cases.</strong> The bug it reports is fixed by #4158, and
+#4158 currently has no regression test for either of its two failing shapes. Its three parametrized
+cases (<code>single-success</code>, <code>single-failure</code>, <code>balanced</code>) are exactly
+the right coverage for the new whole-group mask. Fold those cases into #4158 rewritten against the
+current config API, rather than merging #3469 as-is — its end-to-end <code>grpo_train</code> harness
+is where all three API drifts live, and a direct test of the mask function is both cheaper and less
+likely to rot.</p>
+
+<p><strong>#3467 — keep it open, but retarget it.</strong> The concern is real: on every path except
+SingleController, a fully-masked response still moves the baseline for its peers. But the test blames
+the estimator, and the estimator is fine — it has a <code>valid_mask</code> parameter that produces
+the expected numbers. The fix belongs at the call sites, so the test should assert that
+<code>grpo.py</code> passes a valid mask derived from the sample mask, not that the estimator guesses
+it from the token mask. Do not fold this into #4158: different layer, different fix, and #4158 is
+already carrying two changes.</p>
+
+<div class="warn">
+<strong>The thing worth acting on first.</strong> Both tests were written to fail on purpose and then
+left open, and in that time all four of the APIs they touch moved. A deliberately-red draft that
+nobody merges quietly stops describing the code it was written against — #3467 now fails for a
+constructor signature, which looks identical from CI to failing for the bug it documents. If a red
+draft is worth keeping, it is worth a note saying which commit it was red against.
+</div>
+
+</div>
+</body>
+</html>

@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NVIDIA-NeMo/RL #4158 — how calculate_is_trivial_prompt_distribution works</title>
+<style>
+:root{
+  --bg:#0d1117; --surface:#161b22; --surface2:#1c2128; --border:#30363d;
+  --text:#e6edf3; --dim:#8b949e; --accent:#58a6ff; --green:#3fb950;
+  --orange:#d29922; --red:#f85149;
+  --v1:#79c0ff; --v2:#d2a8ff; --v3:#ffa657; --v4:#ff7b72;
+}
+:root[data-theme="light"]{
+  --bg:#ffffff; --surface:#f6f8fa; --surface2:#eaeef2; --border:#d0d7de;
+  --text:#1f2328; --dim:#59636e; --accent:#0969da; --green:#1a7f37;
+  --orange:#9a6700; --red:#cf222e;
+  --v1:#0550ae; --v2:#8250df; --v3:#953800; --v4:#cf222e;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:28px 20px 70px}
+h1{font-size:22px;margin:0 0 8px;line-height:1.3}
+h2{font-size:18px;margin:32px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;
+  font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
+.sub{color:var(--dim);font-size:13.5px;margin:0 0 10px}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);
+  border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;
+  font:13px/1 ui-monospace,Menlo,monospace;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.18)}
+.mono{font:12.5px ui-monospace,SFMono-Regular,Menlo,monospace;
+  background:var(--surface);border:1px solid var(--border);border-radius:8px;
+  padding:13px;overflow-x:auto;white-space:pre}
+.warn{border-left:3px solid var(--red);background:var(--surface);
+  padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0}
+.status{border:1px solid var(--border);border-radius:10px;background:var(--surface);
+  padding:2px 16px 10px;margin:0 0 20px}
+.status dl{display:grid;grid-template-columns:max-content 1fr;gap:4px 14px;margin:12px 0 0}
+.status dt{color:var(--dim);font-size:12px;text-transform:uppercase;letter-spacing:.04em;
+  white-space:nowrap;padding-top:2px}
+.status dd{margin:0;font-size:14px}
+.verdict{font-weight:700}
+.verdict.good{color:var(--green)}
+.verdict.open{color:var(--red)}
+nav.chain{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 6px;padding:0}
+nav.chain a,nav.chain span{display:inline-block;padding:5px 11px;border:1px solid var(--border);
+  border-radius:20px;background:var(--surface);text-decoration:none;color:var(--accent);
+  font-size:12.5px;line-height:1.3;white-space:nowrap}
+nav.chain a:hover{background:var(--surface2)}
+nav.chain span.here{background:var(--accent);color:var(--bg);border-color:var(--accent);font-weight:600}
+p.chainnote{color:var(--dim);font-size:12px;margin:0 0 18px}
+svg{max-width:100%;height:auto;display:block;margin:16px 0}
+svg .lbl{fill:var(--text);font:12.5px ui-monospace,Menlo,monospace}
+svg .lbl-b{fill:var(--text);font:bold 13px -apple-system,sans-serif}
+svg .note{fill:var(--dim);font:11.5px -apple-system,sans-serif}
+svg .hdr{fill:var(--accent);font:bold 12.5px -apple-system,sans-serif}
+svg .t{fill:var(--red);font:bold 12.5px ui-monospace,Menlo,monospace}
+svg .f{fill:var(--green);font:bold 12.5px ui-monospace,Menlo,monospace}
+svg .rule{stroke:var(--border);stroke-width:1}
+svg .step{fill:var(--surface);stroke:var(--border);stroke-width:1.3}
+svg .g1{fill:var(--v1);opacity:.45;stroke:var(--v1);stroke-width:1.3}
+svg .g2{fill:var(--v3);opacity:.45;stroke:var(--v3);stroke-width:1.3}
+svg .gone{fill:var(--dim);opacity:.2;stroke:var(--dim);stroke-width:1.2;stroke-dasharray:3 3}
+svg a text{text-decoration:underline;fill:var(--accent);font:11.5px ui-monospace,Menlo,monospace}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+  document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head>
+<body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+  function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+  function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
+    b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
+      else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+  document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+<div class="wrap">
+
+<h1>How the whole-group check works, line by line</h1>
+<p class="sub">
+<code>calculate_is_trivial_prompt_distribution</code> in
+<a href="https://github.com/NVIDIA-NeMo/RL/pull/4158">NVIDIA-NeMo/RL #4158</a>
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/70b70e77fddc4ba9b2a66ac7715c1f72a583b447/nemo_rl/algorithms/utils.py#L224-L245">utils.py:224-245</a>).
+All permalinks pin head <code>70b70e7</code>.</p>
+
+<nav class="chain">
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4158-advantage-spike.html">the −2075 advantage</a>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4158-two-masks.html">one check or two</a>
+  <span class="here">the group check, line by line</span>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4158-sibling-test-prs.html">the two test-only PRs</a>
+</nav>
+<p class="chainnote">Four pages on this PR, one question each — this one: what the new function actually does.</p>
+
+<div class="status">
+<dl>
+  <dt>Before</dt>
+  <dd>There was no group-level answer. Dynamic sampling used <code>std != 0</code>, a per-row
+      floating-point test, to decide whether a prompt group was worth training on.</dd>
+  <dt>This PR</dt>
+  <dd>Adds a 22-line function that answers one question per prompt group — "are all the valid
+      rewards here the same value?" — and writes that one answer to every row of the group.</dd>
+  <dt>Status</dt>
+  <dd><span class="verdict good">Added by this PR.</span> Used only by dynamic sampling. The
+      per-rollout leave-one-out check it sits beside is unchanged and still drives normalization.</dd>
+</dl>
+</div>
+
+<p>The whole function is a loop over prompt groups. For each group it takes the rewards that are
+still valid, asks whether they are all one value, and stamps that single answer onto every row
+belonging to that group — including the invalid ones. There is no leave-one-out anywhere in it,
+which is the entire point: the answer must not depend on which row is asking.</p>
+
+<h2>One pass over two groups</h2>
+
+<svg viewBox="0 0 900 360" role="img" aria-label="The function loops over unique prompts. Group 0 has rewards 0.5, 0.5, 0.5 so min equals max and every row is marked True. Group 1 has rewards 0.0, 1.0, 1.0 so min differs from max and every row is marked False.">
+  <text class="hdr" x="16" y="20">prompts = [0,0,0, 1,1,1]   rewards = [0.5, 0.5, 0.5, 0.0, 1.0, 1.0]   valid = all 1</text>
+
+  <rect class="g1" x="20"  y="34" width="88" height="34" rx="6"/>
+  <rect class="g1" x="114" y="34" width="88" height="34" rx="6"/>
+  <rect class="g1" x="208" y="34" width="88" height="34" rx="6"/>
+  <rect class="g2" x="330" y="34" width="88" height="34" rx="6"/>
+  <rect class="g2" x="424" y="34" width="88" height="34" rx="6"/>
+  <rect class="g2" x="518" y="34" width="88" height="34" rx="6"/>
+  <text class="lbl" x="64"  y="56" text-anchor="middle">0.5</text>
+  <text class="lbl" x="158" y="56" text-anchor="middle">0.5</text>
+  <text class="lbl" x="252" y="56" text-anchor="middle">0.5</text>
+  <text class="lbl" x="374" y="56" text-anchor="middle">0.0</text>
+  <text class="lbl" x="468" y="56" text-anchor="middle">1.0</text>
+  <text class="lbl" x="562" y="56" text-anchor="middle">1.0</text>
+  <text class="note" x="20"  y="86">prompt group 0</text>
+  <text class="note" x="330" y="86">prompt group 1</text>
+
+  <line class="rule" x1="16" y1="102" x2="884" y2="102"/>
+
+  <text class="lbl-b" x="20" y="128">iteration 1 — prompt 0</text>
+  <text class="lbl" x="20"  y="152">valid_rewards</text>
+  <text class="lbl" x="250" y="152">[0.5, 0.5, 0.5]</text>
+  <text class="lbl" x="20"  y="174">amin / amax</text>
+  <text class="lbl" x="250" y="174">0.5  /  0.5</text>
+  <text class="lbl" x="20"  y="196">all one value?</text>
+  <text class="t"   x="250" y="196">True</text>
+  <text class="note" x="360" y="196">written to all three rows of group 0 — drop the group</text>
+
+  <text class="lbl-b" x="20" y="232">iteration 2 — prompt 1</text>
+  <text class="lbl" x="20"  y="256">valid_rewards</text>
+  <text class="lbl" x="250" y="256">[0.0, 1.0, 1.0]</text>
+  <text class="lbl" x="20"  y="278">amin / amax</text>
+  <text class="lbl" x="250" y="278">0.0  /  1.0</text>
+  <text class="lbl" x="20"  y="300">all one value?</text>
+  <text class="f"   x="250" y="300">False</text>
+  <text class="note" x="360" y="300">written to all three rows of group 1 — keep the group</text>
+
+  <line class="rule" x1="16" y1="318" x2="884" y2="318"/>
+  <text class="lbl" x="20" y="344">result  [True, True, True, False, False, False]</text>
+  <text class="note" x="430" y="344">one answer per group, repeated across its rows</text>
+
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/70b70e77fddc4ba9b2a66ac7715c1f72a583b447/nemo_rl/algorithms/utils.py#L243">
+    <text x="700" y="128">utils.py:243</text></a>
+</svg>
+
+<div class="mono">is_trivial_prompt_distribution = torch.ones_like(rewards, dtype=torch.bool)   <span class="note">L236  start with True everywhere</span>
+for prompt in torch.unique(prompts, dim=0):                                   <span class="note">L237  one pass per distinct prompt</span>
+    prompt_mask = (prompts == prompt).all(1)                                  <span class="note">L238  which rows belong to it</span>
+    valid_rewards = rewards[prompt_mask & valid_mask.bool()]                  <span class="note">L239  drop the masked-out rows</span>
+    is_trivial = valid_rewards.numel() &lt;= 1 or (                              <span class="note">L240  0 or 1 reward -> nothing to compare</span>
+        valid_rewards.amin() == valid_rewards.amax()                          <span class="note">L241  otherwise: are they all equal?</span>
+    )
+    is_trivial_prompt_distribution[prompt_mask] = is_trivial                  <span class="note">L243  stamp it on EVERY row of the group</span></div>
+
+<p>Two details do the real work. <strong>Line 239</strong> filters to valid rows before comparing, so
+a response that was masked out cannot make a group look diverse. <strong>Line 243</strong> writes to
+<code>prompt_mask</code> — all rows of the group, not just the valid ones — which is what makes the
+answer all-or-nothing and stops the filter from ever splitting a group.</p>
+
+<p>The <code>numel() &lt;= 1</code> on line 240 quietly matters too: it short-circuits the
+<code>or</code>, so <code>amin()</code> is never called on an empty tensor.</p>
+
+<h2>What it returns at the edges</h2>
+
+<p>Every case below was run against the real function at <code>70b70e7</code>. Nothing raises.</p>
+
+<div class="mono">two groups, one trivial one not        -> [True, True, True, False, False, False]
+one group, all same                    -> [True, True, True, True]
+one group, one differs                 -> [False, False, False, False]
+differs ONLY in a masked-out row       -> [True, True, True, True]     <span class="note">group reads as all-one-value</span>
+exactly one valid row                  -> [True, True, True, True]     <span class="note">nothing to compare against</span>
+zero valid rows                        -> [True, True, True, True]     <span class="note">numel() == 0 short-circuits</span>
+empty batch                            -> []</div>
+
+<p>The fourth row is the one worth pausing on. If the only rollout that scored differently is masked
+out, the group is treated as all-one-value and dropped in full. That is the right call — a reward
+that is not trainable cannot supply the contrast — but it means masking can change a keep into a
+drop, not just remove one row.</p>
+
+<div class="warn">
+<strong>How it differs from its sibling, in one line.</strong>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/70b70e77fddc4ba9b2a66ac7715c1f72a583b447/nemo_rl/algorithms/utils.py#L211">The per-rollout check</a>
+compares each rollout against its <em>peers</em> and can return different answers within one group;
+this one compares the <em>whole</em> group and returns one answer for all of it. Using the first
+where the second belongs is exactly the bug that got caught in review — see
+<a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4158-two-masks.html">one check or two</a>.
+</div>
+
+</div>
+</body>
+</html>
