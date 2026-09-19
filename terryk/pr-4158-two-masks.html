@@ -108,7 +108,8 @@ All permalinks pin the PR head <code>70b70e7</code>.</p>
   <dt>Status</dt>
   <dd><span class="verdict good">Fixed by this PR.</span> The first attempt reused the
       per-rollout check for both jobs; a reviewer showed that splits groups, and the author added
-      the separate whole-group check.</dd>
+      the separate whole-group check. The final version also fixes a split that was already
+      happening before this PR, when the odd rollout's peers made its std exactly zero.</dd>
 </dl>
 </div>
 
@@ -201,6 +202,43 @@ Using one answer for both jobs breaks the second one.</p>
 </svg>
 
 <p class="cref">🔴 <a href="https://github.com/NVIDIA-NeMo/RL/pull/4158#discussion_r4041282016">review comment that caught the group split — grpo.py</a></p>
+
+<h2>What each version of the filter keeps</h2>
+
+<p>The filter went through three states. "SPLIT" means the group was broken up — some rollouts kept,
+some dropped — which is never what you want, because the surviving rollouts get re-baselined against
+each other and lose the contrast that made the group worth training on.</p>
+
+<div class="mono">leave_one_out_baseline=True, use_dynamic_sampling=True
+
+case                            status quo       PR v1    PR final   what you want
+---------------------------------------------------------------------------------
+A  [0.95 x8]  all same             <span class="v4">8/8</span>         0/8         0/8   drop all — no signal
+B  [0.0, 0.95 x7]  one differs     8/8   <span class="v4">7/8 SPLIT</span>         8/8   keep all — has signal
+C  [1, 0, 0, 0]  one success <span class="v4">3/4 SPLIT</span>   <span class="v4">3/4 SPLIT</span>         4/4   keep all — has signal
+D  [1, 1, 0, 0]  balanced          4/4         4/4         4/4   keep all — has signal
+E  [1 x4]  all same                0/4         0/4         0/4   drop all — no signal
+F  [1, 1, 1, 0]  one failure <span class="v4">3/4 SPLIT</span>   <span class="v4">3/4 SPLIT</span>         4/4   keep all — has signal</div>
+
+<p>Reading the columns:</p>
+
+<ul>
+<li><strong>Status quo</strong> is wrong two different ways. In <strong>A</strong> it keeps a group
+with no signal at all, because the std is rounding noise rather than zero — that is the case the PR
+author raised. In <strong>C</strong> and <strong>F</strong> it splits a group that <em>does</em> have
+signal, because with leave-one-out the odd rollout's peers are all identical and its std really is
+exactly <code>0.0</code> (0 and 1 are exact in float32, so no rounding is involved).</li>
+<li><strong>PR v1</strong> fixed A by reusing the per-rollout leave-one-out check as the filter. That
+fixed the case it was aimed at and <em>added</em> a new split in <strong>B</strong> — and it still did
+not fix C or F, which were already broken.</li>
+<li><strong>PR final</strong> gets all six right, because the whole-group check never looks at one
+rollout in isolation.</li>
+</ul>
+
+<p>So the answer to "one rollout has <code>std = 0</code> and the rest have <code>std &gt; 0</code> —
+should DAPO drop it?" is <strong>no, keep the whole group</strong>. That single zero is an artifact of
+leave-one-out arithmetic, not evidence the prompt is useless. The group holds two distinct rewards,
+which is exactly the contrast dynamic sampling is looking for.</p>
 
 <h2>The two checks, side by side</h2>
 
