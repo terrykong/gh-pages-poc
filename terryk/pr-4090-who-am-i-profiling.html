@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>NVIDIA-NeMo/RL #4090 — why the inner vLLM worker can't tell whether it is being profiled</title>
+<title>NVIDIA-NeMo/RL #4090 — why the new cleanup step can stop the wrong trace</title>
 <style>
 :root{
   --bg:#0d1117; --surface:#161b22; --surface2:#1c2128; --border:#30363d;
@@ -47,6 +47,13 @@ code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;
 .cref a{display:inline-block;padding:4px 10px;border:1px solid var(--border);
   border-radius:16px;background:var(--surface);font:12.5px ui-monospace,Menlo,monospace}
 .cref a:hover{background:var(--surface2);text-decoration:none}
+nav.chain{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 6px;padding:0}
+nav.chain a,nav.chain span{display:inline-block;padding:5px 11px;border:1px solid var(--border);
+  border-radius:20px;background:var(--surface);text-decoration:none;color:var(--accent);
+  font-size:12.5px;line-height:1.3;white-space:nowrap}
+nav.chain a:hover{background:var(--surface2)}
+nav.chain span.here{background:var(--accent);color:var(--bg);border-color:var(--accent);font-weight:600}
+p.chainnote{color:var(--dim);font-size:12px;margin:0 0 18px}
 svg{max-width:100%;height:auto;display:block;margin:16px 0}
 svg .box{fill:var(--surface);stroke:var(--border);stroke-width:1.4}
 svg .boxr{fill:var(--surface);stroke:var(--red);stroke-width:1.8}
@@ -74,172 +81,126 @@ svg a text{text-decoration:underline;fill:var(--accent);font:11.5px ui-monospace
   document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
 <div class="wrap">
 
-<h1>Why the inner vLLM worker can't tell whether it is being profiled</h1>
+<h1>Why the new cleanup step can stop the wrong trace</h1>
 <p class="sub">On
-<a href="https://github.com/NVIDIA-NeMo/RL/pull/4090">NVIDIA-NeMo/RL #4090</a>
-(nsys traces for every inner vLLM TP worker). All links pinned to
-<code>b2237a2d</code>.</p>
+<a href="https://github.com/NVIDIA-NeMo/RL/pull/4090">NVIDIA-NeMo/RL #4090</a>.
+All links pinned to <code>b2237a2d</code>.</p>
+
+<nav class="chain">
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4090-traces-for-every-rank.html">1 · what the PR fixes</a>
+  <span class="here">2 · a problem it leaves behind</span>
+</nav>
+<p class="chainnote">Two pages on this PR — read page 1 first; this one is a review finding on top of it.</p>
 
 <div class="status">
 <dl>
   <dt>Before</dt>
-  <dd>Nothing in the inner vLLM worker ran <code>nsys</code>, so the question never came up.</dd>
+  <dd>No vLLM worker ran <code>nsys</code>, so nothing could stop anyone else's profile.</dd>
   <dt>This PR</dt>
-  <dd>Adds a block that shells out to <code>nsys stop</code>, guarded by
-      <code>if os.environ.get("NRL_NSYS_WORKER_PATTERNS")</code>.</dd>
+  <dd>Adds the cleanup step from page 1 — each inner worker runs <code>nsys stop</code> so its
+      trace is written before teardown. <strong>That part works.</strong> But it is guarded by
+      <code>if os.environ.get("NRL_NSYS_WORKER_PATTERNS")</code>, and that guard asks the wrong
+      question.</dd>
   <dt>Status</dt>
-  <dd><span class="verdict open">Open — not fixed in this PR.</span> That guard asks the wrong
-      question. Raised in review; the fix below is <strong>proposed, not implemented</strong>.</dd>
+  <dd><span class="verdict open">Open — not fixed in this PR.</span> Raised in review. The fix
+      below is <strong>proposed, nobody has written it.</strong></dd>
 </dl>
 </div>
 
-<p>Two different processes are involved, and only one of them can answer "should these workers be
-profiled?".</p>
+<p>The cleanup step is meant to run on workers that are being profiled. The guard instead checks
+whether profiling was switched on <em>anywhere</em> in the run. Those are the same thing when you
+profile everything, and different when you don't.</p>
 
-<p>The <strong>outer</strong> worker is a NeMo-RL Ray actor with a name —
-<code>vllm_generation_worker</code>. It matches that name against your
-<code>NRL_NSYS_WORKER_PATTERNS</code> and decides
-(<a href="https://github.com/NVIDIA-NeMo/RL/blob/b2237a2d91c9682d27392199ae545277df74f333/nemo_rl/models/generation/vllm/vllm_worker.py#L577">vllm_worker.py:577</a>).
-The <strong>inner</strong> workers are vLLM's own <code>RayWorkerProc</code> processes. They have no
-NeMo-RL name, so they cannot run that match — and the outer worker's answer is never sent to them.
-The new code
-(<a href="https://github.com/NVIDIA-NeMo/RL/blob/b2237a2d91c9682d27392199ae545277df74f333/nemo_rl/models/generation/vllm/vllm_backend.py#L1681">vllm_backend.py:1681</a>)
-falls back to reading the raw environment variable, which answers a different question.</p>
+<p>Profiling only the training side is the case where they come apart — and it is the first
+example in the docs
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/b2237a2d91c9682d27392199ae545277df74f333/docs/nsys-profiling.md#L70">nsys-profiling.md:70</a>,
+"Profile Only Policy Workers").</p>
 
-<h2>The two questions are not the same</h2>
+<h2>What happens on a training-only profile</h2>
 
-<svg viewBox="0 0 960 400" role="img" aria-label="Diagram: the outer worker knows whether generation is profiled; the inner workers do not, so they read the env var instead and sweep every nsys session">
+<svg viewBox="0 0 960 330" role="img" aria-label="With a policy-only pattern the vLLM workers are not profiled, but they still run nsys stop and stop the megatron policy worker's session">
 
-  <text class="hdr" x="0" y="14">Run with NRL_NSYS_WORKER_PATTERNS="*policy*"   (profile megatron only)</text>
+  <text class="hdr" x="0" y="14">NRL_NSYS_WORKER_PATTERNS="*policy*"   — profile training only</text>
 
-  <!-- megatron policy worker -->
-  <rect class="boxg" x="0" y="34" width="250" height="86" rx="8"/>
-  <text class="lbl-b" x="14" y="58">megatron_policy_worker</text>
-  <text class="note" x="14" y="78">name matches "*policy*"</text>
-  <text class="ok"   x="14" y="98">under nsys — session #1</text>
-  <text class="note" x="14" y="114">this is the trace you asked for</text>
+  <rect class="boxg" x="0" y="30" width="250" height="78" rx="8"/>
+  <text class="lbl-b" x="14" y="54">megatron policy worker</text>
+  <text class="note" x="14" y="74">matches "*policy*"</text>
+  <text class="ok"   x="14" y="94">profiling — the trace you wanted</text>
 
-  <!-- outer vllm worker -->
-  <rect class="box" x="330" y="34" width="290" height="86" rx="8"/>
-  <text class="lbl-b" x="344" y="58">vllm_generation_worker (outer)</text>
-  <text class="note" x="344" y="78">name does NOT match "*policy*"</text>
-  <text class="bad"  x="344" y="98">decides: do not profile inner workers</text>
-  <a href="https://github.com/NVIDIA-NeMo/RL/blob/b2237a2d91c9682d27392199ae545277df74f333/nemo_rl/models/generation/vllm/vllm_worker.py#L577">
-    <text x="344" y="114">vllm_worker.py:577</text></a>
+  <rect class="box" x="350" y="30" width="300" height="78" rx="8"/>
+  <text class="lbl-b" x="364" y="54">vLLM generation worker</text>
+  <text class="note" x="364" y="74">does not match "*policy*"</text>
+  <text class="bad"  x="364" y="94">decides: don't profile the inner workers</text>
 
-  <!-- the decision is not passed down -->
-  <path class="arrr" d="M475 120 L475 152" stroke-dasharray="5,4"/>
-  <text class="bad" x="486" y="141">decision stops here — never sent down</text>
+  <path class="arrr" d="M500 108 L500 138" stroke-dasharray="5,4"/>
+  <text class="bad" x="512" y="127">this decision is never passed down</text>
 
-  <!-- inner workers -->
-  <rect class="boxr" x="330" y="160" width="290" height="96" rx="8"/>
-  <text class="lbl-b" x="344" y="184">RayWorkerProc (inner TP workers)</text>
-  <text class="note" x="344" y="204">vLLM's own processes — no NeMo-RL name,</text>
-  <text class="note" x="344" y="220">so nothing to match a pattern against</text>
-  <text class="bad"  x="344" y="240">NOT under nsys — no trace of their own</text>
+  <rect class="boxr" x="350" y="148" width="300" height="72" rx="8"/>
+  <text class="lbl-b" x="364" y="172">inner vLLM workers</text>
+  <text class="bad"  x="364" y="192">not profiled — nothing of their own</text>
+  <text class="note" x="364" y="210">but the guard only reads the env var…</text>
 
-  <!-- env var read -->
-  <rect class="box" x="660" y="160" width="300" height="96" rx="8"/>
-  <text class="lbl-b" x="674" y="184">falls back to the env var</text>
-  <text class="lbl"  x="674" y="206">NRL_NSYS_WORKER_PATTERNS</text>
-  <text class="note" x="674" y="226">set? → yes. But that only means</text>
-  <text class="note" x="674" y="242">"someone is profiled", not "I am".</text>
-  <path class="arr" d="M620 208 L656 208" marker-end="url(#a)"/>
-
-  <!-- the sweep -->
-  <rect class="boxr" x="330" y="286" width="290" height="80" rx="8"/>
-  <text class="lbl-b" x="344" y="310">runs nsys sessions list</text>
-  <text class="lbl"  x="344" y="330">then nsys stop --session=&lt;id&gt;</text>
-  <text class="note" x="344" y="348">for every session it can see</text>
+  <rect class="boxr" x="350" y="248" width="300" height="68" rx="8"/>
+  <text class="lbl-b" x="364" y="272">…so they still run nsys stop</text>
+  <text class="note" x="364" y="292">on every profile running on the machine</text>
   <a href="https://github.com/NVIDIA-NeMo/RL/blob/b2237a2d91c9682d27392199ae545277df74f333/nemo_rl/models/generation/vllm/vllm_backend.py#L1691">
-    <text x="344" y="364">vllm_backend.py:1691</text></a>
-  <path class="arrr" d="M475 256 L475 282" marker-end="url(#ar)"/>
+    <text x="364" y="310">vllm_backend.py:1691</text></a>
+  <path class="arrr" d="M500 220 L500 244" marker-end="url(#ar)"/>
 
-  <!-- the victim -->
-  <path class="arrr" d="M330 326 L138 326 L138 126" marker-end="url(#ar)"/>
-  <text class="bad" x="0" y="348">stops session #1 —</text>
-  <text class="bad" x="0" y="364">the megatron trace</text>
+  <path class="arrr" d="M350 282 L130 282 L130 114" marker-end="url(#ar)"/>
+  <text class="bad" x="0" y="300">stops the training</text>
+  <text class="bad" x="0" y="316">profile too</text>
 
   <defs>
-    <marker id="a" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
-      <path d="M0,0 L8,4 L0,8 z" fill="var(--dim)"/></marker>
     <marker id="ar" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
       <path d="M0,0 L8,4 L0,8 z" fill="var(--red)"/></marker>
   </defs>
 </svg>
 
-<p>The inner workers are not being profiled and have nothing of their own to finalize. They are
-still the only thing that stops the megatron capture.</p>
+<p>The vLLM workers are not being profiled and have nothing of their own to write. They are still
+the only thing that ends the training profile. How much you lose depends on timing: if the window
+closes part-way through the run, the training side stops itself first and its trace is fine; if the
+run ends while the window is still open, the vLLM cleanup goes first and the training trace is cut
+short. Generation shares the machine with training by default
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/b2237a2d91c9682d27392199ae545277df74f333/examples/configs/grpo_math_1B.yaml#L457"><code>colocated.enabled: true</code></a>),
+so this is the ordinary setup.</p>
 
-<h2>What would fix it — proposed, not in the PR</h2>
+<h2>Why it isn't simply fixed — proposed, not implemented</h2>
 
-<p>Nothing below is implemented. The idea is small: the answer already exists in the outer worker,
-so send it to the processes that need it. Ray's <code>runtime_env</code> is already how the outer
-worker configures the inner ones, so the answer can ride along with the nsys settings it is
-already sending.</p>
+<p>Nothing below is in the PR. The obvious repair — have the inner worker check the pattern itself
+— does not work: matching a pattern needs a worker name, and these are vLLM's own processes, which
+have no NeMo-RL name. Asking nsys "am I being profiled?" does not work either; there is no such
+thing in its documentation.</p>
 
-<div class="mono">step 1 — the plugin already builds the inner workers' runtime_env.
-         add one key while it is there:
+<p>The answer does exist, though. The vLLM generation worker worked it out at
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/b2237a2d91c9682d27392199ae545277df74f333/nemo_rl/models/generation/vllm/vllm_worker.py#L577">vllm_worker.py:577</a>
+and then dropped it. So the proposal is to send it along with the settings it is already sending:</p>
 
-    runtime_env["nsight"] = nsight_config                          # already there
-    runtime_env["env_vars"]["NRL_NSYS_INNER_PROFILED"] = "1"       # proposed
+<div class="mono">when the plugin sets up an inner worker, mark it as profiled:
 
-         only runs when the outer worker asked for inner profiling,
-         so only genuinely-profiled workers get stamped.
+    runtime_env["nsight"] = nsight_config                      # already there
+    runtime_env["env_vars"]["NRL_NSYS_INNER_PROFILED"] = "1"   # proposed
 
-step 2 — the guard reads the stamp instead of the pattern list:
+and have the cleanup step read that mark instead of the pattern list:
 
-    if os.environ.get("NRL_NSYS_INNER_PROFILED"):                  # proposed
-        ... nsys sessions list / nsys stop ...
+    if os.environ.get("NRL_NSYS_INNER_PROFILED"):              # proposed
+        ... nsys stop ...
 
-         megatron-only run  -> plugin never stamps -> guard false -> no sweep
-         vllm profiled      -> plugin stamps       -> guard true  -> sweep runs</div>
+    training-only run -> never marked -> no cleanup -> training trace safe
+    vLLM profiled     -> marked       -> cleanup runs as page 1 describes</div>
 
-<p>Step 1 goes next to
-<a href="https://github.com/NVIDIA-NeMo/RL/blob/b2237a2d91c9682d27392199ae545277df74f333/nemo_rl/utils/vllm_nsight_plugin.py#L76">vllm_nsight_plugin.py:76</a>;
-step 2 replaces the guard at
-<a href="https://github.com/NVIDIA-NeMo/RL/blob/b2237a2d91c9682d27392199ae545277df74f333/nemo_rl/models/generation/vllm/vllm_backend.py#L1681">vllm_backend.py:1681</a>.
-The older v1 executor path builds its runtime_env the same way
-(<a href="https://github.com/NVIDIA-NeMo/RL/blob/b2237a2d91c9682d27392199ae545277df74f333/nemo_rl/models/generation/vllm/vllm_worker.py#L840-L847">vllm_worker.py:840-847</a>)
-and needs the same stamp, or it keeps the old guard.</p>
-
-<p><strong>Two things nobody checked.</strong> Whether Ray merges an <code>env_vars</code> key added
-inside <code>_build_runtime_env</code> the same way it merges <code>nsight</code> — it is the same
-dict handed to <code>ray.remote</code>, so it should, but that was not tested. And the stamp only
-reaches workers the plugin actually touched, which is the point, but it does mean the v1 path has
-to be converted too.</p>
-
-<h2>Why not just reuse what's there</h2>
-
-<p>Two simpler-looking options do not work:</p>
-
-<div class="mono">match the pattern inside the inner worker
-    needs a NeMo-RL worker name. RayWorkerProc has none.
-    There is nothing to compare "*policy*" against.
-
-ask nsys "am I being profiled?"
-    no such thing. The Nsight Systems guide documents no
-    "you are under a profiler" variable for the profiled process.
-    NSYS_SESSION_NAME and friends go to the callback command
-    nsys spawns under --after-collection-start, not to the app.</div>
-
-<p>So the stamp is not new information. It is the decision the outer worker already made, carried
-to the process that has to act on it.</p>
+<p>Two things nobody checked: whether Ray passes an <code>env_vars</code> key added at that point
+through the same way it passes the nsys settings, and that the older non-default vLLM executor path
+would need the same mark or it keeps the current guard.</p>
 
 <div class="warn">
-<strong>What this costs you today.</strong> Profile megatron only — the documented
-<a href="https://github.com/NVIDIA-NeMo/RL/blob/b2237a2d91c9682d27392199ae545277df74f333/docs/nsys-profiling.md#L70"><code>"*policy*"</code> example</a>
-— and the vLLM workers, which are not being profiled, run <code>nsys stop</code> on every session on
-the node. The only one there is your megatron trace. How much you lose depends on when the run ends:
-if the profile window closes mid-run the policy stops itself first and its trace is fine; if the run
-ends inside the window, <code>atexit</code> handlers run in reverse order, generation's sweep fires
-first, and the megatron trace is cut short. Generation shares the node by default
-(<a href="https://github.com/NVIDIA-NeMo/RL/blob/b2237a2d91c9682d27392199ae545277df74f333/examples/configs/grpo_math_1B.yaml#L457"><code>colocated.enabled: true</code></a>),
-so this is the normal setup, not an exotic one.
+<strong>What to do with this.</strong> Page 1's fix is good and worth having. This is a guard on
+top of it that is too broad, and it bites hardest in the case where you asked for the least — profile
+training only, and the vLLM side you never asked to profile is what ends your trace.
 </div>
 
 <p class="cref">🔴 <a href="https://github.com/NVIDIA-NeMo/RL/pull/4090#discussion_r4059524133">review comment — vllm_backend.py:1691</a></p>
-<p class="sub" style="margin-top:8px">That review is still pending, so its link resolves only for
+<p class="sub" style="margin-top:8px">That review is still pending, so the link resolves only for
 its author until the review is submitted.</p>
 
 </div>

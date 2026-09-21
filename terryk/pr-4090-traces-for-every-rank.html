@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NVIDIA-NeMo/RL #4090 — how every inner vLLM worker finally writes a usable nsys trace</title>
+<style>
+:root{
+  --bg:#0d1117; --surface:#161b22; --surface2:#1c2128; --border:#30363d;
+  --text:#e6edf3; --dim:#8b949e; --accent:#58a6ff; --green:#3fb950;
+  --orange:#d29922; --red:#f85149;
+}
+:root[data-theme="light"]{
+  --bg:#ffffff; --surface:#f6f8fa; --surface2:#eaeef2; --border:#d0d7de;
+  --text:#1f2328; --dim:#59636e; --accent:#0969da; --green:#1a7f37;
+  --orange:#9a6700; --red:#cf222e;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:28px 20px 70px}
+h1{font-size:22px;margin:0 0 8px;line-height:1.3}
+h2{font-size:18px;margin:30px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;
+  font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
+.sub{color:var(--dim);font-size:13.5px;margin:0 0 14px}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);
+  border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;
+  font:13px/1 ui-monospace,Menlo,monospace;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.18)}
+.mono{font:12.5px ui-monospace,SFMono-Regular,Menlo,monospace;
+  background:var(--surface);border:1px solid var(--border);border-radius:8px;
+  padding:13px;overflow-x:auto;white-space:pre}
+.warn{border-left:3px solid var(--orange);background:var(--surface);
+  padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0}
+.status{border:1px solid var(--border);border-radius:10px;background:var(--surface);
+  padding:2px 16px 10px;margin:0 0 20px}
+.status dl{display:grid;grid-template-columns:max-content 1fr;gap:4px 14px;margin:12px 0 0}
+.status dt{color:var(--dim);font-size:12px;text-transform:uppercase;letter-spacing:.04em;
+  white-space:nowrap;padding-top:2px}
+.status dd{margin:0;font-size:14px}
+.verdict{font-weight:700}
+.verdict.good{color:var(--green)}
+.verdict.open{color:var(--red)}
+nav.chain{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 6px;padding:0}
+nav.chain a,nav.chain span{display:inline-block;padding:5px 11px;border:1px solid var(--border);
+  border-radius:20px;background:var(--surface);text-decoration:none;color:var(--accent);
+  font-size:12.5px;line-height:1.3;white-space:nowrap}
+nav.chain a:hover{background:var(--surface2)}
+nav.chain span.here{background:var(--accent);color:var(--bg);border-color:var(--accent);font-weight:600}
+p.chainnote{color:var(--dim);font-size:12px;margin:0 0 18px}
+svg{max-width:100%;height:auto;display:block;margin:16px 0}
+svg .lbl{fill:var(--text);font:12.5px ui-monospace,Menlo,monospace}
+svg .lbl-b{fill:var(--text);font:bold 13px -apple-system,sans-serif}
+svg .note{fill:var(--dim);font:11.5px -apple-system,sans-serif}
+svg .hdr{fill:var(--accent);font:bold 12.5px -apple-system,sans-serif}
+svg .ok{fill:var(--green);font:bold 12px -apple-system,sans-serif}
+svg .bad{fill:var(--red);font:bold 12px -apple-system,sans-serif}
+svg .trackg{fill:var(--green);opacity:.30}
+svg .trackr{fill:var(--red);opacity:.28}
+svg .tick{stroke:var(--border);stroke-width:1}
+svg .kill{stroke:var(--red);stroke-width:2.2}
+svg .stopl{stroke:var(--green);stroke-width:2.2}
+svg a text{text-decoration:underline;fill:var(--accent);font:11.5px ui-monospace,Menlo,monospace}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+  document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head>
+<body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+  function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+  function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
+    b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
+      else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+  document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+<div class="wrap">
+
+<h1>How every inner vLLM worker finally writes a usable nsys trace</h1>
+<p class="sub">On
+<a href="https://github.com/NVIDIA-NeMo/RL/pull/4090">NVIDIA-NeMo/RL #4090</a>.
+All links pinned to <code>b2237a2d</code>.</p>
+
+<nav class="chain">
+  <span class="here">1 · what the PR fixes</span>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4090-who-am-i-profiling.html">2 · a problem it leaves behind</a>
+</nav>
+<p class="chainnote">Two pages on this PR — this one is the fix itself.</p>
+
+<div class="status">
+<dl>
+  <dt>Before</dt>
+  <dd>With vLLM tensor parallel &gt; 1, profiling a generation run produced <strong>no usable
+      inner-worker traces at all</strong> — the files existed but could not be opened.</dd>
+  <dt>This PR</dt>
+  <dd>Gives the inner workers a profile that starts and stops on command, and writes each rank's
+      report <em>before</em> teardown kills the process.</dd>
+  <dt>Status</dt>
+  <dd><span class="verdict good">Fixed by this PR.</span> The author's run shows one
+      <code>vllm_tp_worker_*</code> trace per rank where there were none.</dd>
+</dl>
+</div>
+
+<p>When vLLM runs with tensor parallel &gt; 1, the model is split across several processes. vLLM
+starts those itself — they are its own Ray workers, not NeMo-RL's. Profiling the generation side
+means getting an nsys trace out of each one.</p>
+
+<p>Take one engine split across two ranks, worker <strong>A</strong> and worker <strong>B</strong>,
+and a profile window of steps 3 to 5.</p>
+
+<h2>Why the old traces were unusable</h2>
+
+<svg viewBox="0 0 960 300" role="img" aria-label="Timeline: before, inner workers record from launch and are killed before nsys writes the report, so the file is unreadable; after, each worker writes its report at the window end and the kill no longer matters">
+
+  <text class="hdr" x="0" y="14">BEFORE — recording never stops on purpose</text>
+  <line class="tick" x1="150" y1="24" x2="150" y2="140"/>
+  <text class="note" x="150" y="36" text-anchor="middle">launch</text>
+  <line class="tick" x1="470" y1="24" x2="470" y2="140"/>
+  <text class="note" x="470" y="36" text-anchor="middle">step 3 — start</text>
+  <line class="tick" x1="640" y1="24" x2="640" y2="140"/>
+  <text class="note" x="640" y="36" text-anchor="middle">step 5 — stop</text>
+  <line class="kill" x1="820" y1="24" x2="820" y2="140"/>
+  <text class="bad" x="820" y="36" text-anchor="middle">teardown: SIGKILL</text>
+
+  <text class="lbl" x="0" y="66">worker A</text>
+  <rect class="trackr" x="150" y="52" width="670" height="18" rx="3"/>
+  <text class="lbl" x="0" y="96">worker B</text>
+  <rect class="trackr" x="150" y="82" width="670" height="18" rx="3"/>
+  <text class="note" x="158" y="122">records everything from launch — vLLM's stock always-on config, no start/stop control</text>
+  <text class="bad"  x="836" y="66">killed mid-write</text>
+  <text class="bad"  x="836" y="96">killed mid-write</text>
+
+  <text class="bad" x="0" y="150">Result: nsys never writes the end of the file, so the capture cannot be opened. Zero usable inner traces.</text>
+
+  <text class="hdr" x="0" y="196">AFTER — the window ends, the report is written, then the kill is harmless</text>
+  <line class="tick" x1="150" y1="206" x2="150" y2="286"/>
+  <text class="note" x="150" y="218" text-anchor="middle">launch</text>
+  <line class="tick" x1="470" y1="206" x2="470" y2="286"/>
+  <text class="note" x="470" y="218" text-anchor="middle">step 3 — start</text>
+  <line class="stopl" x1="640" y1="206" x2="640" y2="286"/>
+  <text class="ok" x="640" y="218" text-anchor="middle">step 5 — stop + write</text>
+  <line class="kill" x1="820" y1="206" x2="820" y2="286"/>
+  <text class="note" x="820" y="218" text-anchor="middle">teardown</text>
+
+  <text class="lbl" x="0" y="248">worker A</text>
+  <rect class="trackg" x="470" y="234" width="170" height="18" rx="3"/>
+  <text class="lbl" x="0" y="274">worker B</text>
+  <rect class="trackg" x="470" y="260" width="170" height="18" rx="3"/>
+  <text class="ok" x="656" y="248">report written ✓</text>
+  <text class="ok" x="656" y="274">report written ✓</text>
+</svg>
+
+<p>Two things had to change to get from the top row to the bottom one.</p>
+
+<h2>How the PR gets there</h2>
+
+<div class="mono">1. give the inner workers a profile that waits to be told when to start
+
+   the config vLLM uses by default records from launch and never stops.
+   NeMo-RL swaps in one with capture-range=cudaProfilerApi, so nsys sits
+   idle until the code calls cudaProfilerStart.
+
+   the catch: that config is built inside vLLM's EngineCore process,
+   which is started fresh and re-imports vLLM, so editing the class
+   in NeMo-RL's own process has no effect there.
+
+   fix: register a vllm.general_plugins entry point. vLLM loads those
+   in every process it starts, including that one.
+
+2. write each rank's report while the process is still alive
+
+   at the end of the window each inner worker calls cudaProfilerStop,
+   then runs `nsys stop --session`, which writes its .nsys-rep there
+   and then. Teardown can kill the process afterwards — the file is
+   already complete.</div>
+
+<p>The plugin is
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/b2237a2d91c9682d27392199ae545277df74f333/nemo_rl/utils/vllm_nsight_plugin.py#L55-L77">vllm_nsight_plugin.py:55-77</a>,
+registered at
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/b2237a2d91c9682d27392199ae545277df74f333/pyproject.toml#L123-L124">pyproject.toml:123-124</a>.
+The write-before-teardown step is
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/b2237a2d91c9682d27392199ae545277df74f333/nemo_rl/models/generation/vllm/vllm_backend.py#L1691-L1700">vllm_backend.py:1691-1700</a>.
+On the async engine the start/stop calls also had to be awaited, or they never reached the inner
+workers at all —
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/b2237a2d91c9682d27392199ae545277df74f333/nemo_rl/models/generation/vllm/vllm_worker_async.py#L229-L253">vllm_worker_async.py:229-253</a>.</p>
+
+<div class="warn">
+<strong>How you can tell it worked.</strong> The filenames say which config the inner workers
+actually got. vLLM's stock one writes <code>worker_process_&lt;pid&gt;.nsys-rep</code>; NeMo-RL's
+writes <code>vllm_tp_worker_&lt;window&gt;_&lt;pid&gt;.nsys-rep</code>
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/b2237a2d91c9682d27392199ae545277df74f333/nemo_rl/utils/vllm_nsight_plugin.py#L63">the template</a>).
+If you see <code>vllm_tp_worker_</code> files, one per rank, the plugin reached the EngineCore
+process and the traces are real. That is the check the author used, and it is worth keeping —
+a run that simply finishes proves nothing, because the broken version finished too.
+</div>
+
+<p class="sub" style="margin-top:22px">There is a separate problem in the new code — the condition
+that decides whether a worker runs that <code>nsys stop</code> at all.
+<a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4090-who-am-i-profiling.html">That is page 2</a>.</p>
+
+</div>
+</body>
+</html>
