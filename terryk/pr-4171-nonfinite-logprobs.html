@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NVIDIA-NeMo/RL #4171 — one bad number in the padding used to throw away a good sequence</title>
+<style>
+:root{
+  --bg:#0d1117; --surface:#161b22; --surface2:#1c2128; --border:#30363d;
+  --text:#e6edf3; --dim:#8b949e; --accent:#58a6ff; --green:#3fb950;
+  --orange:#d29922; --red:#f85149;
+}
+:root[data-theme="light"]{
+  --bg:#ffffff; --surface:#f6f8fa; --surface2:#eaeef2; --border:#d0d7de;
+  --text:#1f2328; --dim:#59636e; --accent:#0969da; --green:#1a7f37;
+  --orange:#9a6700; --red:#cf222e;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:28px 20px 70px}
+h1{font-size:22px;margin:0 0 8px;line-height:1.3}
+h2{font-size:18px;margin:32px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;
+  font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
+.sub{color:var(--dim);font-size:13.5px;margin:0 0 16px}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);
+  border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;
+  font:13px/1 ui-monospace,Menlo,monospace;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.18)}
+.mono{font:12.5px ui-monospace,SFMono-Regular,Menlo,monospace;
+  background:var(--surface);border:1px solid var(--border);border-radius:8px;
+  padding:13px;overflow-x:auto;white-space:pre}
+.hl{border-left:3px solid var(--green);background:var(--surface);
+  padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0}
+.status{border:1px solid var(--border);border-radius:10px;background:var(--surface);
+  padding:2px 16px 10px;margin:0 0 20px}
+.status dl{display:grid;grid-template-columns:max-content 1fr;gap:4px 14px;margin:12px 0 0}
+.status dt{color:var(--dim);font-size:12px;text-transform:uppercase;letter-spacing:.04em;
+  white-space:nowrap;padding-top:2px}
+.status dd{margin:0;font-size:14px}
+.verdict{font-weight:700}
+.verdict.good{color:var(--green)}
+nav.chain{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 6px;padding:0}
+nav.chain a,nav.chain span{display:inline-block;padding:5px 11px;border:1px solid var(--border);
+  border-radius:20px;background:var(--surface);text-decoration:none;color:var(--accent);
+  font-size:12.5px;line-height:1.3;white-space:nowrap}
+nav.chain a:hover{background:var(--surface2)}
+nav.chain span.here{background:var(--accent);color:var(--bg);border-color:var(--accent);font-weight:600}
+p.chainnote{color:var(--dim);font-size:12px;margin:0 0 18px}
+svg{max-width:100%;height:auto;display:block;margin:16px 0}
+svg .box{fill:var(--surface);stroke:var(--border);stroke-width:1.4}
+svg .lbl{fill:var(--text);font:12.5px ui-monospace,Menlo,monospace}
+svg .lbl-b{fill:var(--text);font:bold 13px -apple-system,sans-serif}
+svg .note{fill:var(--dim);font:11.5px -apple-system,sans-serif}
+svg .hdr{fill:var(--accent);font:bold 12.5px -apple-system,sans-serif}
+svg .cell{fill:var(--surface2);stroke:var(--border);stroke-width:1.2}
+svg .cell-pad{fill:var(--dim);opacity:.2;stroke:var(--dim);stroke-width:1.2}
+svg .ctx{fill:var(--text);font:12px ui-monospace,Menlo,monospace}
+svg .arr{stroke:var(--dim);stroke-width:1.5;fill:none}
+svg .bad{fill:var(--red);font:bold 12.5px ui-monospace,Menlo,monospace}
+svg .ok{fill:var(--green);font:bold 12.5px ui-monospace,Menlo,monospace}
+svg a text{text-decoration:underline;fill:var(--accent);font:11px ui-monospace,Menlo,monospace}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+  document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head>
+<body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+  function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+  function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
+    b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
+      else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+  document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+<div class="wrap">
+
+<h1>One bad number in the padding used to throw away a good sequence</h1>
+<p class="sub">Companion illustration for
+<a href="https://github.com/NVIDIA-NeMo/RL/pull/4171">NVIDIA-NeMo/RL #4171</a>.
+Permalinks pin the PR head <code>ae5a6d9</code>; the removed code is linked at the base
+commit <code>612d527</code>, since it no longer exists at head.</p>
+
+<nav class="chain">
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4171-single-forward.html">dropping a forward pass</a>
+  <span class="here">padding used to reject good sequences</span>
+</nav>
+<p class="chainnote">Two pages on this PR, one question each — this one: a fix to the filter that was already on.</p>
+
+<div class="status">
+<dl>
+  <dt>Before</dt>
+  <dd>A <code>NaN</code> or <code>±Inf</code> logprob sitting in a padded slot — a position the filter is supposed to ignore — poisoned the score for the whole sequence and got it thrown away.</dd>
+  <dt>This PR</dt>
+  <dd>Zeroes the ignored positions before doing any arithmetic on them, so padding cannot affect the score.</dd>
+  <dt>Status</dt>
+  <dd><span class="verdict good">Fixed by this PR.</span> This is a change to the existing filter, which is on whenever <code>seq_logprob_error_threshold</code> is set — you do not need the PR's new opt-in mode to get it.</dd>
+</dl>
+</div>
+
+<p>Sequences in a batch have different lengths, so short ones are padded out to a common width.
+A <code>token_mask</code> marks which slots are real response tokens. The filter scores a sequence
+by averaging <code>exp(|generation_logprob − policy_logprob|)</code> over the real tokens only, and
+drops the sequence if that average is above the threshold. The padded slots hold whatever happened
+to be in memory — often <code>-inf</code>, because that is what masked-out logits become. The old
+code multiplied by the mask <em>inside</em> the exponent to skip them, and that is where it went
+wrong: in IEEE floating point, <code>inf × 0</code> is not <code>0</code>. It is <code>NaN</code>.</p>
+
+<h2>One sequence, four slots, three of them real</h2>
+
+<svg viewBox="0 0 900 400" role="img" aria-label="A four-slot sequence where the fourth slot is padding holding negative infinity; the old formula turns it into NaN and rejects the sequence, the new formula zeroes it and keeps the sequence">
+  <text class="hdr" x="14" y="18">One sequence. Slots 1-3 are real response tokens; slot 4 is padding. Threshold = 2.0</text>
+
+  <!-- row labels -->
+  <text class="note" x="14" y="62">slot</text>
+  <text class="note" x="14" y="92">token_mask</text>
+  <text class="note" x="14" y="122">|error|</text>
+
+  <!-- cells -->
+  <rect class="cell" x="120" y="44" width="110" height="24" rx="4"/>
+  <text class="ctx" x="168" y="61" text-anchor="middle">1</text>
+  <rect class="cell" x="240" y="44" width="110" height="24" rx="4"/>
+  <text class="ctx" x="288" y="61" text-anchor="middle">2</text>
+  <rect class="cell" x="360" y="44" width="110" height="24" rx="4"/>
+  <text class="ctx" x="408" y="61" text-anchor="middle">3</text>
+  <rect class="cell-pad" x="480" y="44" width="110" height="24" rx="4"/>
+  <text class="ctx" x="528" y="61" text-anchor="middle">4 (pad)</text>
+
+  <text class="ctx" x="168" y="91" text-anchor="middle">1</text>
+  <text class="ctx" x="288" y="91" text-anchor="middle">1</text>
+  <text class="ctx" x="408" y="91" text-anchor="middle">1</text>
+  <text class="ctx" x="528" y="91" text-anchor="middle">0</text>
+
+  <text class="ctx" x="168" y="121" text-anchor="middle">0.5</text>
+  <text class="ctx" x="288" y="121" text-anchor="middle">0.2</text>
+  <text class="ctx" x="408" y="121" text-anchor="middle">0.9</text>
+  <text class="bad" x="528" y="121" text-anchor="middle">-inf</text>
+
+  <line x1="120" y1="140" x2="886" y2="140" stroke="var(--border)" stroke-width="1"/>
+
+  <!-- OLD -->
+  <text class="lbl-b" x="14" y="172">old</text>
+  <text class="note" x="14" y="190">multiply</text>
+  <text class="note" x="14" y="205">inside exp</text>
+  <text class="lbl" x="120" y="172">exp(|error| × mask) × mask</text>
+
+  <text class="ctx" x="168" y="200" text-anchor="middle">1.65</text>
+  <text class="ctx" x="288" y="200" text-anchor="middle">1.22</text>
+  <text class="ctx" x="408" y="200" text-anchor="middle">2.46</text>
+  <text class="bad" x="528" y="200" text-anchor="middle">NaN</text>
+  <text class="note" x="600" y="186">inf × 0 = NaN,</text>
+  <text class="note" x="600" y="202">not 0</text>
+
+  <text class="lbl" x="120" y="228">mean over the 3 real slots =</text>
+  <text class="bad" x="380" y="228">NaN</text>
+  <text class="lbl" x="424" y="228">→  NaN ≤ 2.0 is false  →</text>
+  <text class="bad" x="660" y="228">sequence dropped</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/612d5274059c821dc09c2c90767b546b6f2d50b5/nemo_rl/algorithms/grpo.py#L2762">
+    <text x="120" y="250">the removed line, at the base commit — grpo.py:2762</text></a>
+
+  <line x1="120" y1="264" x2="886" y2="264" stroke="var(--border)" stroke-width="1"/>
+
+  <!-- NEW -->
+  <text class="lbl-b" x="14" y="296">new</text>
+  <text class="note" x="14" y="314">zero first,</text>
+  <text class="note" x="14" y="329">then exp</text>
+  <text class="lbl" x="120" y="296">where(mask, |error|, 0) → exp(...) × mask</text>
+
+  <text class="ctx" x="168" y="324" text-anchor="middle">1.65</text>
+  <text class="ctx" x="288" y="324" text-anchor="middle">1.22</text>
+  <text class="ctx" x="408" y="324" text-anchor="middle">2.46</text>
+  <text class="ok" x="528" y="324" text-anchor="middle">0</text>
+  <text class="note" x="600" y="310">the -inf is replaced</text>
+  <text class="note" x="600" y="326">before any arithmetic</text>
+
+  <text class="lbl" x="120" y="352">mean over the 3 real slots =</text>
+  <text class="ok" x="380" y="352">1.78</text>
+  <text class="lbl" x="432" y="352">→  1.78 ≤ 2.0  →</text>
+  <text class="ok" x="620" y="352">sequence kept</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/ae5a6d9a12ec9c7c595f74f56733d3a1f0108979/nemo_rl/algorithms/utils.py#L236">
+    <text x="120" y="374">utils.py:236</text></a>
+</svg>
+
+<h2>The change is one line</h2>
+
+<div class="mono">old   num = (torch.exp(lp_error * mask) * mask).sum(dim=-1)
+      #           ^^^^^^^^^^^^^^^^^  (-inf) * 0  ->  NaN, and NaN spreads to the sum
+
+new   error  = torch.where(mask.bool(), (generation_logprobs - policy_logprobs).abs(), 0.0)
+      errors = (torch.exp(error * mask) * mask).sum(dim=-1) / counts.clamp(min=1)
+      #        ^^^^^^^^^^^^^^  the ignored slots are already 0 by the time exp runs</div>
+
+<p>Running the numbers from the figure: <code>exp(0.5) + exp(0.2) + exp(0.9)</code> is
+<code>1.6487 + 1.2214 + 2.4596 = 5.3297</code>, divided by the 3 real tokens gives
+<code>1.7766</code>, which is under the threshold of 2.0. Under the old formula the fourth slot
+turned that sum into <code>NaN</code>, and because every comparison against <code>NaN</code> is
+false, the sequence failed the threshold test and was dropped.</p>
+
+<p>A bad number on a <em>real</em> token still rejects the sequence, which is the behaviour you
+want. <code>exp(inf)</code> is <code>inf</code> and <code>exp(NaN)</code> is <code>NaN</code>, and
+neither is ever below a finite threshold. The fix only stops slots the filter was already told to
+ignore from having a say.</p>
+
+<div class="hl">
+<p><strong>Why this matters more than it looks.</strong> This filter is not the PR's new opt-in
+mode — it runs on any config that sets <code>seq_logprob_error_threshold</code>, and four shipped
+recipes set it to 2. So the old behaviour was quietly throwing away training data whenever a padded slot
+held a non-finite logprob, and the sequence itself was perfectly fine. Nothing logged a warning;
+the sequence just counted as filtered. If you have been watching
+<code>num_masked_seqs_by_logprob_error</code> and wondering why it was higher than you expected,
+this is a candidate explanation.</p>
+</div>
+
+</div>
+</body>
+</html>
