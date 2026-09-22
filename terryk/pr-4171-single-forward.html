@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>NVIDIA-NeMo/RL #4171 — dropping a whole forward pass and still filtering the same sequences</title>
+<title>NVIDIA-NeMo/RL #4171 — why filtering inside the loss needs a gradient correction afterwards</title>
 <style>
 :root{
   --bg:#0d1117; --surface:#161b22; --surface2:#1c2128; --border:#30363d;
@@ -20,7 +20,8 @@ body{margin:0;background:var(--bg);color:var(--text);
   font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
 .wrap{max-width:980px;margin:0 auto;padding:28px 20px 70px}
 h1{font-size:22px;margin:0 0 8px;line-height:1.3}
-h2{font-size:18px;margin:32px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+h2{font-size:18px;margin:30px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+h3{font-size:14.5px;margin:20px 0 6px;color:var(--dim);font-weight:600}
 a{color:var(--accent);text-decoration:none}
 a:hover{text-decoration:underline}
 code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;
@@ -29,13 +30,17 @@ code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;
 #theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);
   border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;
   font:13px/1 ui-monospace,Menlo,monospace;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.18)}
-.mono{font:12.5px ui-monospace,SFMono-Regular,Menlo,monospace;
+.mono{font:12.5px/1.55 ui-monospace,SFMono-Regular,Menlo,monospace;
   background:var(--surface);border:1px solid var(--border);border-radius:8px;
-  padding:13px;overflow-x:auto;white-space:pre}
+  padding:13px 15px;overflow-x:auto;white-space:pre}
+.mono b{color:var(--orange);font-weight:700}
+.mono i{color:var(--dim);font-style:normal}
+.mono u{color:var(--green);text-decoration:none;font-weight:700}
+.mono s{color:var(--red);text-decoration:none;font-weight:700}
 .hl{border-left:3px solid var(--green);background:var(--surface);
   padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0}
-.warn{border-left:3px solid var(--orange);background:var(--surface);
-  padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0}
+.key{border:1px solid var(--orange);background:var(--surface);
+  padding:12px 16px;margin:16px 0;border-radius:8px}
 .status{border:1px solid var(--border);border-radius:10px;background:var(--surface);
   padding:2px 16px 10px;margin:0 0 20px}
 .status dl{display:grid;grid-template-columns:max-content 1fr;gap:4px 14px;margin:12px 0 0}
@@ -44,7 +49,6 @@ code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;
 .status dd{margin:0;font-size:14px}
 .verdict{font-weight:700}
 .verdict.good{color:var(--green)}
-.verdict.open{color:var(--red)}
 nav.chain{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 6px;padding:0}
 nav.chain a,nav.chain span{display:inline-block;padding:5px 11px;border:1px solid var(--border);
   border-radius:20px;background:var(--surface);text-decoration:none;color:var(--accent);
@@ -52,22 +56,15 @@ nav.chain a,nav.chain span{display:inline-block;padding:5px 11px;border:1px soli
 nav.chain a:hover{background:var(--surface2)}
 nav.chain span.here{background:var(--accent);color:var(--bg);border-color:var(--accent);font-weight:600}
 p.chainnote{color:var(--dim);font-size:12px;margin:0 0 18px}
-svg{max-width:100%;height:auto;display:block;margin:16px 0}
-svg .box{fill:var(--surface);stroke:var(--border);stroke-width:1.4}
-svg .box-g{fill:var(--surface);stroke:var(--green);stroke-width:1.6}
-svg .box-d{fill:var(--surface);stroke:var(--dim);stroke-width:1.2;stroke-dasharray:4 3}
-svg .lbl{fill:var(--text);font:12.5px ui-monospace,Menlo,monospace}
-svg .lbl-b{fill:var(--text);font:bold 13px -apple-system,sans-serif}
-svg .note{fill:var(--dim);font:11.5px -apple-system,sans-serif}
+svg{max-width:100%;height:auto;display:block;margin:14px 0}
+svg .lbl-b{fill:var(--text);font:bold 12.5px -apple-system,sans-serif}
+svg .note{fill:var(--dim);font:11px -apple-system,sans-serif}
 svg .hdr{fill:var(--accent);font:bold 12.5px -apple-system,sans-serif}
-svg .arr{stroke:var(--dim);stroke-width:1.5;fill:none}
-svg .num{fill:var(--orange);font:bold 12px ui-monospace,Menlo,monospace}
 svg .ok{fill:var(--green);font:bold 12px ui-monospace,Menlo,monospace}
-svg .bad{fill:var(--red);font:bold 12px ui-monospace,Menlo,monospace}
-svg a text{text-decoration:underline;fill:var(--accent);font:11px ui-monospace,Menlo,monospace}
-table{border-collapse:collapse;width:100%;margin:14px 0;font-size:13.5px}
-th,td{border:1px solid var(--border);padding:7px 10px;text-align:left}
-th{background:var(--surface2);font-weight:600}
+svg .warnc{fill:var(--orange);font:bold 12px ui-monospace,Menlo,monospace}
+svg .bar{fill:var(--surface2);stroke:var(--border);stroke-width:1.2}
+svg .mark-ok{stroke:var(--green);stroke-width:2.4}
+svg .mark-w{stroke:var(--orange);stroke-width:2.4}
 </style>
 <script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
   document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
@@ -82,190 +79,153 @@ th{background:var(--surface2);font-weight:600}
   document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
 <div class="wrap">
 
-<h1>How GRPO drops a whole forward pass and still filters the same sequences</h1>
+<h1>Why filtering inside the loss needs a gradient correction afterwards</h1>
 <p class="sub">Companion illustration for
 <a href="https://github.com/NVIDIA-NeMo/RL/pull/4171">NVIDIA-NeMo/RL #4171</a>.
 All permalinks pin the PR head <code>ae5a6d9</code>.</p>
 
 <nav class="chain">
-  <span class="here">dropping a forward pass</span>
+  <span class="here">why the correction exists</span>
   <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4171-nonfinite-logprobs.html">padding used to reject good sequences</a>
 </nav>
-<p class="chainnote">Two pages on this PR, one question each — this one: what the new mode is and how it compares to the old one.</p>
+<p class="chainnote">Two pages on this PR, one question each — this one: the old flow, the new flow, and why the new one needs a fix-up step.</p>
 
 <div class="status">
 <dl>
   <dt>Before</dt>
-  <dd>Setting <code>grpo.seq_logprob_error_threshold</code> forced an extra forward pass over the whole batch, just to get the policy logprobs the filter needed.</dd>
+  <dd>Setting <code>grpo.seq_logprob_error_threshold</code> forced an extra forward pass over the whole batch, purely to get the logprobs the filter needed.</dd>
   <dt>This PR</dt>
-  <dd>Adds <code>loss_fn.seq_logprob_error_in_loss</code>. The filter now runs inside the training forward, and the worker corrects the gradient afterwards.</dd>
+  <dd>Adds <code>loss_fn.seq_logprob_error_in_loss</code>. The filter runs inside the training forward, and the worker corrects the gradient once the loop is done.</dd>
   <dt>Status</dt>
-  <dd><span class="verdict good">New feature, off by default.</span> Megatron GRPO only. The author measured a 17.8% drop in mean step time.</dd>
+  <dd><span class="verdict good">New feature, off by default.</span> Non-streaming Megatron GRPO only — SingleController is rejected outright.</dd>
 </dl>
 </div>
 
-<p>GRPO can throw away a sequence whose logprobs from the generator and from the trainer
-disagree too much. The measure is a per-sequence mean of
-<code>exp(|generation_logprob − policy_logprob|)</code>, and anything above
-<code>seq_logprob_error_threshold</code> is dropped
-(<a href="https://github.com/NVIDIA-NeMo/RL/blob/ae5a6d9a12ec9c7c595f74f56733d3a1f0108979/nemo_rl/algorithms/utils.py#L220">utils.py:220</a>).
-The catch is the denominator. The loss divides by the total number of surviving response tokens
-across every rank, and each microbatch has to divide by that same number while it runs — but you
-only know it once every microbatch is done. The old code solved that by computing the policy
-logprobs up front in a separate pass. This PR solves it by dividing by the unfiltered count first
-and fixing the gradient at the end.</p>
+<p>GRPO can throw away a sequence when the logprobs from the generator and from the trainer
+disagree too much. Each microbatch's loss divides by the <em>global</em> number of surviving
+response tokens — global meaning across every microbatch and every data-parallel rank — so that
+once the gradients accumulate and get summed, the total comes out as
+<code>(sum of contributions) / (global count)</code>.</p>
 
-<h2>The same batch, both ways</h2>
+<div class="key">
+<strong>The whole PR turns on one thing: when is that global count knowable?</strong>
+If you filter <em>before</em> training, you know it before the first microbatch runs — divide by it
+and you are done. If you filter <em>inside</em> the loss, you cannot know it while microbatch 1 is
+running, because you have not yet seen what microbatches 2…N will reject. So you divide by the
+count you do have, and fix the gradient afterwards. That fix-up is the only reason the correction
+step exists.
+</div>
 
-<svg viewBox="0 0 900 470" role="img" aria-label="Two lanes comparing the separate-forward path and the in-loss path on the same batch of three sequences">
-  <!-- legend -->
-  <text class="hdr" x="14" y="18">One batch: 3 response sequences of 7, 9 and 4 tokens. The 4-token one fails the threshold.</text>
-  <rect class="box-g" x="14" y="28" width="12" height="12" rx="2"/>
-  <text class="note" x="32" y="38">kept</text>
-  <rect x="78" y="28" width="12" height="12" rx="2" fill="var(--red)" opacity="0.45" stroke="var(--red)"/>
-  <text class="note" x="96" y="38">dropped by the filter</text>
-  <rect class="box-d" x="238" y="28" width="12" height="12" rx="2"/>
-  <text class="note" x="256" y="38">work that no longer happens</text>
+<h2>Today: filter first, then train</h2>
 
-  <!-- LANE A -->
-  <text class="lbl-b" x="14" y="72">Today — separate forward pass</text>
-  <rect class="box" x="14" y="82" width="176" height="44" rx="6"/>
-  <text class="lbl" x="24" y="101">extra forward pass</text>
-  <text class="note" x="24" y="117">policy logprobs, whole batch</text>
+<p>The driver runs a whole extra forward pass to get <code>prev_logprobs</code>, filters with it,
+and only then hands the batch to the worker. Three sequences of 7, 9 and 4 response tokens;
+the 4-token one fails the threshold.</p>
 
-  <path class="arr" d="M194 104 L218 104" marker-end="url(#a1)"/>
+<div class="mono"><i># --- driver, nemo_rl/algorithms/grpo.py ---</i>
 
-  <rect class="box" x="222" y="82" width="200" height="44" rx="6"/>
-  <text class="lbl" x="232" y="101">filter in the driver</text>
-  <text class="note" x="232" y="117">zeroes sample_mask on rejects</text>
-  <a href="https://github.com/NVIDIA-NeMo/RL/blob/ae5a6d9a12ec9c7c595f74f56733d3a1f0108979/nemo_rl/algorithms/grpo.py#L2760">
-    <text x="232" y="141">grpo.py:2760</text></a>
+<b>prev_logprobs</b> = policy.get_logprobs(train_data)   <i># EXTRA FORWARD PASS over the whole batch</i>
 
-  <path class="arr" d="M426 104 L450 104" marker-end="url(#a1)"/>
+compute_and_apply_seq_logprob_error_masking(train_data, ...)
+    err = mean(exp|generation_logprobs - prev_logprobs|)  <i># per sequence</i>
+    train_data["sample_mask"][err &gt; 2.0] = 0              <i># seq C (4 tok) rejected -&gt; weight 0</i>
 
-  <rect class="box" x="454" y="82" width="182" height="44" rx="6"/>
-  <text class="lbl" x="464" y="101">count tokens</text>
-  <text class="lbl" x="464" y="117">G = <tspan class="ok">16</tspan>  (already filtered)</text>
+policy.train(train_data, loss_fn)
+    |
+    |   <i># --- worker, nemo_rl/models/megatron/data.py ---</i>
+    |   process_global_batch:
+    |       local = sum(token_mask * sample_mask)         <i># C already contributes 0</i>
+    |       <u>G = all_reduce(local) = 16</u>                    <i># 7 + 9. ALREADY the survivor count</i>
+    |
+    |   <i># --- per microbatch ---</i>
+    |   mb1: loss = (A's token losses).sum() / <u>16</u>
+    |   mb2: loss = (B's token losses).sum() / <u>16</u>
+    |   backward, DP all-reduce
+    |
+    +-- gradient = <u>S / 16</u>   -&gt;  optimizer.step()        <i># clip sees S/16</i>
+</div>
 
-  <path class="arr" d="M640 104 L664 104" marker-end="url(#a1)"/>
+<p>Nothing to correct: <code>G</code> was the right denominator from the start, because the rejects
+were already zeroed out of <code>sample_mask</code> before
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/ae5a6d9a12ec9c7c595f74f56733d3a1f0108979/nemo_rl/models/megatron/data.py#L1200-L1206"><code>process_global_batch</code></a>
+counted them.</p>
 
-  <rect class="box-g" x="668" y="82" width="218" height="44" rx="6"/>
-  <text class="lbl" x="678" y="101">train: every loss ÷ <tspan class="ok">16</tspan></text>
-  <text class="note" x="678" y="117">gradient ends at S / 16</text>
+<h3>That extra forward pass was pure overhead</h3>
 
-  <!-- divider -->
-  <line x1="14" y1="172" x2="886" y2="172" stroke="var(--border)" stroke-width="1"/>
+<p>This mode requires <code>force_on_policy_ratio: true</code>, and under that flag the loss does
+not even load <code>prev_logprobs</code>
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/ae5a6d9a12ec9c7c595f74f56733d3a1f0108979/nemo_rl/algorithms/loss/loss_functions.py#L514-L516">loss_functions.py:514-516</a>)
+and then overwrites it with <code>curr_logprobs.detach()</code>
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/ae5a6d9a12ec9c7c595f74f56733d3a1f0108979/nemo_rl/algorithms/loss/loss_functions.py#L528-L529">:528-529</a>).
+So that pass produced a tensor the loss throws away — its only consumer was the filter. Same
+weights, same quantity the training forward already computes.</p>
 
-  <!-- LANE B -->
-  <text class="lbl-b" x="14" y="202">This PR — filter inside the training forward</text>
-  <rect class="box-d" x="14" y="212" width="176" height="44" rx="6"/>
-  <text class="note" x="24" y="231">extra forward pass</text>
-  <text class="note" x="24" y="247">skipped entirely</text>
+<h2>With this PR: train first, then correct</h2>
 
-  <path class="arr" d="M194 234 L218 234" marker-end="url(#a1)" stroke-dasharray="4 3"/>
+<div class="mono"><i># --- driver ---</i>
 
-  <rect class="box" x="222" y="212" width="200" height="44" rx="6"/>
-  <text class="lbl" x="232" y="231">count tokens</text>
-  <text class="lbl" x="232" y="247">G = <tspan class="num">20</tspan>  (not filtered)</text>
+<s>prev_logprobs = policy.get_logprobs(train_data)</s>      <i># SKIPPED — this is the saving</i>
+<i># sample_mask is untouched here; nothing is filtered yet</i>
 
-  <path class="arr" d="M426 234 L450 234" marker-end="url(#a1)"/>
+policy.train(train_data, loss_fn)
+    |
+    |   process_global_batch:
+    |       <b>G = all_reduce(sum(token_mask * sample_mask)) = 20</b>  <i># 7+9+4, NOT filtered</i>
+    |
+    |   <i># --- per microbatch: the filter now lives here ---</i>
+    |   mb1: curr_logprobs = forward(...)                 <i># the pass we were doing anyway</i>
+    |        err = mean(exp|generation_logprobs - curr_logprobs.detach()|)
+    |        sample_mask *= (err &lt;= 2.0)                  <i># seq C -&gt; 0, seq A stays 1</i>
+    |        emit seq_logprob_error_valid_tokens = 7      <i># A only</i>
+    |        loss = (A's token losses).sum() / <b>20</b>         <i># C contributes exactly 0</i>
+    |
+    |   mb2: ... same ...
+    |        emit seq_logprob_error_valid_tokens = 9      <i># B only</i>
+    |        loss = (B's token losses).sum() / <b>20</b>
+    |
+    |   backward, DP all-reduce  -&gt;  gradient = <b>S / 20</b>     <i># too small by 20/16</i>
+    |
+    |   <i># --- after the loop: _normalize_in_loss_seq_filter ---</i>
+    |   <u>K</u> = all_reduce(7 + 9) over DP, broadcast over PP  <i># = 16, knowable only NOW</i>
+    |   scale_gradients(<b>20</b> / <u>16</u> = 1.25)
+    |
+    +-- gradient = <u>S / 16</u>   -&gt;  optimizer.step()        <i># same as before; clip sees S/16</i>
+</div>
 
-  <rect class="box" x="454" y="212" width="182" height="60" rx="6"/>
-  <text class="lbl" x="464" y="231">filter in the loss</text>
-  <text class="note" x="464" y="247">rejects contribute 0;</text>
-  <text class="note" x="464" y="263">still divides by <tspan class="num">20</tspan></text>
-  <a href="https://github.com/NVIDIA-NeMo/RL/blob/ae5a6d9a12ec9c7c595f74f56733d3a1f0108979/nemo_rl/algorithms/loss/loss_functions.py#L540">
-    <text x="464" y="288">loss_functions.py:540</text></a>
+<p>Both paths end at the identical gradient. The correction lives at
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/ae5a6d9a12ec9c7c595f74f56733d3a1f0108979/nemo_rl/models/policy/workers/megatron_policy_worker.py#L1026">megatron_policy_worker.py:1026</a>,
+and it has to land before <code>optimizer.step()</code> because Megatron does gradient clipping
+inside that call — if it ran after, the clip would see the wrong scale.</p>
 
-  <path class="arr" d="M640 234 L664 234" marker-end="url(#a1)"/>
+<h2>When each path knows its denominator</h2>
 
-  <rect class="box-g" x="668" y="212" width="218" height="60" rx="6"/>
-  <text class="lbl" x="678" y="231">worker fixes it up</text>
-  <text class="note" x="678" y="247">sum survivors K = <tspan class="ok">16</tspan>,</text>
-  <text class="note" x="678" y="263">multiply grads by 20/16 = 1.25</text>
-  <a href="https://github.com/NVIDIA-NeMo/RL/blob/ae5a6d9a12ec9c7c595f74f56733d3a1f0108979/nemo_rl/models/policy/workers/megatron_policy_worker.py#L1026">
-    <text x="678" y="288">megatron_policy_worker.py:1026</text></a>
+<svg viewBox="0 0 900 200" role="img" aria-label="Timeline showing the old path knows the denominator before training starts, while the new path only knows it after the last microbatch">
+  <text class="hdr" x="14" y="16">The only real difference: the moment the denominator becomes knowable</text>
 
-  <!-- converge -->
-  <path class="arr" d="M777 300 L777 330" marker-end="url(#a1)"/>
-  <path class="arr" d="M777 140 L777 156 L790 156" stroke-dasharray="3 3"/>
-  <rect class="box-g" x="560" y="334" width="326" height="40" rx="6"/>
-  <text class="lbl-b" x="572" y="359">both end at the same gradient: S / <tspan class="ok">16</tspan></text>
+  <text class="lbl-b" x="14" y="54">today</text>
+  <rect class="bar" x="110" y="40" width="720" height="20" rx="4"/>
+  <text class="note" x="122" y="54">filter  -&gt;  count  -&gt;  microbatch 1  -&gt;  microbatch 2  -&gt;  step</text>
+  <line class="mark-ok" x1="196" y1="34" x2="196" y2="66"/>
+  <text class="ok" x="196" y="82" text-anchor="middle">G = 16 known here</text>
+  <text class="note" x="196" y="97" text-anchor="middle">already the survivor count</text>
 
-  <text class="note" x="14" y="352">S = the summed gradient contribution of the two surviving sequences (7 + 9 = 16 tokens).</text>
-  <text class="note" x="14" y="370">Rejected tokens contribute exactly zero in both paths, so only the divisor differs.</text>
-  <text class="note" x="14" y="396">The old path knows the right divisor before training starts, because the driver already</text>
-  <text class="note" x="14" y="412">filtered. The new path cannot know it until the last microbatch is done, so it divides by</text>
-  <text class="note" x="14" y="428">the unfiltered 20 and multiplies the finished gradient by 20/16 before the optimizer clips.</text>
-
-  <defs>
-    <marker id="a1" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
-      <path d="M0 0 L8 4 L0 8 z" fill="var(--dim)"/>
-    </marker>
-  </defs>
+  <text class="lbl-b" x="14" y="144">this PR</text>
+  <rect class="bar" x="110" y="130" width="720" height="20" rx="4"/>
+  <text class="note" x="122" y="144">count  -&gt;  microbatch 1 (filters)  -&gt;  microbatch 2 (filters)  -&gt;  correct  -&gt;  step</text>
+  <line class="mark-w" x1="168" y1="124" x2="168" y2="156"/>
+  <text class="warnc" x="168" y="172" text-anchor="middle">G = 20 known here</text>
+  <line class="mark-ok" x1="690" y1="124" x2="690" y2="156"/>
+  <text class="ok" x="690" y="172" text-anchor="middle">K = 16 known only here</text>
+  <text class="note" x="690" y="187" text-anchor="middle">after every microbatch has run</text>
 </svg>
-
-<h2>Where the correction happens</h2>
-
-<p>Same three sequences, split across two microbatches: the 7-token and 4-token sequences
-in the first, the 9-token one in the second. Threshold <code>2.0</code>.</p>
-
-<div class="mono">microbatch 1   seq A (7 tok, error 1.4) -> kept
-               seq C (4 tok, error 3.1) -> dropped, sample_mask = 0
-               loss_1 = (A's token loss sum) / 20        # C adds nothing
-
-microbatch 2   seq B (9 tok, error 1.1) -> kept
-               loss_2 = (B's token loss sum) / 20
-
-after the loop  accumulated gradient  =  S / 20         # S = A + B contributions
-                survivor tokens K     =  7 + 9 = 16     # summed across all ranks
-                scale_gradients(20 / 16 = 1.25)
-                gradient              =  S / 16         # matches the old path
-                                                         then the optimizer clips</div>
-
-<p>Three details make that work, and each is a line you can point at:</p>
-
-<table>
-<tr><th>Step</th><th>What it does</th><th>Code</th></tr>
-<tr>
-  <td>Reject cleanly</td>
-  <td>A dropped sequence has its <code>sample_mask</code> zeroed, so its tokens add nothing to the gradient. That is what lets the divisor be fixed afterwards.</td>
-  <td><a href="https://github.com/NVIDIA-NeMo/RL/blob/ae5a6d9a12ec9c7c595f74f56733d3a1f0108979/nemo_rl/algorithms/loss/loss_functions.py#L540">loss_functions.py:540</a></td>
-</tr>
-<tr>
-  <td>Count survivors once</td>
-  <td>After every microbatch has run, the worker sums the survivor counts across data-parallel ranks and broadcasts them to every pipeline stage.</td>
-  <td><a href="https://github.com/NVIDIA-NeMo/RL/blob/ae5a6d9a12ec9c7c595f74f56733d3a1f0108979/nemo_rl/models/policy/workers/megatron_policy_worker.py#L988">megatron_policy_worker.py:988</a></td>
-</tr>
-<tr>
-  <td>Fix before clipping</td>
-  <td>The multiply has to land before <code>optimizer.step()</code>, because Megatron does gradient clipping inside that call. If it ran after, the clip would see the wrong scale.</td>
-  <td><a href="https://github.com/NVIDIA-NeMo/RL/blob/ae5a6d9a12ec9c7c595f74f56733d3a1f0108979/nemo_rl/models/policy/workers/megatron_policy_worker.py#L1026">megatron_policy_worker.py:1026</a></td>
-</tr>
-</table>
-
-<h2>Why the old path still exists</h2>
-
-<p>The new mode is off by default and refuses most configurations. It needs the Megatron backend,
-one optimizer update per rollout batch, and a token-level loss; it rejects MTP, draft models,
-distillation, KL-in-reward, and the streaming trainer
-(<a href="https://github.com/NVIDIA-NeMo/RL/blob/ae5a6d9a12ec9c7c595f74f56733d3a1f0108979/nemo_rl/algorithms/grpo.py#L461">grpo.py:461</a>).
-The reason the list is that long is the correction itself: only the Megatron worker knows how to
-rescale gradients after the microbatch loop, so every other backend has to keep using the separate
-pass.</p>
-
-<p>The two paths share exactly one piece of code — the function that scores a sequence
-(<a href="https://github.com/NVIDIA-NeMo/RL/blob/ae5a6d9a12ec9c7c595f74f56733d3a1f0108979/nemo_rl/algorithms/utils.py#L220">utils.py:220</a>).
-Everything else differs, and that is deliberate: they filter at different times, divide by
-different denominators, and report their counts through different channels.</p>
 
 <div class="hl">
 <p><strong>What you get, and what you give up.</strong> You save one forward pass over the whole
 batch per step — measured at 17.8% lower mean step time on a 1.5B model over 450 steps. You pay
-for it in two ways. Rejected sequences still cost a full forward and backward, because the filter
-only learns they are bad partway through. And the decision now comes from the training forward
-rather than a separate inference forward, so FP8 scale history and packing can change which
-sequences pass. The PR says plainly that bitwise agreement with the old path is not expected.</p>
+in two ways. Rejected sequences still cost a full forward and backward, because the filter only
+learns they are bad partway through. And the decision now comes from the training forward rather
+than a separate inference forward, so FP8 scale history and packing can change which sequences
+pass; the PR says plainly that bitwise agreement with the old path is not expected.</p>
 </div>
 
 </div>
