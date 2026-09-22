@@ -235,7 +235,8 @@ how the split-API path in this same file already works, and it passes a literal 
     |   <i># --- _finish_train_step_body ---</i>
     |   <u>K</u> = all_reduce(local_valid_toks) = 16
     |   scale_gradients(1 / <u>16</u>)
-    |   _scale_mtp_param_grads(...)                    <i># MTP needs its OWN correction here</i>
+    |                                                 <i># one multiply, whole buffer —</i>
+    |                                                 <i># main, MoE and MTP params alike</i>
     |
     +-- gradient = <u>S / 16</u>   -&gt;  optimizer.step()        <i># same as paths 1 and 2</i>
 </div>
@@ -263,15 +264,22 @@ has knock-on effects:</p>
   <td>Every metric comes back un-normalized and has to be undone downstream — which is exactly what the <code>metric_normalizations</code> machinery exists for on that path.</td>
 </tr>
 <tr>
-  <td><strong>MoE / MTP aux losses</strong></td>
-  <td>Their grad-scale hooks are already wired to <code>1/global_valid_toks</code> (<a href="https://github.com/NVIDIA-NeMo/RL/blob/ae5a6d9a12ec9c7c595f74f56733d3a1f0108979/nemo_rl/models/policy/workers/megatron_policy_worker.py#L1186">:1186</a>, <a href="https://github.com/NVIDIA-NeMo/RL/blob/ae5a6d9a12ec9c7c595f74f56733d3a1f0108979/nemo_rl/models/policy/workers/megatron_policy_worker.py#L1189">:1189</a>), so they ride the same correction for free.</td>
-  <td>Each needs its own fix-up. The split-API path proves it — it carries <a href="https://github.com/NVIDIA-NeMo/RL/blob/ae5a6d9a12ec9c7c595f74f56733d3a1f0108979/nemo_rl/models/policy/workers/megatron_policy_worker.py#L1962"><code>_scale_mtp_param_grads</code></a> for precisely this reason.</td>
+  <td><strong>MoE aux-loss hook</strong></td>
+  <td>The hook is hardcoded to <code>1/global_valid_toks</code> (<a href="https://github.com/NVIDIA-NeMo/RL/blob/ae5a6d9a12ec9c7c595f74f56733d3a1f0108979/nemo_rl/models/policy/workers/megatron_policy_worker.py#L1186">:1186</a>), which is the same value as <code>C</code> — so main and aux come out of the backward on one denominator, and the single end multiply takes both to <code>1/K</code>.</td>
+  <td>The hook still says <code>1/global_valid_toks</code>, but the main loss is now on <code>1/1</code>. They leave the backward already off by <code>G</code>, and the end multiply scales both and keeps the gap. That line has to change too.</td>
 </tr>
 <tr>
   <td><strong>Numerics</strong></td>
-  <td colspan="2">No difference. One multiply either way, and bf16 relative precision does not change with scale.</td>
+  <td colspan="2">No difference. <code>G</code> is at most <code>2^18</code> here (512 sequences × 512 tokens), against bf16's <code>2^-126 … 2^128</code> — roughly 100 spare binades at either end, so neither form comes near overflow or underflow. FP8 and NVFP4 pick their scale factors from each tensor's own amax, so a constant factor is absorbed exactly and relative error is unchanged. And bf16's mantissa is 8 bits at every exponent, so precision does not vary with scale.</td>
 </tr>
 </table>
+
+<p>The aux-loss row is the one that bites, because those hooks sit at a different place in the
+code from the loss's own divide and name the same quantity by hand. MoE is a live case — this
+feature does not reject it, and a shipped MoE recipe already sets
+<code>seq_logprob_error_threshold</code>. MTP is not: the validator refuses it outright
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/ae5a6d9a12ec9c7c595f74f56733d3a1f0108979/nemo_rl/algorithms/grpo.py#L485-L491">grpo.py:485-491</a>),
+along with draft models, positive-example NLL and distillation.</p>
 
 <div class="hl">
 <p><strong>What you get, and what you give up.</strong> You save one forward pass over the whole
