@@ -8,12 +8,12 @@
 :root{
   --bg:#0d1117; --surface:#161b22; --surface2:#1c2128; --border:#30363d;
   --text:#e6edf3; --dim:#8b949e; --accent:#58a6ff; --green:#3fb950;
-  --orange:#d29922; --red:#f85149;
+  --orange:#d29922; --red:#f85149; --purple:#bc8cff;
 }
 :root[data-theme="light"]{
   --bg:#ffffff; --surface:#f6f8fa; --surface2:#eaeef2; --border:#d0d7de;
   --text:#1f2328; --dim:#59636e; --accent:#0969da; --green:#1a7f37;
-  --orange:#9a6700; --red:#cf222e;
+  --orange:#9a6700; --red:#cf222e; --purple:#8250df;
 }
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--text);
@@ -37,6 +37,7 @@ code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;
 .mono i{color:var(--dim);font-style:normal}
 .mono u{color:var(--green);text-decoration:none;font-weight:700}
 .mono s{color:var(--red);text-decoration:none;font-weight:700}
+.mono em{color:var(--purple);font-style:normal;font-weight:700}
 .hl{border-left:3px solid var(--green);background:var(--surface);
   padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0}
 .key{border:1px solid var(--orange);background:var(--surface);
@@ -56,6 +57,10 @@ nav.chain a,nav.chain span{display:inline-block;padding:5px 11px;border:1px soli
 nav.chain a:hover{background:var(--surface2)}
 nav.chain span.here{background:var(--accent);color:var(--bg);border-color:var(--accent);font-weight:600}
 p.chainnote{color:var(--dim);font-size:12px;margin:0 0 18px}
+table{border-collapse:collapse;width:100%;margin:14px 0;font-size:13.5px}
+th,td{border:1px solid var(--border);padding:7px 10px;text-align:left;vertical-align:top}
+th{background:var(--surface2);font-weight:600}
+td.c{font:12.5px ui-monospace,Menlo,monospace}
 svg{max-width:100%;height:auto;display:block;margin:14px 0}
 svg .lbl-b{fill:var(--text);font:bold 12.5px -apple-system,sans-serif}
 svg .note{fill:var(--dim);font:11px -apple-system,sans-serif}
@@ -88,7 +93,7 @@ All permalinks pin the PR head <code>ae5a6d9</code>.</p>
   <span class="here">why the correction exists</span>
   <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4171-nonfinite-logprobs.html">padding used to reject good sequences</a>
 </nav>
-<p class="chainnote">Two pages on this PR, one question each — this one: the old flow, the new flow, and why the new one needs a fix-up step.</p>
+<p class="chainnote">Two pages on this PR, one question each — this one: three ways to normalize the same gradient, and why the PR picks the one it does.</p>
 
 <div class="status">
 <dl>
@@ -116,11 +121,11 @@ count you do have, and fix the gradient afterwards. That fix-up is the only reas
 step exists.
 </div>
 
-<h2>Today: filter first, then train</h2>
+<p>Below: the flow today, the flow this PR adds, and the third shape raised in review. All three
+land on the identical gradient. Same batch throughout — three sequences of 7, 9 and 4 response
+tokens, split across two microbatches, where the 4-token one fails the threshold.</p>
 
-<p>The driver runs a whole extra forward pass to get <code>prev_logprobs</code>, filters with it,
-and only then hands the batch to the worker. Three sequences of 7, 9 and 4 response tokens;
-the 4-token one fails the threshold.</p>
+<h2>1 · Today: filter first, then train</h2>
 
 <div class="mono"><i># --- driver, nemo_rl/algorithms/grpo.py ---</i>
 
@@ -137,7 +142,6 @@ policy.train(train_data, loss_fn)
     |       local = sum(token_mask * sample_mask)         <i># C already contributes 0</i>
     |       <u>G = all_reduce(local) = 16</u>                    <i># 7 + 9. ALREADY the survivor count</i>
     |
-    |   <i># --- per microbatch ---</i>
     |   mb1: loss = (A's token losses).sum() / <u>16</u>
     |   mb2: loss = (B's token losses).sum() / <u>16</u>
     |   backward, DP all-reduce
@@ -157,50 +161,39 @@ not even load <code>prev_logprobs</code>
 (<a href="https://github.com/NVIDIA-NeMo/RL/blob/ae5a6d9a12ec9c7c595f74f56733d3a1f0108979/nemo_rl/algorithms/loss/loss_functions.py#L514-L516">loss_functions.py:514-516</a>)
 and then overwrites it with <code>curr_logprobs.detach()</code>
 (<a href="https://github.com/NVIDIA-NeMo/RL/blob/ae5a6d9a12ec9c7c595f74f56733d3a1f0108979/nemo_rl/algorithms/loss/loss_functions.py#L528-L529">:528-529</a>).
-So that pass produced a tensor the loss throws away — its only consumer was the filter. Same
-weights, same quantity the training forward already computes.</p>
+So that pass produced a tensor the loss throws away — its only consumer was the filter.</p>
 
-<h2>With this PR: train first, then correct</h2>
+<h2>2 · This PR: divide by the unfiltered count, then correct</h2>
 
 <div class="mono"><i># --- driver ---</i>
 
 <s>prev_logprobs = policy.get_logprobs(train_data)</s>      <i># SKIPPED — this is the saving</i>
-<i># sample_mask is untouched here; nothing is filtered yet</i>
+<i># sample_mask untouched here; nothing is filtered yet</i>
 
 policy.train(train_data, loss_fn)
     |
     |   process_global_batch:
     |       <b>G = all_reduce(sum(token_mask * sample_mask)) = 20</b>  <i># 7+9+4, NOT filtered</i>
     |
-    |   <i># --- per microbatch: the filter now lives here ---</i>
     |   mb1: curr_logprobs = forward(...)                 <i># the pass we were doing anyway</i>
     |        err = mean(exp|generation_logprobs - curr_logprobs.detach()|)
-    |        sample_mask *= (err &lt;= 2.0)                  <i># seq C -&gt; 0, seq A stays 1</i>
-    |        emit seq_logprob_error_valid_tokens = 7      <i># A only</i>
+    |        sample_mask *= (err &lt;= 2.0)                  <i># seq C -&gt; 0</i>
+    |        emit seq_logprob_error_valid_tokens = 7
     |        loss = (A's token losses).sum() / <b>20</b>         <i># C contributes exactly 0</i>
-    |
-    |   mb2: ... same ...
-    |        emit seq_logprob_error_valid_tokens = 9      <i># B only</i>
+    |   mb2: ... emit 9 ...
     |        loss = (B's token losses).sum() / <b>20</b>
     |
     |   backward, DP all-reduce  -&gt;  gradient = <b>S / 20</b>     <i># too small by 20/16</i>
     |
-    |   <i># --- after the loop: _normalize_in_loss_seq_filter ---</i>
+    |   <i># --- _normalize_in_loss_seq_filter, after the loop ---</i>
     |   <u>K</u> = all_reduce(7 + 9) over DP, broadcast over PP  <i># = 16, knowable only NOW</i>
     |   scale_gradients(<b>20</b> / <u>16</u> = 1.25)
     |
-    +-- gradient = <u>S / 16</u>   -&gt;  optimizer.step()        <i># same as before; clip sees S/16</i>
+    +-- gradient = <u>S / 16</u>   -&gt;  optimizer.step()        <i># same as path 1</i>
 </div>
 
-<p>Both paths end at the identical gradient. The correction lives at
-<a href="https://github.com/NVIDIA-NeMo/RL/blob/ae5a6d9a12ec9c7c595f74f56733d3a1f0108979/nemo_rl/models/policy/workers/megatron_policy_worker.py#L1026">megatron_policy_worker.py:1026</a>,
-and it has to land before <code>optimizer.step()</code> because Megatron does gradient clipping
-inside that call — if it ran after, the clip would see the wrong scale.</p>
-
-<h2>When each path knows its denominator</h2>
-
 <svg viewBox="0 0 900 200" role="img" aria-label="Timeline showing the old path knows the denominator before training starts, while the new path only knows it after the last microbatch">
-  <text class="hdr" x="14" y="16">The only real difference: the moment the denominator becomes knowable</text>
+  <text class="hdr" x="14" y="16">The difference between 1 and 2: when the denominator becomes knowable</text>
 
   <text class="lbl-b" x="14" y="54">today</text>
   <rect class="bar" x="110" y="40" width="720" height="20" rx="4"/>
@@ -218,6 +211,67 @@ inside that call — if it ran after, the clip would see the wrong scale.</p>
   <text class="ok" x="690" y="172" text-anchor="middle">K = 16 known only here</text>
   <text class="note" x="690" y="187" text-anchor="middle">after every microbatch has run</text>
 </svg>
+
+<h2>3 · The alternative raised in review: do not normalize at all, divide once</h2>
+
+<p>The review question on this PR was why the loss divides by <code>20</code> at all, when it is
+going to be corrected away. The alternative: have the loss divide by nothing, let the raw sum
+accumulate, and divide by the survivor count once at the end. That is not hypothetical — it is
+how the split-API path in this same file already works, and it passes a literal placeholder of
+<code>1.0</code> into the loss to do it.</p>
+
+<div class="mono"><i># --- the split-API path, megatron_policy_worker.py:1837-1840 ---</i>
+<i># "Placeholder N=1: loss returns un-normalized sums. backward deposits raw</i>
+<i>#  d(sum)/dtheta into param.main_grad via the DDP hooks. The 1/N rescale</i>
+<i>#  happens once at finish."</i>
+
+    <em>placeholder_n = torch.tensor(1.0)</em>                   <i># passed as BOTH global_valid_seqs</i>
+                                                  <i># and global_valid_toks</i>
+    |   mb1: loss = (A's token losses).sum() / <em>1</em>          <i># raw sum, not normalized</i>
+    |   mb2: loss = (B's token losses).sum() / <em>1</em>
+    |
+    |   backward, DP all-reduce  -&gt;  gradient = <em>S</em>         <i># 20x bigger than path 2's</i>
+    |
+    |   <i># --- _finish_train_step_body ---</i>
+    |   <u>K</u> = all_reduce(local_valid_toks) = 16
+    |   scale_gradients(1 / <u>16</u>)
+    |   _scale_mtp_param_grads(...)                    <i># MTP needs its OWN correction here</i>
+    |
+    +-- gradient = <u>S / 16</u>   -&gt;  optimizer.step()        <i># same as paths 1 and 2</i>
+</div>
+
+<p>So paths 2 and 3 are the <strong>same single multiply</strong> on the finished gradient. The
+survivor count is not knowable any earlier in either one. The only thing that differs is which
+constant the loss divides by on the way in — <code>20</code> or <code>1</code> — and that choice
+has knock-on effects:</p>
+
+<table>
+<tr><th></th><th>2 · divide by G = 20</th><th>3 · divide by 1</th></tr>
+<tr>
+  <td><strong>End-of-step multiply</strong></td>
+  <td class="c">× 20/16</td>
+  <td class="c">× 1/16</td>
+</tr>
+<tr>
+  <td><strong>Final gradient</strong></td>
+  <td class="c">S / 16</td>
+  <td class="c">S / 16 — identical</td>
+</tr>
+<tr>
+  <td><strong>Loss metrics</strong></td>
+  <td>Already on the denominator everything else expects. <a href="https://github.com/NVIDIA-NeMo/RL/blob/ae5a6d9a12ec9c7c595f74f56733d3a1f0108979/nemo_rl/algorithms/loss/utils.py#L51-L74"><code>rescale_loss_metrics</code></a> only touches the keys the loss advertises.</td>
+  <td>Every metric comes back un-normalized and has to be undone downstream — which is exactly what the <code>metric_normalizations</code> machinery exists for on that path.</td>
+</tr>
+<tr>
+  <td><strong>MoE / MTP aux losses</strong></td>
+  <td>Their grad-scale hooks are already wired to <code>1/global_valid_toks</code> (<a href="https://github.com/NVIDIA-NeMo/RL/blob/ae5a6d9a12ec9c7c595f74f56733d3a1f0108979/nemo_rl/models/policy/workers/megatron_policy_worker.py#L1186">:1186</a>, <a href="https://github.com/NVIDIA-NeMo/RL/blob/ae5a6d9a12ec9c7c595f74f56733d3a1f0108979/nemo_rl/models/policy/workers/megatron_policy_worker.py#L1189">:1189</a>), so they ride the same correction for free.</td>
+  <td>Each needs its own fix-up. The split-API path proves it — it carries <a href="https://github.com/NVIDIA-NeMo/RL/blob/ae5a6d9a12ec9c7c595f74f56733d3a1f0108979/nemo_rl/models/policy/workers/megatron_policy_worker.py#L1962"><code>_scale_mtp_param_grads</code></a> for precisely this reason.</td>
+</tr>
+<tr>
+  <td><strong>Numerics</strong></td>
+  <td colspan="2">No difference. One multiply either way, and bf16 relative precision does not change with scale.</td>
+</tr>
+</table>
 
 <div class="hl">
 <p><strong>What you get, and what you give up.</strong> You save one forward pass over the whole
