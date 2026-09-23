@@ -117,7 +117,8 @@ But each model call in a multi-turn rollout stores only its new tokens: rows <co
 <code>prev_len</code> is the length the earlier turns already stored. So the PR adds one all <code>-1</code> row and cuts off the
 first <code>prev_len</code> rows
 (<a href="https://github.com/lauradang/RL/blob/b311ce920d482f6541e308e4dbecd5d00c61bdd9/nemo_rl/data_plane/tq_token_sink.py#L419">_delta_align_minf_routing_indices</a>).
-vLLM already hands back one row per token, and its worker already cuts rows the same way.</p>
+vLLM also gives <code>[T-1, L, K]</code>; its NeMo-RL worker already adds a final row (filled with experts 0…K-1)
+and cuts rows the same way. The two paths differ only in where that row is added and what goes in it.</p>
 
 <h2>Two engines, one staging row</h2>
 
@@ -154,17 +155,18 @@ vLLM already hands back one row per token, and its worker already cuts rows the 
   <rect class="box bv" x="16" y="204" width="200" height="132" rx="8"/>
   <text class="lbl-b" x="28" y="226">vLLM engine</text>
   <text class="lbl" x="28" y="248">routed_experts</text>
-  <text class="lbl" x="28" y="266">[21, 2, 8]</text>
-  <text class="note" x="28" y="284">last row filled with 0…7</text>
-  <a href="https://github.com/lauradang/RL/blob/b311ce920d482f6541e308e4dbecd5d00c61bdd9/nemo_rl/models/generation/vllm/utils.py#L310" target="_blank" rel="noopener"><text x="28" y="306">vllm/utils.py:310-322</text></a>
+  <text class="lbl" x="28" y="266">[20, 2, 8]</text>
+  <text class="note" x="28" y="284">no row for the last token</text>
+  <a href="https://github.com/lauradang/RL/blob/b311ce920d482f6541e308e4dbecd5d00c61bdd9/nemo_rl/models/generation/vllm/utils.py#L261" target="_blank" rel="noopener"><text x="28" y="306">vllm/utils.py:261</text></a>
   <path class="arr" d="M216 266 L244 266"/>
 
   <rect class="box bv" x="246" y="204" width="250" height="132" rx="8"/>
   <text class="lbl-b" x="258" y="226">NeMo-RL: vLLM worker</text>
-  <text class="lbl" x="258" y="248">keep rows [7:] → [14, 2, 8]</text>
-  <text class="note" x="258" y="266">wrong-length routes: warn, drop, go on</text>
-  <a href="https://github.com/lauradang/RL/blob/b311ce920d482f6541e308e4dbecd5d00c61bdd9/nemo_rl/models/generation/vllm/vllm_worker_async.py#L598" target="_blank" rel="noopener"><text x="258" y="288">_delta_align_routed_experts</text></a>
-  <a href="https://github.com/lauradang/RL/blob/b311ce920d482f6541e308e4dbecd5d00c61bdd9/nemo_rl/models/generation/vllm/vllm_worker_async.py#L634" target="_blank" rel="noopener"><text x="258" y="306">vllm_worker_async.py:634</text></a>
+  <text class="lbl" x="258" y="248">add a 0…7 row → [21, 2, 8]</text>
+  <text class="lbl" x="258" y="266">keep rows [7:] → [14, 2, 8]</text>
+  <text class="note" x="258" y="284">wrong-length routes: warn, drop, go on</text>
+  <a href="https://github.com/lauradang/RL/blob/b311ce920d482f6541e308e4dbecd5d00c61bdd9/nemo_rl/models/generation/vllm/utils.py#L310" target="_blank" rel="noopener"><text x="258" y="306">vllm/utils.py:310-322</text></a>
+  <a href="https://github.com/lauradang/RL/blob/b311ce920d482f6541e308e4dbecd5d00c61bdd9/nemo_rl/models/generation/vllm/vllm_worker_async.py#L634" target="_blank" rel="noopener"><text x="258" y="324">vllm_worker_async.py:634</text></a>
   <path class="arr" d="M496 266 L524 266"/>
 
   <rect class="box bv" x="526" y="204" width="220" height="132" rx="8"/>
@@ -206,7 +208,8 @@ vLLM already hands back one row per token, and its worker already cuts rows the 
 MInf  routing_indices            [20, 2, 8]  int16  <span class="c"># one row per token except the last</span>
       add one all -1 row    →    [21, 2, 8]         <span class="c"># tq_token_sink.py:451-458</span>
       keep rows [7:]        →    [14, 2, 8]         <span class="c"># :459</span>
-vLLM  routed_experts             [21, 2, 8]         <span class="c"># last row = experts 0…7, utils.py:310</span>
+vLLM  routed_experts             [20, 2, 8]         <span class="c"># also one row per token except the last, utils.py:261</span>
+      add one 0…7 row       →    [21, 2, 8]         <span class="c"># utils.py:310-322</span>
       keep rows [7:]        →    [14, 2, 8]         <span class="c"># vllm_worker_async.py:634</span>
 both  TQTokenSink.stage: 14 rows == 14 new tokens → staged   <span class="c"># tq_token_sink.py:305</span></div>
 
