@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Why the spawned checkpoint worker crashed on a patched GPU tensor — PR #4162</title>
+<style>
+:root{
+  --bg:#0d1117; --surface:#161b22; --surface2:#1c2128; --border:#30363d;
+  --text:#e6edf3; --dim:#8b949e; --accent:#58a6ff; --green:#3fb950;
+  --orange:#d29922; --red:#f85149;
+}
+:root[data-theme="light"]{
+  --bg:#ffffff; --surface:#f6f8fa; --surface2:#eaeef2; --border:#d0d7de;
+  --text:#1f2328; --dim:#59636e; --accent:#0969da; --green:#1a7f37;
+  --orange:#9a6700; --red:#cf222e;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:28px 20px 70px}
+h1{font-size:22px;margin:0 0 8px;line-height:1.3}
+h2{font-size:18px;margin:32px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;
+  font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
+.sub{color:var(--dim);font-size:13.5px;margin:0 0 16px}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);
+  border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;
+  font:13px/1 ui-monospace,Menlo,monospace;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.18)}
+.mono{font:12.5px ui-monospace,SFMono-Regular,Menlo,monospace;
+  background:var(--surface);border:1px solid var(--border);border-radius:8px;
+  padding:13px;overflow-x:auto;white-space:pre;line-height:1.55}
+.mono .c{color:var(--dim)}
+.mono .bad{color:var(--red)}
+.mono .ok{color:var(--green)}
+.src{font-size:12.5px;color:var(--dim);margin:-6px 0 14px}
+.warn{border-left:3px solid var(--orange);background:var(--surface);
+  padding:12px 16px;margin:22px 0 0;border-radius:0 8px 8px 0}
+.status{border:1px solid var(--border);border-radius:10px;background:var(--surface);
+  padding:2px 16px 10px;margin:0 0 16px}
+.status dl{display:grid;grid-template-columns:max-content 1fr;gap:4px 14px;margin:12px 0 0}
+.status dt{color:var(--dim);font-size:12px;text-transform:uppercase;letter-spacing:.04em;
+  white-space:nowrap;padding-top:2px}
+.status dd{margin:0;font-size:14px}
+.verdict{font-weight:700}
+.verdict.good{color:var(--green)}
+nav.chain{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 6px;padding:0}
+nav.chain a,nav.chain span{display:inline-block;padding:5px 11px;border:1px solid var(--border);
+  border-radius:20px;background:var(--surface);text-decoration:none;color:var(--accent);
+  font-size:12.5px;line-height:1.3;white-space:nowrap}
+nav.chain a:hover{background:var(--surface2)}
+nav.chain span.here{background:var(--accent);color:var(--bg);border-color:var(--accent);font-weight:600}
+p.chainnote{color:var(--dim);font-size:12px;margin:0 0 18px}
+.cref{margin:6px 0 0;font-size:13px}
+.cref a{display:inline-block;padding:4px 10px;border:1px solid var(--border);
+  border-radius:16px;background:var(--surface);font:12.5px ui-monospace,Menlo,monospace}
+.cref a:hover{background:var(--surface2);text-decoration:none}
+svg{max-width:100%;height:auto;display:block;margin:16px 0}
+svg .lane{fill:var(--surface);stroke:var(--border);stroke-width:1.4}
+svg .hdr{fill:var(--accent);font:bold 13px -apple-system,sans-serif}
+svg .t{fill:var(--text);font:12.5px -apple-system,sans-serif}
+svg .tb{fill:var(--text);font:bold 12.5px -apple-system,sans-serif}
+svg .m{fill:var(--text);font:11.5px ui-monospace,Menlo,monospace}
+svg .note{fill:var(--dim);font:11.5px -apple-system,sans-serif}
+svg .num{fill:var(--bg);font:bold 12px -apple-system,sans-serif}
+svg .dot{fill:var(--accent)}
+svg .arrow{stroke:var(--accent);stroke-width:1.8;fill:none}
+svg .ahead{fill:var(--accent)}
+svg .bad-box{fill:none;stroke:var(--red);stroke-width:1.6}
+svg .ok-box{fill:none;stroke:var(--green);stroke-width:1.6}
+svg .gray-box{fill:none;stroke:var(--dim);stroke-width:1.2;stroke-dasharray:4 3}
+svg .bad{fill:var(--red);font:bold 12.5px -apple-system,sans-serif}
+svg .ok{fill:var(--green);font:bold 12.5px -apple-system,sans-serif}
+svg .gray{fill:var(--dim);font:italic 12px -apple-system,sans-serif}
+svg .sw-bad{fill:var(--red)} svg .sw-ok{fill:var(--green)} svg .sw-gray{fill:var(--dim)}
+svg a text{text-decoration:underline;fill:var(--accent);font:11.5px ui-monospace,Menlo,monospace}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+  document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head>
+<body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+  function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+  function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
+    b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
+      else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+  document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+<div class="wrap">
+
+<h1>Why the spawned checkpoint worker crashed on a GPU tensor, and how saving the original at import fixes it</h1>
+<p class="sub"><a href="https://github.com/NVIDIA-NeMo/RL/pull/4162">NVIDIA-NeMo/RL #4162</a> ·
+permalinks pinned to head <code>b0134f22</code>, base <code>fd45cb8e</code>, nvidia-resiliency-ext <code>v0.6.0</code></p>
+
+<div class="status">
+<dl>
+  <dt>Before</dt>
+  <dd>With SGLang and async checkpointing on, the first save crashed inside the checkpoint worker with
+  <code>AttributeError: … no attribute '_rebuild_cuda_tensor_original'</code>. The save never finished, so the job timed out.</dd>
+  <dt>This PR</dt>
+  <dd>Saves torch's original rebuild function in a module-level variable when <code>train_utils</code> is imported, instead of on the torch module when the patch runs.</dd>
+  <dt>Status</dt>
+  <dd><span class="verdict good">Fixed by this PR.</span> Reruns of both failing SGLang recipes (H100 and GB200) with this fix finished every step, checkpoints included.</dd>
+</dl>
+</div>
+
+<nav class="chain">
+  <span class="here">the spawn crash</span>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4162-sglang-guard.html">what SGLang still reads</a>
+</nav>
+<p class="chainnote">Two pages on this PR — this one: the crash and the fix. The other: a gap the fix leaves for SGLang's own patch.</p>
+
+<p>To send GPU weights to SGLang, the training process patches torch's tensor pickler so it records each GPU by its UUID rather than its number, since the two processes number GPUs differently
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/b0134f22c70e844e5c01f76a172f91c82fb8a375/nemo_rl/models/policy/workers/base_policy_worker.py#L224">base_policy_worker.py#L224</a>).
+After the patch, every GPU tensor it pickles is packed as "call
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/b0134f22c70e844e5c01f76a172f91c82fb8a375/nemo_rl/models/generation/sglang/utils/train_utils.py#L111-L113"><code>_rebuild_cuda_tensor_modified</code></a>
+to unpack me". That function fixes up the device number and then calls torch's original rebuild function.
+Before this PR, it found that original on the torch module, where the patch had stored it
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/fd45cb8e44782c6ad3e218f47415d42c976b793c/nemo_rl/models/generation/sglang/utils/train_utils.py#L78">base L78</a>).
+But the patch only runs in the training process. The checkpoint worker is a separate process that never runs it.</p>
+
+<h2>What goes wrong: a pickled tensor lands in a process that never ran the patch</h2>
+
+<svg viewBox="0 0 940 468" role="img" aria-label="Timeline of the training process and the checkpoint worker">
+  <!-- legend -->
+  <rect x="20" y="10" width="12" height="12" class="sw-bad"/><text x="38" y="21" class="note">before this PR</text>
+  <rect x="140" y="10" width="12" height="12" class="sw-ok"/><text x="158" y="21" class="note">with this PR</text>
+  <rect x="252" y="10" width="12" height="12" class="sw-gray"/><text x="270" y="21" class="note">never happens in the worker</text>
+
+  <!-- lanes -->
+  <rect x="14" y="34" width="420" height="424" rx="10" class="lane"/>
+  <rect x="506" y="34" width="420" height="424" rx="10" class="lane"/>
+  <text x="30" y="58" class="hdr">Training process (a Ray actor)</text>
+  <text x="522" y="58" class="hdr">NVRx checkpoint worker (started with spawn)</text>
+
+  <!-- step 1 -->
+  <circle cx="40" cy="92" r="11" class="dot"/><text x="36" y="96" class="num">1</text>
+  <text x="60" y="89" class="tb">Setup: start the checkpoint worker</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/b0134f22c70e844e5c01f76a172f91c82fb8a375/nemo_rl/models/megatron/setup.py#L2280-L2285"><text x="60" y="107">setup.py#L2280-L2285</text></a>
+  <path d="M300 96 L500 96" class="arrow"/><polygon points="500,91 510,96 500,101" class="ahead"/>
+  <text x="318" y="88" class="note">spawn = a brand-new Python</text>
+  <text x="522" y="89" class="t">Fresh interpreter. It has only what its</text>
+  <text x="522" y="106" class="t">own imports create. Nothing is copied.</text>
+
+  <!-- step 2 -->
+  <circle cx="40" cy="160" r="11" class="dot"/><text x="36" y="164" class="num">2</text>
+  <text x="60" y="157" class="tb">SGLang weight-sync setup runs the patch</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/b0134f22c70e844e5c01f76a172f91c82fb8a375/nemo_rl/models/policy/workers/base_policy_worker.py#L224"><text x="60" y="175">base_policy_worker.py#L224</text></a>
+  <text x="60" y="194" class="m">reductions._rebuild_cuda_tensor_original</text>
+  <text x="60" y="211" class="note">is set here, in this process only (old code, base L78)</text>
+  <rect x="522" y="150" width="390" height="46" rx="6" class="gray-box"/>
+  <text x="536" y="171" class="gray">The worker never runs the patch, so the</text>
+  <text x="536" y="188" class="gray">attribute never exists here.</text>
+
+  <!-- step 3 -->
+  <circle cx="40" cy="248" r="11" class="dot"/><text x="36" y="252" class="num">3</text>
+  <text x="60" y="245" class="tb">Step-10 save: send the save request</text>
+  <a href="https://github.com/NVIDIA/nvidia-resiliency-ext/blob/6c5f2a13c7688d92a7ac7ee6e464721eb8b7345d/src/nvidia_resiliency_ext/checkpointing/async_ckpt/core.py#L541"><text x="60" y="263">nvrx core.py#L541  queue.put(…)</text></a>
+  <text x="60" y="282" class="note">each GPU tensor is pickled by the patched pickler</text>
+  <path d="M300 252 L500 252" class="arrow"/><polygon points="500,247 510,252 500,257" class="ahead"/>
+  <text x="312" y="244" class="note">"call _rebuild_cuda_</text>
+  <text x="312" y="272" class="note">tensor_modified(…)"</text>
+  <text x="522" y="245" class="t">Unpickling imports <tspan class="m">train_utils</tspan> and</text>
+  <text x="522" y="262" class="t">calls <tspan class="m">_rebuild_cuda_tensor_modified</tspan>.</text>
+
+  <!-- step 4 outcomes -->
+  <circle cx="532" cy="306" r="11" class="dot"/><text x="528" y="310" class="num">4</text>
+  <text x="552" y="310" class="tb">Where does the wrapper find the original?</text>
+
+  <rect x="522" y="324" width="390" height="58" rx="6" class="bad-box"/>
+  <text x="536" y="344" class="bad">Before: on the torch module</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/fd45cb8e44782c6ad3e218f47415d42c976b793c/nemo_rl/models/generation/sglang/utils/train_utils.py#L106"><text x="740" y="344">base L106</text></a>
+  <text x="536" y="364" class="t">Not there → AttributeError. The save never</text>
+  <text x="536" y="378" class="t">finishes and the job times out.</text>
+
+  <rect x="522" y="392" width="390" height="56" rx="6" class="ok-box"/>
+  <text x="536" y="412" class="ok">With PR: in a module-level variable</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/b0134f22c70e844e5c01f76a172f91c82fb8a375/nemo_rl/models/generation/sglang/utils/train_utils.py#L77-L78"><text x="812" y="412">head L77-78</text></a>
+  <text x="536" y="432" class="t">Created when step 3 imported train_utils, so it is</text>
+  <text x="536" y="446" class="t">always there. The tensor unpacks; the save goes on.</text>
+
+  <text x="30" y="330" class="note">The training process itself was always fine:</text>
+  <text x="30" y="347" class="note">it ran the patch, so the old attribute existed there.</text>
+  <text x="30" y="376" class="note">The bug needs two processes: one that packs with</text>
+  <text x="30" y="393" class="note">the patch, and one that unpacks without it.</text>
+</svg>
+
+<h2>How the fix works</h2>
+<p>The key fact: unpickling a function by name imports its module. So anything that module sets at import time
+is guaranteed to exist in any process that unpacks one of these tensors. The PR moves the saved original there.</p>
+
+<div class="mono"><span class="c"># Before (base). The original is stored by the patch, on the torch module.</span>
+def monkey_patch_torch_reductions():          <span class="c"># runs in the training process only</span>
+    reductions._rebuild_cuda_tensor_original = reductions.rebuild_cuda_tensor
+    ...
+def _rebuild_cuda_tensor_modified(*args):     <span class="c"># runs in whatever process unpacks</span>
+    return reductions._rebuild_cuda_tensor_original(*args)
+    <span class="bad">#      ^ checkpoint worker: attribute never set → AttributeError</span>
+
+<span class="c"># After (head). The original is saved when the module is imported.</span>
+_REBUILD_CUDA_TENSOR_ORIGINAL = reductions.rebuild_cuda_tensor
+    <span class="ok"># ^ checkpoint worker: set when unpickling imports train_utils → torch's function</span>
+def _rebuild_cuda_tensor_modified(*args):
+    return _REBUILD_CUDA_TENSOR_ORIGINAL(*args)   <span class="ok"># always defined</span></div>
+<p class="src">Real code: <a href="https://github.com/NVIDIA-NeMo/RL/blob/fd45cb8e44782c6ad3e218f47415d42c976b793c/nemo_rl/models/generation/sglang/utils/train_utils.py#L73-L106">before (base L73-L106)</a> ·
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/b0134f22c70e844e5c01f76a172f91c82fb8a375/nemo_rl/models/generation/sglang/utils/train_utils.py#L73-L113">after (head L73-L113)</a> ·
+new test that unpacks in a fresh spawned process:
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/b0134f22c70e844e5c01f76a172f91c82fb8a375/tests/unit/models/generation/sglang/test_utils_smoke.py#L157-L194">test_utils_smoke.py#L157-L194</a></p>
+
+<h2>Why spawn matters, and where NVRx comes in</h2>
+<p><b>NVRx</b> (nvidia-resiliency-ext) is the library that writes Megatron checkpoints in the background, so training does
+not wait for the disk. NeMo-RL uses its <i>persistent</i> worker: one long-lived process per training rank.
+The training process sends it each save request, GPU tensors included, through a queue.
+The queue pickles them with the (patched) pickler
+(<a href="https://github.com/NVIDIA/nvidia-resiliency-ext/blob/6c5f2a13c7688d92a7ac7ee6e464721eb8b7345d/src/nvidia_resiliency_ext/checkpointing/async_ckpt/core.py#L514-L541">core.py#L514-L541</a>).</p>
+<p>How the worker starts decides what it has:</p>
+<ul>
+  <li><b>fork</b> copies the parent's memory. A child forked after the patch would have the attribute too.
+  NVRx's older one-shot worker forks at each save
+  (<a href="https://github.com/NVIDIA/nvidia-resiliency-ext/blob/6c5f2a13c7688d92a7ac7ee6e464721eb8b7345d/src/nvidia_resiliency_ext/checkpointing/async_ckpt/core.py#L349">core.py#L349</a>).</li>
+  <li><b>spawn</b> starts a brand-new Python. It only has what its own imports create. The persistent worker uses spawn
+  (<a href="https://github.com/NVIDIA/nvidia-resiliency-ext/blob/6c5f2a13c7688d92a7ac7ee6e464721eb8b7345d/src/nvidia_resiliency_ext/checkpointing/async_ckpt/core.py#L461">core.py#L461</a>),
+  and NeMo-RL requires it, because forking inside a Ray actor is unsafe
+  (<a href="https://github.com/NVIDIA-NeMo/RL/blob/b0134f22c70e844e5c01f76a172f91c82fb8a375/nemo_rl/models/megatron/setup.py#L2280-L2285">setup.py#L2280-L2285</a>).</li>
+</ul>
+<p>That is the point of the reviewer's first comment: a value you need later should not live only where "the process that ran
+the patch, and its forks" can see it, because a spawned process is neither.</p>
+<p class="cref">💬 <a href="https://github.com/NVIDIA-NeMo/RL/pull/4162#discussion_r4052364343">review comment — train_utils.py:78 (spawn vs fork)</a></p>
+
+<div class="warn"><b>So what:</b> any setting that turns on SGLang plus NVRx async saves with the persistent worker
+hit this on its first checkpoint, and the run hung until the scheduler killed it. The fix is safe in every process order:
+the training process, the checkpoint worker, and the SGLang server all get the original from the import.
+The one thing the PR stops providing, an attribute SGLang's own copy of this patch still reads, is on the
+<a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4162-sglang-guard.html">next page</a>.</div>
+
+</div>
+</body>
+</html>
