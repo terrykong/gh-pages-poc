@@ -171,21 +171,21 @@ So the question is not <em>whether</em> to send these, but <em>who writes the li
 
   <!-- right: owners declare -->
   <rect class="own" x="498" y="44" width="250" height="62" rx="6"/>
-  <text class="lbl-b" x="510" y="64">algorithms/grpo.py</text>
-  <text class="lbl" x="510" y="82">GRPO_METRICS = (TeedMetric(</text>
-  <text class="lbl" x="510" y="98">  "reward", "rl.reward.mean"),…)</text>
+  <text class="lbl-b" x="510" y="64">algorithms/metric_utils.py</text>
+  <text class="lbl" x="510" y="82">reward, loss, grad_norm, lr</text>
+  <text class="lbl" x="510" y="98">+ SETUP_TIMING_PREFIX</text>
 
   <rect class="own" x="498" y="116" width="250" height="44" rx="6"/>
-  <text class="lbl-b" x="510" y="136">algorithms/ppo.py</text>
-  <text class="lbl" x="510" y="152">PPO_METRICS (… "critic/loss")</text>
+  <text class="lbl-b" x="510" y="136">loss/loss_functions.py</text>
+  <text class="lbl" x="510" y="152">kl_penalty, approx_entropy</text>
 
   <rect class="own" x="498" y="170" width="250" height="44" rx="6"/>
-  <text class="lbl-b" x="510" y="190">generation/vllm/…</text>
-  <text class="lbl" x="510" y="206">VLLM_METRICS (keys as constants)</text>
+  <text class="lbl-b" x="510" y="190">ppo.py _compute_critic_metrics</text>
+  <text class="lbl" x="510" y="206">critic/loss</text>
 
   <rect class="own" x="498" y="224" width="250" height="44" rx="6"/>
-  <text class="lbl-b" x="510" y="244">algorithms/metric_utils.py</text>
-  <text class="lbl" x="510" y="260">SETUP_TIMING_PREFIX (no torch)</text>
+  <text class="lbl-b" x="510" y="244">generation/vllm/…</text>
+  <text class="lbl" x="510" y="260">vllm/* (keys as constants)</text>
 
   <rect class="box" x="790" y="120" width="136" height="96" rx="8"/>
   <text class="lbl-b" x="800" y="142">telemetry/</text>
@@ -199,10 +199,10 @@ So the question is not <em>whether</em> to send these, but <em>who writes the li
   <path class="arr-g" d="M748 246 L790 200"/>
   <text class="note" x="752" y="112">register(…)</text>
 
-  <text class="grn" x="498" y="306">✓ a new algorithm declares its rows in its own file</text>
-  <text class="grn" x="498" y="330">✓ the log line and its row sit together, so a rename</text>
-  <text class="grn" x="514" y="346">changes both or a test run fails at once</text>
-  <text class="grn" x="498" y="370">✓ only the running algorithm's rows are active</text>
+  <text class="grn" x="498" y="306">✓ each row sits beside the code that makes the key</text>
+  <text class="grn" x="498" y="330">✓ grpo.py, ppo.py and the single controller call the same</text>
+  <text class="grn" x="514" y="346">producers, so they share rows with no list of their own</text>
+  <text class="grn" x="498" y="370">✓ a rename changes the one constant everyone uses</text>
   <text class="note" x="498" y="400">Telemetry imports nothing from the owners.</text>
   <text class="note" x="498" y="416">Owners already import telemetry for their spans.</text>
 
@@ -233,7 +233,7 @@ test_every_teed_logger_key_is_emitted  →  <span class="bad">PASS</span>   <spa
 
 <h2>What would fix it — proposed, not in the PR</h2>
 
-<p>Nothing below is implemented. Telemetry keeps the tee and a small registration call; each owner declares its rows next to the line that logs them.</p>
+<p>Nothing below is implemented. Telemetry keeps the tee and a small registration call; each row is declared next to the function that produces its key. The single controller needs no list of its own: it builds its <code>train</code> metrics from the same producers as <code>grpo.py</code> and <code>ppo.py</code> (<a href="https://github.com/NVIDIA-NeMo/RL/blob/0ccc1c88f54466e52f47d9dce1d3e0e38c7dc14f/nemo_rl/algorithms/single_controller.py#L3217-L3260">single_controller.py:3217</a>), so GRPO, PPO, OPD and SFT v2 on either path share the same rows.</p>
 
 <div class="mono"><span class="c"># nemo_rl/telemetry/metrics.py — machinery only</span>
 @dataclass(frozen=True)
@@ -245,16 +245,21 @@ class TeedMetric:
 def register_teed_metrics(rows): …  <span class="c"># owners call this; rows are collected, then handed to lens</span>
                                     <span class="c"># ONCE on the first tee (lens raises on a second registration)</span>
 
-<span class="c"># nemo_rl/algorithms/grpo.py — beside the loop that logs these keys</span>
+<span class="c"># nemo_rl/algorithms/metric_utils.py — keys every training loop logs (no torch import)</span>
 REWARD_KEY = "reward"
-GRPO_TEED_METRICS = (TeedMetric(REWARD_KEY, "rl.reward.mean"), TeedMetric("kl_penalty", "rl.kl.divergence"), …)
-metrics = {REWARD_KEY: rewards.numpy(), …}   <span class="ok"># one name, used in both places</span></div>
+TRAINING_TEED_METRICS = (TeedMetric(REWARD_KEY, "rl.reward.mean"), TeedMetric("grad_norm", "rl.grad_norm"), …)
+
+<span class="c"># nemo_rl/algorithms/loss/loss_functions.py — beside the loss that computes them</span>
+LOSS_TEED_METRICS = (TeedMetric("kl_penalty", "rl.kl.divergence"), TeedMetric("approx_entropy", "rl.entropy"))
+
+<span class="c"># grpo.py and single_controller_utils/utils.py both log through the constant</span>
+metrics = {REWARD_KEY: rewards.numpy(), …}   <span class="ok"># one name, used everywhere</span></div>
 
 <div class="warn">
 <strong>Why it matters.</strong> The list lives in the one package every algorithm depends on, so each new
 algorithm or backend has to edit telemetry to get its metrics out. Silence is the failure mode: a rename sends the OTel
 series flat while CI stays green. Lens now lets NeMo-RL name its own series, so moving each row next to the code that
-logs it costs only a move. Nothing is lost. If that move is too much for this PR, the smaller step is to take the
+produces it costs only a move. Nothing is lost. If that move is too much for this PR, the smaller step is to take the
 training-metric table out and land it later in the owner-declared shape, which is what #3655 agreed to.
 </div>
 
