@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>lauradang/RL #2 — how MInf router replay gets its expert routes into training, next to vLLM</title>
+<style>
+:root{
+  --bg:#0d1117; --surface:#161b22; --surface2:#1c2128; --border:#30363d;
+  --text:#e6edf3; --dim:#8b949e; --accent:#58a6ff; --green:#3fb950;
+  --orange:#d29922; --red:#f85149;
+}
+:root[data-theme="light"]{
+  --bg:#ffffff; --surface:#f6f8fa; --surface2:#eaeef2; --border:#d0d7de;
+  --text:#1f2328; --dim:#59636e; --accent:#0969da; --green:#1a7f37;
+  --orange:#9a6700; --red:#cf222e;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:28px 20px 70px}
+h1{font-size:22px;margin:0 0 8px;line-height:1.3}
+h2{font-size:18px;margin:32px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;
+  font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
+.sub{color:var(--dim);font-size:13.5px;margin:0 0 16px}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);
+  border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;
+  font:13px/1 ui-monospace,Menlo,monospace;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.18)}
+.status{border:1px solid var(--border);border-radius:10px;background:var(--surface);
+  padding:2px 16px 10px;margin:0 0 20px}
+.status dl{display:grid;grid-template-columns:max-content 1fr;gap:4px 14px;margin:12px 0 0}
+.status dt{color:var(--dim);font-size:12px;text-transform:uppercase;letter-spacing:.04em;
+  white-space:nowrap;padding-top:2px}
+.status dd{margin:0;font-size:14px}
+.verdict{font-weight:700;color:var(--orange)}
+nav.chain{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 6px;padding:0}
+nav.chain a,nav.chain span{display:inline-block;padding:5px 11px;border:1px solid var(--border);
+  border-radius:20px;background:var(--surface);text-decoration:none;color:var(--accent);
+  font-size:12.5px;line-height:1.3;white-space:nowrap}
+nav.chain a:hover{background:var(--surface2)}
+nav.chain span.here{background:var(--accent);color:var(--bg);border-color:var(--accent);font-weight:600}
+p.chainnote{color:var(--dim);font-size:12px;margin:0 0 18px}
+.mono{font:12.5px ui-monospace,SFMono-Regular,Menlo,monospace;
+  background:var(--surface);border:1px solid var(--border);border-radius:8px;
+  padding:13px;overflow-x:auto;white-space:pre}
+.mono .c{color:var(--dim)}
+table{border-collapse:collapse;width:100%;font-size:14px;margin:10px 0}
+th,td{border:1px solid var(--border);padding:7px 10px;text-align:left;vertical-align:top}
+th{background:var(--surface)}
+.warn{border-left:3px solid var(--orange);background:var(--surface);
+  padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0}
+svg{max-width:100%;height:auto;display:block;margin:16px 0}
+svg .box{fill:var(--surface);stroke:var(--border);stroke-width:1.4}
+svg .bm{stroke:var(--orange);stroke-width:2}
+svg .bv{stroke:var(--accent);stroke-width:2}
+svg .bs{stroke:var(--green);stroke-width:2}
+svg .lbl{fill:var(--text);font:12px ui-monospace,Menlo,monospace}
+svg .lbl-b{fill:var(--text);font:bold 13px -apple-system,sans-serif}
+svg .note{fill:var(--dim);font:11.5px -apple-system,sans-serif}
+svg .hdr{fill:var(--accent);font:bold 12.5px -apple-system,sans-serif}
+svg .arr{stroke:var(--dim);stroke-width:1.6;fill:none;marker-end:url(#ah)}
+svg .ahf{fill:var(--dim)}
+svg .k-p{fill:var(--dim);opacity:.3}
+svg .k-g{fill:var(--accent);opacity:.35}
+svg .r-ok{fill:var(--green);opacity:.5}
+svg .r-m1{fill:var(--orange);opacity:.6}
+svg .r-ph{fill:var(--red);opacity:.5}
+svg .c-txt{fill:var(--text);font:10.5px ui-monospace,Menlo,monospace}
+svg .mark{stroke:var(--text);stroke-width:1.6;stroke-dasharray:4 3;fill:none}
+svg .brk{stroke:var(--dim);stroke-width:1.2;fill:none}
+svg a text{text-decoration:underline;fill:var(--accent);font:11.5px ui-monospace,Menlo,monospace}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+  document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head>
+<body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+  function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+  function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
+    b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
+      else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+  document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+<div class="wrap">
+
+<h1>How MInf router replay gets its expert routes into training, next to the vLLM path</h1>
+<p class="sub">Explainer for <a href="https://github.com/lauradang/RL/pull/2">lauradang/RL #2</a>,
+a PR into <a href="https://github.com/NVIDIA-NeMo/RL/pull/4129">NVIDIA-NeMo/RL #4129</a>.
+All permalinks pin the PR head <code>b311ce9</code>.</p>
+
+<div class="status">
+<dl>
+  <dt>Before</dt>
+  <dd>Router replay worked only with vLLM generation. The SingleController setup rejected router replay with Megatron generation
+    (<a href="https://github.com/lauradang/RL/blob/00621c2e2266fd3abd6d012c8ca48e0dcc6dd63d/nemo_rl/algorithms/single_controller_utils/setup.py#L1196">setup.py:1196, before</a>).</dd>
+  <dt>This PR</dt>
+  <dd>Reshapes the expert routes from Megatron Inference (MInf) into the same per-call rows vLLM already writes, so the rest of the pipeline reads them unchanged.</dd>
+  <dt>Status</dt>
+  <dd><span class="verdict">Proposed — open PR into #4129, under review.</span></dd>
+</dl>
+</div>
+
+<nav class="chain">
+  <span class="here">MInf vs vLLM routes</span>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-l2-minf-colocated-no-routes.html">colocated: no routes recorded</a>
+</nav>
+<p class="chainnote">Two pages on this PR, one question each — this one: how the new MInf path compares with the vLLM path.</p>
+
+<p><strong>Router replay</strong> makes the trainer use the same experts, per token and per MoE layer, that the
+generation engine picked, so the two do not disagree on routing. MInf records one route row per token
+<em>except the last</em>: shape <code>[T-1, L, K]</code> for <code>T</code> tokens, <code>L</code> MoE layers and top-<code>K</code> experts
+(<a href="https://github.com/NVIDIA/Megatron-LM/blob/bde6af2eb29325649dd71d41e584acb9782706f1/megatron/core/inference/inference_request.py#L917">inference_request.py:917</a>).
+But each model call in a multi-turn rollout stores only its new tokens: rows <code>prev_len</code> to <code>T</code>, where
+<code>prev_len</code> is the length the earlier turns already stored. So the PR adds one all <code>-1</code> row and cuts off the
+first <code>prev_len</code> rows
+(<a href="https://github.com/lauradang/RL/blob/b311ce920d482f6541e308e4dbecd5d00c61bdd9/nemo_rl/data_plane/tq_token_sink.py#L419">_delta_align_minf_routing_indices</a>).
+vLLM already hands back one row per token, and its worker already cuts rows the same way.</p>
+
+<h2>Two engines, one staging row</h2>
+
+<svg viewBox="0 0 960 384" role="img" aria-label="Two lanes, MInf on top and vLLM below. Each goes engine, then a trim step, then a Gym commit, and both land in the same staging check, after which the code is shared.">
+  <defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="ahf" d="M0 0 L10 5 L0 10 z"/></marker></defs>
+  <text class="hdr" x="16" y="24">Call 2 of the example below: 21 tokens, the first 7 already stored by call 1, 2 MoE layers, top-8 experts</text>
+
+  <rect class="box bm" x="16" y="44" width="200" height="132" rx="8"/>
+  <text class="lbl-b" x="28" y="66">MInf engine</text>
+  <text class="lbl" x="28" y="88">routing_indices</text>
+  <text class="lbl" x="28" y="106">[20, 2, 8] int16</text>
+  <text class="note" x="28" y="124">no row for the last token</text>
+  <a href="https://github.com/NVIDIA/Megatron-LM/blob/bde6af2eb29325649dd71d41e584acb9782706f1/megatron/core/inference/inference_request.py#L917" target="_blank" rel="noopener"><text x="28" y="146">inference_request.py:917</text></a>
+  <path class="arr" d="M216 106 L244 106"/>
+
+  <rect class="box bm" x="246" y="44" width="250" height="132" rx="8"/>
+  <text class="lbl-b" x="258" y="66">NeMo-RL: MInf staging step</text>
+  <text class="lbl" x="258" y="88">add a -1 row  → [21, 2, 8]</text>
+  <text class="lbl" x="258" y="106">keep rows [7:] → [14, 2, 8]</text>
+  <text class="note" x="258" y="124">missing or wrong-length routes: call fails</text>
+  <a href="https://github.com/lauradang/RL/blob/b311ce920d482f6541e308e4dbecd5d00c61bdd9/nemo_rl/data_plane/tq_token_sink.py#L451" target="_blank" rel="noopener"><text x="258" y="146">tq_token_sink.py:451-459</text></a>
+  <a href="https://github.com/lauradang/RL/blob/b311ce920d482f6541e308e4dbecd5d00c61bdd9/nemo_rl/data_plane/tq_token_sink.py#L694" target="_blank" rel="noopener"><text x="258" y="164">_stage_admitted :694</text></a>
+  <path class="arr" d="M496 106 L524 106"/>
+
+  <rect class="box bm" x="526" y="44" width="220" height="132" rx="8"/>
+  <text class="lbl-b" x="538" y="66">Gym commit</text>
+  <text class="lbl" x="538" y="88">complete_call(extras=…)</text>
+  <text class="note" x="538" y="106">routes passed in by hand: Gym's</text>
+  <text class="note" x="538" y="122">Megatron reader returns no extras</text>
+  <a href="https://github.com/lauradang/RL/blob/b311ce920d482f6541e308e4dbecd5d00c61bdd9/nemo_rl/data_plane/tq_token_sink.py#L707" target="_blank" rel="noopener"><text x="538" y="146">tq_token_sink.py:707</text></a>
+  <a href="https://github.com/NVIDIA-NeMo/Gym/blob/9fc05c0ffb38740a00dd82326a464bc7bd2ceb50/nemo_gym/token_id_capture/adapters/megatron.py#L82" target="_blank" rel="noopener"><text x="538" y="164">Gym megatron.py:82</text></a>
+  <path class="arr" d="M746 106 L774 106"/>
+
+  <rect class="box bv" x="16" y="204" width="200" height="132" rx="8"/>
+  <text class="lbl-b" x="28" y="226">vLLM engine</text>
+  <text class="lbl" x="28" y="248">routed_experts</text>
+  <text class="lbl" x="28" y="266">[21, 2, 8]</text>
+  <text class="note" x="28" y="284">last row filled with 0…7</text>
+  <a href="https://github.com/lauradang/RL/blob/b311ce920d482f6541e308e4dbecd5d00c61bdd9/nemo_rl/models/generation/vllm/utils.py#L310" target="_blank" rel="noopener"><text x="28" y="306">vllm/utils.py:310-322</text></a>
+  <path class="arr" d="M216 266 L244 266"/>
+
+  <rect class="box bv" x="246" y="204" width="250" height="132" rx="8"/>
+  <text class="lbl-b" x="258" y="226">NeMo-RL: vLLM worker</text>
+  <text class="lbl" x="258" y="248">keep rows [7:] → [14, 2, 8]</text>
+  <text class="note" x="258" y="266">wrong-length routes: warn, drop, go on</text>
+  <a href="https://github.com/lauradang/RL/blob/b311ce920d482f6541e308e4dbecd5d00c61bdd9/nemo_rl/models/generation/vllm/vllm_worker_async.py#L598" target="_blank" rel="noopener"><text x="258" y="288">_delta_align_routed_experts</text></a>
+  <a href="https://github.com/lauradang/RL/blob/b311ce920d482f6541e308e4dbecd5d00c61bdd9/nemo_rl/models/generation/vllm/vllm_worker_async.py#L634" target="_blank" rel="noopener"><text x="258" y="306">vllm_worker_async.py:634</text></a>
+  <path class="arr" d="M496 266 L524 266"/>
+
+  <rect class="box bv" x="526" y="204" width="220" height="132" rx="8"/>
+  <text class="lbl-b" x="538" y="226">Gym commit</text>
+  <text class="lbl" x="538" y="248">complete_call_from_response</text>
+  <text class="note" x="538" y="266">Gym's vLLM reader pulls the</text>
+  <text class="note" x="538" y="282">trimmed routes out of the reply</text>
+  <a href="https://github.com/lauradang/RL/blob/b311ce920d482f6541e308e4dbecd5d00c61bdd9/nemo_rl/models/generation/vllm/vllm_worker_async.py#L674" target="_blank" rel="noopener"><text x="538" y="306">vllm_worker_async.py:674</text></a>
+  <a href="https://github.com/NVIDIA-NeMo/Gym/blob/9fc05c0ffb38740a00dd82326a464bc7bd2ceb50/nemo_gym/token_id_capture/adapters/vllm.py#L67" target="_blank" rel="noopener"><text x="538" y="324">Gym vllm.py:67</text></a>
+  <path class="arr" d="M746 266 L774 266"/>
+
+  <rect class="box bs" x="776" y="44" width="170" height="292" rx="8"/>
+  <text class="lbl-b" x="788" y="66">Shared from here</text>
+  <text class="lbl" x="788" y="90">TQTokenSink.stage</text>
+  <text class="note" x="788" y="108">rows must equal the new</text>
+  <text class="note" x="788" y="124">token count: 14</text>
+  <a href="https://github.com/lauradang/RL/blob/b311ce920d482f6541e308e4dbecd5d00c61bdd9/nemo_rl/data_plane/tq_token_sink.py#L305" target="_blank" rel="noopener"><text x="788" y="144">tq_token_sink.py:305</text></a>
+  <path class="arr" d="M860 156 L860 174"/>
+  <text class="lbl" x="788" y="194">execute_route_plan</text>
+  <text class="note" x="788" y="212">joins both calls into one</text>
+  <text class="lbl" x="788" y="230">[21, 2, 8] row</text>
+  <a href="https://github.com/lauradang/RL/blob/b311ce920d482f6541e308e4dbecd5d00c61bdd9/nemo_rl/experience/route_assembly.py#L110" target="_blank" rel="noopener"><text x="788" y="250">route_assembly.py:110</text></a>
+  <path class="arr" d="M860 262 L860 280"/>
+  <text class="lbl" x="788" y="298">trainer</text>
+  <text class="note" x="788" y="314">-1 row → its own router</text>
+  <a href="https://github.com/lauradang/RL/blob/b311ce920d482f6541e308e4dbecd5d00c61bdd9/nemo_rl/models/megatron/router_replay.py#L365" target="_blank" rel="noopener"><text x="788" y="330">router_replay.py:365</text></a>
+
+  <rect class="box bm" x="16" y="358" width="18" height="12" rx="2"/><text class="note" x="42" y="369">MInf only (new in this PR)</text>
+  <rect class="box bv" x="226" y="358" width="18" height="12" rx="2"/><text class="note" x="252" y="369">vLLM only (already there)</text>
+  <rect class="box bs" x="426" y="358" width="18" height="12" rx="2"/><text class="note" x="452" y="369">one shared code path for both</text>
+</svg>
+
+<h2>The same 2-turn rollout through both</h2>
+
+<p>Call 1: a 3-token prompt, 4 generated tokens, 7 in all. Call 2 continues it: those 7, then 5 new user tokens
+(a 12-token prompt), then 9 generated tokens, 21 in all. The model has 2 MoE layers and picks the top 8 experts.</p>
+
+<div class="mono"><span class="c"># call 2 — prev_len = 7 (call 1's whole length), T = 21, so 14 new tokens</span>
+MInf  routing_indices            [20, 2, 8]  int16  <span class="c"># one row per token except the last</span>
+      add one all -1 row    →    [21, 2, 8]         <span class="c"># tq_token_sink.py:451-458</span>
+      keep rows [7:]        →    [14, 2, 8]         <span class="c"># :459</span>
+vLLM  routed_experts             [21, 2, 8]         <span class="c"># last row = experts 0…7, utils.py:310</span>
+      keep rows [7:]        →    [14, 2, 8]         <span class="c"># vllm_worker_async.py:634</span>
+both  TQTokenSink.stage: 14 rows == 14 new tokens → staged   <span class="c"># tq_token_sink.py:305</span></div>
+
+<svg viewBox="0 0 960 262" role="img" aria-label="21 token columns. Both engines give real routes everywhere except column 6 and column 20. MInf puts -1 there, vLLM puts experts 0 to 7.">
+  <text class="hdr" x="16" y="20">The full rollout the trainer sees: one column per token. Which route does each token get?</text>
+  <path class="brk" d="M121 42 L121 36 L385 36 L385 42"/>
+  <text class="note" x="253" y="31" text-anchor="middle">call 1: prev_len 0, stores 7 rows</text>
+  <path class="brk" d="M387 42 L387 36 L917 36 L917 42"/>
+  <text class="note" x="652" y="31" text-anchor="middle">call 2: prev_len 7, stores 14 rows</text>
+
+  <text class="lbl-b" x="16" y="65">token</text>
+  <rect class="k-p" x="120" y="48" width="36" height="24"/><text class="c-txt" x="134" y="64">0</text>
+  <rect class="k-p" x="158" y="48" width="36" height="24"/><text class="c-txt" x="172" y="64">1</text>
+  <rect class="k-p" x="196" y="48" width="36" height="24"/><text class="c-txt" x="210" y="64">2</text>
+  <rect class="k-g" x="234" y="48" width="36" height="24"/><text class="c-txt" x="248" y="64">3</text>
+  <rect class="k-g" x="272" y="48" width="36" height="24"/><text class="c-txt" x="286" y="64">4</text>
+  <rect class="k-g" x="310" y="48" width="36" height="24"/><text class="c-txt" x="324" y="64">5</text>
+  <rect class="k-g" x="348" y="48" width="36" height="24"/><text class="c-txt" x="362" y="64">6</text>
+  <rect class="k-p" x="386" y="48" width="36" height="24"/><text class="c-txt" x="400" y="64">7</text>
+  <rect class="k-p" x="424" y="48" width="36" height="24"/><text class="c-txt" x="438" y="64">8</text>
+  <rect class="k-p" x="462" y="48" width="36" height="24"/><text class="c-txt" x="476" y="64">9</text>
+  <rect class="k-p" x="500" y="48" width="36" height="24"/><text class="c-txt" x="511" y="64">10</text>
+  <rect class="k-p" x="538" y="48" width="36" height="24"/><text class="c-txt" x="549" y="64">11</text>
+  <rect class="k-g" x="576" y="48" width="36" height="24"/><text class="c-txt" x="587" y="64">12</text>
+  <rect class="k-g" x="614" y="48" width="36" height="24"/><text class="c-txt" x="625" y="64">13</text>
+  <rect class="k-g" x="652" y="48" width="36" height="24"/><text class="c-txt" x="663" y="64">14</text>
+  <rect class="k-g" x="690" y="48" width="36" height="24"/><text class="c-txt" x="701" y="64">15</text>
+  <rect class="k-g" x="728" y="48" width="36" height="24"/><text class="c-txt" x="739" y="64">16</text>
+  <rect class="k-g" x="766" y="48" width="36" height="24"/><text class="c-txt" x="777" y="64">17</text>
+  <rect class="k-g" x="804" y="48" width="36" height="24"/><text class="c-txt" x="815" y="64">18</text>
+  <rect class="k-g" x="842" y="48" width="36" height="24"/><text class="c-txt" x="853" y="64">19</text>
+  <rect class="k-g" x="880" y="48" width="36" height="24"/><text class="c-txt" x="891" y="64">20</text>
+
+  <text class="lbl-b" x="16" y="101">MInf</text>
+  <rect class="r-ok" x="120" y="84" width="264" height="24"/>
+  <rect class="r-m1" x="348" y="84" width="36" height="24"/><text class="c-txt" x="359" y="100">-1</text>
+  <rect class="r-ok" x="386" y="84" width="492" height="24"/>
+  <rect class="r-m1" x="880" y="84" width="36" height="24"/><text class="c-txt" x="891" y="100">-1</text>
+
+  <text class="lbl-b" x="16" y="137">vLLM</text>
+  <rect class="r-ok" x="120" y="120" width="264" height="24"/>
+  <rect class="r-ph" x="348" y="120" width="36" height="24"/><text class="c-txt" x="353" y="136">0…7</text>
+  <rect class="r-ok" x="386" y="120" width="492" height="24"/>
+  <rect class="r-ph" x="880" y="120" width="36" height="24"/><text class="c-txt" x="885" y="136">0…7</text>
+
+  <rect class="mark" x="345" y="44" width="42" height="104" rx="4"/>
+
+  <rect class="k-p" x="120" y="162" width="16" height="12"/><text class="note" x="142" y="172">prompt / user token</text>
+  <rect class="k-g" x="270" y="162" width="16" height="12"/><text class="note" x="292" y="172">generated token</text>
+  <rect class="r-ok" x="400" y="162" width="16" height="12"/><text class="note" x="422" y="172">the engine's real route</text>
+  <rect class="r-m1" x="572" y="162" width="16" height="12"/><text class="note" x="594" y="172">-1: trainer's router picks</text>
+  <rect class="r-ph" x="760" y="162" width="16" height="12"/><text class="note" x="782" y="172">experts 0…7 forced</text>
+
+  <text class="note" x="16" y="202">Column 6 (dashed) is call 1's last generated token. In call 1 no engine had routed it yet, so each engine put its filler there.</text>
+  <text class="note" x="16" y="220">In call 2 both engines do route it, since it is part of call 2's prompt. But that row sits before prev_len = 7, so [7:] drops it.</text>
+  <text class="note" x="16" y="238">Column 20 is the rollout's last token. Its route only shapes its own output, which training does not score.</text>
+  <a href="https://github.com/lauradang/RL/blob/b311ce920d482f6541e308e4dbecd5d00c61bdd9/docs/design-docs/token-capture-ledger.md#L136" target="_blank" rel="noopener"><text x="16" y="256">documented in token-capture-ledger.md:136</text></a>
+</svg>
+
+<h2>What still differs after they meet</h2>
+
+<table>
+<tr><th></th><th>MInf (this PR)</th><th>vLLM (already there)</th></tr>
+<tr><td>Filler for a token with no route</td>
+  <td>all <code>-1</code>: the trainer's own router picks
+  (<a href="https://github.com/lauradang/RL/blob/b311ce920d482f6541e308e4dbecd5d00c61bdd9/nemo_rl/experience/route_assembly.py#L45">route_assembly.py:45</a>)</td>
+  <td>experts <code>0…K-1</code>, forced
+  (<a href="https://github.com/lauradang/RL/blob/b311ce920d482f6541e308e4dbecd5d00c61bdd9/nemo_rl/models/generation/vllm/utils.py#L310">utils.py:310</a>)</td></tr>
+<tr><td>Routes missing or the wrong length</td>
+  <td>the call fails, so the whole rollout is thrown out
+  (<a href="https://github.com/lauradang/RL/blob/b311ce920d482f6541e308e4dbecd5d00c61bdd9/nemo_rl/data_plane/tq_token_sink.py#L694">tq_token_sink.py:694</a>,
+  <a href="https://github.com/lauradang/RL/blob/b311ce920d482f6541e308e4dbecd5d00c61bdd9/nemo_rl/data_plane/tq_token_sink.py#L662">:662</a>,
+  <a href="https://github.com/lauradang/RL/blob/b311ce920d482f6541e308e4dbecd5d00c61bdd9/nemo_rl/environments/nemo_gym.py#L972">nemo_gym.py:972</a>)</td>
+  <td>wrong length: routes dropped with a warning; the rollout is kept and those rows become <code>-1</code>
+  (<a href="https://github.com/lauradang/RL/blob/b311ce920d482f6541e308e4dbecd5d00c61bdd9/nemo_rl/models/generation/vllm/vllm_worker_async.py#L636">vllm_worker_async.py:636</a>,
+  <a href="https://github.com/lauradang/RL/blob/b311ce920d482f6541e308e4dbecd5d00c61bdd9/nemo_rl/experience/route_assembly.py#L140">route_assembly.py:140</a>)</td></tr>
+<tr><td><code>token_capture.defer_routed_experts_to_policy</code></td>
+  <td>must stay <code>false</code>; setup rejects <code>true</code>
+  (<a href="https://github.com/lauradang/RL/blob/b311ce920d482f6541e308e4dbecd5d00c61bdd9/nemo_rl/algorithms/single_controller_utils/setup.py#L1205">setup.py:1205</a>)</td>
+  <td>either value works</td></tr>
+</table>
+
+<p><strong>Why keep both?</strong> vLLM stays the usual generation engine. MInf lets a run generate with
+Megatron itself, and until this PR such a run could not use router replay at all. In exchange, the MInf path
+is stricter — one bad route costs the whole rollout — and it has no deferred mode yet.</p>
+
+<div class="warn">
+<strong>What this means for you.</strong> Router replay now works with <code>generation.backend: megatron</code> on the
+SingleController + Gym token-capture path, and once the routes are staged the two engines share every line of code.
+Before you switch, keep <code>defer_routed_experts_to_policy: false</code>, and expect missing routes to show up as
+rejected rollouts rather than warnings. The token at each turn boundary (column 6) gets no replayed route on either
+engine; MInf lets the trainer's router choose there, while vLLM forces experts 0…7.
+</div>
+
+</div>
+</body>
+</html>
