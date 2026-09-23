@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>What SGLang's own patch still reads after PR #4162</title>
+<title>How the reviewer's suggestion differs from PR #4162</title>
 <style>
 :root{
   --bg:#0d1117; --surface:#161b22; --surface2:#1c2128; --border:#30363d;
@@ -96,114 +96,127 @@ svg a text{text-decoration:underline;fill:var(--accent);font:11.5px ui-monospace
   document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
 <div class="wrap">
 
-<h1>What SGLang's own copy of the patch still reads, and the one line that keeps it working</h1>
+<h1>How the reviewer's suggestion differs from this PR: one source for the originals, and both attributes set again</h1>
 <p class="sub"><a href="https://github.com/NVIDIA-NeMo/RL/pull/4162">NVIDIA-NeMo/RL #4162</a> ·
 permalinks pinned to head <code>b0134f22</code>, base <code>fd45cb8e</code>, SGLang <code>3003d70f</code> (the version NeMo-RL pins)</p>
 
 <div class="status">
 <dl>
   <dt>Before</dt>
-  <dd>Our patch set both saved originals on the torch module, <code>_reduce_tensor_original</code> and <code>_rebuild_cuda_tensor_original</code>.</dd>
+  <dd>The patch stored both of torch's originals on the torch module. Our wrapper read them from there, which crashed in the spawned checkpoint worker.</dd>
   <dt>This PR</dt>
-  <dd>Stops setting <code>_rebuild_cuda_tensor_original</code>, because our own wrapper no longer reads it.</dd>
+  <dd>Our wrapper reads a module variable instead. The patch no longer stores <code>_rebuild_cuda_tensor_original</code> on the torch module.</dd>
   <dt>Status</dt>
-  <dd><span class="verdict open">Open, not fixed in this PR.</span> A latent gap: no process reaches it today.
-  A reviewer proposed a one-line fix; it is not applied yet.</dd>
+  <dd><span class="verdict open">Open. Suggested in review, not in the PR yet.</span> The PR fixes the crash but leaves a latent gap for SGLang's copy of the patch.
+  The suggestion closes that gap and keeps the crash fix.</dd>
 </dl>
 </div>
 
 <nav class="chain">
   <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4162-spawn-crash.html">the spawn crash</a>
-  <span class="here">what SGLang still reads</span>
+  <span class="here">the reviewer's suggestion</span>
 </nav>
-<p class="chainnote">Two pages on this PR. This one covers the gap the fix leaves for SGLang's patch. The other covers the crash and the fix.</p>
+<p class="chainnote">Two pages on this PR. This one compares the PR with the reviewer's suggestion. The other covers the crash and the fix.</p>
 
-<p>SGLang ships its own copy of the same torch patch. The two copies share one "already patched" check:
-if <code>reductions._reduce_tensor_original</code> exists, the patch returns without doing anything
-(<a href="https://github.com/sgl-project/sglang/blob/3003d70f680d41c59d1b7acbf65cb47795dfd19e/python/sglang/srt/utils/patch_torch.py#L44-L48">SGLang patch_torch.py#L44-L48</a>,
+<p>SGLang ships its own copy of the same torch patch. Both copies use one "already patched" check. If
+<code>reductions._reduce_tensor_original</code> exists, the patch returns without doing anything
+(<a href="https://github.com/sgl-project/sglang/blob/3003d70f680d41c59d1b7acbf65cb47795dfd19e/python/sglang/srt/utils/patch_torch.py#L44-L48">SGLang #L44-L48</a>,
 <a href="https://github.com/NVIDIA-NeMo/RL/blob/b0134f22c70e844e5c01f76a172f91c82fb8a375/nemo_rl/models/generation/sglang/utils/train_utils.py#L83-L85">ours L83-L85</a>).
-Whichever runs first wins. SGLang's check assumes the winner also set <b>both</b> saved originals, because SGLang's rebuild wrapper reads
-<code>_rebuild_cuda_tensor_original</code> from the torch module
-(<a href="https://github.com/sgl-project/sglang/blob/3003d70f680d41c59d1b7acbf65cb47795dfd19e/python/sglang/srt/utils/patch_torch.py#L80-L82">#L80-L82</a>).
-The PR fixed <i>our</i> wrapper by moving its original into a module variable. SGLang's wrapper still looks on the torch module.</p>
+So whichever patch runs first wins. SGLang's own wrappers still read <b>both</b> originals from the torch module
+(<a href="https://github.com/sgl-project/sglang/blob/3003d70f680d41c59d1b7acbf65cb47795dfd19e/python/sglang/srt/utils/patch_torch.py#L72-L82">#L72-L82</a>).
+If ours wins, ours has to leave both there.</p>
 
-<table>
-<tr><th>Wrapper</th><th>Where it finds torch's original</th><th>Covered by</th></tr>
-<tr><td>Ours, <a href="https://github.com/NVIDIA-NeMo/RL/blob/b0134f22c70e844e5c01f76a172f91c82fb8a375/nemo_rl/models/generation/sglang/utils/train_utils.py#L111-L113"><code>_rebuild_cuda_tensor_modified</code></a></td>
-    <td>module variable <code>_REBUILD_CUDA_TENSOR_ORIGINAL</code></td><td>this PR</td></tr>
-<tr><td>SGLang's, <a href="https://github.com/sgl-project/sglang/blob/3003d70f680d41c59d1b7acbf65cb47795dfd19e/python/sglang/srt/utils/patch_torch.py#L80-L82"><code>_rebuild_cuda_tensor_modified</code></a></td>
-    <td>torch module attribute <code>_rebuild_cuda_tensor_original</code></td><td>the reviewer's one line (proposed)</td></tr>
-</table>
+<h2>Three versions, side by side</h2>
 
-<h2>The gap: our patch runs first, SGLang's skips, and nobody sets the attribute</h2>
-
-<svg viewBox="0 0 940 336" role="img" aria-label="Grid comparing before, this PR, and this PR plus the proposed line">
+<svg viewBox="0 0 940 452" role="img" aria-label="Grid comparing before, this PR, and the reviewer's suggestion">
   <rect x="20" y="10" width="12" height="12" class="sw-ok"/><text x="38" y="21" class="note">works / present</text>
   <rect x="150" y="10" width="12" height="12" class="sw-bad"/><text x="168" y="21" class="note">missing / crashes</text>
-  <rect x="290" y="10" width="12" height="12" class="sw-gray"/><text x="308" y="21" class="note">same in all three</text>
 
-  <text x="24" y="58" class="note">One process. Our patch runs first,</text>
-  <text x="24" y="74" class="note">then something calls SGLang's patch.</text>
-  <text x="404" y="64" class="colh">Before this PR</text>
-  <text x="586" y="64" class="colh">This PR</text>
-  <text x="768" y="64" class="colh">This PR + the line</text>
+  <text x="394" y="58" class="colh">Before this PR</text>
+  <text x="580" y="58" class="colh">This PR (head)</text>
+  <text x="766" y="58" class="colh">Reviewer's suggestion</text>
 
-  <!-- row 1 -->
-  <text x="24" y="112" class="tb">1. Our patch sets on the torch module:</text>
-  <text x="36" y="136" class="m">_reduce_tensor_original</text>
-  <text x="36" y="154" class="note">the "already patched" flag</text>
-  <rect x="390" y="120" width="170" height="40" rx="6" class="cell"/><text x="404" y="145" class="ok">set</text>
-  <rect x="572" y="120" width="170" height="40" rx="6" class="cell"/><text x="586" y="145" class="ok">set</text>
-  <rect x="754" y="120" width="170" height="40" rx="6" class="cell"/><text x="768" y="145" class="ok">set</text>
+  <text x="20" y="84" class="hdr">What the code stores</text>
 
-  <text x="36" y="186" class="m">_rebuild_cuda_tensor_original</text>
-  <a href="https://github.com/NVIDIA-NeMo/RL/blob/fd45cb8e44782c6ad3e218f47415d42c976b793c/nemo_rl/models/generation/sglang/utils/train_utils.py#L78"><text x="36" y="203">set at base L78</text></a>
-  <rect x="390" y="170" width="170" height="40" rx="6" class="cell"/><text x="404" y="195" class="ok">set</text>
-  <rect x="572" y="170" width="170" height="40" rx="6" class="bad-box"/><text x="586" y="195" class="bad">not set</text>
-  <rect x="754" y="170" width="170" height="40" rx="6" class="cell"/><text x="768" y="195" class="ok">set again</text>
+  <!-- R1 -->
+  <text x="20" y="110" class="tb">Our wrapper gets torch's original from</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/b0134f22c70e844e5c01f76a172f91c82fb8a375/nemo_rl/models/generation/sglang/utils/train_utils.py#L111-L113"><text x="20" y="127">_rebuild_cuda_tensor_modified</text></a>
+  <rect x="380" y="94" width="176" height="40" rx="6" class="bad-box"/><text x="394" y="119" class="bad">torch module attribute</text>
+  <rect x="566" y="94" width="176" height="40" rx="6" class="cell"/><text x="580" y="119" class="ok">module variable</text>
+  <rect x="752" y="94" width="176" height="40" rx="6" class="cell"/><text x="766" y="119" class="ok">module variable</text>
 
-  <!-- row 2 -->
-  <text x="24" y="242" class="tb">2. SGLang's patch sees the flag, returns</text>
-  <a href="https://github.com/sgl-project/sglang/blob/3003d70f680d41c59d1b7acbf65cb47795dfd19e/python/sglang/srt/utils/patch_torch.py#L44-L46"><text x="36" y="259">SGLang #L44-L46</text></a>
-  <rect x="390" y="226" width="534" height="36" rx="6" class="gray-box"/>
-  <text x="404" y="249" class="gray">skipped: SGLang sets nothing of its own</text>
+  <!-- R2 -->
+  <text x="20" y="160" class="tb">Patch stores the "already patched" flag</text>
+  <text x="20" y="177" class="m">reductions._reduce_tensor_original</text>
+  <rect x="380" y="144" width="176" height="40" rx="6" class="cell"/><text x="394" y="169" class="ok">yes, from torch</text>
+  <rect x="566" y="144" width="176" height="40" rx="6" class="cell"/><text x="580" y="169" class="ok">yes, from torch</text>
+  <rect x="752" y="144" width="176" height="40" rx="6" class="cell"/><text x="766" y="169" class="ok">yes, from variable</text>
 
-  <!-- row 3 -->
-  <text x="24" y="294" class="tb">3. Unpack a GPU tensor SGLang packed</text>
-  <a href="https://github.com/sgl-project/sglang/blob/3003d70f680d41c59d1b7acbf65cb47795dfd19e/python/sglang/srt/utils/patch_torch.py#L80-L82"><text x="36" y="311">SGLang wrapper reads the attribute</text></a>
-  <rect x="390" y="276" width="170" height="44" rx="6" class="cell"/><text x="404" y="303" class="ok">works</text>
-  <rect x="572" y="276" width="170" height="44" rx="6" class="bad-box"/><text x="586" y="296" class="bad">AttributeError</text>
-  <text x="586" y="312" class="note">same error as page 1</text>
-  <rect x="754" y="276" width="170" height="44" rx="6" class="cell"/><text x="768" y="303" class="ok">works</text>
+  <!-- R3 -->
+  <text x="20" y="210" class="tb">Patch stores the rebuild original</text>
+  <text x="20" y="227" class="m">reductions._rebuild_cuda_tensor_original</text>
+  <rect x="380" y="194" width="176" height="40" rx="6" class="cell"/><text x="394" y="219" class="ok">yes, from torch</text>
+  <rect x="566" y="194" width="176" height="40" rx="6" class="bad-box"/><text x="580" y="219" class="bad">no</text>
+  <rect x="752" y="194" width="176" height="40" rx="6" class="cell"/><text x="766" y="219" class="ok">yes, from variable</text>
+
+  <line x1="20" y1="254" x2="928" y2="254" stroke="var(--border)"/>
+  <text x="20" y="280" class="hdr">What happens when…</text>
+
+  <!-- R4 -->
+  <text x="20" y="308" class="tb">The spawned checkpoint worker unpacks</text>
+  <text x="20" y="325" class="tb">one of our GPU tensors</text>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4162-spawn-crash.html"><text x="20" y="342">the bug this PR fixes (page 1)</text></a>
+  <rect x="380" y="292" width="176" height="44" rx="6" class="bad-box"/><text x="394" y="312" class="bad">AttributeError</text>
+  <text x="394" y="328" class="note">run hangs at the save</text>
+  <rect x="566" y="292" width="176" height="44" rx="6" class="cell"/><text x="580" y="319" class="ok">works</text>
+  <rect x="752" y="292" width="176" height="44" rx="6" class="cell"/><text x="766" y="319" class="ok">works</text>
+
+  <!-- R5 -->
+  <text x="20" y="378" class="tb">Our patch ran first, then the process</text>
+  <text x="20" y="395" class="tb">unpacks a GPU tensor SGLang packed</text>
+  <a href="https://github.com/sgl-project/sglang/blob/3003d70f680d41c59d1b7acbf65cb47795dfd19e/python/sglang/srt/utils/patch_torch.py#L80-L82"><text x="20" y="412">SGLang's wrapper reads the attribute</text></a>
+  <text x="20" y="430" class="note">no process does this today</text>
+  <rect x="380" y="362" width="176" height="44" rx="6" class="cell"/><text x="394" y="389" class="ok">works</text>
+  <rect x="566" y="362" width="176" height="44" rx="6" class="bad-box"/><text x="580" y="382" class="bad">AttributeError</text>
+  <text x="580" y="398" class="note">same error, SGLang side</text>
+  <rect x="752" y="362" width="176" height="44" rx="6" class="cell"/><text x="766" y="389" class="ok">works</text>
 </svg>
 
-<p><b>Why no process hits this today.</b> Our patch runs only in the training process
+<p>The PR's column fixes row 4 and breaks row 5. The suggestion keeps row 4 and fixes row 5.
+Row 5 is latent. Our patch runs only in the training process
 (<a href="https://github.com/NVIDIA-NeMo/RL/blob/b0134f22c70e844e5c01f76a172f91c82fb8a375/nemo_rl/models/policy/workers/base_policy_worker.py#L224">base_policy_worker.py#L224</a>),
-and weights only travel from training to SGLang, never back. So a tensor packed by SGLang never gets unpacked where our patch won.
-The reviewer reproduced the crash on real GPU transfer by setting up that order on purpose.
-The opposite order, SGLang first as in the SGLang server, is fine: our module saves SGLang's wrapper as its "original",
-and SGLang's wrapper passes our already-converted device number through unchanged
-(<a href="https://github.com/sgl-project/sglang/blob/3003d70f680d41c59d1b7acbf65cb47795dfd19e/python/sglang/srt/utils/patch_torch.py#L89-L91">#L89-L91</a>).</p>
+and weights only go from training to SGLang, never back. The reviewer reproduced it on a real GPU transfer by forcing that order.</p>
 
-<h2>The proposed fix: one line, not in the PR yet</h2>
-<p>Nothing below is implemented. It keeps the promise SGLang's check relies on: whoever sets the flag also sets both originals.</p>
-<div class="mono">def monkey_patch_torch_reductions():
+<h2>The suggested code: two lines differ from the PR</h2>
+<p>Nothing below is in the PR yet. It only changes <code>monkey_patch_torch_reductions()</code>.</p>
+<div class="mono">_REDUCE_TENSOR_ORIGINAL = reductions.reduce_tensor          <span class="c"># unchanged: set at import, in every process</span>
+_REBUILD_CUDA_TENSOR_ORIGINAL = reductions.rebuild_cuda_tensor
+
+def monkey_patch_torch_reductions():
     if hasattr(reductions, "_reduce_tensor_original"):
         return
-    reductions._reduce_tensor_original = reductions.reduce_tensor
-<span class="ok">    reductions._rebuild_cuda_tensor_original = _REBUILD_CUDA_TENSOR_ORIGINAL   # proposed</span>
-<span class="c">    #   ^ torch's own function here: this module is always imported before its patch can run</span>
+    <span class="c"># sglang's patch skips itself on this same check, but its wrappers read both
+    # attributes, so whoever wins the check must set both.</span>
+<span class="bad">-   reductions._reduce_tensor_original = reductions.reduce_tensor</span>
+<span class="ok">+   reductions._reduce_tensor_original = _REDUCE_TENSOR_ORIGINAL         # ① same value, one source</span>
+<span class="ok">+   reductions._rebuild_cuda_tensor_original = _REBUILD_CUDA_TENSOR_ORIGINAL   # ② the fix for row 5</span>
     reductions.reduce_tensor = _reduce_tensor_modified
     reductions.rebuild_cuda_tensor = _rebuild_cuda_tensor_modified
     reductions.init_reductions()</div>
-<p class="src">Where it goes: <a href="https://github.com/NVIDIA-NeMo/RL/blob/b0134f22c70e844e5c01f76a172f91c82fb8a375/nemo_rl/models/generation/sglang/utils/train_utils.py#L81-L89">train_utils.py#L81-L89</a> at head.</p>
-<p>Afterwards, neither attribute is read by our code. Both exist only for SGLang. A short comment at those lines saying so would stop
-the next reader from deleting them as dead code. That already happened once in review.</p>
-<p class="cref">💬 <a href="https://github.com/NVIDIA-NeMo/RL/pull/4162#discussion_r4087065004">review comment — train_utils.py:85 (the one-line fix)</a></p>
+<p class="src">Head for comparison: <a href="https://github.com/NVIDIA-NeMo/RL/blob/b0134f22c70e844e5c01f76a172f91c82fb8a375/nemo_rl/models/generation/sglang/utils/train_utils.py#L77-L89">train_utils.py#L77-L89</a></p>
+<ul>
+  <li><b>① changes nothing at runtime.</b> Inside the patch, the variable and <code>reductions.reduce_tensor</code> are both torch's function.
+  The module is always imported before its patch can run. If SGLang had patched before that import, the flag would already exist and our patch would return early.
+  The point is that our wrappers and SGLang's wrappers now read the same saved originals, so they can't drift apart.</li>
+  <li><b>② is the real difference.</b> It puts back the attribute SGLang's wrapper needs, so the flag again means "both originals are here".</li>
+  <li>The added comment also answers why these attributes stay even though our code no longer reads them.
+  An earlier review question mistook them for dead code.</li>
+</ul>
+<p class="cref">💬 <a href="https://github.com/NVIDIA-NeMo/RL/pull/4162#discussion_r4087175803">review comment — train_utils.py:78 (the suggestion)</a></p>
 
-<div class="warn"><b>So what:</b> the PR's crash fix is correct and complete for our own wrapper. This gap only matters if a future change
-runs both patches in one process with our patch first, for example unpacking SGLang-packed tensors on the training side.
-If that happens, the result is the same <code>AttributeError</code> the PR just fixed, now inside SGLang's code. One line now prevents it.</div>
+<div class="warn"><b>So what:</b> the PR's crash fix is correct. The suggestion adds one line and changes one value, with no runtime change.
+Our wrappers keep working in spawned processes. SGLang's wrappers keep working if both patches ever run in one process with ours first.
+Without it, that future case fails with the same <code>AttributeError</code> this PR just fixed, only inside SGLang's code.</div>
 
 </div>
 </body>
