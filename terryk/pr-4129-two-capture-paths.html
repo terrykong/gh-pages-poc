@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NVIDIA-NeMo/RL #4129 — how Megatron token capture reaches the same row as vLLM</title>
+<style>
+:root{
+  --bg:#0d1117; --surface:#161b22; --surface2:#1c2128; --border:#30363d;
+  --text:#e6edf3; --dim:#8b949e; --accent:#58a6ff; --green:#3fb950;
+  --orange:#d29922; --red:#f85149; --purple:#bc8cff;
+}
+:root[data-theme="light"]{
+  --bg:#ffffff; --surface:#f6f8fa; --surface2:#eaeef2; --border:#d0d7de;
+  --text:#1f2328; --dim:#59636e; --accent:#0969da; --green:#1a7f37;
+  --orange:#9a6700; --red:#cf222e; --purple:#8250df;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:28px 20px 70px}
+h1{font-size:22px;margin:0 0 8px;line-height:1.3}
+h2{font-size:18px;margin:32px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;
+  font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
+.sub{color:var(--dim);font-size:13.5px;margin:0 0 16px}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);
+  border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;
+  font:13px/1 ui-monospace,Menlo,monospace;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.18)}
+.status{border:1px solid var(--border);border-radius:10px;background:var(--surface);
+  padding:2px 16px 10px;margin:0 0 20px}
+.status dl{display:grid;grid-template-columns:max-content 1fr;gap:4px 14px;margin:12px 0 0}
+.status dt{color:var(--dim);font-size:12px;text-transform:uppercase;letter-spacing:.04em;
+  white-space:nowrap;padding-top:2px}
+.status dd{margin:0;font-size:14px}
+.verdict{font-weight:700}
+.verdict.open{color:var(--orange)}
+.mono{font:12.5px ui-monospace,SFMono-Regular,Menlo,monospace;
+  background:var(--surface);border:1px solid var(--border);border-radius:8px;
+  padding:13px;overflow-x:auto;white-space:pre}
+.mono .c{color:var(--dim)}
+.hl{border-left:3px solid var(--accent);background:var(--surface);
+  padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0}
+table{border-collapse:collapse;width:100%;font-size:13.5px;margin:10px 0}
+th,td{border:1px solid var(--border);padding:6px 9px;text-align:left;vertical-align:top}
+th{background:var(--surface2)}
+svg{max-width:100%;height:auto;display:block;margin:16px 0}
+svg .box{fill:var(--surface);stroke:var(--border);stroke-width:1.4}
+svg .same{fill:var(--surface);stroke:var(--green);stroke-width:2}
+svg .diff{fill:var(--surface);stroke:var(--orange);stroke-width:2}
+svg .row{fill:var(--surface2);stroke:var(--purple);stroke-width:2.2}
+svg .lbl{fill:var(--text);font:12px ui-monospace,Menlo,monospace}
+svg .lbl-b{fill:var(--text);font:bold 13px -apple-system,sans-serif}
+svg .note{fill:var(--dim);font:11.5px -apple-system,sans-serif}
+svg .hdr{fill:var(--accent);font:bold 13px -apple-system,sans-serif}
+svg .arr{stroke:var(--dim);stroke-width:1.6;fill:none}
+svg .arrh{fill:var(--dim)}
+svg .lg-same{fill:var(--green)} svg .lg-diff{fill:var(--orange)} svg .lg-row{fill:var(--purple)}
+svg a text{text-decoration:underline;fill:var(--accent);font:11px ui-monospace,Menlo,monospace}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+  document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head>
+<body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+  function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+  function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
+    b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
+      else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+  document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+<div class="wrap">
+
+<h1>How Megatron token capture writes the same row that vLLM already writes</h1>
+<p class="sub"><a href="https://github.com/NVIDIA-NeMo/RL/pull/4129">NVIDIA-NeMo/RL #4129</a>
+· Gym <a href="https://github.com/NVIDIA-NeMo/Gym/pull/2823">#2823</a> (merged, pinned at <code>9fc05c0</code>)
+· Megatron-LM <a href="https://github.com/NVIDIA/Megatron-LM/pull/7015">#7015</a> (merged, pinned at <code>c711dc0</code>)
+· permalinks pin RL head <code>1f9eb12</code>.</p>
+
+<div class="status">
+<dl>
+  <dt>Before</dt>
+  <dd>Only the vLLM backend could record the exact tokens of each model call. Asking for token capture with
+  <code>policy.generation.backend=megatron</code> failed at setup.</dd>
+  <dt>This PR</dt>
+  <dd>Adds a Megatron path. Two small objects plug into hooks inside Megatron's inference engine, and both
+  write the same row, to the same store, that vLLM writes.</dd>
+  <dt>Status</dt>
+  <dd><span class="verdict open">In review — not merged.</span> Open items are in the PR's review comments,
+  including a Megatron-Bridge pin that still points at an unmerged Bridge PR.</dd>
+</dl>
+</div>
+
+<p><strong>Token capture</strong> means: for every model call in an agent rollout, save the exact token ids the
+model saw and wrote, so training uses those ids instead of re-tokenizing text. Gym decides <em>what</em> each call
+is allowed to start from (its <code>CaptureAdmission</code>). The serving worker does two jobs: (1) before
+generation, rebuild the prompt so it starts with the exact tokens of the earlier turns, and (2) after generation,
+write the new tokens to TransferQueue (TQ) as one row and hand Gym back a small key to that row. vLLM does both
+jobs inside its HTTP handler. Megatron cannot, because the prompt is built inside its engine, so the PR adds two
+engine hooks that Megatron-LM #7015 exposes.</p>
+
+<h2>Where each backend does the two jobs</h2>
+
+<svg viewBox="0 0 960 560" role="img" aria-label="Two lanes. vLLM does prompt rebuild and staging in its HTTP handler; Megatron does them in two engine hooks. Both use the same prefix cache, the same splice function, Gym's capture core, and TQTokenSink.stage, and produce the same TQ row.">
+  <!-- legend -->
+  <rect class="lg-same" x="560" y="10" width="14" height="10"/><text class="note" x="580" y="19">same code in both</text>
+  <rect class="lg-diff" x="690" y="10" width="14" height="10"/><text class="note" x="710" y="19">differs by backend</text>
+  <rect class="lg-row" x="836" y="10" width="14" height="10"/><text class="note" x="856" y="19">stored result</text>
+
+  <text class="hdr" x="16" y="48">vLLM (existing)</text>
+  <text class="note" x="16" y="64">inside the worker's HTTP handler, off the event loop</text>
+
+  <rect class="diff" x="16" y="76" width="200" height="74" rx="7"/>
+  <text class="lbl-b" x="28" y="96">1 · resolve prefix</text>
+  <text class="note" x="28" y="113">asyncio.to_thread(…)</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/1f9eb1251c8bb4ba589c013d4f36e4f569ba84c2/nemo_rl/models/generation/vllm/vllm_worker_async.py#L898" target="_blank" rel="noopener"><text x="28" y="136">vllm_worker_async.py:898</text></a>
+
+  <rect class="diff" x="236" y="76" width="210" height="74" rx="7"/>
+  <text class="lbl-b" x="248" y="96">2 · splice prompt</text>
+  <text class="note" x="248" y="113">tokenizer from the renderer</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/1f9eb1251c8bb4ba589c013d4f36e4f569ba84c2/nemo_rl/models/generation/vllm/vllm_worker_async.py#L961" target="_blank" rel="noopener"><text x="248" y="136">vllm_worker_async.py:961</text></a>
+
+  <rect class="diff" x="466" y="76" width="226" height="74" rx="7"/>
+  <text class="lbl-b" x="478" y="96">3 · begin_call</text>
+  <text class="note" x="478" y="113">version = worker's current value</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/1f9eb1251c8bb4ba589c013d4f36e4f569ba84c2/nemo_rl/models/generation/vllm/vllm_worker_async.py#L588" target="_blank" rel="noopener"><text x="478" y="136">vllm_worker_async.py:588</text></a>
+
+  <rect class="diff" x="712" y="76" width="232" height="74" rx="7"/>
+  <text class="lbl-b" x="724" y="96">4 · stage after generate</text>
+  <text class="note" x="724" y="113">asyncio.to_thread(…)</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/1f9eb1251c8bb4ba589c013d4f36e4f569ba84c2/nemo_rl/models/generation/vllm/vllm_worker_async.py#L1232" target="_blank" rel="noopener"><text x="724" y="136">vllm_worker_async.py:1232</text></a>
+
+  <text class="hdr" x="16" y="196">Megatron (new in this PR)</text>
+  <text class="note" x="16" y="212">inside Megatron's engine loop, called by the engine itself</text>
+
+  <rect class="diff" x="16" y="224" width="430" height="74" rx="7"/>
+  <text class="lbl-b" x="28" y="244">1 + 2 · TQMegatronPromptPreparer.prepare_prompt</text>
+  <text class="note" x="28" y="261">no tokenizer: EOS id and prior turns come in offload_params</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/1f9eb1251c8bb4ba589c013d4f36e4f569ba84c2/nemo_rl/data_plane/tq_token_sink.py#L431" target="_blank" rel="noopener"><text x="28" y="284">tq_token_sink.py:431</text></a>
+  <a href="https://github.com/NVIDIA/Megatron-LM/blob/c711dc0a7f4f7460045cae18ec2f9ff5f4b92b5e/megatron/core/inference/engines/dynamic_engine.py#L4195" target="_blank" rel="noopener"><text x="200" y="284">called at dynamic_engine.py:4195</text></a>
+
+  <rect class="diff" x="466" y="224" width="478" height="74" rx="7"/>
+  <text class="lbl-b" x="478" y="244">3 + 4 · TQMegatronTokenStager.stage</text>
+  <text class="note" x="478" y="261">version = epoch the engine stamped when the request was admitted</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/1f9eb1251c8bb4ba589c013d4f36e4f569ba84c2/nemo_rl/data_plane/tq_token_sink.py#L563" target="_blank" rel="noopener"><text x="478" y="284">tq_token_sink.py:563</text></a>
+  <a href="https://github.com/NVIDIA/Megatron-LM/blob/c711dc0a7f4f7460045cae18ec2f9ff5f4b92b5e/megatron/core/inference/engines/dynamic_engine.py#L1567" target="_blank" rel="noopener"><text x="660" y="284">called at dynamic_engine.py:1567</text></a>
+
+  <!-- arrows down to shared -->
+  <path class="arr" d="M116 150 L116 168 L160 168 L160 336"/><path class="arr" d="M126 298 L126 336"/>
+  <path class="arr" d="M340 150 L340 172 L400 172 L400 336"/><path class="arr" d="M360 298 L360 336"/>
+  <path class="arr" d="M580 150 L580 176 L640 176 L640 336"/><path class="arr" d="M820 150 L820 180 L860 180 L860 336"/>
+  <path class="arr" d="M700 298 L700 336"/>
+
+  <text class="hdr" x="16" y="330">Shared by both — the paths join here</text>
+  <rect class="same" x="16" y="340" width="230" height="74" rx="7"/>
+  <text class="lbl-b" x="28" y="360">ChainPrefixCache</text>
+  <text class="note" x="28" y="377">+ resolve_admission_prefix</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/1f9eb1251c8bb4ba589c013d4f36e4f569ba84c2/nemo_rl/data_plane/tq_token_sink.py#L364" target="_blank" rel="noopener"><text x="28" y="400">tq_token_sink.py:364</text></a>
+
+  <rect class="same" x="262" y="340" width="226" height="74" rx="7"/>
+  <text class="lbl-b" x="274" y="360">replace_prefix_tokens</text>
+  <text class="note" x="274" y="377">now takes eos_token_id=</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/1f9eb1251c8bb4ba589c013d4f36e4f569ba84c2/nemo_rl/models/generation/openai_server_utils.py#L28" target="_blank" rel="noopener"><text x="274" y="400">openai_server_utils.py:28</text></a>
+
+  <rect class="same" x="504" y="340" width="218" height="74" rx="7"/>
+  <text class="lbl-b" x="516" y="360">Gym capture core</text>
+  <text class="note" x="516" y="377">begin_call → complete_call_…</text>
+  <a href="https://github.com/NVIDIA-NeMo/Gym/blob/9fc05c0ffb38740a00dd82326a464bc7bd2ceb50/nemo_gym/token_id_capture/staging/capture.py#L90" target="_blank" rel="noopener"><text x="516" y="400">gym capture.py:90</text></a>
+
+  <rect class="same" x="738" y="340" width="206" height="74" rx="7"/>
+  <text class="lbl-b" x="750" y="360">TQTokenSink.stage</text>
+  <text class="note" x="750" y="377">one put_samples per call</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/1f9eb1251c8bb4ba589c013d4f36e4f569ba84c2/nemo_rl/data_plane/tq_token_sink.py#L205" target="_blank" rel="noopener"><text x="750" y="400">tq_token_sink.py:205</text></a>
+
+  <path class="arr" d="M841 414 L841 446"/><path class="arrh" d="M835 440 L841 450 L847 440 Z"/>
+  <rect class="row" x="480" y="452" width="464" height="84" rx="8"/>
+  <text class="lbl-b" x="494" y="474">One TQ row per model call — identical columns</text>
+  <text class="lbl" x="494" y="494">token_ids_delta · token_mask_delta · generation_logprobs_delta</text>
+  <text class="note" x="494" y="512">Gym gets back only a small key (ng_commit_coords).</text>
+  <text class="note" x="494" y="528">The finalizer reads rows by key — it never knows the backend.</text>
+
+  <text class="note" x="16" y="470">The engine only calls the hooks on the</text>
+  <text class="note" x="16" y="486">model-parallel leader rank; setup installs</text>
+  <text class="note" x="16" y="502">them there and nowhere else.</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/1f9eb1251c8bb4ba589c013d4f36e4f569ba84c2/nemo_rl/models/generation/megatron/megatron_worker.py#L1001" target="_blank" rel="noopener"><text x="16" y="522">megatron_worker.py:1001-1006</text></a>
+</svg>
+
+<h2>One two-turn call, followed through both paths</h2>
+
+<p>Turn 1 already happened and its row is stored under key <code>k1</code>. Turn 2 arrives. Gym's admission says:
+start from <code>k1</code>, whose tokens are 8 ids long. A refit (new weights) lands while turn 2 is still being
+generated: epoch 6 → 7.</p>
+
+<div class="mono"><span class="c"># the same input for both backends</span>
+admission.staging_chain = ["k1"]      admission.prev_len = 8
+template prompt (chat template re-renders turn 1 as 9 ids, then 5 new ids) = 14 ids
+refit during generation: epoch 6 → 7
+
+<span class="c"># step 1 — resolve the prefix: fetch k1 from TQ (cache miss the first time)</span>
+vLLM:     _resolve_admission_prefix  → [8 exact ids]      <span class="c"># in a thread</span>
+Megatron: prepare_prompt → resolve_admission_prefix → [8 exact ids]   <span class="c"># on the engine loop</span>
+
+<span class="c"># step 2 — splice: keep the 8 real ids, drop the 9 re-rendered ones, keep the 5 new ones</span>
+both:     replace_prefix_tokens(...) → 8 + 5 = 13 ids     <span class="c"># check: prompt[:8] == prefix</span>
+          vLLM passes its tokenizer; Megatron passes eos_token_id from offload_params
+
+<span class="c"># step 3 — which weight version the call is stamped with</span>
+vLLM:     6   <span class="c"># value set by set_rollout_weight_version when begin_call ran</span>
+Megatron: 6   <span class="c"># policy_epoch = [(0, 6), (2, 7)] → first entry, the admission epoch</span>
+
+<span class="c"># step 4 — stage</span>
+both:     TQTokenSink.stage → row under a new key k2 → Gym records k2</div>
+
+<p>Same 13-id prompt, same version 6, same row. The Megatron stager logs a warning when a request spans two
+epochs (<a href="https://github.com/NVIDIA-NeMo/RL/blob/1f9eb1251c8bb4ba589c013d4f36e4f569ba84c2/nemo_rl/data_plane/tq_token_sink.py#L541">tq_token_sink.py:541</a>),
+because async rollouts make that routine.</p>
+
+<h2>What still differs after they join</h2>
+
+<table>
+<tr><th></th><th>vLLM</th><th>Megatron</th></tr>
+<tr><td>Where TQ reads and writes run</td><td>A worker thread; the HTTP loop keeps serving</td>
+<td>Inside the engine step; the whole model-parallel group waits for each read and write</td></tr>
+<tr><td>Where the version comes from</td><td>A worker attribute set by <a href="https://github.com/NVIDIA-NeMo/RL/blob/1f9eb1251c8bb4ba589c013d4f36e4f569ba84c2/nemo_rl/models/generation/vllm/vllm_worker_async.py#L521">set_rollout_weight_version</a></td>
+<td>The engine's own epoch, set by <a href="https://github.com/NVIDIA-NeMo/RL/blob/1f9eb1251c8bb4ba589c013d4f36e4f569ba84c2/nemo_rl/models/generation/megatron/megatron_worker.py#L1010">set_rollout_weight_version</a> → <code>set_generation_epoch</code></td></tr>
+<tr><td>Streaming calls</td><td>Capture is aborted for the call (<a href="https://github.com/NVIDIA-NeMo/RL/blob/1f9eb1251c8bb4ba589c013d4f36e4f569ba84c2/nemo_rl/models/generation/vllm/vllm_worker_async.py#L1238">:1238</a>)</td><td>Engine skips the stager (<a href="https://github.com/NVIDIA/Megatron-LM/blob/c711dc0a7f4f7460045cae18ec2f9ff5f4b92b5e/megatron/core/inference/engines/dynamic_engine.py#L1564">dynamic_engine.py:1564</a>); the call has no key, so Gym masks the rollout</td></tr>
+</table>
+
+<div class="hl">
+<strong>So what.</strong> The two backends share the parts that decide correctness: the prefix lookup, the
+splice, Gym's checks, and the row format. A bug fixed in any of those is fixed for both. They differ in where the
+work runs, and Megatron runs it inside the engine step. So a capture-on vs capture-off throughput number for
+Megatron is the main thing this design still owes. The review comments on the PR list the open items.
+</div>
+
+</div>
+</body>
+</html>
