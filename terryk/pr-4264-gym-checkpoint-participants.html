@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NVIDIA-NeMo/RL #4264 — how RL gets every Gym service to agree on one checkpoint</title>
+<style>
+:root{
+  --bg:#0d1117; --surface:#161b22; --surface2:#1c2128; --border:#30363d;
+  --text:#e6edf3; --dim:#8b949e; --accent:#58a6ff; --green:#3fb950;
+  --orange:#d29922; --red:#f85149; --purple:#bc8cff;
+}
+:root[data-theme="light"]{
+  --bg:#ffffff; --surface:#f6f8fa; --surface2:#eaeef2; --border:#d0d7de;
+  --text:#1f2328; --dim:#59636e; --accent:#0969da; --green:#1a7f37;
+  --orange:#9a6700; --red:#cf222e; --purple:#8250df;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:28px 20px 70px}
+h1{font-size:22px;margin:0 0 8px;line-height:1.3}
+h2{font-size:18px;margin:32px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;
+  font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
+.sub{color:var(--dim);font-size:13.5px;margin:0 0 16px}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);
+  border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;
+  font:13px/1 ui-monospace,Menlo,monospace;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.18)}
+.mono{font:12.5px ui-monospace,SFMono-Regular,Menlo,monospace;
+  background:var(--surface);border:1px solid var(--border);border-radius:8px;
+  padding:13px;overflow-x:auto;white-space:pre}
+.mono .c{color:var(--dim)}
+.hl{border-left:3px solid var(--accent);background:var(--surface);
+  padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0}
+table{border-collapse:collapse;width:100%;font-size:13.5px;margin:10px 0}
+th,td{border:1px solid var(--border);padding:6px 10px;text-align:left;vertical-align:top}
+th{background:var(--surface2);font-weight:600}
+.status{border:1px solid var(--border);border-radius:10px;background:var(--surface);
+  padding:2px 16px 10px;margin:0 0 20px}
+.status dl{display:grid;grid-template-columns:max-content 1fr;gap:4px 14px;margin:12px 0 0}
+.status dt{color:var(--dim);font-size:12px;text-transform:uppercase;letter-spacing:.04em;
+  white-space:nowrap;padding-top:2px}
+.status dd{margin:0;font-size:14px}
+.verdict{font-weight:700;color:var(--orange)}
+nav.chain{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 6px;padding:0}
+nav.chain a,nav.chain span{display:inline-block;padding:5px 11px;border:1px solid var(--border);
+  border-radius:20px;background:var(--surface);text-decoration:none;color:var(--accent);
+  font-size:12.5px;line-height:1.3;white-space:nowrap}
+nav.chain a:hover{background:var(--surface2)}
+nav.chain span.here{background:var(--accent);color:var(--bg);border-color:var(--accent);font-weight:600}
+p.chainnote{color:var(--dim);font-size:12px;margin:0 0 18px}
+.cref{margin:6px 0 0;font-size:13px}
+.cref a{display:inline-block;padding:4px 10px;border:1px solid var(--border);
+  border-radius:16px;background:var(--surface);font:12.5px ui-monospace,Menlo,monospace}
+.cref a:hover{background:var(--surface2);text-decoration:none}
+svg{max-width:100%;height:auto;display:block;margin:16px 0}
+svg .m{fill:var(--surface);stroke:var(--accent);stroke-width:2}
+svg .ag{fill:var(--surface);stroke:var(--green);stroke-width:2}
+svg .r{fill:var(--surface);stroke:var(--purple);stroke-width:2}
+svg .poll{fill:var(--surface);stroke:var(--orange);stroke-width:2;stroke-dasharray:5 3}
+svg .lane{fill:none;stroke:var(--border);stroke-width:1}
+svg .lbl{fill:var(--text);font:12px ui-monospace,Menlo,monospace}
+svg .lbl-b{fill:var(--text);font:bold 13px -apple-system,sans-serif}
+svg .note{fill:var(--dim);font:11.5px -apple-system,sans-serif}
+svg .hdr{fill:var(--accent);font:bold 12.5px -apple-system,sans-serif}
+svg .arrow{stroke:var(--dim);stroke-width:1.6;fill:none}
+svg .ah{fill:var(--dim)}
+svg .feed{stroke:var(--green);stroke-width:1.8;fill:none;stroke-dasharray:4 3}
+svg .feedlbl{fill:var(--green);font:11px ui-monospace,Menlo,monospace}
+svg .back{stroke:var(--red);stroke-width:1.8;fill:none}
+svg .backlbl{fill:var(--red);font:bold 11.5px -apple-system,sans-serif}
+svg a text{text-decoration:underline;fill:var(--accent);font:bold 12.5px -apple-system,sans-serif}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+  document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head>
+<body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+  function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+  function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
+    b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
+      else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+  document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+<div class="wrap">
+
+<h1>How RL gets every Gym service to stop at the same point before a checkpoint</h1>
+<p class="sub"><a href="https://github.com/NVIDIA-NeMo/RL/pull/4264">NVIDIA-NeMo/RL #4264</a>, 1/3 of a stack split from
+<a href="https://github.com/NVIDIA-NeMo/RL/pull/4117">#4117</a> (then <a href="https://github.com/NVIDIA-NeMo/RL/pull/4265">#4265</a>,
+<a href="https://github.com/NVIDIA-NeMo/RL/pull/4266">#4266</a>). All permalinks pin head <code>ad3c9cb</code>.</p>
+
+<div class="status">
+<dl>
+  <dt>Before</dt>
+  <dd>RL could snapshot its own rollout state, but it had no way to ask the Gym services (policy model server, agent servers, resource servers) to stop and save theirs. Gym work still running at save time could not be captured.</dd>
+  <dt>This PR</dt>
+  <dd>Adds the RL side of Gym's checkpoint protocol on the <code>NemoGym</code> actor: find out who can take part, then prepare → commit → resume (or restore, or abort) in a fixed order. Off by default.</dd>
+  <dt>Status</dt>
+  <dd><span class="verdict">New, opt-in, not yet driven.</span> Only discovery runs in this PR (at setup). The Single Controller calls the phases in #4266.</dd>
+</dl>
+</div>
+
+<nav class="chain">
+  <span class="here">what the PR adds</span>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4264-gym-bump-metrics.html">what the Gym bump breaks</a>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4266-gym-turn-recovery.html">3/3: turn recovery (#4266)</a>
+</nav>
+<p class="chainnote">Two pages on this PR plus one on the last PR of the stack — this one: what the new protocol does.</p>
+
+<p>At setup, when <code>rollout_checkpointing.gym.capability_discovery_enabled</code> is true
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/ad3c9cba741d30909132c4252a579ff2eb059d8a/nemo_rl/algorithms/single_controller_utils/config.py#L746">config.py:746</a>, default false),
+RL asks every Gym server <code>GET /ng-control/v1/capabilities</code> and keeps a list of the ones that can take part
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/ad3c9cba741d30909132c4252a579ff2eb059d8a/nemo_rl/environments/nemo_gym.py#L878">discover_checkpoint_capabilities</a>,
+called from <a href="https://github.com/NVIDIA-NeMo/RL/blob/ad3c9cba741d30909132c4252a579ff2eb059d8a/nemo_rl/algorithms/single_controller_utils/setup.py#L1798-L1801">setup.py:1798</a>).
+Each later phase calls those servers one by one, in an order fixed per phase by a small table
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/ad3c9cba741d30909132c4252a579ff2eb059d8a/nemo_rl/environments/nemo_gym.py#L410-L431">nemo_gym.py:410-431</a>).
+Policy models always pause and resume. Everything else takes part only if it can export its state
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/ad3c9cba741d30909132c4252a579ff2eb059d8a/nemo_rl/environments/nemo_gym.py#L962-L978">_participates_in_checkpoint_phase</a>).
+One deadline, an absolute clock time, bounds every call.</p>
+
+<h2>The four phases, on one small setup</h2>
+
+<p>Example setup: one policy model <code>policy_model</code>, one agent <code>simple_agent</code> that can export state,
+one stateless agent <code>math_agent</code>, one resource server <code>tools</code>.</p>
+
+<svg viewBox="0 0 900 470" role="img" aria-label="Four lanes, one per phase, showing the order RL calls the policy model, the agent and the resource server; commit passes the agent's continuation index into the model commit; a failed prepare resumes every participant already contacted">
+  <text class="hdr" x="16" y="20">Call order per phase  (left → right, one call at a time)</text>
+  <rect class="m" x="470" y="8" width="14" height="14" rx="3"/><text class="note" x="490" y="20">policy model</text>
+  <rect class="ag" x="572" y="8" width="14" height="14" rx="3"/><text class="note" x="592" y="20">agent</text>
+  <rect class="r" x="638" y="8" width="14" height="14" rx="3"/><text class="note" x="658" y="20">resource server</text>
+  <rect class="poll" x="760" y="8" width="14" height="14" rx="3"/><text class="note" x="780" y="20">long-poll wait</text>
+
+  <!-- PREPARE -->
+  <line class="lane" x1="16" y1="40" x2="884" y2="40"/>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/ad3c9cba741d30909132c4252a579ff2eb059d8a/nemo_rl/environments/nemo_gym.py#L1023" target="_blank" rel="noopener"><text x="16" y="72">prepare</text></a>
+  <rect class="m" x="120" y="52" width="170" height="44" rx="6"/>
+  <text class="lbl" x="130" y="70">policy_model</text><text class="note" x="130" y="87">pause: now draining</text>
+  <path class="arrow" d="M292 74 L312 74"/><path class="ah" d="M318 74 L310 69 L310 79 Z"/>
+  <rect class="ag" x="320" y="52" width="170" height="44" rx="6"/>
+  <text class="lbl" x="330" y="70">simple_agent</text><text class="note" x="330" y="87">park at a safe turn</text>
+  <path class="arrow" d="M492 74 L512 74"/><path class="ah" d="M518 74 L510 69 L510 79 Z"/>
+  <rect class="r" x="520" y="52" width="150" height="44" rx="6"/>
+  <text class="lbl" x="530" y="70">tools</text><text class="note" x="530" y="87">freeze sessions</text>
+  <path class="arrow" d="M672 74 L692 74"/><path class="ah" d="M698 74 L690 69 L690 79 Z"/>
+  <rect class="poll" x="700" y="52" width="184" height="44" rx="6"/>
+  <text class="lbl" x="710" y="70">policy_model status</text><text class="note" x="710" y="87">wait until 3 in flight → 0</text>
+
+  <!-- COMMIT -->
+  <line class="lane" x1="16" y1="116" x2="884" y2="116"/>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/ad3c9cba741d30909132c4252a579ff2eb059d8a/nemo_rl/environments/nemo_gym.py#L1262" target="_blank" rel="noopener"><text x="16" y="148">commit</text></a>
+  <rect class="ag" x="120" y="128" width="170" height="44" rx="6"/>
+  <text class="lbl" x="130" y="146">simple_agent</text><text class="note" x="130" y="163">write continuation index</text>
+  <path class="arrow" d="M292 150 L312 150"/><path class="ah" d="M318 150 L310 145 L310 155 Z"/>
+  <rect class="m" x="320" y="128" width="170" height="44" rx="6"/>
+  <text class="lbl" x="330" y="146">policy_model</text><text class="note" x="330" y="163">write model ledger</text>
+  <path class="arrow" d="M492 150 L512 150"/><path class="ah" d="M518 150 L510 145 L510 155 Z"/>
+  <rect class="r" x="520" y="128" width="150" height="44" rx="6"/>
+  <text class="lbl" x="530" y="146">tools</text><text class="note" x="530" y="163">write session state</text>
+  <path class="feed" d="M205 174 C205 190, 405 190, 405 176"/>
+  <text class="feedlbl" x="216" y="200">agent's index is passed into the model commit (continuation_indexes)</text>
+
+  <!-- RESTORE -->
+  <line class="lane" x1="16" y1="212" x2="884" y2="212"/>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/ad3c9cba741d30909132c4252a579ff2eb059d8a/nemo_rl/environments/nemo_gym.py#L1358" target="_blank" rel="noopener"><text x="16" y="244">restore</text></a>
+  <rect class="m" x="120" y="224" width="170" height="44" rx="6"/>
+  <text class="lbl" x="130" y="242">policy_model</text><text class="note" x="130" y="259">load ledger, stay paused</text>
+  <path class="arrow" d="M292 246 L312 246"/><path class="ah" d="M318 246 L310 241 L310 251 Z"/>
+  <rect class="ag" x="320" y="224" width="170" height="44" rx="6"/>
+  <text class="lbl" x="330" y="242">simple_agent</text><text class="note" x="330" y="259">load index, stay paused</text>
+  <path class="arrow" d="M492 246 L512 246"/><path class="ah" d="M518 246 L510 241 L510 251 Z"/>
+  <rect class="r" x="520" y="224" width="150" height="44" rx="6"/>
+  <text class="lbl" x="530" y="242">tools</text><text class="note" x="530" y="259">load sessions</text>
+
+  <!-- RESUME -->
+  <line class="lane" x1="16" y1="288" x2="884" y2="288"/>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/ad3c9cba741d30909132c4252a579ff2eb059d8a/nemo_rl/environments/nemo_gym.py#L1464" target="_blank" rel="noopener"><text x="16" y="320">resume</text></a>
+  <rect class="r" x="120" y="300" width="170" height="44" rx="6"/>
+  <text class="lbl" x="130" y="318">tools</text><text class="note" x="130" y="335">accept calls again</text>
+  <path class="arrow" d="M292 322 L312 322"/><path class="ah" d="M318 322 L310 317 L310 327 Z"/>
+  <rect class="m" x="320" y="300" width="170" height="44" rx="6"/>
+  <text class="lbl" x="330" y="318">policy_model</text><text class="note" x="330" y="335">open admission</text>
+  <path class="arrow" d="M492 322 L512 322"/><path class="ah" d="M518 322 L510 317 L510 327 Z"/>
+  <rect class="ag" x="520" y="300" width="150" height="44" rx="6"/>
+  <text class="lbl" x="530" y="318">simple_agent</text><text class="note" x="530" y="335">release parked turns</text>
+  <text class="note" x="690" y="318">agents go last: what they</text>
+  <text class="note" x="690" y="334">call must be open first</text>
+
+  <!-- ROLLBACK -->
+  <line class="lane" x1="16" y1="364" x2="884" y2="364"/>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/ad3c9cba741d30909132c4252a579ff2eb059d8a/nemo_rl/environments/nemo_gym.py#L1134" target="_blank" rel="noopener"><text x="16" y="394">rollback</text></a>
+  <text class="backlbl" x="120" y="390">prepare fails or misses the deadline at any step →</text>
+  <text class="note" x="120" y="408">resume every server RL already contacted (in resume order), even one whose reply was lost,</text>
+  <text class="note" x="120" y="424">then raise. The previous checkpoint stays valid. abort_checkpoint uses the same resume calls.</text>
+
+  <!-- skipped -->
+  <rect x="16" y="440" width="868" height="24" rx="6" style="fill:var(--surface2);stroke:var(--border)"/>
+  <text class="note" x="28" y="457">Not called in any phase: math_agent (stateless) and any model marked instance_role: auxiliary (for example a judge).</text>
+</svg>
+
+<h2>Where it joins what RL already had</h2>
+
+<p>RL already talked to one Gym server over a control API: the token-capture ledger on the policy model.
+The new code reuses that same helper, <code>_control</code>
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/ad3c9cba741d30909132c4252a579ff2eb059d8a/nemo_rl/environments/nemo_gym.py#L815">nemo_gym.py:815</a>),
+which sends every call through Gym's <code>ServerClient.request</code>. From there the two differ in only three ways:</p>
+
+<table>
+<tr><th></th><th>Token-capture control (existing)</th><th>Checkpoint control (new)</th></tr>
+<tr><td>Which servers</td><td><code>policy_model</code> only</td><td>every discovered participant, by name</td></tr>
+<tr><td>Password (bearer)</td><td>token-capture token</td><td><code>NEMO_GYM_CHECKPOINT_CONTROL_TOKEN</code>, or the token-capture one if unset
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/ad3c9cba741d30909132c4252a579ff2eb059d8a/nemo_rl/environments/nemo_gym.py#L824-L828">picked by path, :824-828</a>)</td></tr>
+<tr><td>Time limit per call</td><td>fixed <code>control_timeout_s</code> (60 s)</td><td>time left until the shared deadline</td></tr>
+</table>
+
+<p>Two setup checks keep the first version small: exactly one Gym actor
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/ad3c9cba741d30909132c4252a579ff2eb059d8a/nemo_rl/algorithms/single_controller_utils/config.py#L1280-L1294">config.py:1280</a>,
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/ad3c9cba741d30909132c4252a579ff2eb059d8a/nemo_rl/environments/nemo_gym.py#L2630">sole_nemo_gym_checkpoint_actor</a>),
+and multi-worker servers that Gym cannot coordinate are refused at discovery.</p>
+
+<div class="hl">
+<strong>What to watch in review.</strong> Off by default, so nothing changes for existing runs <em>from the new code</em>. Three things
+matter anyway. (1) The Gym submodule now points at a commit on a Gym draft branch, not Gym main. (2) That same bump breaks four
+existing finalize metrics on every token-capture run (<a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4264-gym-bump-metrics.html">next page</a>).
+(3) Gym marks every model server as a policy model unless told otherwise, so a separate judge server would be paused
+during prepare, and prepare would never finish on that recipe.
+</div>
+
+</div>
+</body>
+</html>
