@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NVIDIA-NeMo/RL #4266 — what a crash costs a multi-turn Gym rollout, before and after turn-level recovery</title>
+<style>
+:root{
+  --bg:#0d1117; --surface:#161b22; --surface2:#1c2128; --border:#30363d;
+  --text:#e6edf3; --dim:#8b949e; --accent:#58a6ff; --green:#3fb950;
+  --orange:#d29922; --red:#f85149;
+}
+:root[data-theme="light"]{
+  --bg:#ffffff; --surface:#f6f8fa; --surface2:#eaeef2; --border:#d0d7de;
+  --text:#1f2328; --dim:#59636e; --accent:#0969da; --green:#1a7f37;
+  --orange:#9a6700; --red:#cf222e;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:28px 20px 70px}
+h1{font-size:22px;margin:0 0 8px;line-height:1.3}
+h2{font-size:18px;margin:32px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;
+  font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
+.sub{color:var(--dim);font-size:13.5px;margin:0 0 16px}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);
+  border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;
+  font:13px/1 ui-monospace,Menlo,monospace;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.18)}
+.status{border:1px solid var(--border);border-radius:10px;background:var(--surface);
+  padding:2px 16px 10px;margin:0 0 20px}
+.status dl{display:grid;grid-template-columns:max-content 1fr;gap:4px 14px;margin:12px 0 0}
+.status dt{color:var(--dim);font-size:12px;text-transform:uppercase;letter-spacing:.04em;
+  white-space:nowrap;padding-top:2px}
+.status dd{margin:0;font-size:14px}
+.verdict{font-weight:700}
+.verdict.good{color:var(--green)}
+.verdict.open{color:var(--orange)}
+.mono{font:12.5px ui-monospace,SFMono-Regular,Menlo,monospace;
+  background:var(--surface);border:1px solid var(--border);border-radius:8px;
+  padding:13px;overflow-x:auto;white-space:pre}
+.warn{border-left:3px solid var(--orange);background:var(--surface);
+  padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0}
+.cref{margin:6px 0 0;font-size:13px}
+.cref a{display:inline-block;padding:4px 10px;border:1px solid var(--border);
+  border-radius:16px;background:var(--surface);font:12.5px ui-monospace,Menlo,monospace}
+.cref a:hover{background:var(--surface2);text-decoration:none}
+.kept{color:var(--green);font-weight:700}
+.drop{color:var(--red);font-weight:700}
+.new{color:var(--accent);font-weight:700}
+svg{max-width:100%;height:auto;display:block;margin:16px 0}
+svg .box{fill:var(--surface);stroke:var(--border);stroke-width:1.4}
+svg .box-new{fill:var(--surface);stroke:var(--accent);stroke-width:2}
+svg .box-shared{fill:var(--surface2);stroke:var(--green);stroke-width:2}
+svg .lbl{fill:var(--text);font:12.5px ui-monospace,Menlo,monospace}
+svg .lbl-b{fill:var(--text);font:bold 13px -apple-system,sans-serif}
+svg .note{fill:var(--dim);font:11.5px -apple-system,sans-serif}
+svg .hdr{fill:var(--accent);font:bold 12.5px -apple-system,sans-serif}
+svg .arrow{stroke:var(--dim);stroke-width:1.4;fill:none}
+svg .arrowhead{fill:var(--dim)}
+svg .merge{stroke:var(--green);stroke-width:1.6;fill:none;stroke-dasharray:5 4}
+svg .sw-new{fill:var(--accent)}
+svg .sw-shared{fill:var(--green)}
+svg a text{text-decoration:underline;fill:var(--accent);font:11.5px ui-monospace,Menlo,monospace}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+  document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head>
+<body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+  function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+  function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
+    b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
+      else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+  document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+<div class="wrap">
+
+<h1>What a crash costs a multi-turn Gym rollout, before and after turn-level recovery</h1>
+<p class="sub">Explainer for <a href="https://github.com/NVIDIA-NeMo/RL/pull/4266">NVIDIA-NeMo/RL #4266</a>
+(stack part 3 of 3, on top of <a href="https://github.com/NVIDIA-NeMo/RL/pull/4264">#4264</a> and
+<a href="https://github.com/NVIDIA-NeMo/RL/pull/4265">#4265</a>). All permalinks pin the PR head <code>98b3b6c</code>;
+"before" links pin the base <code>ed14402</code>.</p>
+
+<div class="status">
+<dl>
+  <dt>Before</dt>
+  <dd>A rollout snapshot saved the data plane, the replay index and the recovery ledger. After a crash, finished siblings were reused, but every <strong>unfinished</strong> multi-turn Gym rollout started again from turn 1.</dd>
+  <dt>This PR</dt>
+  <dd>Adds an opt-in mode (<code>rollout_checkpointing.gym.participant_checkpointing_enabled</code>) that pauses Gym at turn boundaries and saves its agents, model and resources into the same snapshot, so a restart continues from the last finished turn.</dd>
+  <dt>Status</dt>
+  <dd><span class="verdict good">New in this PR, off by default.</span> <span class="verdict open">Two review findings are open</span> — see the last section.</dd>
+</dl>
+</div>
+
+<p>Single Controller already takes a rollout snapshot every <code>snapshot_attempt_interval_s</code>: it takes the data-plane barrier, saves the data plane plus the replay and recovery files, and publishes the directory with one rename
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/ed1440266ca2e02ca3942d7837777fbdeff64aae/nemo_rl/algorithms/single_controller.py#L4000">before: <code>_save_rollout_checkpoint</code></a>).
+This PR keeps that same path and adds Gym steps on both sides of it
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/98b3b6c3d550ecdebd4a5ae80e00feb5896c547f/nemo_rl/algorithms/single_controller.py#L4517"><code>_save_rollout_checkpoint_locked</code></a>).
+Before the barrier, it closes rollout admission, asks Gym to park every agent at a turn boundary, and has Gym write its state into the unpublished snapshot directory.
+After the rename, it tells Gym to resume. If anything fails before the rename, Gym is aborted with the same checkpoint ID and the previous snapshot stays in use.</p>
+
+<h2>Where each path does the work — and where they become one</h2>
+
+<svg viewBox="0 0 940 400" role="img" aria-label="Two save sequences stacked. The old one is barrier, data-plane save, rename. The new one adds close admission, Gym prepare, Gym commit before the same barrier and rename, and Gym resume after. The shared part is marked green.">
+  <text class="hdr" x="16" y="22">One rollout snapshot, step by step</text>
+  <rect class="sw-new" x="560" y="11" width="14" height="12" rx="2"/>
+  <text class="note" x="580" y="21">new Gym step (this PR)</text>
+  <rect class="sw-shared" x="740" y="11" width="14" height="12" rx="2"/>
+  <text class="note" x="760" y="21">shared by both paths</text>
+
+  <!-- BEFORE lane -->
+  <text class="lbl-b" x="16" y="70">Before</text>
+  <text class="note" x="16" y="86">base ed14402</text>
+  <rect class="box-shared" x="392" y="50" width="176" height="46" rx="7"/>
+  <text class="lbl" x="404" y="70">barrier + save</text>
+  <text class="lbl" x="404" y="86">data plane, ledger</text>
+  <rect class="box-shared" x="600" y="50" width="130" height="46" rx="7"/>
+  <text class="lbl" x="612" y="70">rename =</text>
+  <text class="lbl" x="612" y="86">publish</text>
+  <path class="arrow" d="M568 73 L596 73"/><path class="arrowhead" d="M600 73 L593 69 L593 77 Z"/>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/ed1440266ca2e02ca3942d7837777fbdeff64aae/nemo_rl/algorithms/single_controller.py#L4127" target="_blank" rel="noopener"><text x="742" y="78">commit_snapshot (base)</text></a>
+
+  <!-- AFTER lane -->
+  <text class="lbl-b" x="16" y="196">This PR</text>
+  <text class="note" x="16" y="212">participant mode on</text>
+  <rect class="box-new" x="112" y="176" width="130" height="46" rx="7"/>
+  <text class="lbl" x="122" y="196">close admission</text>
+  <text class="lbl" x="122" y="212">flush Gym ACKs</text>
+  <rect class="box-new" x="258" y="176" width="118" height="46" rx="7"/>
+  <text class="lbl" x="268" y="196">Gym prepare</text>
+  <text class="lbl" x="268" y="212">+ commit</text>
+  <rect class="box-shared" x="392" y="176" width="176" height="46" rx="7"/>
+  <text class="lbl" x="404" y="196">barrier + save</text>
+  <text class="lbl" x="404" y="212">+ Gym TQ keys</text>
+  <rect class="box-shared" x="600" y="176" width="130" height="46" rx="7"/>
+  <text class="lbl" x="612" y="196">rename =</text>
+  <text class="lbl" x="612" y="212">publish</text>
+  <rect class="box-new" x="762" y="176" width="130" height="46" rx="7"/>
+  <text class="lbl" x="774" y="196">Gym resume,</text>
+  <text class="lbl" x="774" y="212">reopen admission</text>
+  <path class="arrow" d="M242 199 L254 199"/><path class="arrowhead" d="M258 199 L251 195 L251 203 Z"/>
+  <path class="arrow" d="M376 199 L388 199"/><path class="arrowhead" d="M392 199 L385 195 L385 203 Z"/>
+  <path class="arrow" d="M568 199 L596 199"/><path class="arrowhead" d="M600 199 L593 195 L593 203 Z"/>
+  <path class="arrow" d="M730 199 L758 199"/><path class="arrowhead" d="M762 199 L755 195 L755 203 Z"/>
+
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/98b3b6c3d550ecdebd4a5ae80e00feb5896c547f/nemo_rl/algorithms/single_controller.py#L1949" target="_blank" rel="noopener"><text x="112" y="244">_prepare_and_commit_gym_checkpoint</text></a>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/98b3b6c3d550ecdebd4a5ae80e00feb5896c547f/nemo_rl/algorithms/single_controller.py#L4664" target="_blank" rel="noopener"><text x="392" y="262">barrier :4664</text></a>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/98b3b6c3d550ecdebd4a5ae80e00feb5896c547f/nemo_rl/algorithms/single_controller.py#L4726" target="_blank" rel="noopener"><text x="600" y="244">commit_snapshot :4726</text></a>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/98b3b6c3d550ecdebd4a5ae80e00feb5896c547f/nemo_rl/algorithms/single_controller.py#L4736" target="_blank" rel="noopener"><text x="762" y="244">release :4736</text></a>
+
+  <!-- merge lines -->
+  <path class="merge" d="M480 96 L480 176"/>
+  <path class="merge" d="M665 96 L665 176"/>
+  <text class="note" x="672" y="140">same code:</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/98b3b6c3d550ecdebd4a5ae80e00feb5896c547f/nemo_rl/algorithms/single_controller.py#L4309" target="_blank" rel="noopener"><text x="672" y="156">_capture_rollout_checkpoint_cut</text></a>
+
+  <!-- failure note -->
+  <rect class="box" x="112" y="290" width="780" height="92" rx="8"/>
+  <text class="lbl-b" x="126" y="312">What still differs after they join</text>
+  <text class="note" x="126" y="332">• the saved key set also includes the TQ rows Gym's parked agents point to (gym_staging_keys)</text>
+  <text class="note" x="126" y="350">• the manifest records the Gym topology fingerprint and each participant's files, checked again at restore</text>
+  <text class="note" x="126" y="368">• the "nothing changed, skip this snapshot" shortcut is off, because Gym turns move on without any data-plane write</text>
+</svg>
+
+<h2>Same group, two restarts</h2>
+
+<p>One prompt group with 3 siblings. The agent needs 5 turns per sibling. The process dies right after a snapshot, at this point:</p>
+
+<div class="mono">sibling   turns done at snapshot   restart BEFORE this PR        restart WITH this PR
+A         5 of 5 (finished)        <span class="kept">reused</span>                        <span class="kept">reused</span>
+B         2 of 5                   <span class="drop">starts at turn 1, redoes 2</span>    <span class="kept">keeps its 2 turns</span>
+C         4 of 5                   <span class="drop">starts at turn 1, redoes 4</span>    <span class="kept">keeps its 4 turns</span>
+                                   ───────────────────────────
+turns thrown away                  <span class="drop">6</span>                             <span class="kept">0</span></div>
+
+<p>How the restart gets there with this PR:</p>
+<div class="mono">setup:   pick the newest snapshot, check the Gym topology fingerprint matches      <a href="https://github.com/NVIDIA-NeMo/RL/blob/98b3b6c3d550ecdebd4a5ae80e00feb5896c547f/nemo_rl/algorithms/single_controller_utils/setup.py#L1880">setup.py:1880</a>
+         restore TQ, then Gym restores its own participants while still paused   <a href="https://github.com/NVIDIA-NeMo/RL/blob/98b3b6c3d550ecdebd4a5ae80e00feb5896c547f/nemo_rl/algorithms/single_controller_utils/setup.py#L1976">setup.py:1976</a>
+actor:   restore ledger: B and C get attempt n+1, matched to Gym's saved turns     <a href="https://github.com/NVIDIA-NeMo/RL/blob/98b3b6c3d550ecdebd4a5ae80e00feb5896c547f/nemo_rl/algorithms/single_controller.py#L1166">single_controller.py:1166</a>
+         any sibling that used a restart-only resource starts over instead       <a href="https://github.com/NVIDIA-NeMo/RL/blob/98b3b6c3d550ecdebd4a5ae80e00feb5896c547f/nemo_rl/algorithms/single_controller.py#L1783">:1783</a>
+         resume Gym; B and C pick up after their last finished turn            <a href="https://github.com/NVIDIA-NeMo/RL/blob/98b3b6c3d550ecdebd4a5ae80e00feb5896c547f/nemo_rl/algorithms/single_controller.py#L792">:792</a></div>
+
+<p>Trainer checkpoints get a second, safer layer. Each one first writes a <code>gym_restart_fallback.json</code> marker
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/98b3b6c3d550ecdebd4a5ae80e00feb5896c547f/nemo_rl/algorithms/single_controller.py#L5313">:5313</a>)
+and then tries the snapshot above. If that snapshot never lands, restore uses the marker and falls back to the "before" column for unfinished work
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/98b3b6c3d550ecdebd4a5ae80e00feb5896c547f/nemo_rl/algorithms/single_controller_utils/setup.py#L1439">setup.py:1439</a>).</p>
+
+<h2>What it costs, and what is still open</h2>
+
+<p>Why keep both paths: the old one needs nothing from Gym and never pauses rollouts. The new one needs a Gym build that supports the checkpoint protocol, <code>token_capture.enabled: true</code>, <code>max_row_attempts: 1</code>, and exactly one Gym actor. Every snapshot also closes rollout admission until Gym has parked.
+The PR has no timing numbers yet for that pause.</p>
+
+<div class="warn">
+<strong>Two open review findings affect this mode.</strong>
+(1) If a Gym control call fails during a periodic snapshot, the error reaches the checkpoint loop as a <code>RuntimeError</code>. The loop only retries <code>OSError</code> and <code>TimeoutError</code>, so one HTTP 500 on commit ends the run instead of being retried
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/98b3b6c3d550ecdebd4a5ae80e00feb5896c547f/nemo_rl/algorithms/single_controller.py#L4870">:4870</a>).
+(2) With <code>prompt_group</code> recovery, a finished sibling is acknowledged only after its whole group finishes. Gym prepare waits for that acknowledgement, while its parked siblings can't finish. Every snapshot then times out after <code>prepare_timeout_s</code>, and three failures in a row end the run. Both have a one-place fix in the review.
+</div>
+
+</div>
+</body>
+</html>
