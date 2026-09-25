@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NVIDIA-NeMo/RL #4265 — why prompt-group mode stops Gym checkpoints</title>
+<style>
+:root{
+  --bg:#0d1117; --surface:#161b22; --surface2:#1c2128; --border:#30363d;
+  --text:#e6edf3; --dim:#8b949e; --accent:#58a6ff; --green:#3fb950;
+  --orange:#d29922; --red:#f85149;
+}
+:root[data-theme="light"]{
+  --bg:#ffffff; --surface:#f6f8fa; --surface2:#eaeef2; --border:#d0d7de;
+  --text:#1f2328; --dim:#59636e; --accent:#0969da; --green:#1a7f37;
+  --orange:#9a6700; --red:#cf222e;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:28px 20px 70px}
+h1{font-size:22px;margin:0 0 8px;line-height:1.3}
+h2{font-size:18px;margin:32px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;
+  font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
+.sub{color:var(--dim);font-size:13.5px;margin:0 0 16px}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);
+  border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;
+  font:13px/1 ui-monospace,Menlo,monospace;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.18)}
+.status{border:1px solid var(--border);border-radius:10px;background:var(--surface);
+  padding:2px 16px 10px;margin:0 0 20px}
+.status dl{display:grid;grid-template-columns:max-content 1fr;gap:4px 14px;margin:12px 0 0}
+.status dt{color:var(--dim);font-size:12px;text-transform:uppercase;letter-spacing:.04em;
+  white-space:nowrap;padding-top:2px}
+.status dd{margin:0;font-size:14px}
+.verdict{font-weight:700}
+.verdict.open{color:var(--red)}
+nav.chain{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 6px;padding:0}
+nav.chain a,nav.chain span{display:inline-block;padding:5px 11px;border:1px solid var(--border);
+  border-radius:20px;background:var(--surface);text-decoration:none;color:var(--accent);
+  font-size:12.5px;line-height:1.3;white-space:nowrap}
+nav.chain a:hover{background:var(--surface2)}
+nav.chain span.here{background:var(--accent);color:var(--bg);border-color:var(--accent);font-weight:600}
+p.chainnote{color:var(--dim);font-size:12px;margin:0 0 18px}
+.cref{margin:6px 0 0;font-size:13px}
+.cref a{display:inline-block;padding:4px 10px;border:1px solid var(--border);
+  border-radius:16px;background:var(--surface);font:12.5px ui-monospace,Menlo,monospace}
+.cref a:hover{background:var(--surface2);text-decoration:none}
+.mono{font:12.5px ui-monospace,SFMono-Regular,Menlo,monospace;
+  background:var(--surface);border:1px solid var(--border);border-radius:8px;
+  padding:13px;overflow-x:auto;white-space:pre}
+.cm{color:var(--dim)}
+.warn{border-left:3px solid var(--red);background:var(--surface);
+  padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0}
+svg{max-width:100%;height:auto;display:block;margin:16px 0}
+svg .box{fill:var(--surface);stroke:var(--border);stroke-width:1.4}
+svg .ok{fill:var(--green);opacity:.5;stroke:var(--green)}
+svg .held{fill:var(--red);opacity:.5;stroke:var(--red)}
+svg .run{fill:var(--dim);opacity:.3;stroke:var(--dim)}
+svg .park{fill:var(--orange);opacity:.45;stroke:var(--orange)}
+svg .lbl{fill:var(--text);font:12px ui-monospace,Menlo,monospace}
+svg .lbl-b{fill:var(--text);font:bold 13px -apple-system,sans-serif}
+svg .note{fill:var(--dim);font:11.5px -apple-system,sans-serif}
+svg .hdr{fill:var(--accent);font:bold 12.5px -apple-system,sans-serif}
+svg .bad{fill:var(--red);font:bold 12px -apple-system,sans-serif}
+svg .good{fill:var(--green);font:bold 12px -apple-system,sans-serif}
+svg .snap{stroke:var(--orange);stroke-width:2.2;stroke-dasharray:6 4}
+svg .snap-lbl{fill:var(--orange);font:bold 11.5px -apple-system,sans-serif}
+svg a text{text-decoration:underline;fill:var(--accent);font:11px ui-monospace,Menlo,monospace}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+  document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head>
+<body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+  function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+  function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
+    b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
+      else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+  document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+<div class="wrap">
+
+<h1>Why prompt-group mode can stop every later Gym checkpoint</h1>
+<p class="sub"><a href="https://github.com/NVIDIA-NeMo/RL/pull/4265">NVIDIA-NeMo/RL #4265</a>.
+RL links pin head <code>ed14402</code>; Gym links pin <code>f4fcf8c</code>. Found by reading the code on
+both sides; not run against a live Gym.</p>
+
+<div class="status">
+<dl>
+  <dt>Before</dt>
+  <dd>RL sent Gym no ACKs at all (see page 1).</dd>
+  <dt>This PR</dt>
+  <dd>Adds ACKs, but in prompt-group mode it records them only once every sibling in the group has finished.</dd>
+  <dt>Status</dt>
+  <dd><span class="verdict open">Open — not fixed in this PR.</span> Raised in the review comments.</dd>
+</dl>
+</div>
+
+<nav class="chain">
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4265-durable-gym-state.html">1 · what the PR adds</a>
+  <span class="here">2 · prompt-group ACK stall</span>
+</nav>
+<p class="chainnote">Two pages on this PR — this one: the bug in prompt-group mode.</p>
+
+<p id="mechanism">Gym keeps each finished result until RL ACKs it, and its
+<a href="https://github.com/NVIDIA-NeMo/Gym/blob/f4fcf8cf98272740fd7585aa49cee00fa2c099f0/nemo_gym/_checkpoint/agent.py#L722"><code>status()</code></a>
+says "not ready to commit" while any result is un-ACKed. Gym's
+<a href="https://github.com/NVIDIA-NeMo/Gym/blob/f4fcf8cf98272740fd7585aa49cee00fa2c099f0/nemo_gym/_checkpoint/agent.py#L652"><code>retire()</code></a>
+refuses a finished result, so an ACK is the only way to release one. In sibling mode RL records the ACK
+debt the moment a sibling finishes. In prompt-group mode (all siblings must succeed, or the whole group is
+retried) RL keeps finished siblings in a local dict,
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/ed1440266ca2e02ca3942d7837777fbdeff64aae/nemo_rl/experience/rollout_manager.py#L2425"><code>pending_group_results</code></a>,
+and <a href="https://github.com/NVIDIA-NeMo/RL/blob/ed1440266ca2e02ca3942d7837777fbdeff64aae/nemo_rl/experience/rollout_manager.py#L2426">returns early</a>
+until all of them are in.</p>
+
+<h2>Same group, two modes</h2>
+
+<svg viewBox="0 0 940 500" role="img" aria-label="Three siblings over time. Sibling mode: g0 is ACKed as soon as it finishes and the snapshot succeeds. Prompt-group mode: g0 is held with no ACK, the snapshot parks g1 and g2, Gym keeps answering 409 until the 300 second deadline. If the group then fails, g0 is never ACKed and every later snapshot fails.">
+  <text class="hdr" x="16" y="22">Prompt group p7, 3 siblings. g0 finishes first; then a snapshot starts.</text>
+  <text class="note" x="160" y="44">g0 finishes</text>
+  <text class="note" x="400" y="44">snapshot starts</text>
+
+  <!-- sibling mode -->
+  <text class="lbl-b" x="16" y="74">Sibling mode</text>
+  <text class="lbl" x="16" y="98">g0</text><rect class="run" x="60" y="86" width="100" height="18"/><rect class="ok" x="160" y="86" width="230" height="18"/>
+  <text class="lbl" x="170" y="100">sealed + ACK debt → ACK sent</text>
+  <text class="lbl" x="16" y="122">g1</text><rect class="run" x="60" y="110" width="340" height="18"/><rect class="park" x="400" y="110" width="200" height="18"/>
+  <text class="lbl" x="16" y="146">g2</text><rect class="run" x="60" y="134" width="340" height="18"/><rect class="park" x="400" y="134" width="200" height="18"/>
+  <text class="lbl" x="410" y="124">parked at a saved point</text>
+  <text class="good" x="612" y="124">Gym: 0 un-ACKed</text>
+  <text class="good" x="612" y="146">→ ready, snapshot commits</text>
+
+  <!-- prompt group mode -->
+  <text class="lbl-b" x="16" y="196">Prompt-group mode</text>
+  <text class="lbl" x="16" y="220">g0</text><rect class="run" x="60" y="208" width="100" height="18"/><rect class="held" x="160" y="208" width="440" height="18"/>
+  <text class="lbl" x="170" y="222">done, held in pending_group_results — no ACK debt</text>
+  <text class="lbl" x="16" y="244">g1</text><rect class="run" x="60" y="232" width="340" height="18"/><rect class="park" x="400" y="232" width="200" height="18"/>
+  <text class="lbl" x="16" y="268">g2</text><rect class="run" x="60" y="256" width="340" height="18"/><rect class="park" x="400" y="256" width="200" height="18"/>
+  <text class="lbl" x="410" y="246">parked — cannot finish</text>
+  <text class="bad" x="612" y="222">Gym: 1 un-ACKed</text>
+  <text class="bad" x="612" y="246">→ 409, RL retries …</text>
+  <text class="bad" x="612" y="270">… until the prepare deadline</text>
+
+  <line class="snap" x1="400" y1="54" x2="400" y2="290"/>
+  <text class="snap-lbl" x="406" y="300">Gym parks g1, g2</text>
+
+  <!-- group failure -->
+  <rect class="box" x="16" y="322" width="908" height="84" rx="8" style="stroke:var(--red)"/>
+  <text class="lbl-b" x="30" y="344">Worse: the group fails after g0 finished</text>
+  <text class="note" x="30" y="364">g2 fails → whole group abandoned and retried as try 1 → g0's result is thrown away on the RL side,</text>
+  <text class="note" x="30" y="380">but it is still COMPLETED in Gym. Nothing will ever ACK it, and retire() refuses it. Every later</text>
+  <text class="note" x="30" y="396">prepare keeps returning 409 until its deadline, so no Gym-aware snapshot can commit again in that process.</text>
+
+  <!-- legend + links -->
+  <rect class="run" x="16" y="424" width="16" height="12"/><text class="note" x="38" y="435">running</text>
+  <rect class="ok" x="110" y="424" width="16" height="12"/><text class="note" x="132" y="435">done + ACKed</text>
+  <rect class="held" x="232" y="424" width="16" height="12"/><text class="note" x="254" y="435">done, not ACKed</text>
+  <rect class="park" x="376" y="424" width="16" height="12"/><text class="note" x="398" y="435">parked by Gym prepare</text>
+
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/ed1440266ca2e02ca3942d7837777fbdeff64aae/nemo_rl/experience/rollout_manager.py#L2426" target="_blank" rel="noopener"><text x="16" y="462">early return :2426</text></a>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/ed1440266ca2e02ca3942d7837777fbdeff64aae/nemo_rl/experience/rollout_recovery.py#L982" target="_blank" rel="noopener"><text x="150" y="462">ACKs only at group seal :982</text></a>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/ed1440266ca2e02ca3942d7837777fbdeff64aae/nemo_rl/experience/rollout_recovery.py#L540" target="_blank" rel="noopener"><text x="350" y="462">_abandon_entire_group :540</text></a>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/ed1440266ca2e02ca3942d7837777fbdeff64aae/nemo_rl/environments/nemo_gym.py#L1295" target="_blank" rel="noopener"><text x="560" y="462">409 retry loop :1295</text></a>
+  <a href="https://github.com/NVIDIA-NeMo/Gym/blob/f4fcf8cf98272740fd7585aa49cee00fa2c099f0/nemo_gym/_checkpoint/agent.py#L611" target="_blank" rel="noopener"><text x="16" y="484">Gym _wait_prepared :611</text></a>
+  <a href="https://github.com/NVIDIA-NeMo/Gym/blob/f4fcf8cf98272740fd7585aa49cee00fa2c099f0/nemo_gym/_checkpoint/agent.py#L599" target="_blank" rel="noopener"><text x="190" y="484">only PARK_REQUESTED resumed :599</text></a>
+  <a href="https://github.com/NVIDIA-NeMo/Gym/blob/f4fcf8cf98272740fd7585aa49cee00fa2c099f0/nemo_gym/_checkpoint/agent.py#L652" target="_blank" rel="noopener"><text x="440" y="484">retire refuses COMPLETED :652</text></a>
+</svg>
+
+<p id="reachable">Nothing rejects this setup: prompt-group mode is a documented option, and no check in this PR or the
+two stacked with it refuses prompt-group mode together with Gym checkpointing. This PR even adds
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/ed1440266ca2e02ca3942d7837777fbdeff64aae/nemo_rl/experience/rollout_recovery.py#L982"><code>record_sealed_group_acknowledgements</code></a>
+for it. A second way to strand a result: the new receipt fetch
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/ed1440266ca2e02ca3942d7837777fbdeff64aae/nemo_rl/environments/nemo_gym.py#L1906">nemo_gym.py:1906</a>)
+runs after a <code>/run</code> has finished but outside the loop that keeps draining the batch, so one
+control-call timeout leaves that row finished in Gym with no receipt in RL.</p>
+
+<h2>What would fix it — proposed, not in the PR</h2>
+
+<p>Nothing below is implemented. Record each sibling's ACK debt as soon as it arrives, like sibling mode does,
+and keep only the <em>seal</em> all-or-nothing. That is safe: a partly finished prompt group is never
+reused. It is thrown away whole on failure and on restart, so Gym does not need to keep g0's copy.</p>
+
+<div class="mono"><span class="cm"># rollout_manager.py, PROMPT_GROUP branch of _record_streamed_completion (proposed)</span>
+pending_group_results[0] = result_g0          <span class="cm"># {0: g0}, 1 of 3 in</span>
+async with self._recovery_mutation("sibling_seals") as cut:
+    ledger.record_unsealed_group_acknowledgement(   <span class="cm"># new ledger method</span>
+        cut, "p7", generation_index=0,
+        completion_receipt=result_g0.completion_receipt)
+                                              <span class="cm"># ACK debts: {("p7_g0", try 0)}</span>
+sink.notify_ready()                           <span class="cm"># ACK sent → Gym un-ACKed: 1 → 0</span>
+if len(pending_group_results) &lt; 3:
+    return                                    <span class="cm"># g1, g2 still running</span>
+
+<span class="cm"># snapshot starts: Gym parks g1, g2 at a saved point</span>
+<span class="cm"># status(): running 0, un-ACKed 0 → ready_to_commit = True → snapshot commits</span>
+<span class="cm"># group fails later: nothing stranded — g0 was already released</span></div>
+<p class="note" style="color:var(--dim);font-size:13px">Real code this changes:
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/ed1440266ca2e02ca3942d7837777fbdeff64aae/nemo_rl/experience/rollout_manager.py#L2426">rollout_manager.py:2426-2442</a>
+and a new ledger method next to
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/ed1440266ca2e02ca3942d7837777fbdeff64aae/nemo_rl/experience/rollout_recovery.py#L964"><code>record_sealed_sibling_acknowledgement</code></a>
+that builds the ACK from the receipt without requiring the sibling to be sealed. For the receipt fetch:
+treat an error after <code>await task</code> like a failed task and keep draining.</p>
+
+<div class="warn">
+<strong>So what.</strong> With prompt-group mode and Gym checkpointing both on, any snapshot taken while
+a group is partly done waits out its full prepare deadline (300 s by default in #4266) and fails. One failed group after a sibling finished
+blocks every later Gym-aware snapshot for the rest of the process. Recording each sibling's ACK when it
+arrives removes both.
+</div>
+
+</div>
+</body>
+</html>
