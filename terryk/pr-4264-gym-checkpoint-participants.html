@@ -136,6 +136,16 @@ One <span class="tip" tabindex="0" data-tip="A wall-clock time (Unix seconds) se
 
 <h2>The four phases, on one small setup</h2>
 
+<table>
+<tr><th>Phase</th><th>What it does</th><th>What exists afterwards</th></tr>
+<tr><td><b>prepare</b></td><td>Stop. The policy model refuses new calls and waits for running ones to finish; agents park each rollout at a turn end; resources freeze. Nothing is written.</td><td>All of Gym paused at one point. Nothing on disk yet, so backing out is free.</td></tr>
+<tr><td><b>commit</b></td><td>Each Gym server writes its own part into a temporary folder RL picked. Gym stays paused.</td><td><b>No usable checkpoint yet</b>: only Gym's half, unpublished. The Single Controller (#4266) still adds RL's half (TQ, loader place, recovery ledger, manifest) and then renames the folder into place. That rename is the real commit; a crash before it leaves the previous snapshot in use.</td></tr>
+<tr><td><b>resume</b></td><td>Reopen: resources, then the model, then agents. Called after the snapshot is published.</td><td>A complete published snapshot, and Gym running again.</td></tr>
+<tr><td><b>restore</b></td><td>After a restart, each Gym server loads its own part from a published snapshot. Gym stays paused until RL has loaded its half and calls resume.</td><td>Gym back at the saved turns, paused.</td></tr>
+<tr><td><b>rollback</b> (abort)</td><td>Undo a prepare or an unpublished commit by calling the resume routes, so nothing half-done is kept.</td><td>Gym running again; the previous snapshot is still the latest.</td></tr>
+</table>
+<p class="sub">Gym's "commit" means "write my part", not "make it permanent". The step-by-step order, with RL's own save, is on <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4264-4266-save-restore-sequence.html">the sequence page</a>.</p>
+
 <p><strong>Who calls what.</strong> In #4266 the Single Controller calls the actor's methods (<code>prepare_checkpoint</code>, <code>commit_checkpoint</code>, …); the <code>NemoGym</code> actor then makes each HTTP call below, one server at a time. The full sequence, including RL's own save and the restore path, is on <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4264-4266-save-restore-sequence.html">the sequence page</a>.</p>
 
 <p>Example setup: one policy model <code>policy_model</code>, one agent <code>simple_agent</code> that can export state,
