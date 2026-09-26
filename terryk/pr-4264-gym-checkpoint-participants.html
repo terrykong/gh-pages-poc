@@ -65,6 +65,7 @@ svg .lane{fill:none;stroke:var(--border);stroke-width:1}
 svg .lbl{fill:var(--text);font:12px ui-monospace,Menlo,monospace}
 svg .lbl-b{fill:var(--text);font:bold 13px -apple-system,sans-serif}
 svg .note{fill:var(--dim);font:11.5px -apple-system,sans-serif}
+svg .whyl{fill:var(--dim);font:italic 11px -apple-system,sans-serif}
 svg .hdr{fill:var(--accent);font:bold 12.5px -apple-system,sans-serif}
 svg .arrow{stroke:var(--dim);stroke-width:1.6;fill:none}
 svg .ah{fill:var(--dim)}
@@ -140,7 +141,7 @@ One <span class="tip" tabindex="0" data-tip="A wall-clock time (Unix seconds) se
 <p>Example setup: one policy model <code>policy_model</code>, one agent <code>simple_agent</code> that can export state,
 one <span class="tip" tabindex="0" data-tip="Has no per-rollout state worth saving, so it is simply left running.">stateless</span> agent <code>math_agent</code>, one resource server <code>tools</code>.</p>
 
-<svg viewBox="0 0 900 530" role="img" aria-label="Four lanes, one per phase, showing the order RL calls the policy model, the agent and the resource server; commit passes the agent's continuation index into the model commit; a failed prepare resumes every participant already contacted">
+<svg viewBox="0 0 900 546" role="img" aria-label="Four lanes, one per phase, showing the order RL calls the policy model, the agent and the resource server; commit passes the agent's continuation index into the model commit; a failed prepare resumes every participant already contacted">
   <text class="hdr" x="16" y="20">The actor's HTTP calls, per phase (left → right, one at a time)</text>
   <rect class="m" x="470" y="8" width="14" height="14" rx="3"/><text class="note" x="490" y="20">policy model</text>
   <rect class="ag" x="572" y="8" width="14" height="14" rx="3"/><text class="note" x="592" y="20">agent</text>
@@ -162,6 +163,8 @@ one <span class="tip" tabindex="0" data-tip="Has no per-rollout state worth savi
   <rect class="poll" x="700" y="52" width="184" height="44" rx="6"/>
   <text class="lbl" x="710" y="70">policy_model status</text><text class="note" x="710" y="87"><title>RL asks the model server for its status; the server answers once nothing is in flight, or the deadline passes.</title>wait until 3 in flight → 0</text>
 
+  <text class="whyl" x="120" y="110">Why: close the model first so agents can't start a new turn and park fast; freeze tools once agents stop calling them.</text>
+
   <!-- COMMIT -->
   <line class="lane" x1="16" y1="116" x2="884" y2="116"/>
   <a href="https://github.com/NVIDIA-NeMo/RL/blob/ad3c9cba741d30909132c4252a579ff2eb059d8a/nemo_rl/environments/nemo_gym.py#L1262" target="_blank" rel="noopener"><text x="16" y="148">commit</text></a>
@@ -181,42 +184,46 @@ one <span class="tip" tabindex="0" data-tip="Has no per-rollout state worth savi
   <text class="feedlbl" x="130" y="240">{"rollout_id": "p7_g2", "attempt_index": 0, "capture_key": "p7_g2",</text>
   <text class="feedlbl" x="130" y="254"> "last_committed_model_call_id": "call-2", "resource_state_revisions": {"tools": 3}}</text>
 
+  <text class="whyl" x="120" y="274">Why: agents first, because the model commit needs their continuation indexes (above) to know which calls to save.</text>
+
   <!-- RESTORE -->
-  <line class="lane" x1="16" y1="272" x2="884" y2="272"/>
-  <a href="https://github.com/NVIDIA-NeMo/RL/blob/ad3c9cba741d30909132c4252a579ff2eb059d8a/nemo_rl/environments/nemo_gym.py#L1358" target="_blank" rel="noopener"><text x="16" y="304">restore</text></a>
-  <rect class="m" x="120" y="284" width="170" height="44" rx="6"/>
-  <text class="lbl" x="130" y="302">policy_model</text><text class="note" x="130" y="319">load ledger, stay paused</text>
-  <path class="arrow" d="M292 306 L312 306"/><path class="ah" d="M318 306 L310 301 L310 311 Z"/>
-  <rect class="ag" x="320" y="284" width="170" height="44" rx="6"/>
-  <text class="lbl" x="330" y="302">simple_agent</text><text class="note" x="330" y="319">load index, stay paused</text>
-  <path class="arrow" d="M492 306 L512 306"/><path class="ah" d="M518 306 L510 301 L510 311 Z"/>
-  <rect class="r" x="520" y="284" width="150" height="44" rx="6"/>
-  <text class="lbl" x="530" y="302">tools</text><text class="note" x="530" y="319">load sessions</text>
+  <line class="lane" x1="16" y1="288" x2="884" y2="288"/>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/ad3c9cba741d30909132c4252a579ff2eb059d8a/nemo_rl/environments/nemo_gym.py#L1358" target="_blank" rel="noopener"><text x="16" y="320">restore</text></a>
+  <rect class="m" x="120" y="300" width="170" height="44" rx="6"/>
+  <text class="lbl" x="130" y="318">policy_model</text><text class="note" x="130" y="335">load ledger, stay paused</text>
+  <path class="arrow" d="M292 322 L312 322"/><path class="ah" d="M318 322 L310 317 L310 327 Z"/>
+  <rect class="ag" x="320" y="300" width="170" height="44" rx="6"/>
+  <text class="lbl" x="330" y="318">simple_agent</text><text class="note" x="330" y="335">load index, stay paused</text>
+  <path class="arrow" d="M492 322 L512 322"/><path class="ah" d="M518 322 L510 317 L510 327 Z"/>
+  <rect class="r" x="520" y="300" width="150" height="44" rx="6"/>
+  <text class="lbl" x="530" y="318">tools</text><text class="note" x="530" y="335">load sessions</text>
+
+  <text class="whyl" x="120" y="358">Why (not written down in the PR): likely model first, because restored agent turns point at calls in the model ledger.</text>
 
   <!-- RESUME -->
-  <line class="lane" x1="16" y1="348" x2="884" y2="348"/>
-  <a href="https://github.com/NVIDIA-NeMo/RL/blob/ad3c9cba741d30909132c4252a579ff2eb059d8a/nemo_rl/environments/nemo_gym.py#L1464" target="_blank" rel="noopener"><text x="16" y="380">resume</text></a>
-  <rect class="r" x="120" y="360" width="170" height="44" rx="6"/>
-  <text class="lbl" x="130" y="378">tools</text><text class="note" x="130" y="395">accept calls again</text>
-  <path class="arrow" d="M292 382 L312 382"/><path class="ah" d="M318 382 L310 377 L310 387 Z"/>
-  <rect class="m" x="320" y="360" width="170" height="44" rx="6"/>
-  <text class="lbl" x="330" y="378">policy_model</text><text class="note" x="330" y="395">open admission</text>
-  <path class="arrow" d="M492 382 L512 382"/><path class="ah" d="M518 382 L510 377 L510 387 Z"/>
-  <rect class="ag" x="520" y="360" width="150" height="44" rx="6"/>
-  <text class="lbl" x="530" y="378">simple_agent</text><text class="note" x="530" y="395"><title>Parked rollouts continue with their next turn.</title>release parked turns</text>
-  <text class="note" x="690" y="378">agents go last: what they</text>
-  <text class="note" x="690" y="394">call must be open first</text>
+  <line class="lane" x1="16" y1="364" x2="884" y2="364"/>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/ad3c9cba741d30909132c4252a579ff2eb059d8a/nemo_rl/environments/nemo_gym.py#L1464" target="_blank" rel="noopener"><text x="16" y="396">resume</text></a>
+  <rect class="r" x="120" y="376" width="170" height="44" rx="6"/>
+  <text class="lbl" x="130" y="394">tools</text><text class="note" x="130" y="411">accept calls again</text>
+  <path class="arrow" d="M292 398 L312 398"/><path class="ah" d="M318 398 L310 393 L310 403 Z"/>
+  <rect class="m" x="320" y="376" width="170" height="44" rx="6"/>
+  <text class="lbl" x="330" y="394">policy_model</text><text class="note" x="330" y="411">open admission</text>
+  <path class="arrow" d="M492 398 L512 398"/><path class="ah" d="M518 398 L510 393 L510 403 Z"/>
+  <rect class="ag" x="520" y="376" width="150" height="44" rx="6"/>
+  <text class="lbl" x="530" y="394">simple_agent</text><text class="note" x="530" y="411"><title>Parked rollouts continue with their next turn.</title>release parked turns</text>
+
+  <text class="whyl" x="120" y="434">Why: open what agents call (tools, then the model) before releasing the agents, so their first call is accepted.</text>
 
   <!-- ROLLBACK -->
-  <line class="lane" x1="16" y1="424" x2="884" y2="424"/>
-  <a href="https://github.com/NVIDIA-NeMo/RL/blob/ad3c9cba741d30909132c4252a579ff2eb059d8a/nemo_rl/environments/nemo_gym.py#L1134" target="_blank" rel="noopener"><text x="16" y="454">rollback</text></a>
-  <text class="backlbl" x="120" y="450">prepare fails or misses the deadline at any step →</text>
-  <text class="note" x="120" y="468">resume every server RL already contacted (in resume order), even one whose reply was lost,</text>
-  <text class="note" x="120" y="484">then raise. The previous checkpoint stays valid. abort_checkpoint uses the same resume calls.</text>
+  <line class="lane" x1="16" y1="440" x2="884" y2="440"/>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/ad3c9cba741d30909132c4252a579ff2eb059d8a/nemo_rl/environments/nemo_gym.py#L1134" target="_blank" rel="noopener"><text x="16" y="470">rollback</text></a>
+  <text class="backlbl" x="120" y="466">prepare fails or misses the deadline at any step →</text>
+  <text class="note" x="120" y="484">resume every server RL already contacted (in resume order), even one whose reply was lost,</text>
+  <text class="note" x="120" y="500">then raise. The previous checkpoint stays valid. abort_checkpoint uses the same resume calls.</text>
 
   <!-- skipped -->
-  <rect x="16" y="500" width="868" height="24" rx="6" style="fill:var(--surface2);stroke:var(--border)"/>
-  <text class="note" x="28" y="517">Not called in any phase: math_agent (stateless) and any model marked instance_role: auxiliary (for example a judge).</text>
+  <rect x="16" y="516" width="868" height="24" rx="6" style="fill:var(--surface2);stroke:var(--border)"/>
+  <text class="note" x="28" y="533">Not called in any phase: math_agent (stateless) and any model marked instance_role: auxiliary (for example a judge).</text>
 </svg>
 
 <h2>Where it joins what RL already had</h2>
