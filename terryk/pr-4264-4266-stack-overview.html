@@ -111,11 +111,13 @@ svg a text{text-decoration:underline;fill:var(--accent);font:bold 12.5px -apple-
 <p>Gym runs each multi-turn rollout as an agent that calls the policy model once per turn. To continue a rollout after a crash,
 three things must be true at the moment of the snapshot: every Gym server has stopped at a safe turn and written its state
 (<a href="https://github.com/NVIDIA-NeMo/RL/blob/ad3c9cba741d30909132c4252a579ff2eb059d8a/nemo_rl/environments/nemo_gym.py#L1023">#4264: prepare / commit / resume</a>);
-RL and Gym agree which try of which rollout each saved turn belongs to, and who owns each finished result
+each rollout keeps one fixed ID for its whole life, plus a run number that goes up whenever it is resumed or run again,
+and RL tells Gym to drop a finished result only after RL has saved it
 (<a href="https://github.com/NVIDIA-NeMo/RL/blob/ed1440266ca2e02ca3942d7837777fbdeff64aae/nemo_rl/experience/rollout_manager.py#L2445">#4265: stable IDs, receipts, ACKs</a>);
 and the snapshot actually drives those steps and restores them on restart
 (<a href="https://github.com/NVIDIA-NeMo/RL/blob/98b3b6c3d550ecdebd4a5ae80e00feb5896c547f/nemo_rl/algorithms/single_controller.py#L4517">#4266: <code>_save_rollout_checkpoint_locked</code></a>).
-Each PR adds one of the three.</p>
+Each PR adds one of the three. A new run number does not mean starting over: the resumed run keeps its saved turns, and
+the new number lets RL and Gym ignore anything the crashed run wrote after the snapshot.</p>
 
 <h2>What you have after each merge</h2>
 
@@ -145,11 +147,11 @@ Each PR adds one of the three.</p>
   <rect class="yes" x="716" y="78" width="170" height="36" rx="6"/><text class="t-yes" x="730" y="100">✓ used by snapshots</text>
 
   <!-- row 2: stable IDs -->
-  <text class="lbl" x="16" y="140">one rollout ID across</text>
-  <text class="lbl" x="16" y="155">tries (token capture)</text>
-  <rect class="no" x="176" y="126" width="170" height="36" rx="6"/><text class="t-no" x="190" y="148">new random ID per try</text>
-  <rect class="no" x="356" y="126" width="170" height="36" rx="6"/><text class="t-no" x="370" y="148">new random ID per try</text>
-  <rect class="yes" x="536" y="126" width="170" height="36" rx="6"/><text class="t-yes" x="550" y="142">✓ ID "p7_g2", try 1</text><text class="t-yes" x="550" y="156">Gym key "p7_g2-a1"</text>
+  <text class="lbl" x="16" y="140">fixed ID + run number</text>
+  <text class="lbl" x="16" y="155">(token-capture runs)</text>
+  <rect class="no" x="176" y="126" width="170" height="36" rx="6"/><text class="t-no" x="190" y="148">new random ID per run</text>
+  <rect class="no" x="356" y="126" width="170" height="36" rx="6"/><text class="t-no" x="370" y="148">new random ID per run</text>
+  <rect class="yes" x="536" y="126" width="170" height="36" rx="6"/><text class="t-yes" x="550" y="142">✓ ID "p7_g2", run 1</text><text class="t-yes" x="550" y="156">Gym key "p7_g2-a1"</text>
   <rect class="yes" x="716" y="126" width="170" height="36" rx="6"/><text class="t-yes" x="730" y="148">✓ matched on restart</text>
 
   <!-- row 3: receipts + ACK -->
@@ -221,7 +223,7 @@ Each PR adds one of the three.</p>
 <td><code>rollout_checkpointing.gym.capability_discovery_enabled</code></td>
 <td><span class="bad">Its Gym version bump breaks four finalize metrics on every token-capture run</span>, flag on or off (<a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4264-gym-bump-metrics.html">page</a>, <a href="https://github.com/NVIDIA-NeMo/RL/pull/4264#discussion_r4101848758">comment</a>). The new Gym commit is also not on Gym main yet (<a href="https://github.com/NVIDIA-NeMo/RL/pull/4264#discussion_r4101848773">comment</a>).</td></tr>
 <tr><td><a href="https://github.com/NVIDIA-NeMo/RL/pull/4265">#4265</a><br><a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4265-durable-gym-state.html">page</a></td>
-<td>Each rollout keeps one ID across tries. Each finished result gets a Gym receipt, is saved as "ACK owed", and is ACKed to Gym only after RL has saved it.</td>
+<td>Each rollout keeps one fixed ID, plus a run number that goes up when it is resumed or run again (a resumed run keeps its saved turns). Each finished result gets a Gym receipt, is saved as "ACK owed", and is ACKed to Gym only after RL has saved it.</td>
 <td>no new flag; the stable IDs apply to every token-capture run</td>
 <td><span class="bad">In prompt-group mode the ACK waits for the whole group</span>, so Gym never becomes ready to checkpoint (<a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4265-prompt-group-ack.html">page</a>, <a href="https://github.com/NVIDIA-NeMo/RL/pull/4265#discussion_r4109065679">comment</a>).</td></tr>
 <tr><td><a href="https://github.com/NVIDIA-NeMo/RL/pull/4266">#4266</a><br><a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4266-gym-turn-recovery.html">page</a></td>
