@@ -73,6 +73,12 @@ svg .feedlbl{fill:var(--green);font:11px ui-monospace,Menlo,monospace}
 svg .back{stroke:var(--red);stroke-width:1.8;fill:none}
 svg .backlbl{fill:var(--red);font:bold 11.5px -apple-system,sans-serif}
 svg a text{text-decoration:underline;fill:var(--accent);font:bold 12.5px -apple-system,sans-serif}
+.tip{border-bottom:1px dotted var(--dim);cursor:help;position:relative;outline:none}
+.tip:hover::after,.tip:focus::after{content:attr(data-tip);position:absolute;left:0;top:1.7em;z-index:60;
+  width:max-content;max-width:min(340px,80vw);white-space:normal;background:var(--surface2);color:var(--text);
+  border:1px solid var(--border);border-radius:6px;padding:7px 10px;font:13px/1.45 -apple-system,sans-serif;
+  font-weight:400;box-shadow:0 4px 14px rgba(0,0,0,.3)}
+.bg{border:1px dashed var(--border);border-radius:8px;padding:10px 14px;margin:0 0 16px;font-size:14px}
 </style>
 <script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
   document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
@@ -97,9 +103,9 @@ svg a text{text-decoration:underline;fill:var(--accent);font:bold 12.5px -apple-
   <dt>Before</dt>
   <dd>RL could snapshot its own rollout state, but it had no way to ask the Gym services (policy model server, agent servers, resource servers) to stop and save theirs. Gym work still running at save time could not be captured.</dd>
   <dt>This PR</dt>
-  <dd>Adds the RL side of Gym's checkpoint protocol on the <code>NemoGym</code> actor: find out who can take part, then prepare → commit → resume (or restore, or abort) in a fixed order. Off by default.</dd>
+  <dd>Adds the RL side of Gym's checkpoint protocol on the <span class="tip" tabindex="0" data-tip="The one Ray actor in RL that starts all the Gym servers and talks to them over HTTP."><code>NemoGym</code> actor</span>: find out who can take part, then prepare → commit → resume (or restore, or abort) in a fixed order. Off by default.</dd>
   <dt>Status</dt>
-  <dd><span class="verdict">New, opt-in, not yet driven.</span> Only discovery runs in this PR (at setup). The Single Controller calls the phases in #4266.</dd>
+  <dd><span class="verdict">New, opt-in, not yet driven.</span> Only discovery runs in this PR (at setup). The <span class="tip" tabindex="0" data-tip="RL&#x27;s async training loop. It runs rollouts and training side by side and takes the periodic rollout snapshots.">Single Controller</span> calls the phases in #4266.</dd>
 </dl>
 </div>
 
@@ -113,21 +119,23 @@ svg a text{text-decoration:underline;fill:var(--accent);font:bold 12.5px -apple-
 </nav>
 <p class="chainnote">Six pages on this stack — this one: #4264: what the new protocol does.</p>
 
+<div class="bg"><strong>Background, if you have not used Gym.</strong> NeMo Gym runs RL's rollouts as a few small HTTP servers, all started by the <span class="tip" tabindex="0" data-tip="The one Ray actor in RL that starts all the Gym servers and talks to them over HTTP."><code>NemoGym</code> actor</span>. There are three kinds:<br>• <b>policy model server</b>: passes each model call from an agent through to RL's own inference engine (vLLM);<br>• <b>agent server</b>: runs the multi-turn loop for each rollout (call the model, call a tool, repeat);<br>• <b>resource server</b>: holds the tool and environment state for each rollout, and scores the result.<br>All three hold state for rollouts that are still running, so a checkpoint that can resume them needs every one of them to stop and save. Dotted words have a short explanation: hover or tap them.</div>
+
 <p>At setup, when <code>rollout_checkpointing.gym.capability_discovery_enabled</code> is true
 (<a href="https://github.com/NVIDIA-NeMo/RL/blob/ad3c9cba741d30909132c4252a579ff2eb059d8a/nemo_rl/algorithms/single_controller_utils/config.py#L746">config.py:746</a>, default false),
-RL asks every Gym server <code>GET /ng-control/v1/capabilities</code> and keeps a list of the ones that can take part
+RL asks every Gym server <span class="tip" tabindex="0" data-tip="An HTTP call, GET /ng-control/v1/capabilities, that every checkpoint-aware Gym server answers. The reply says what kind of server it is, whether it can save and restore its state, whether a model server is the policy or an auxiliary one such as a judge, and which optional checkpoint features it has.">what it can do in a checkpoint</span> and keeps a list of the ones that can <span class="tip" tabindex="0" data-tip="Gym calls a server that joins a checkpoint a &#x27;participant&#x27;.">take part</span>
 (<a href="https://github.com/NVIDIA-NeMo/RL/blob/ad3c9cba741d30909132c4252a579ff2eb059d8a/nemo_rl/environments/nemo_gym.py#L878">discover_checkpoint_capabilities</a>,
 called from <a href="https://github.com/NVIDIA-NeMo/RL/blob/ad3c9cba741d30909132c4252a579ff2eb059d8a/nemo_rl/algorithms/single_controller_utils/setup.py#L1798-L1801">setup.py:1798</a>).
 Each later phase calls those servers one by one, in an order fixed per phase by a small table
 (<a href="https://github.com/NVIDIA-NeMo/RL/blob/ad3c9cba741d30909132c4252a579ff2eb059d8a/nemo_rl/environments/nemo_gym.py#L410-L431">nemo_gym.py:410-431</a>).
-Policy models always pause and resume. Everything else takes part only if it can export its state
+Policy models always <span class="tip" tabindex="0" data-tip="The server stops taking new model calls (agents get HTTP 409 and try again after the checkpoint). Calls already running finish first; waiting for them is called draining.">pause</span> and resume. Everything else takes part only if it can <span class="tip" tabindex="0" data-tip="Gym&#x27;s checkpoint_mode &#x27;export_restore&#x27;: the server can write its per-rollout state to disk and load it back. The other modes are &#x27;stateless&#x27; (nothing to save) and &#x27;restart_only&#x27; (has state it cannot save, so its rollouts start over).">export its state</span>
 (<a href="https://github.com/NVIDIA-NeMo/RL/blob/ad3c9cba741d30909132c4252a579ff2eb059d8a/nemo_rl/environments/nemo_gym.py#L962-L978">_participates_in_checkpoint_phase</a>).
-One deadline, an absolute clock time, bounds every call.</p>
+One <span class="tip" tabindex="0" data-tip="A wall-clock time (Unix seconds) sent to every server. Each call gets whatever time is left; when it runs out, the whole checkpoint is rolled back.">deadline</span>, an absolute clock time, bounds every call.</p>
 
 <h2>The four phases, on one small setup</h2>
 
 <p>Example setup: one policy model <code>policy_model</code>, one agent <code>simple_agent</code> that can export state,
-one stateless agent <code>math_agent</code>, one resource server <code>tools</code>.</p>
+one <span class="tip" tabindex="0" data-tip="Has no per-rollout state worth saving, so it is simply left running.">stateless</span> agent <code>math_agent</code>, one resource server <code>tools</code>.</p>
 
 <svg viewBox="0 0 900 470" role="img" aria-label="Four lanes, one per phase, showing the order RL calls the policy model, the agent and the resource server; commit passes the agent's continuation index into the model commit; a failed prepare resumes every participant already contacted">
   <text class="hdr" x="16" y="20">Call order per phase  (left → right, one call at a time)</text>
@@ -140,28 +148,28 @@ one stateless agent <code>math_agent</code>, one resource server <code>tools</co
   <line class="lane" x1="16" y1="40" x2="884" y2="40"/>
   <a href="https://github.com/NVIDIA-NeMo/RL/blob/ad3c9cba741d30909132c4252a579ff2eb059d8a/nemo_rl/environments/nemo_gym.py#L1023" target="_blank" rel="noopener"><text x="16" y="72">prepare</text></a>
   <rect class="m" x="120" y="52" width="170" height="44" rx="6"/>
-  <text class="lbl" x="130" y="70">policy_model</text><text class="note" x="130" y="87">pause: now draining</text>
+  <text class="lbl" x="130" y="70">policy_model</text><text class="note" x="130" y="87"><title>Admission closed: new model calls get HTTP 409 and retry later; calls already running finish.</title>pause: now draining</text>
   <path class="arrow" d="M292 74 L312 74"/><path class="ah" d="M318 74 L310 69 L310 79 Z"/>
   <rect class="ag" x="320" y="52" width="170" height="44" rx="6"/>
-  <text class="lbl" x="330" y="70">simple_agent</text><text class="note" x="330" y="87">park at a safe turn</text>
+  <text class="lbl" x="330" y="70">simple_agent</text><text class="note" x="330" y="87"><title>The agent stops each rollout at the end of a turn and holds it there.</title>park at a safe turn</text>
   <path class="arrow" d="M492 74 L512 74"/><path class="ah" d="M518 74 L510 69 L510 79 Z"/>
   <rect class="r" x="520" y="52" width="150" height="44" rx="6"/>
-  <text class="lbl" x="530" y="70">tools</text><text class="note" x="530" y="87">freeze sessions</text>
+  <text class="lbl" x="530" y="70">tools</text><text class="note" x="530" y="87"><title>The resource server stops accepting changes to tool and environment state.</title>freeze sessions</text>
   <path class="arrow" d="M672 74 L692 74"/><path class="ah" d="M698 74 L690 69 L690 79 Z"/>
   <rect class="poll" x="700" y="52" width="184" height="44" rx="6"/>
-  <text class="lbl" x="710" y="70">policy_model status</text><text class="note" x="710" y="87">wait until 3 in flight → 0</text>
+  <text class="lbl" x="710" y="70">policy_model status</text><text class="note" x="710" y="87"><title>RL asks the model server for its status; the server answers once nothing is in flight, or the deadline passes.</title>wait until 3 in flight → 0</text>
 
   <!-- COMMIT -->
   <line class="lane" x1="16" y1="116" x2="884" y2="116"/>
   <a href="https://github.com/NVIDIA-NeMo/RL/blob/ad3c9cba741d30909132c4252a579ff2eb059d8a/nemo_rl/environments/nemo_gym.py#L1262" target="_blank" rel="noopener"><text x="16" y="148">commit</text></a>
   <rect class="ag" x="120" y="128" width="170" height="44" rx="6"/>
-  <text class="lbl" x="130" y="146">simple_agent</text><text class="note" x="130" y="163">write continuation index</text>
+  <text class="lbl" x="130" y="146">simple_agent</text><text class="note" x="130" y="163"><title>A file listing, for each parked rollout, the saved turn it can continue from.</title>write continuation index</text>
   <path class="arrow" d="M292 150 L312 150"/><path class="ah" d="M318 150 L310 145 L310 155 Z"/>
   <rect class="m" x="320" y="128" width="170" height="44" rx="6"/>
-  <text class="lbl" x="330" y="146">policy_model</text><text class="note" x="330" y="163">write model ledger</text>
+  <text class="lbl" x="330" y="146">policy_model</text><text class="note" x="330" y="163"><title>The model server&#x27;s record of the model calls behind each saved turn.</title>write model ledger</text>
   <path class="arrow" d="M492 150 L512 150"/><path class="ah" d="M518 150 L510 145 L510 155 Z"/>
   <rect class="r" x="520" y="128" width="150" height="44" rx="6"/>
-  <text class="lbl" x="530" y="146">tools</text><text class="note" x="530" y="163">write session state</text>
+  <text class="lbl" x="530" y="146">tools</text><text class="note" x="530" y="163"><title>Tool and environment state for each parked rollout.</title>write session state</text>
   <path class="feed" d="M205 174 C205 190, 405 190, 405 176"/>
   <text class="feedlbl" x="216" y="200">agent's index is passed into the model commit (continuation_indexes)</text>
 
@@ -187,7 +195,7 @@ one stateless agent <code>math_agent</code>, one resource server <code>tools</co
   <text class="lbl" x="330" y="318">policy_model</text><text class="note" x="330" y="335">open admission</text>
   <path class="arrow" d="M492 322 L512 322"/><path class="ah" d="M518 322 L510 317 L510 327 Z"/>
   <rect class="ag" x="520" y="300" width="150" height="44" rx="6"/>
-  <text class="lbl" x="530" y="318">simple_agent</text><text class="note" x="530" y="335">release parked turns</text>
+  <text class="lbl" x="530" y="318">simple_agent</text><text class="note" x="530" y="335"><title>Parked rollouts continue with their next turn.</title>release parked turns</text>
   <text class="note" x="690" y="318">agents go last: what they</text>
   <text class="note" x="690" y="334">call must be open first</text>
 
@@ -205,15 +213,15 @@ one stateless agent <code>math_agent</code>, one resource server <code>tools</co
 
 <h2>Where it joins what RL already had</h2>
 
-<p>RL already talked to one Gym server over a control API: the token-capture ledger on the policy model.
+<p>RL already talked to one Gym server over a control API: the <span class="tip" tabindex="0" data-tip="With token capture on, RL&#x27;s vLLM workers record the exact token IDs of every model call Gym makes, so training uses the tokens that were really generated. The ledger is that record; RL reads it through the policy model server.">token-capture ledger</span> on the policy model.
 The new code reuses that same helper, <code>_control</code>
 (<a href="https://github.com/NVIDIA-NeMo/RL/blob/ad3c9cba741d30909132c4252a579ff2eb059d8a/nemo_rl/environments/nemo_gym.py#L815">nemo_gym.py:815</a>),
-which sends every call through Gym's <code>ServerClient.request</code>. From there the two differ in only three ways:</p>
+which sends every call through Gym's <span class="tip" tabindex="0" data-tip="Gym&#x27;s HTTP client. It looks up a server&#x27;s address by its config name."><code>ServerClient.request</code></span>. From there the two differ in only three ways:</p>
 
 <table>
 <tr><th></th><th>Token-capture control (existing)</th><th>Checkpoint control (new)</th></tr>
 <tr><td>Which servers</td><td><code>policy_model</code> only</td><td>every discovered participant, by name</td></tr>
-<tr><td>Password (bearer)</td><td>token-capture token</td><td><code>NEMO_GYM_CHECKPOINT_CONTROL_TOKEN</code>, or the token-capture one if unset
+<tr><td><span class="tip" tabindex="0" data-tip="A shared secret sent in the Authorization header. Gym refuses control calls that do not carry it.">Password (bearer)</span></td><td>token-capture token</td><td><code>NEMO_GYM_CHECKPOINT_CONTROL_TOKEN</code>, or the token-capture one if unset
 (<a href="https://github.com/NVIDIA-NeMo/RL/blob/ad3c9cba741d30909132c4252a579ff2eb059d8a/nemo_rl/environments/nemo_gym.py#L824-L828">picked by path, :824-828</a>)</td></tr>
 <tr><td>Time limit per call</td><td>fixed <code>control_timeout_s</code> (60 s)</td><td>time left until the shared deadline</td></tr>
 </table>
@@ -221,13 +229,13 @@ which sends every call through Gym's <code>ServerClient.request</code>. From the
 <p>Two setup checks keep the first version small: exactly one Gym actor
 (<a href="https://github.com/NVIDIA-NeMo/RL/blob/ad3c9cba741d30909132c4252a579ff2eb059d8a/nemo_rl/algorithms/single_controller_utils/config.py#L1280-L1294">config.py:1280</a>,
 <a href="https://github.com/NVIDIA-NeMo/RL/blob/ad3c9cba741d30909132c4252a579ff2eb059d8a/nemo_rl/environments/nemo_gym.py#L2630">sole_nemo_gym_checkpoint_actor</a>),
-and multi-worker servers that Gym cannot coordinate are refused at discovery.</p>
+and <span class="tip" tabindex="0" data-tip="A Gym server can run several worker processes. A checkpoint needs all of them paused together; Gym reports such servers as &#x27;unmanaged&#x27; unless a coordinator handles it, and RL refuses &#x27;unmanaged&#x27; ones.">multi-worker servers that Gym cannot coordinate</span> are refused at discovery.</p>
 
 <div class="hl">
 <strong>What to watch in review.</strong> Off by default, so nothing changes for existing runs <em>from the new code</em>. Three things
 matter anyway. (1) The Gym submodule now points at a commit on a Gym draft branch, not Gym main. (2) That same bump breaks four
-existing finalize metrics on every token-capture run (<a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4264-gym-bump-metrics.html">next page</a>).
-(3) Gym marks every model server as a policy model unless told otherwise, so a separate judge server would be paused
+existing <span class="tip" tabindex="0" data-tip="Per-step counts RL logs when it turns captured model calls into training rows.">finalize metrics</span> on every token-capture run (<a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4264-gym-bump-metrics.html">next page</a>).
+(3) Gym marks every model server as a policy model unless told otherwise, so a separate <span class="tip" tabindex="0" data-tip="A second model server that grades answers (for example a reward model). Gym expects these to be marked &#x27;auxiliary&#x27; so they keep serving during a checkpoint.">judge server</span> would be paused
 during prepare, and prepare would never finish on that recipe.
 </div>
 <p class="cref">🔴 <a href="https://github.com/NVIDIA-NeMo/RL/pull/4264#discussion_r4101848773">review comment — Gym submodule pin</a>
