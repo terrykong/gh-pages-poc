@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NVIDIA-NeMo/RL #4264–#4266 — who calls what when a Gym-aware snapshot is saved and restored</title>
+<style>
+:root{
+  --bg:#0d1117; --surface:#161b22; --surface2:#1c2128; --border:#30363d;
+  --text:#e6edf3; --dim:#8b949e; --accent:#58a6ff; --green:#3fb950;
+  --orange:#d29922; --red:#f85149;
+}
+:root[data-theme="light"]{
+  --bg:#ffffff; --surface:#f6f8fa; --surface2:#eaeef2; --border:#d0d7de;
+  --text:#1f2328; --dim:#59636e; --accent:#0969da; --green:#1a7f37;
+  --orange:#9a6700; --red:#cf222e;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:28px 20px 70px}
+h1{font-size:22px;margin:0 0 8px;line-height:1.3}
+h2{font-size:18px;margin:32px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;
+  font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
+.sub{color:var(--dim);font-size:13.5px;margin:0 0 16px}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);
+  border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;
+  font:13px/1 ui-monospace,Menlo,monospace;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.18)}
+.mono{font:12.5px ui-monospace,SFMono-Regular,Menlo,monospace;
+  background:var(--surface);border:1px solid var(--border);border-radius:8px;
+  padding:13px;overflow-x:auto;white-space:pre}
+.hl{border-left:3px solid var(--accent);background:var(--surface);
+  padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0}
+.bg{border:1px dashed var(--border);border-radius:8px;padding:10px 14px;margin:0 0 16px;font-size:14px}
+table{border-collapse:collapse;width:100%;font-size:13.5px;margin:10px 0}
+th,td{border:1px solid var(--border);padding:6px 10px;text-align:left;vertical-align:top}
+th{background:var(--surface2);font-weight:600}
+.status{border:1px solid var(--border);border-radius:10px;background:var(--surface);
+  padding:2px 16px 10px;margin:0 0 20px}
+.status dl{display:grid;grid-template-columns:max-content 1fr;gap:4px 14px;margin:12px 0 0}
+.status dt{color:var(--dim);font-size:12px;text-transform:uppercase;letter-spacing:.04em;
+  white-space:nowrap;padding-top:2px}
+.status dd{margin:0;font-size:14px}
+.verdict{font-weight:700;color:var(--orange)}
+nav.chain{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 6px;padding:0}
+nav.chain a,nav.chain span{display:inline-block;padding:5px 11px;border:1px solid var(--border);
+  border-radius:20px;background:var(--surface);text-decoration:none;color:var(--accent);
+  font-size:12.5px;line-height:1.3;white-space:nowrap}
+nav.chain a:hover{background:var(--surface2)}
+nav.chain span.here{background:var(--accent);color:var(--bg);border-color:var(--accent);font-weight:600}
+p.chainnote{color:var(--dim);font-size:12px;margin:0 0 18px}
+.tip{border-bottom:1px dotted var(--dim);cursor:help;position:relative;outline:none}
+.tip:hover::after,.tip:focus::after{content:attr(data-tip);position:absolute;left:0;top:1.7em;z-index:60;
+  width:max-content;max-width:min(340px,80vw);white-space:normal;background:var(--surface2);color:var(--text);
+  border:1px solid var(--border);border-radius:6px;padding:7px 10px;font:13px/1.45 -apple-system,sans-serif;
+  font-weight:400;box-shadow:0 4px 14px rgba(0,0,0,.3)}
+svg{max-width:100%;height:auto;display:block;margin:16px 0}
+svg .hdr{fill:var(--accent);font:bold 12.5px -apple-system,sans-serif}
+svg .l-rl{fill:var(--surface);stroke:var(--accent);stroke-width:1.6}
+svg .l-gym{fill:var(--surface);stroke:var(--orange);stroke-width:1.6}
+svg .l-disk{fill:var(--surface);stroke:var(--green);stroke-width:1.6}
+svg .lh{fill:var(--text);font:bold 11.5px -apple-system,sans-serif}
+svg .life{stroke:var(--border);stroke-width:1.2;stroke-dasharray:3 4}
+svg .band{fill:var(--surface2);stroke:none}
+svg .bandt{fill:var(--text);font:bold 11.5px -apple-system,sans-serif}
+svg .mlab{fill:var(--text);font:11px -apple-system,sans-serif;paint-order:stroke;stroke:var(--bg);stroke-width:3px;stroke-linejoin:round}
+svg a text.mlab{fill:var(--accent);text-decoration:underline}
+svg .snote{fill:var(--dim);font:11px -apple-system,sans-serif}
+svg .selfbox{fill:var(--accent);opacity:.5}
+svg .m-call{stroke:var(--accent);stroke-width:1.6}
+svg .m-call-h{fill:var(--accent)}
+svg .m-http{stroke:var(--orange);stroke-width:1.6}
+svg .m-http-h{fill:var(--orange)}
+svg .m-write,svg .m-read{stroke:var(--green);stroke-width:1.6;stroke-dasharray:5 3}
+svg .m-write-h,svg .m-read-h{fill:var(--green)}
+
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+  document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head>
+<body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+  function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+  function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
+    b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
+      else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+  document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+<div class="wrap">
+
+<h1>Who calls what when a Gym-aware rollout snapshot is saved, and when it is restored</h1>
+<p class="sub">The full stack: <a href="https://github.com/NVIDIA-NeMo/RL/pull/4264">#4264</a> (<code>ad3c9cb</code>, the actor calls) →
+<a href="https://github.com/NVIDIA-NeMo/RL/pull/4265">#4265</a> →
+<a href="https://github.com/NVIDIA-NeMo/RL/pull/4266">#4266</a> (<code>98b3b6c</code>, the Single Controller). Gym links pin <code>f4fcf8c</code>.</p>
+
+<div class="status">
+<dl>
+  <dt>Before</dt>
+  <dd>A rollout snapshot held RL's own state and TQ. Gym was told nothing, so an unfinished multi-turn rollout started over after a crash.</dd>
+  <dt>This stack</dt>
+  <dd>Each snapshot also pauses Gym at turn boundaries and has every Gym server save its part into the same folder; restore loads it back and continues each rollout from its last finished turn.</dd>
+  <dt>Status</dt>
+  <dd><span class="verdict">All three PRs open, under review.</span> Off by default.</dd>
+</dl>
+</div>
+
+<nav class="chain">
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4264-4266-stack-overview.html">stack overview</a>
+  <span class="here">save & restore sequence</span>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4264-gym-checkpoint-participants.html">#4264 · what it adds</a>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4264-gym-bump-metrics.html">#4264 · Gym bump breaks metrics</a>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4265-durable-gym-state.html">#4265 · what it adds</a>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4265-prompt-group-ack.html">#4265 · prompt-group ACK stall</a>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4266-gym-turn-recovery.html">#4266 · turn recovery</a>
+</nav>
+<p class="chainnote">Seven pages on this stack — this one: who calls what when a snapshot is saved and restored.</p>
+
+<div class="bg"><strong>Three layers.</strong> The <span class="tip" tabindex="0" data-tip="RL&#x27;s async training loop. It runs rollouts and training side by side and takes the periodic rollout snapshots.">Single Controller</span> decides when to save and owns the snapshot folder. It never talks to Gym directly: it calls the
+<span class="tip" tabindex="0" data-tip="The one Ray actor in RL that starts all the Gym servers and talks to them over HTTP. It is the only RL process with Gym installed."><code>NemoGym</code> actor</span>, which calls each Gym server over HTTP. The Gym servers are the policy model server (passes model calls to vLLM), the agent server (runs the
+multi-turn loop), and the resource server (tool and environment state). Blue arrows are Ray calls inside RL, orange are HTTP calls to Gym, green are
+files written or read. Dotted words have a short explanation: hover or tap them.</div>
+
+<h2>Saving</h2>
+<p>Rollouts are paused from step 1 to step 5: new Gym rollouts are not sent, and Gym refuses new model calls. RL's own cut (step 3) runs under the
+<span class="tip" tabindex="0" data-tip="A lock that lets RL copy its own bookkeeping and TQ at one consistent moment. Rollouts and training keep running; only changes that touch two things at once wait.">data-plane barrier</span>, after Gym has finished writing, and the folder is published with one rename only when every part is on disk. Code:
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/98b3b6c3d550ecdebd4a5ae80e00feb5896c547f/nemo_rl/algorithms/single_controller.py#L1949"><code>_prepare_and_commit_gym_checkpoint</code></a>,
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/98b3b6c3d550ecdebd4a5ae80e00feb5896c547f/nemo_rl/algorithms/single_controller.py#L4517"><code>_save_rollout_checkpoint_locked</code></a>, and the actor side in
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/ad3c9cba741d30909132c4252a579ff2eb059d8a/nemo_rl/environments/nemo_gym.py#L1023"><code>prepare_checkpoint</code></a> /
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/ad3c9cba741d30909132c4252a579ff2eb059d8a/nemo_rl/environments/nemo_gym.py#L1262"><code>commit_checkpoint</code></a>.</p>
+<svg viewBox="0 0 900 878" role="img" aria-label="Sequence diagram of saving a Gym-aware rollout snapshot"><text class="hdr" x="8" y="16">Saving a snapshot (every snapshot_attempt_interval_s)</text><rect class="l-rl" x="560" y="5" width="12" height="12" rx="2"/><text class="snote" x="577" y="15">NeMo-RL</text><rect class="l-gym" x="640" y="5" width="12" height="12" rx="2"/><text class="snote" x="657" y="15">Gym server (HTTP)</text><rect class="l-disk" x="770" y="5" width="12" height="12" rx="2"/><text class="snote" x="787" y="15">files</text><rect class="l-rl" x="8" y="26" width="112" height="34" rx="6"/><text class="lh" x="64" y="40" text-anchor="middle">Single</text><text class="lh" x="64" y="54" text-anchor="middle">Controller</text><line class="life" x1="64" y1="60" x2="64" y2="872"/><rect class="l-rl" x="140" y="26" width="112" height="34" rx="6"/><text class="lh" x="196" y="40" text-anchor="middle">NemoGym</text><text class="lh" x="196" y="54" text-anchor="middle">actor</text><line class="life" x1="196" y1="60" x2="196" y2="872"/><rect class="l-gym" x="274" y="26" width="112" height="34" rx="6"/><text class="lh" x="330" y="40" text-anchor="middle">policy model</text><text class="lh" x="330" y="54" text-anchor="middle">server</text><line class="life" x1="330" y1="60" x2="330" y2="872"/><rect class="l-gym" x="396" y="26" width="112" height="34" rx="6"/><text class="lh" x="452" y="40" text-anchor="middle">agent</text><text class="lh" x="452" y="54" text-anchor="middle">server</text><line class="life" x1="452" y1="60" x2="452" y2="872"/><rect class="l-gym" x="518" y="26" width="112" height="34" rx="6"/><text class="lh" x="574" y="40" text-anchor="middle">resource</text><text class="lh" x="574" y="54" text-anchor="middle">server</text><line class="life" x1="574" y1="60" x2="574" y2="872"/><rect class="l-rl" x="640" y="26" width="112" height="34" rx="6"/><text class="lh" x="696" y="40" text-anchor="middle">TransferQueue</text><text class="lh" x="696" y="54" text-anchor="middle">(TQ)</text><line class="life" x1="696" y1="60" x2="696" y2="872"/><rect class="l-disk" x="770" y="26" width="112" height="34" rx="6"/><text class="lh" x="826" y="40" text-anchor="middle">snapshot</text><text class="lh" x="826" y="54" text-anchor="middle">folder</text><line class="life" x1="826" y1="60" x2="826" y2="872"/><rect class="band" x="8" y="78" width="884" height="20" rx="4"/><text class="bandt" x="16" y="92">1 · stop new work and park at a turn boundary (rollouts are paused from here until step 5)</text><rect class="selfbox" x="58" y="96" width="10" height="16" rx="2"/><text class="mlab" x="74" y="108">stop sending new Gym rollouts</text><line class="m-call" x1="64" y1="132" x2="190" y2="132"/><path class="m-call-h" d="M196 132 L188 128 L188 136 Z"/><a href="https://github.com/NVIDIA-NeMo/RL/blob/98b3b6c3d550ecdebd4a5ae80e00feb5896c547f/nemo_rl/algorithms/single_controller.py#L1875" target="_blank" rel="noopener"><text class="mlab" x="70" y="127">flush ACKs of finished results (#4265)</text></a><line class="m-http" x1="196" y1="158" x2="446" y2="158"/><path class="m-http-h" d="M452 158 L444 154 L444 162 Z"/><text class="mlab" x="202" y="153">POST acknowledge, one per finished result</text><line class="m-call" x1="64" y1="184" x2="190" y2="184"/><path class="m-call-h" d="M196 184 L188 180 L188 188 Z"/><a href="https://github.com/NVIDIA-NeMo/RL/blob/98b3b6c3d550ecdebd4a5ae80e00feb5896c547f/nemo_rl/algorithms/single_controller.py#L1966-L1971" target="_blank" rel="noopener"><text class="mlab" x="70" y="179">prepare_checkpoint(id, deadline)</text></a><line class="m-http" x1="196" y1="210" x2="324" y2="210"/><path class="m-http-h" d="M330 210 L322 206 L322 214 Z"/><a href="https://github.com/NVIDIA-NeMo/RL/blob/ad3c9cba741d30909132c4252a579ff2eb059d8a/nemo_rl/environments/nemo_gym.py#L1069-L1076" target="_blank" rel="noopener"><text class="mlab" x="202" y="205">pause: refuse new model calls</text></a><line class="m-http" x1="196" y1="236" x2="446" y2="236"/><path class="m-http-h" d="M452 236 L444 232 L444 240 Z"/><a href="https://github.com/NVIDIA-NeMo/RL/blob/ad3c9cba741d30909132c4252a579ff2eb059d8a/nemo_rl/environments/nemo_gym.py#L1178-L1195" target="_blank" rel="noopener"><text class="mlab" x="202" y="231">prepare: park each rollout at a turn end</text></a><line class="m-http" x1="196" y1="262" x2="568" y2="262"/><path class="m-http-h" d="M574 262 L566 258 L566 266 Z"/><text class="mlab" x="202" y="257">prepare: freeze sessions</text><line class="m-http" x1="196" y1="288" x2="324" y2="288"/><path class="m-http-h" d="M330 288 L322 284 L322 292 Z"/><a href="https://github.com/NVIDIA-NeMo/RL/blob/ad3c9cba741d30909132c4252a579ff2eb059d8a/nemo_rl/environments/nemo_gym.py#L1204-L1229" target="_blank" rel="noopener"><text class="mlab" x="202" y="283">status: wait until 0 calls in flight</text></a><rect class="band" x="8" y="314" width="884" height="20" rx="4"/><text class="bandt" x="16" y="328">2 · Gym writes its own state into the unpublished snapshot folder</text><line class="m-call" x1="64" y1="344" x2="190" y2="344"/><path class="m-call-h" d="M196 344 L188 340 L188 348 Z"/><a href="https://github.com/NVIDIA-NeMo/RL/blob/98b3b6c3d550ecdebd4a5ae80e00feb5896c547f/nemo_rl/algorithms/single_controller.py#L1974-L1979" target="_blank" rel="noopener"><text class="mlab" x="70" y="339">commit_checkpoint(id, deadline, tmp folder)</text></a><line class="m-http" x1="196" y1="370" x2="446" y2="370"/><path class="m-http-h" d="M452 370 L444 366 L444 374 Z"/><text class="mlab" x="202" y="365">commit</text><line class="m-write" x1="452" y1="396" x2="820" y2="396"/><path class="m-write-h" d="M826 396 L818 392 L818 400 Z"/><text class="mlab" x="458" y="391">agent state + continuations.jsonl</text><line class="m-http" x1="196" y1="422" x2="324" y2="422"/><path class="m-http-h" d="M330 422 L322 418 L322 426 Z"/><text class="mlab" x="202" y="417">commit (with the agents&#x27; continuation indexes)</text><line class="m-write" x1="330" y1="448" x2="820" y2="448"/><path class="m-write-h" d="M826 448 L818 444 L818 452 Z"/><text class="mlab" x="336" y="443">model ledger for those turns</text><line class="m-http" x1="196" y1="474" x2="568" y2="474"/><path class="m-http-h" d="M574 474 L566 470 L566 478 Z"/><text class="mlab" x="202" y="469">commit</text><line class="m-write" x1="574" y1="500" x2="820" y2="500"/><path class="m-write-h" d="M826 500 L818 496 L818 504 Z"/><text class="mlab" x="580" y="495">session state</text><rect class="band" x="8" y="526" width="884" height="20" rx="4"/><text class="bandt" x="16" y="540">3 · RL&#x27;s own cut, under the data-plane barrier</text><line class="m-call" x1="64" y1="556" x2="690" y2="556"/><path class="m-call-h" d="M696 556 L688 552 L688 560 Z"/><a href="https://github.com/NVIDIA-NeMo/RL/blob/98b3b6c3d550ecdebd4a5ae80e00feb5896c547f/nemo_rl/algorithms/single_controller.py#L4664-L4677" target="_blank" rel="noopener"><text class="mlab" x="70" y="551">save_checkpoint</text></a><line class="m-write" x1="696" y1="582" x2="820" y2="582"/><path class="m-write-h" d="M826 582 L818 578 L818 586 Z"/><text class="mlab" x="888" y="577" text-anchor="end">training rows + token-capture rows</text><line class="m-write" x1="64" y1="608" x2="820" y2="608"/><path class="m-write-h" d="M826 608 L818 604 L818 612 Z"/><a href="https://github.com/NVIDIA-NeMo/RL/blob/98b3b6c3d550ecdebd4a5ae80e00feb5896c547f/nemo_rl/algorithms/single_controller.py#L4693-L4722" target="_blank" rel="noopener"><text class="mlab" x="70" y="603">loader place, replay index, recovery ledger, manifest</text></a><rect class="band" x="8" y="634" width="884" height="20" rx="4"/><text class="bandt" x="16" y="648">4 · publish: fsync, then rename the tmp folder into place</text><line class="m-write" x1="64" y1="664" x2="820" y2="664"/><path class="m-write-h" d="M826 664 L818 660 L818 668 Z"/><a href="https://github.com/NVIDIA-NeMo/RL/blob/98b3b6c3d550ecdebd4a5ae80e00feb5896c547f/nemo_rl/algorithms/single_controller.py#L4726-L4731" target="_blank" rel="noopener"><text class="mlab" x="70" y="659">rename tmp → snapshot_N</text></a><rect class="band" x="8" y="690" width="884" height="20" rx="4"/><text class="bandt" x="16" y="704">5 · resume, in the order that opens what agents call first</text><line class="m-call" x1="64" y1="720" x2="190" y2="720"/><path class="m-call-h" d="M196 720 L188 716 L188 724 Z"/><a href="https://github.com/NVIDIA-NeMo/RL/blob/98b3b6c3d550ecdebd4a5ae80e00feb5896c547f/nemo_rl/algorithms/single_controller.py#L2030-L2041" target="_blank" rel="noopener"><text class="mlab" x="70" y="715">resume_checkpoint(id)</text></a><line class="m-http" x1="196" y1="746" x2="568" y2="746"/><path class="m-http-h" d="M574 746 L566 742 L566 750 Z"/><text class="mlab" x="202" y="741">resume</text><line class="m-http" x1="196" y1="772" x2="324" y2="772"/><path class="m-http-h" d="M330 772 L322 768 L322 776 Z"/><text class="mlab" x="202" y="767">resume: accept model calls</text><line class="m-http" x1="196" y1="798" x2="446" y2="798"/><path class="m-http-h" d="M452 798 L444 794 L444 802 Z"/><text class="mlab" x="202" y="793">resume: parked turns continue</text><rect class="selfbox" x="58" y="812" width="10" height="16" rx="2"/><text class="mlab" x="74" y="824">send Gym rollouts again (only after Gym confirms)</text><text class="snote" x="16" y="848">If anything fails before step 4, the actor calls the same resume routes (abort_checkpoint) and the snapshot is never published.</text></svg>
+
+<h2>Restoring</h2>
+<p>Setup on the driver loads TQ first, then has Gym load its state while everything stays paused. Only after the Single Controller has loaded its own
+bookkeeping and given each unfinished rollout a new <span class="tip" tabindex="0" data-tip="Each rollout keeps one fixed ID. Its run number goes up whenever it is resumed or run again, so records the crashed run wrote after the snapshot can be ignored.">run n+1</span> does it resume Gym. A rollout that used a <span class="tip" tabindex="0" data-tip="A resource server that has state it cannot save (Gym&#x27;s checkpoint_mode restart_only). Rollouts that used one start over instead of resuming.">restart-only</span> resource is thrown away and starts over.
+Code: <a href="https://github.com/NVIDIA-NeMo/RL/blob/98b3b6c3d550ecdebd4a5ae80e00feb5896c547f/nemo_rl/algorithms/single_controller_utils/setup.py#L1872-L1990">setup.py:1872-1990</a>, <a href="https://github.com/NVIDIA-NeMo/RL/blob/98b3b6c3d550ecdebd4a5ae80e00feb5896c547f/nemo_rl/algorithms/single_controller.py#L770-L797">single_controller.py:770-797</a>.</p>
+<svg viewBox="0 0 900 682" role="img" aria-label="Sequence diagram of restoring a Gym-aware rollout snapshot"><text class="hdr" x="8" y="16">Restoring after a crash</text><rect class="l-rl" x="560" y="5" width="12" height="12" rx="2"/><text class="snote" x="577" y="15">NeMo-RL</text><rect class="l-gym" x="640" y="5" width="12" height="12" rx="2"/><text class="snote" x="657" y="15">Gym server (HTTP)</text><rect class="l-disk" x="770" y="5" width="12" height="12" rx="2"/><text class="snote" x="787" y="15">files</text><rect class="l-rl" x="8" y="26" width="112" height="34" rx="6"/><text class="lh" x="64" y="40" text-anchor="middle">Single</text><text class="lh" x="64" y="54" text-anchor="middle">Controller</text><line class="life" x1="64" y1="60" x2="64" y2="676"/><rect class="l-rl" x="140" y="26" width="112" height="34" rx="6"/><text class="lh" x="196" y="40" text-anchor="middle">NemoGym</text><text class="lh" x="196" y="54" text-anchor="middle">actor</text><line class="life" x1="196" y1="60" x2="196" y2="676"/><rect class="l-gym" x="274" y="26" width="112" height="34" rx="6"/><text class="lh" x="330" y="40" text-anchor="middle">policy model</text><text class="lh" x="330" y="54" text-anchor="middle">server</text><line class="life" x1="330" y1="60" x2="330" y2="676"/><rect class="l-gym" x="396" y="26" width="112" height="34" rx="6"/><text class="lh" x="452" y="40" text-anchor="middle">agent</text><text class="lh" x="452" y="54" text-anchor="middle">server</text><line class="life" x1="452" y1="60" x2="452" y2="676"/><rect class="l-gym" x="518" y="26" width="112" height="34" rx="6"/><text class="lh" x="574" y="40" text-anchor="middle">resource</text><text class="lh" x="574" y="54" text-anchor="middle">server</text><line class="life" x1="574" y1="60" x2="574" y2="676"/><rect class="l-rl" x="640" y="26" width="112" height="34" rx="6"/><text class="lh" x="696" y="40" text-anchor="middle">TransferQueue</text><text class="lh" x="696" y="54" text-anchor="middle">(TQ)</text><line class="life" x1="696" y1="60" x2="696" y2="676"/><rect class="l-disk" x="770" y="26" width="112" height="34" rx="6"/><text class="lh" x="826" y="40" text-anchor="middle">snapshot</text><text class="lh" x="826" y="54" text-anchor="middle">folder</text><line class="life" x1="826" y1="60" x2="826" y2="676"/><rect class="band" x="8" y="78" width="884" height="20" rx="4"/><text class="bandt" x="16" y="92">1 · setup, on the driver</text><line class="m-call" x1="64" y1="108" x2="190" y2="108"/><path class="m-call-h" d="M196 108 L188 104 L188 112 Z"/><a href="https://github.com/NVIDIA-NeMo/RL/blob/98b3b6c3d550ecdebd4a5ae80e00feb5896c547f/nemo_rl/algorithms/single_controller_utils/setup.py#L1874-L1876" target="_blank" rel="noopener"><text class="mlab" x="70" y="103">discover_checkpoint_capabilities()</text></a><line class="m-http" x1="196" y1="134" x2="568" y2="134"/><path class="m-http-h" d="M574 134 L566 130 L566 138 Z"/><text class="mlab" x="202" y="129">GET capabilities (every Gym server)</text><rect class="selfbox" x="58" y="148" width="10" height="16" rx="2"/><text class="mlab" x="74" y="160">pick newest snapshot; topology fingerprint must match</text><line class="m-call" x1="64" y1="184" x2="690" y2="184"/><path class="m-call-h" d="M696 184 L688 180 L688 188 Z"/><text class="mlab" x="70" y="179">load TQ files</text><line class="m-read" x1="826" y1="210" x2="702" y2="210"/><path class="m-read-h" d="M696 210 L704 206 L704 214 Z"/><text class="mlab" x="888" y="205" text-anchor="end">training rows + token-capture rows</text><line class="m-call" x1="64" y1="236" x2="190" y2="236"/><path class="m-call-h" d="M196 236 L188 232 L188 240 Z"/><a href="https://github.com/NVIDIA-NeMo/RL/blob/98b3b6c3d550ecdebd4a5ae80e00feb5896c547f/nemo_rl/algorithms/single_controller_utils/setup.py#L1975-L1982" target="_blank" rel="noopener"><text class="mlab" x="70" y="231">restore_checkpoint(folder, saved id)</text></a><line class="m-http" x1="196" y1="262" x2="324" y2="262"/><path class="m-http-h" d="M330 262 L322 258 L322 266 Z"/><a href="https://github.com/NVIDIA-NeMo/RL/blob/ad3c9cba741d30909132c4252a579ff2eb059d8a/nemo_rl/environments/nemo_gym.py#L1395-L1406" target="_blank" rel="noopener"><text class="mlab" x="202" y="257">restore: model ledger; close the old runs</text></a><line class="m-read" x1="826" y1="288" x2="336" y2="288"/><path class="m-read-h" d="M330 288 L338 284 L338 292 Z"/><text class="mlab" x="336" y="283">model ledger</text><line class="m-http" x1="196" y1="314" x2="446" y2="314"/><path class="m-http-h" d="M452 314 L444 310 L444 318 Z"/><text class="mlab" x="202" y="309">restore: set up parked rollouts as run n+1</text><line class="m-read" x1="826" y1="340" x2="458" y2="340"/><path class="m-read-h" d="M452 340 L460 336 L460 344 Z"/><text class="mlab" x="458" y="335">agent state + continuations.jsonl</text><line class="m-http" x1="196" y1="366" x2="568" y2="366"/><path class="m-http-h" d="M574 366 L566 362 L566 370 Z"/><text class="mlab" x="202" y="361">restore sessions</text><line class="m-read" x1="826" y1="392" x2="580" y2="392"/><path class="m-read-h" d="M574 392 L582 388 L582 396 Z"/><text class="mlab" x="580" y="387">session state</text><text class="snote" x="16" y="418">Everything restored in step 1 stays paused.</text><rect class="band" x="8" y="438" width="884" height="20" rx="4"/><text class="bandt" x="16" y="452">2 · the Single Controller actor starts</text><line class="m-read" x1="826" y1="468" x2="70" y2="468"/><path class="m-read-h" d="M64 468 L72 464 L72 472 Z"/><a href="https://github.com/NVIDIA-NeMo/RL/blob/98b3b6c3d550ecdebd4a5ae80e00feb5896c547f/nemo_rl/algorithms/single_controller.py#L1150-L1166" target="_blank" rel="noopener"><text class="mlab" x="70" y="463">loader place, replay index, recovery ledger</text></a><rect class="selfbox" x="58" y="482" width="10" height="16" rx="2"/><text class="mlab" x="74" y="494">unfinished rollouts get run number n+1</text><line class="m-call" x1="64" y1="518" x2="190" y2="518"/><path class="m-call-h" d="M196 518 L188 514 L188 522 Z"/><a href="https://github.com/NVIDIA-NeMo/RL/blob/98b3b6c3d550ecdebd4a5ae80e00feb5896c547f/nemo_rl/algorithms/single_controller.py#L1783-L1790" target="_blank" rel="noopener"><text class="mlab" x="70" y="513">discard continuations that used restart-only resources</text></a><line class="m-http" x1="196" y1="544" x2="446" y2="544"/><path class="m-http-h" d="M452 544 L444 540 L444 548 Z"/><text class="mlab" x="202" y="539">discard: those rollouts start over</text><line class="m-call" x1="64" y1="570" x2="190" y2="570"/><path class="m-call-h" d="M196 570 L188 566 L188 574 Z"/><a href="https://github.com/NVIDIA-NeMo/RL/blob/98b3b6c3d550ecdebd4a5ae80e00feb5896c547f/nemo_rl/algorithms/single_controller.py#L790-L797" target="_blank" rel="noopener"><text class="mlab" x="70" y="565">resume_checkpoint(restore id)</text></a><line class="m-http" x1="196" y1="596" x2="446" y2="596"/><path class="m-http-h" d="M452 596 L444 592 L444 600 Z"/><text class="mlab" x="202" y="591">resume (resources, then model, then agents)</text><rect class="selfbox" x="58" y="610" width="10" height="16" rx="2"/><text class="mlab" x="74" y="622">start pumps: re-send unfinished rollouts as run n+1</text><line class="m-call" x1="64" y1="646" x2="446" y2="646"/><path class="m-call-h" d="M452 646 L444 642 L444 650 Z"/><text class="mlab" x="70" y="641">run p7_g2, run 1 → continues after call-2</text></svg>
+
+<h2>What is saved, and who loads it back</h2>
+<table>
+<tr><th>In the snapshot folder</th><th>Written by</th><th>Loaded by</th></tr>
+<tr><td>agent state, plus the <span class="tip" tabindex="0" data-tip="A file each agent server writes: one line per parked rollout, saying which run of which rollout it is and the last model call whose turn finished.">continuation index</span> (<code>continuations.jsonl</code>)</td><td>agent server</td><td>agent server</td></tr>
+<tr><td><span class="tip" tabindex="0" data-tip="The policy model server&#x27;s record of every model call, with pointers to the exact tokens in TQ. The commit saves only the calls behind the saved turns.">model ledger</span> and its token-storage index</td><td>policy model server</td><td>policy model server</td></tr>
+<tr><td>session state (only servers that can export it)</td><td>resource server</td><td>resource server</td></tr>
+<tr><td>training rows and token-capture rows</td><td>TQ</td><td>setup, on the driver</td></tr>
+<tr><td>loader place, replay index, recovery ledger (run numbers, ACKs owed)</td><td>Single Controller</td><td>Single Controller</td></tr>
+<tr><td>manifest: Gym's commit result and the <span class="tip" tabindex="0" data-tip="A hash of which Gym servers take part and what they can do. Restore refuses a snapshot taken with a different set of servers.">topology fingerprint</span></td><td>Single Controller</td><td>setup, to check before loading</td></tr>
+</table>
+<p>One line of a continuation index (fields from Gym's
+<a href="https://github.com/NVIDIA-NeMo/Gym/blob/f4fcf8cf98272740fd7585aa49cee00fa2c099f0/nemo_gym/_checkpoint/artifacts.py#L59-L74"><code>AgentContinuationRoot</code></a>; values as in Gym's own tests). It says: rollout
+<code>p7_g2</code> was parked during its first run (run 0, Gym key <code>p7_g2</code>), its last finished turn ended with model call <code>call-2</code>,
+and it depends on version 3 of the <code>tools</code> server's state. On restore, Gym sets it up again as run 1 and it continues after <code>call-2</code>.</p>
+<div class="mono">{&quot;schema_version&quot;: 1, &quot;rollout_id&quot;: &quot;p7_g2&quot;, &quot;attempt_index&quot;: 0, &quot;capture_key&quot;: &quot;p7_g2&quot;,
+ &quot;last_committed_model_call_id&quot;: &quot;call-2&quot;, &quot;resource_state_revisions&quot;: {&quot;tools&quot;: 3}}</div>
+
+<div class="hl"><strong>So what.</strong> Gym never decides when to checkpoint and RL never touches Gym's files directly: the Single Controller drives, the
+actor fans out, each server saves and loads only its own part. The cost is the pause: rollouts wait from step 1 to step 5, which includes Gym's drain
+(up to <code>prepare_timeout_s</code>, 300 s by default), Gym's commit, RL's cut and the rename. The stack has no timing numbers for that pause yet.</div>
+
+</div>
+</body>
+</html>
