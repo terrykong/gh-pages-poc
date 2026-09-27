@@ -81,6 +81,9 @@ svg a text{text-decoration:underline;fill:var(--accent);font:11px ui-monospace,M
 .hl{border-left:3px solid var(--green);background:var(--surface);padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0}
 p.small{color:var(--dim);font-size:13px}
 .gd{color:var(--green)}.bd{color:var(--red)}
+h3.walk{font-size:15.5px;margin:18px 0 6px}
+ol.walk{margin:4px 0 8px 22px;padding:0}ol.walk li{margin:5px 0;font-size:14.5px}
+p.walknote{margin:10px 0 2px;color:var(--dim);font-size:14px}
 </style>
 <script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
   document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
@@ -141,7 +144,7 @@ not when participant checkpointing is on. It then reads the two row keys that on
 
 <h2>Same setup, token capture on and off</h2>
 
-<svg viewBox="0 0 940 330" role="img" aria-label="Two lanes. Both run discovery at setup, so the actor has a list of Gym servers and the registration gate opens. With token capture on, rows carry the rollout ID and the rollout runs. With token capture off, rows have no rollout ID and the gate raises KeyError on the first batch.">
+<svg viewBox="0 0 940 266" role="img" aria-label="Two lanes. Both run discovery at setup, so the actor has a list of Gym servers and the registration gate opens. With token capture on, rows carry the rollout ID and the rollout runs. With token capture off, rows have no rollout ID and the gate raises KeyError on the first batch.">
   <text class="hdr" x="16" y="22">capability_discovery_enabled: true, in both lanes</text>
 
   <rect class="box" x="16" y="40" width="190" height="52" rx="6"/>
@@ -168,14 +171,24 @@ not when participant checkpointing is on. It then reads the two row keys that on
 
   <rect class="ok" x="16" y="236" width="16" height="12"/><text class="note" x="38" y="247">works</text>
   <rect class="held" x="110" y="236" width="16" height="12"/><text class="note" x="132" y="247">crashes</text>
-
-  <a href="https://github.com/NVIDIA-NeMo/RL/blob/ed1440266ca2e02ca3942d7837777fbdeff64aae/nemo_rl/algorithms/single_controller_utils/setup.py#L1798" target="_blank" rel="noopener"><text x="16" y="278">setup discovery :1798</text></a>
-  <a href="https://github.com/NVIDIA-NeMo/RL/blob/ed1440266ca2e02ca3942d7837777fbdeff64aae/nemo_rl/environments/nemo_gym.py#L988" target="_blank" rel="noopener"><text x="190" y="278">list set :988</text></a>
-  <a href="https://github.com/NVIDIA-NeMo/RL/blob/ed1440266ca2e02ca3942d7837777fbdeff64aae/nemo_rl/environments/nemo_gym.py#L1843" target="_blank" rel="noopener"><text x="310" y="278">gate :1843</text></a>
-  <a href="https://github.com/NVIDIA-NeMo/RL/blob/ed1440266ca2e02ca3942d7837777fbdeff64aae/nemo_rl/environments/nemo_gym.py#L1846" target="_blank" rel="noopener"><text x="420" y="278">row[_ng_rollout_id] :1846</text></a>
-  <a href="https://github.com/NVIDIA-NeMo/RL/blob/ed1440266ca2e02ca3942d7837777fbdeff64aae/nemo_rl/experience/rollout_manager.py#L1174" target="_blank" rel="noopener"><text x="16" y="302">keys only with token capture :1174</text></a>
-  <a href="https://github.com/NVIDIA-NeMo/RL/blob/ed1440266ca2e02ca3942d7837777fbdeff64aae/nemo_rl/algorithms/single_controller_utils/config.py#L1280" target="_blank" rel="noopener"><text x="290" y="302">config check (shards only) :1280</text></a>
 </svg>
+<h3 class="walk">How the first rollout crashes, step by step</h3>
+<ol class="walk">
+<li><b>The config passes the check.</b> With discovery on, setup
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/ed1440266ca2e02ca3942d7837777fbdeff64aae/nemo_rl/algorithms/single_controller_utils/config.py#L1280-L1294">checks only the number of Gym actors</a>, not
+whether token capture is on.</li>
+<li><b>Setup runs discovery</b>
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/ed1440266ca2e02ca3942d7837777fbdeff64aae/nemo_rl/algorithms/single_controller_utils/setup.py#L1798-L1801">setup.py</a>), which
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/ed1440266ca2e02ca3942d7837777fbdeff64aae/nemo_rl/environments/nemo_gym.py#L988-L991">fills in the list of Gym checkpoint participants</a>.</li>
+<li><b>Rows are built without the ID keys.</b> RL adds <code>_ng_rollout_id</code> and <code>_ng_attempt_index</code>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/ed1440266ca2e02ca3942d7837777fbdeff64aae/nemo_rl/experience/rollout_manager.py#L1174-L1179">only when token capture passes rollout IDs</a>. Here it is off.</li>
+<li><b>The new tracking code turns on anyway.</b> It
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/ed1440266ca2e02ca3942d7837777fbdeff64aae/nemo_rl/environments/nemo_gym.py#L1843">checks only that the participant list is non-empty</a>, which discovery made true.</li>
+<li><b>It reads the missing key</b>
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/ed1440266ca2e02ca3942d7837777fbdeff64aae/nemo_rl/environments/nemo_gym.py#L1846"><code>row[_NG_ROLLOUT_ID_BODY_KEY]</code></a>) and raises
+<code>KeyError: '_ng_rollout_id'</code> on the first batch.</li>
+</ol>
+
 
 <p>The config that crashes, and why nothing stops it:</p>
 <div class="mono">rollout_checkpointing:
