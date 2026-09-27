@@ -74,6 +74,10 @@ svg a text{text-decoration:underline;fill:var(--accent);font:11px ui-monospace,M
   width:max-content;max-width:min(340px,80vw);white-space:normal;background:var(--surface2);color:var(--text);
   border:1px solid var(--border);border-radius:6px;padding:7px 10px;font:13px/1.45 -apple-system,sans-serif;
   font-weight:400;box-shadow:0 4px 14px rgba(0,0,0,.3)}
+table.rc{border-collapse:collapse;margin:8px 0 14px;font-size:13.5px;width:100%}
+table.rc th,table.rc td{border:1px solid var(--border);padding:6px 9px;text-align:left;vertical-align:top}
+table.rc th{background:var(--surface)}table.rc td:first-child{color:var(--dim);white-space:nowrap}
+ol.steps li{margin:4px 0}
 </style>
 <script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
   document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
@@ -116,20 +120,29 @@ RL links pin head <code>ed14402</code> (base: <code>ad3c9cb</code>); Gym links p
 <p class="chainnote">Seven pages on this stack — this one: #4265: how a finished Gym rollout is tracked.</p>
 
 <div class="bg">
-<h3>What Gym keeps, and what an ACK lets it delete</h3>
+<h3>What <code>/run</code> is, what Gym keeps, and what an ACK deletes</h3>
 <ol>
-<li>When an agent finishes a rollout, Gym keeps the <b>whole finished result</b> in memory: the
-<a href="https://github.com/NVIDIA-NeMo/Gym/blob/f4fcf8cf98272740fd7585aa49cee00fa2c099f0/nemo_gym/_checkpoint/agent.py#L411-L414">response it returned from <code>/run</code></a>, filed under the
-rollout's ID and try number.</li>
-<li>It keeps it so the result cannot be lost. If RL asks for the same rollout and try again (the reply
-got lost, or RL restarted from an earlier checkpoint), Gym
-<a href="https://github.com/NVIDIA-NeMo/Gym/blob/f4fcf8cf98272740fd7585aa49cee00fa2c099f0/nemo_gym/_checkpoint/agent.py#L320-L323">hands back the stored result</a> instead of running the rollout again.
-That is what Gym's code means by <span class="tip" tabindex="0" data-tip="Gym can give back the same finished result again, without running the rollout a second time.">"replayable"</span>.</li>
+<li><b><code>/run</code></b> is the HTTP call RL makes to a Gym agent to play out <b>one</b> rollout (one sibling)
+from start to finish: every model call, every tool call, and the final scoring. It is a single
+<a href="https://github.com/NVIDIA-NeMo/Gym/blob/f4fcf8cf98272740fd7585aa49cee00fa2c099f0/nemo_gym/rollout_collection.py#L1983">blocking POST</a>: it returns only when that rollout is done.
+RL sends all siblings' <code>/run</code> calls at once and
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/ed1440266ca2e02ca3942d7837777fbdeff64aae/nemo_rl/environments/nemo_gym.py#L1872-L1875">handles each reply as it arrives</a>. There is no polling.</li>
+<li>The <b>reply is small</b>: the output messages as text, the reward, and a few IDs. It has
+<b>no tokens</b>. The token IDs and logprobs were already written to
+<span class="tip" tabindex="0" data-tip="TransferQueue: RL's shared store for training data. Each model call during the rollout writes one row of tokens and logprobs here.">TQ</span>
+during the rollout, one row per model call.</li>
+<li>When the agent finishes, Gym <a href="https://github.com/NVIDIA-NeMo/Gym/blob/f4fcf8cf98272740fd7585aa49cee00fa2c099f0/nemo_gym/_checkpoint/agent.py#L411-L414">keeps that reply in memory</a>,
+filed under the rollout's ID and try number.</li>
+<li>Why: Gym's HTTP client <a href="https://github.com/NVIDIA-NeMo/Gym/blob/f4fcf8cf98272740fd7585aa49cee00fa2c099f0/nemo_gym/server_utils.py#L509-L560">re-sends the same <code>/run</code></a> if the
+connection drops. If the first reply was lost after the agent finished, the re-sent call
+<a href="https://github.com/NVIDIA-NeMo/Gym/blob/f4fcf8cf98272740fd7585aa49cee00fa2c099f0/nemo_gym/base_responses_api_agent.py#L217-L218">gets the stored reply back</a> instead of running the rollout
+again. This copy lives only in memory: a Gym checkpoint
+<a href="https://github.com/NVIDIA-NeMo/Gym/blob/f4fcf8cf98272740fd7585aa49cee00fa2c099f0/nemo_gym/_checkpoint/agent.py#L748-L761">does not save it</a>, so it does not survive a restore.</li>
 <li>An <b>ACK</b> is RL saying "I have saved this result". Gym
-<a href="https://github.com/NVIDIA-NeMo/Gym/blob/f4fcf8cf98272740fd7585aa49cee00fa2c099f0/nemo_gym/_checkpoint/agent.py#L437-L479">checks the receipt matches exactly</a>, then <b>deletes the stored result</b>
-and marks that ID and try as done for good, so it can never run or be handed back again.</li>
-<li>Until that happens, Gym <a href="https://github.com/NVIDIA-NeMo/Gym/blob/f4fcf8cf98272740fd7585aa49cee00fa2c099f0/nemo_gym/_checkpoint/agent.py#L722">will not commit a checkpoint</a>, because it cannot tell
-whether RL has the result or still needs the stored copy.</li>
+<a href="https://github.com/NVIDIA-NeMo/Gym/blob/f4fcf8cf98272740fd7585aa49cee00fa2c099f0/nemo_gym/_checkpoint/agent.py#L437-L479">checks the receipt matches exactly</a>, then <b>deletes the stored
+reply</b> and marks that ID and try as done for good. It does not touch TQ or anything RL still needs.</li>
+<li>Until every finished run is ACKed, Gym <a href="https://github.com/NVIDIA-NeMo/Gym/blob/f4fcf8cf98272740fd7585aa49cee00fa2c099f0/nemo_gym/_checkpoint/agent.py#L722">will not commit a
+checkpoint</a>.</li>
 </ol>
 Dotted words have a short explanation: hover or tap them.
 </div>
@@ -245,6 +258,32 @@ and the network send happens after the lock is released. That order is required:
 sending the ACK but before saving, Gym would have deleted its copy of a result RL never saved. Debts are removed only
 after Gym accepts the ACK
 (<a href="https://github.com/NVIDIA-NeMo/RL/blob/ed1440266ca2e02ca3942d7837777fbdeff64aae/nemo_rl/experience/rollout_recovery.py#L1031"><code>mark_completed_executions_acknowledged</code></a>).</p>
+
+<h2>Two things called "receipt", and the order RL does things</h2>
+
+<table class="rc">
+<tr><th></th><th>Completion receipt</th><th>Rollout receipt</th></tr>
+<tr><td>Made by</td><td>Gym, for one finished run</td><td>RL, from Gym's token-capture list for that run</td></tr>
+<tr><td>Holds</td><td>ID, try number, a hash of the <code>/run</code> reply, which token list to read, the last model call</td>
+<td>which TQ rows make up this rollout, which call was the last one, the reward</td></tr>
+<tr><td>Used for</td><td>the body of the ACK (and picking the right token list)</td><td>rebuilding the training row from TQ</td></tr>
+</table>
+
+<p>For each finished row, in this order:</p>
+<ol class="steps">
+<li><code>/run</code> returns the reply (<a href="https://github.com/NVIDIA-NeMo/RL/blob/ed1440266ca2e02ca3942d7837777fbdeff64aae/nemo_rl/environments/nemo_gym.py#L1875">nemo_gym.py:1875</a>).</li>
+<li>RL fetches the <b>completion receipt</b> from Gym
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/ed1440266ca2e02ca3942d7837777fbdeff64aae/nemo_rl/environments/nemo_gym.py#L1025"><code>_completion_receipt_for</code></a>).</li>
+<li>RL fetches the run's token list from Gym and builds the <b>rollout receipt</b>
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/ed1440266ca2e02ca3942d7837777fbdeff64aae/nemo_rl/environments/nemo_gym.py#L2036-L2054"><code>_postprocess_receipt_mode</code></a>).</li>
+<li>RL seals the row and writes "I owe Gym an ACK" in one locked step
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/ed1440266ca2e02ca3942d7837777fbdeff64aae/nemo_rl/experience/rollout_manager.py#L2445">rollout_manager.py:2445</a>).</li>
+<li>After the lock is released, RL sends the ACK
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/ed1440266ca2e02ca3942d7837777fbdeff64aae/nemo_rl/environments/nemo_gym.py#L1045"><code>acknowledge_completed_executions</code></a>); Gym deletes its
+copy of the reply; RL removes its "owe an ACK" note
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/ed1440266ca2e02ca3942d7837777fbdeff64aae/nemo_rl/experience/rollout_recovery.py#L1031"><code>mark_completed_executions_acknowledged</code></a>).</li>
+</ol>
+<p>By step 5, RL already has everything it needs. The ACK only lets Gym free its copy.</p>
 
 <div class="hl">
 <strong>So what.</strong> After this PR, a finished Gym rollout has one owner at every moment: Gym until
