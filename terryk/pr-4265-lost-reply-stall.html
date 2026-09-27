@@ -81,6 +81,9 @@ svg a text{text-decoration:underline;fill:var(--accent);font:11px ui-monospace,M
 .hl{border-left:3px solid var(--green);background:var(--surface);padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0}
 p.small{color:var(--dim);font-size:13px}
 .gd{color:var(--green)}.bd{color:var(--red)}
+h3.walk{font-size:15.5px;margin:18px 0 6px}
+ol.walk{margin:4px 0 8px 22px;padding:0}ol.walk li{margin:5px 0;font-size:14.5px}
+p.walknote{margin:10px 0 2px;color:var(--dim);font-size:14px}
 </style>
 <script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
   document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
@@ -146,7 +149,7 @@ starts the next try, and never ACKs the old one. Gym keeps it forever.</p>
 
 <h2>One lost reply, step by step</h2>
 
-<svg viewBox="0 0 940 440" role="img" aria-label="Timeline. RL sends try 0. RL's deadline fires and it stops waiting. Gym finishes try 0 and keeps the reply, which reaches no one. RL runs try 1, seals and ACKs it. At the next checkpoint Gym still has try 0 finished and not ACKed, so prepare answers not ready until the deadline, every time.">
+<svg viewBox="0 0 940 390" role="img" aria-label="Timeline. RL sends try 0. RL's deadline fires and it stops waiting. Gym finishes try 0 and keeps the reply, which reaches no one. RL runs try 1, seals and ACKs it. At the next checkpoint Gym still has try 0 finished and not ACKed, so prepare answers not ready until the deadline, every time.">
   <text class="hdr" x="16" y="22">Rollout r7. Try 0 finishes in Gym after RL has stopped waiting for it.</text>
   <text class="lbl-b" x="16" y="62">RL</text>
   <text class="lbl-b" x="16" y="142">Gym, try 0</text>
@@ -176,15 +179,27 @@ starts the next try, and never ACKs the old one. Gym keeps it forever.</p>
   <rect class="run" x="16" y="364" width="16" height="12"/><text class="note" x="38" y="375">running</text>
   <rect class="ok" x="110" y="364" width="16" height="12"/><text class="note" x="132" y="375">finished + ACKed</text>
   <rect class="held" x="250" y="364" width="16" height="12"/><text class="note" x="272" y="375">finished, not ACKed / reply dropped</text>
-
-  <a href="https://github.com/NVIDIA-NeMo/RL/blob/ed1440266ca2e02ca3942d7837777fbdeff64aae/nemo_rl/experience/rollout_manager.py#L1331" target="_blank" rel="noopener"><text x="16" y="404">RL deadline :1331</text></a>
-  <a href="https://github.com/NVIDIA-NeMo/RL/blob/ed1440266ca2e02ca3942d7837777fbdeff64aae/nemo_rl/environments/nemo_gym.py#L1906" target="_blank" rel="noopener"><text x="150" y="404">receipt fetch :1906</text></a>
-  <a href="https://github.com/NVIDIA-NeMo/Gym/blob/f4fcf8cf98272740fd7585aa49cee00fa2c099f0/nemo_gym/base_responses_api_agent.py#L244" target="_blank" rel="noopener"><text x="290" y="404">Gym finish() :244</text></a>
-  <a href="https://github.com/NVIDIA-NeMo/Gym/blob/f4fcf8cf98272740fd7585aa49cee00fa2c099f0/nemo_gym/_checkpoint/agent.py#L712" target="_blank" rel="noopener"><text x="430" y="404">status() not ready :712</text></a>
-  <a href="https://github.com/NVIDIA-NeMo/Gym/blob/f4fcf8cf98272740fd7585aa49cee00fa2c099f0/nemo_gym/_checkpoint/agent.py#L652" target="_blank" rel="noopener"><text x="600" y="404">retire() refuses :652</text></a>
-  <a href="https://github.com/NVIDIA-NeMo/RL/blob/ed1440266ca2e02ca3942d7837777fbdeff64aae/nemo_rl/environments/nemo_gym.py#L1304" target="_blank" rel="noopener"><text x="16" y="426">RL prepare retry loop :1304</text></a>
-  <a href="https://github.com/NVIDIA-NeMo/RL/blob/ed1440266ca2e02ca3942d7837777fbdeff64aae/nemo_rl/experience/rollout_recovery.py#L585" target="_blank" rel="noopener"><text x="230" y="426">RL starts next try :585</text></a>
 </svg>
+<h3 class="walk">How one lost reply blocks every later checkpoint, step by step</h3>
+<ol class="walk">
+<li><b>Gym finishes try N.</b> The agent's <code>/run</code> ends, and Gym
+<a href="https://github.com/NVIDIA-NeMo/Gym/blob/f4fcf8cf98272740fd7585aa49cee00fa2c099f0/nemo_gym/base_responses_api_agent.py#L244">marks it finished and keeps the reply</a> before sending it back.</li>
+<li><b>RL never uses the reply.</b> RL's own
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/ed1440266ca2e02ca3942d7837777fbdeff64aae/nemo_rl/experience/rollout_manager.py#L1331-L1335">time limit for the rollout</a> fires, the stream closes early, or the
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/ed1440266ca2e02ca3942d7837777fbdeff64aae/nemo_rl/environments/nemo_gym.py#L1906-L1909">receipt fetch</a> after <code>/run</code> fails.</li>
+<li><b>RL starts try N+1</b>
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/ed1440266ca2e02ca3942d7837777fbdeff64aae/nemo_rl/experience/rollout_recovery.py#L585-L592"><code>prepare_incomplete_retry</code></a>) and never sends an
+ACK for try N, because it never got try N's receipt.</li>
+<li><b>Every checkpoint prepare fails.</b> Gym's
+<a href="https://github.com/NVIDIA-NeMo/Gym/blob/f4fcf8cf98272740fd7585aa49cee00fa2c099f0/nemo_gym/_checkpoint/agent.py#L712-L722"><code>status()</code> says "not ready"</a> while any finished run is un-ACKed,
+and try N is one.</li>
+<li><b>Nothing can release try N.</b> Gym's
+<a href="https://github.com/NVIDIA-NeMo/Gym/blob/f4fcf8cf98272740fd7585aa49cee00fa2c099f0/nemo_gym/_checkpoint/agent.py#L652-L660"><code>retire()</code> refuses finished runs</a>, and RL has no receipt to ACK it with.</li>
+<li><b>RL retries prepare until the deadline</b>
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/ed1440266ca2e02ca3942d7837777fbdeff64aae/nemo_rl/environments/nemo_gym.py#L1304-L1325">retry loop</a>), gives up on that snapshot, and the next snapshot hits
+step 4 again, for the rest of the process.</li>
+</ol>
+
 
 <p>How a reply gets lost. None of these needs a bug; each is normal behavior:</p>
 <ul>
