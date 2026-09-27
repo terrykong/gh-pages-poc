@@ -106,9 +106,11 @@ both sides; not run against a live Gym.</p>
   <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4264-gym-bump-metrics.html">#4264 · Gym bump breaks metrics</a>
   <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4265-durable-gym-state.html">#4265 · what it adds</a>
   <span class="here">#4265 · prompt-group ACK stall</span>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4265-lost-reply-stall.html">#4265 · lost reply stalls checkpoints</a>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4265-discovery-keyerror.html">#4265 · discovery-only KeyError</a>
   <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4266-gym-turn-recovery.html">#4266 · turn recovery</a>
 </nav>
-<p class="chainnote">Seven pages on this stack — this one: #4265: the bug in prompt-group mode.</p>
+<p class="chainnote">Nine pages on this stack — this one: #4265: the bug in prompt-group mode.</p>
 
 <p id="mechanism">Gym keeps each finished result until RL ACKs it, and its
 <a href="https://github.com/NVIDIA-NeMo/Gym/blob/f4fcf8cf98272740fd7585aa49cee00fa2c099f0/nemo_gym/_checkpoint/agent.py#L722"><code>status()</code></a>
@@ -177,10 +179,7 @@ until all of them are in.</p>
 <p id="reachable">Nothing rejects this setup: prompt-group mode is a documented option, and no check in this PR or the
 two stacked with it refuses prompt-group mode together with Gym checkpointing. This PR even adds
 <a href="https://github.com/NVIDIA-NeMo/RL/blob/ed1440266ca2e02ca3942d7837777fbdeff64aae/nemo_rl/experience/rollout_recovery.py#L982"><code>record_sealed_group_acknowledgements</code></a>
-for it. A second way to strand a result: the new receipt fetch
-(<a href="https://github.com/NVIDIA-NeMo/RL/blob/ed1440266ca2e02ca3942d7837777fbdeff64aae/nemo_rl/environments/nemo_gym.py#L1906">nemo_gym.py:1906</a>)
-runs after a <code>/run</code> has finished but outside the loop that keeps draining the batch, so one
-control-call timeout leaves that row finished in Gym with no receipt in RL.</p>
+for it. A lost <code>/run</code> reply strands a finished result the same way; see <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4265-lost-reply-stall.html">the lost-reply page</a>.</p>
 <p class="cref">🔴 <a href="https://github.com/NVIDIA-NeMo/RL/pull/4265#discussion_r4109065679">review comment — rollout_manager.py:2434</a> <a href="https://github.com/NVIDIA-NeMo/RL/pull/4265#discussion_r4109065692">review comment — nemo_gym.py:1906</a></p>
 
 <h2>What would fix it — proposed, not in the PR</h2>
@@ -207,8 +206,7 @@ if len(pending_group_results) &lt; 3:
 <a href="https://github.com/NVIDIA-NeMo/RL/blob/ed1440266ca2e02ca3942d7837777fbdeff64aae/nemo_rl/experience/rollout_manager.py#L2426">rollout_manager.py:2426-2442</a>
 and a new ledger method next to
 <a href="https://github.com/NVIDIA-NeMo/RL/blob/ed1440266ca2e02ca3942d7837777fbdeff64aae/nemo_rl/experience/rollout_recovery.py#L964"><code>record_sealed_sibling_acknowledgement</code></a>
-that builds the ACK from the receipt without requiring the sibling to be sealed. For the receipt fetch:
-treat an error after <code>await task</code> like a failed task and keep draining.</p>
+that builds the ACK from the receipt without requiring the sibling to be sealed. For lost replies, see <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4265-lost-reply-stall.html">the lost-reply page</a>.</p>
 
 <div class="warn">
 <strong>So what.</strong> With prompt-group mode and Gym checkpointing both on, any snapshot taken while
