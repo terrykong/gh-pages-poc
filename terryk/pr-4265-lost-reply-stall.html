@@ -138,8 +138,9 @@ reward, so RL needs it. Each call has a rollout ID and a <span class="tip" tabin
 <li>Before a checkpoint, RL asks Gym to <span class="tip" tabindex="0" data-tip="Gym stops new work and parks running rollouts at a saved turn, so the checkpoint has a consistent state.">prepare</span>.
 Gym <a href="https://github.com/NVIDIA-NeMo/Gym/blob/f4fcf8cf98272740fd7585aa49cee00fa2c099f0/nemo_gym/_checkpoint/agent.py#L712-L722">answers "not ready"</a> while any finished run is un-ACKed,
 and RL <a href="https://github.com/NVIDIA-NeMo/RL/blob/ed1440266ca2e02ca3942d7837777fbdeff64aae/nemo_rl/environments/nemo_gym.py#L1304-L1325">retries until the deadline</a>.</li>
-<li>Gym's <code>retire()</code> can cancel a try RL no longer wants, but it
-<a href="https://github.com/NVIDIA-NeMo/Gym/blob/f4fcf8cf98272740fd7585aa49cee00fa2c099f0/nemo_gym/_checkpoint/agent.py#L652-L660">refuses a finished one</a>. Only an ACK releases it.</li>
+<li>Gym also has a <a href="https://github.com/NVIDIA-NeMo/Gym/blob/f4fcf8cf98272740fd7585aa49cee00fa2c099f0/nemo_gym/_checkpoint/agent.py#L1473-L1483"><code>/retire</code> route</a> that cancels a try
+RL no longer wants. <b>Nothing calls it today</b>, not this PR and not #4266. And it
+<a href="https://github.com/NVIDIA-NeMo/Gym/blob/f4fcf8cf98272740fd7585aa49cee00fa2c099f0/nemo_gym/_checkpoint/agent.py#L652-L660">refuses a finished try</a>, so only an ACK can release one.</li>
 </ul>
 Dotted words have a short explanation: hover or tap them.
 </div>
@@ -174,7 +175,7 @@ starts the next try, and never ACKs the old one. Gym keeps it forever.</p>
   <rect class="box" x="16" y="252" width="908" height="96" rx="8" style="stroke:var(--red)"/>
   <text class="bad" x="30" y="274">At the checkpoint, and at every one after it:</text>
   <text class="note" x="30" y="294">Gym prepare: 1 finished run not ACKed (r7, try 0) → "not ready" (HTTP 409)</text>
-  <text class="note" x="30" y="312">RL retries prepare until the deadline → TimeoutError. retire(r7, 0) refuses: the run is finished.</text>
+  <text class="note" x="30" y="312">RL retries prepare until the deadline → TimeoutError. Nothing can release r7 try 0.</text>
   <text class="note" x="30" y="330">Nothing in RL will ever ACK try 0, so no Gym-aware checkpoint can commit again in this process.</text>
 
   <rect class="run" x="16" y="364" width="16" height="12"/><text class="note" x="38" y="375">running</text>
@@ -194,8 +195,8 @@ ACK for try N, because it never got try N's receipt.</li>
 <li><b>Every checkpoint prepare fails.</b> Gym's
 <a href="https://github.com/NVIDIA-NeMo/Gym/blob/f4fcf8cf98272740fd7585aa49cee00fa2c099f0/nemo_gym/_checkpoint/agent.py#L712-L722"><code>status()</code> says "not ready"</a> while any finished run is un-ACKed,
 and try N is one.</li>
-<li><b>Nothing can release try N.</b> Gym's
-<a href="https://github.com/NVIDIA-NeMo/Gym/blob/f4fcf8cf98272740fd7585aa49cee00fa2c099f0/nemo_gym/_checkpoint/agent.py#L652-L660"><code>retire()</code> refuses finished runs</a>, and RL has no receipt to ACK it with.</li>
+<li><b>Nothing can release try N.</b> RL has no receipt to ACK it with. Gym's <code>/retire</code> route,
+which nothing calls today, would <a href="https://github.com/NVIDIA-NeMo/Gym/blob/f4fcf8cf98272740fd7585aa49cee00fa2c099f0/nemo_gym/_checkpoint/agent.py#L652-L660">refuse a finished run</a> anyway.</li>
 <li><b>RL retries prepare until the deadline</b>
 (<a href="https://github.com/NVIDIA-NeMo/RL/blob/ed1440266ca2e02ca3942d7837777fbdeff64aae/nemo_rl/environments/nemo_gym.py#L1304-L1325">retry loop</a>), gives up on that snapshot, and the next snapshot hits
 step 4 again, for the rest of the process.</li>
@@ -223,7 +224,7 @@ after RL reran+ACKed try 1: ready_to_commit= False completed_unacknowledged= 1 s
 <p class="where"><b>Where the fix lands:</b> RL only. A new method on the NemoGym actor in <a href="https://github.com/NVIDIA-NeMo/RL/blob/ed1440266ca2e02ca3942d7837777fbdeff64aae/nemo_rl/environments/nemo_gym.py#L1045">nemo_gym.py</a> (next to <code>acknowledge_completed_executions</code>) calls Gym's retire route and, when needed, re-sends <code>/run</code>. It is called from the retry path, before <a href="https://github.com/NVIDIA-NeMo/RL/blob/ed1440266ca2e02ca3942d7837777fbdeff64aae/nemo_rl/experience/rollout_recovery.py#L585-L592"><code>prepare_incomplete_retry</code></a> starts try N+1, and from the prepare path, where the 409 arrives (<a href="https://github.com/NVIDIA-NeMo/RL/blob/ed1440266ca2e02ca3942d7837777fbdeff64aae/nemo_rl/environments/nemo_gym.py#L1318-L1325"><code>_prepare_agent_checkpoint</code></a>). No Gym change: the <a href="https://github.com/NVIDIA-NeMo/Gym/blob/f4fcf8cf98272740fd7585aa49cee00fa2c099f0/nemo_gym/_checkpoint/agent.py#L1474-L1483">retire route</a>, the <a href="https://github.com/NVIDIA-NeMo/Gym/blob/f4fcf8cf98272740fd7585aa49cee00fa2c099f0/nemo_gym/base_responses_api_agent.py#L217-L218">stored-reply replay</a> and the <a href="https://github.com/NVIDIA-NeMo/Gym/blob/f4fcf8cf98272740fd7585aa49cee00fa2c099f0/nemo_gym/_checkpoint/agent.py#L727-L733">list of un-ACKed runs in the 409</a> all exist in the pinned Gym.</p>
 
 <p>Nothing below is implemented. Keep the ACK, and never leave a try behind. When RL gives up on a try,
-it first calls Gym's <code>retire()</code>, and the answer says what to do. Every piece already exists in the
+it first calls Gym's <code>/retire</code> route (it exists in Gym today; RL would be its first caller), and the answer says what to do. Every piece already exists in the
 pinned Gym, so <b>no Gym change is needed</b>:</p>
 <ul>
 <li><code>retire()</code> <a href="https://github.com/NVIDIA-NeMo/Gym/blob/f4fcf8cf98272740fd7585aa49cee00fa2c099f0/nemo_gym/_checkpoint/agent.py#L661-L675">cancels a try that is still running</a> and blocks its try number.</li>
