@@ -84,6 +84,7 @@ p.small{color:var(--dim);font-size:13px}
 h3.walk{font-size:15.5px;margin:18px 0 6px}
 ol.walk{margin:4px 0 8px 22px;padding:0}ol.walk li{margin:5px 0;font-size:14.5px}
 p.walknote{margin:10px 0 2px;color:var(--dim);font-size:14px}
+.where{border-left:4px solid var(--accent);background:var(--surface);padding:6px 12px;margin:6px 0 10px}
 </style>
 <script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
   document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
@@ -219,6 +220,7 @@ after RL reran+ACKed try 1: ready_to_commit= False completed_unacknowledged= 1 s
 <p class="small">The review is still pending, so this link opens for others only after it is published.</p>
 
 <h2>What would fix it — proposed, not in the PR</h2>
+<p class="where"><b>Where the fix lands:</b> RL only. A new method on the NemoGym actor in <a href="https://github.com/NVIDIA-NeMo/RL/blob/ed1440266ca2e02ca3942d7837777fbdeff64aae/nemo_rl/environments/nemo_gym.py#L1045">nemo_gym.py</a> (next to <code>acknowledge_completed_executions</code>) calls Gym's retire route and, when needed, re-sends <code>/run</code>. It is called from the retry path, before <a href="https://github.com/NVIDIA-NeMo/RL/blob/ed1440266ca2e02ca3942d7837777fbdeff64aae/nemo_rl/experience/rollout_recovery.py#L585-L592"><code>prepare_incomplete_retry</code></a> starts try N+1, and from the prepare path, where the 409 arrives (<a href="https://github.com/NVIDIA-NeMo/RL/blob/ed1440266ca2e02ca3942d7837777fbdeff64aae/nemo_rl/environments/nemo_gym.py#L1318-L1325"><code>_prepare_agent_checkpoint</code></a>). No Gym change: the <a href="https://github.com/NVIDIA-NeMo/Gym/blob/f4fcf8cf98272740fd7585aa49cee00fa2c099f0/nemo_gym/_checkpoint/agent.py#L1474-L1483">retire route</a>, the <a href="https://github.com/NVIDIA-NeMo/Gym/blob/f4fcf8cf98272740fd7585aa49cee00fa2c099f0/nemo_gym/base_responses_api_agent.py#L217-L218">stored-reply replay</a> and the <a href="https://github.com/NVIDIA-NeMo/Gym/blob/f4fcf8cf98272740fd7585aa49cee00fa2c099f0/nemo_gym/_checkpoint/agent.py#L727-L733">list of un-ACKed runs in the 409</a> all exist in the pinned Gym.</p>
 
 <p>Nothing below is implemented. Keep the ACK, and never leave a try behind. When RL gives up on a try,
 it first calls Gym's <code>retire()</code>, and the answer says what to do. Every piece already exists in the
