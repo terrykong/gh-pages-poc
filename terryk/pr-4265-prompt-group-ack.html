@@ -69,6 +69,9 @@ svg .good{fill:var(--green);font:bold 12px -apple-system,sans-serif}
 svg .snap{stroke:var(--orange);stroke-width:2.2;stroke-dasharray:6 4}
 svg .snap-lbl{fill:var(--orange);font:bold 11.5px -apple-system,sans-serif}
 svg a text{text-decoration:underline;fill:var(--accent);font:11px ui-monospace,Menlo,monospace}
+h3.walk{font-size:15.5px;margin:18px 0 6px}
+ol.walk{margin:4px 0 8px 22px;padding:0}ol.walk li{margin:5px 0;font-size:14.5px}
+p.walknote{margin:10px 0 2px;color:var(--dim);font-size:14px}
 </style>
 <script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
   document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
@@ -125,7 +128,7 @@ until all of them are in.</p>
 
 <h2>Same group, two modes</h2>
 
-<svg viewBox="0 0 940 500" role="img" aria-label="Three siblings over time. Sibling mode: g0 is ACKed as soon as it finishes and the snapshot succeeds. Prompt-group mode: g0 is held with no ACK, the snapshot parks g1 and g2, Gym keeps answering 409 until the 300 second deadline. If the group then fails, g0 is never ACKed and every later snapshot fails.">
+<svg viewBox="0 0 940 446" role="img" aria-label="Three siblings over time. Sibling mode: g0 is ACKed as soon as it finishes and the snapshot succeeds. Prompt-group mode: g0 is held with no ACK, the snapshot parks g1 and g2, Gym keeps answering 409 until the 300 second deadline. If the group then fails, g0 is never ACKed and every later snapshot fails.">
   <text class="hdr" x="16" y="22">Prompt group p7, 3 siblings. g0 finishes first; then a snapshot starts.</text>
   <text class="note" x="160" y="44">g0 finishes</text>
   <text class="note" x="400" y="44">snapshot starts</text>
@@ -167,14 +170,35 @@ until all of them are in.</p>
   <rect class="held" x="232" y="424" width="16" height="12"/><text class="note" x="254" y="435">done, not ACKed</text>
   <rect class="park" x="376" y="424" width="16" height="12"/><text class="note" x="398" y="435">parked by Gym prepare</text>
 
-  <a href="https://github.com/NVIDIA-NeMo/RL/blob/ed1440266ca2e02ca3942d7837777fbdeff64aae/nemo_rl/experience/rollout_manager.py#L2426" target="_blank" rel="noopener"><text x="16" y="462">early return :2426</text></a>
-  <a href="https://github.com/NVIDIA-NeMo/RL/blob/ed1440266ca2e02ca3942d7837777fbdeff64aae/nemo_rl/experience/rollout_recovery.py#L982" target="_blank" rel="noopener"><text x="150" y="462">ACKs only at group seal :982</text></a>
-  <a href="https://github.com/NVIDIA-NeMo/RL/blob/ed1440266ca2e02ca3942d7837777fbdeff64aae/nemo_rl/experience/rollout_recovery.py#L540" target="_blank" rel="noopener"><text x="350" y="462">_abandon_entire_group :540</text></a>
-  <a href="https://github.com/NVIDIA-NeMo/RL/blob/ed1440266ca2e02ca3942d7837777fbdeff64aae/nemo_rl/environments/nemo_gym.py#L1295" target="_blank" rel="noopener"><text x="560" y="462">409 retry loop :1295</text></a>
-  <a href="https://github.com/NVIDIA-NeMo/Gym/blob/f4fcf8cf98272740fd7585aa49cee00fa2c099f0/nemo_gym/_checkpoint/agent.py#L611" target="_blank" rel="noopener"><text x="16" y="484">Gym _wait_prepared :611</text></a>
-  <a href="https://github.com/NVIDIA-NeMo/Gym/blob/f4fcf8cf98272740fd7585aa49cee00fa2c099f0/nemo_gym/_checkpoint/agent.py#L599" target="_blank" rel="noopener"><text x="190" y="484">only PARK_REQUESTED resumed :599</text></a>
-  <a href="https://github.com/NVIDIA-NeMo/Gym/blob/f4fcf8cf98272740fd7585aa49cee00fa2c099f0/nemo_gym/_checkpoint/agent.py#L652" target="_blank" rel="noopener"><text x="440" y="484">retire refuses COMPLETED :652</text></a>
 </svg>
+
+
+<h3 class="walk">What happens in prompt-group mode, step by step</h3>
+<ol class="walk">
+<li><b>g0 finishes.</b> RL puts its result in a local dict and
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/ed1440266ca2e02ca3942d7837777fbdeff64aae/nemo_rl/experience/rollout_manager.py#L2425-L2427">returns early</a>, because the group is not complete yet.
+No "I owe Gym an ACK" note is written for g0.</li>
+<li><b>The ACK note is written only when the whole group is in</b>, by
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/ed1440266ca2e02ca3942d7837777fbdeff64aae/nemo_rl/experience/rollout_recovery.py#L982-L1000"><code>record_sealed_group_acknowledgements</code></a>.
+Until then Gym still counts g0 as "finished, not ACKed".</li>
+<li><b>A snapshot starts.</b> Gym parks g1 and g2 at a saved point and
+<a href="https://github.com/NVIDIA-NeMo/Gym/blob/f4fcf8cf98272740fd7585aa49cee00fa2c099f0/nemo_gym/_checkpoint/agent.py#L611-L619">waits until nothing is running</a>. Then it reports
+<a href="https://github.com/NVIDIA-NeMo/Gym/blob/f4fcf8cf98272740fd7585aa49cee00fa2c099f0/nemo_gym/_checkpoint/agent.py#L722">"not ready to commit"</a>, because g0 is finished but not ACKed.</li>
+<li><b>g1 and g2 stay parked.</b> When a prepare fails, Gym
+<a href="https://github.com/NVIDIA-NeMo/Gym/blob/f4fcf8cf98272740fd7585aa49cee00fa2c099f0/nemo_gym/_checkpoint/agent.py#L599-L608">wakes up only runs it had not parked yet</a>. g1 and g2 are already parked, so they
+cannot finish, the group cannot complete, and g0 never gets its ACK note.</li>
+<li><b>RL retries prepare until the deadline.</b> Each try gets a 409, and RL
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/ed1440266ca2e02ca3942d7837777fbdeff64aae/nemo_rl/environments/nemo_gym.py#L1304-L1325">tries again</a> until the prepare deadline (300 s by default),
+then gives up on this snapshot.</li>
+</ol>
+<p class="walknote">Worse case, if a sibling fails after g0 finished:</p>
+<ol class="walk" start="6">
+<li><b>RL throws away the whole group</b>, including g0's result
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/ed1440266ca2e02ca3942d7837777fbdeff64aae/nemo_rl/experience/rollout_recovery.py#L540-L555"><code>_abandon_entire_group</code></a>), and retries it as try 1.</li>
+<li><b>Gym still holds g0 as finished, and nothing will ever ACK it.</b> Gym's
+<a href="https://github.com/NVIDIA-NeMo/Gym/blob/f4fcf8cf98272740fd7585aa49cee00fa2c099f0/nemo_gym/_checkpoint/agent.py#L652-L660"><code>retire()</code> refuses finished runs</a>, so step 3 now fails on every later
+snapshot, for the rest of the process.</li>
+</ol>
 
 <p id="reachable">Nothing rejects this setup: prompt-group mode is a documented option, and no check in this PR or the
 two stacked with it refuses prompt-group mode together with Gym checkpointing. This PR even adds
