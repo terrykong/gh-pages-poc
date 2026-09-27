@@ -78,6 +78,7 @@ table.rc{border-collapse:collapse;margin:8px 0 14px;font-size:13.5px;width:100%}
 table.rc th,table.rc td{border:1px solid var(--border);padding:6px 9px;text-align:left;vertical-align:top}
 table.rc th{background:var(--surface)}table.rc td:first-child{color:var(--dim);white-space:nowrap}
 ol.steps li{margin:4px 0}
+.bg ul.fields{margin:4px 0 6px 18px;padding:0}.bg ul.fields li{margin:1px 0}
 </style>
 <script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
   document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
@@ -127,8 +128,18 @@ from start to finish: every model call, every tool call, and the final scoring. 
 <a href="https://github.com/NVIDIA-NeMo/Gym/blob/f4fcf8cf98272740fd7585aa49cee00fa2c099f0/nemo_gym/rollout_collection.py#L1983">blocking POST</a>: it returns only when that rollout is done.
 RL sends all siblings' <code>/run</code> calls at once and
 <a href="https://github.com/NVIDIA-NeMo/RL/blob/ed1440266ca2e02ca3942d7837777fbdeff64aae/nemo_rl/environments/nemo_gym.py#L1872-L1875">handles each reply as it arrives</a>. There is no polling.</li>
-<li>The <b>reply is small</b>: the output messages as text, the reward, and a few IDs. It has
-<b>no tokens</b>. The token IDs and logprobs were already written to
+<li><b>What <code>/run</code> returns</b> (a
+<a href="https://github.com/NVIDIA-NeMo/Gym/blob/f4fcf8cf98272740fd7585aa49cee00fa2c099f0/nemo_gym/base_resources_server.py#L116-L124"><code>BaseVerifyResponse</code></a>):
+<ul class="fields">
+<li><code>response</code>: the output messages and tool calls, as text</li>
+<li><code>reward</code>: the score the environment gave this rollout</li>
+<li><code>mask_sample</code>: "leave this sample out", set when the environment itself failed</li>
+<li>a few IDs, and the original request fields</li>
+</ul>
+<b>This reply is the only way the reward reaches RL.</b> RL reads it straight from the reply
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/ed1440266ca2e02ca3942d7837777fbdeff64aae/nemo_rl/environments/nemo_gym.py#L2053">nemo_gym.py:2053</a>). So RL must hear back from every
+<code>/run</code>. Without the reply, the rollout has no reward and cannot be trained on.<br>
+The reply has <b>no tokens</b>. The token IDs and logprobs were already written to
 <span class="tip" tabindex="0" data-tip="TransferQueue: RL's shared store for training data. Each model call during the rollout writes one row of tokens and logprobs here.">TQ</span>
 during the rollout, one row per model call.</li>
 <li>When the agent finishes, Gym <a href="https://github.com/NVIDIA-NeMo/Gym/blob/f4fcf8cf98272740fd7585aa49cee00fa2c099f0/nemo_gym/_checkpoint/agent.py#L411-L414">keeps that reply in memory</a>,
