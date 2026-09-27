@@ -65,6 +65,15 @@ svg .arr{stroke:var(--dim);stroke-width:1.5;fill:none;marker-end:url(#ah)}
 svg .arr-new{stroke:var(--green);stroke-width:1.8;fill:none;marker-end:url(#ahg)}
 svg .sep{stroke:var(--border);stroke-width:1;stroke-dasharray:4 4}
 svg a text{text-decoration:underline;fill:var(--accent);font:11px ui-monospace,Menlo,monospace}
+.bg{border:1px solid var(--border);border-left:4px solid var(--accent);border-radius:8px;
+  background:var(--surface);padding:10px 16px;margin:0 0 18px;font-size:14.5px}
+.bg h3{margin:2px 0 6px;font-size:15px}
+.bg ol{margin:4px 0 4px 20px;padding:0}.bg li{margin:3px 0}
+.tip{border-bottom:1px dotted var(--dim);cursor:help;position:relative;outline:none}
+.tip:hover::after,.tip:focus::after{content:attr(data-tip);position:absolute;left:0;top:1.7em;z-index:60;
+  width:max-content;max-width:min(340px,80vw);white-space:normal;background:var(--surface2);color:var(--text);
+  border:1px solid var(--border);border-radius:6px;padding:7px 10px;font:13px/1.45 -apple-system,sans-serif;
+  font-weight:400;box-shadow:0 4px 14px rgba(0,0,0,.3)}
 </style>
 <script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
   document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
@@ -87,7 +96,7 @@ RL links pin head <code>ed14402</code> (base: <code>ad3c9cb</code>); Gym links p
 <div class="status">
 <dl>
   <dt>Before</dt>
-  <dd>Each Gym try got a random ID. RL kept no record of which finished Gym results it owned, and had no way to tell Gym "I have this one, you can drop it".</dd>
+  <dd>Each Gym try got a random ID. RL kept no record of which finished Gym results it owned, and had no way to tell Gym "I have this one, you can delete your stored copy".</dd>
   <dt>This PR</dt>
   <dd>Gives each rollout a stable ID plus a try number, fetches a receipt from Gym for every finished row, and stores "I still owe Gym an ACK for this receipt" in the saved recovery state.</dd>
   <dt>Status</dt>
@@ -106,8 +115,27 @@ RL links pin head <code>ed14402</code> (base: <code>ad3c9cb</code>); Gym links p
 </nav>
 <p class="chainnote">Seven pages on this stack — this one: #4265: how a finished Gym rollout is tracked.</p>
 
+<div class="bg">
+<h3>What Gym keeps, and what an ACK lets it delete</h3>
+<ol>
+<li>When an agent finishes a rollout, Gym keeps the <b>whole finished result</b> in memory: the
+<a href="https://github.com/NVIDIA-NeMo/Gym/blob/f4fcf8cf98272740fd7585aa49cee00fa2c099f0/nemo_gym/_checkpoint/agent.py#L411-L414">response it returned from <code>/run</code></a>, filed under the
+rollout's ID and try number.</li>
+<li>It keeps it so the result cannot be lost. If RL asks for the same rollout and try again (the reply
+got lost, or RL restarted from an earlier checkpoint), Gym
+<a href="https://github.com/NVIDIA-NeMo/Gym/blob/f4fcf8cf98272740fd7585aa49cee00fa2c099f0/nemo_gym/_checkpoint/agent.py#L320-L323">hands back the stored result</a> instead of running the rollout again.
+That is what Gym's code means by <span class="tip" tabindex="0" data-tip="Gym can give back the same finished result again, without running the rollout a second time.">"replayable"</span>.</li>
+<li>An <b>ACK</b> is RL saying "I have saved this result". Gym
+<a href="https://github.com/NVIDIA-NeMo/Gym/blob/f4fcf8cf98272740fd7585aa49cee00fa2c099f0/nemo_gym/_checkpoint/agent.py#L437-L479">checks the receipt matches exactly</a>, then <b>deletes the stored result</b>
+and marks that ID and try as done for good, so it can never run or be handed back again.</li>
+<li>Until that happens, Gym <a href="https://github.com/NVIDIA-NeMo/Gym/blob/f4fcf8cf98272740fd7585aa49cee00fa2c099f0/nemo_gym/_checkpoint/agent.py#L722">will not commit a checkpoint</a>, because it cannot tell
+whether RL has the result or still needs the stored copy.</li>
+</ol>
+Dotted words have a short explanation: hover or tap them.
+</div>
+
 <p>Gym runs each rollout as an agent. With checkpointing on, Gym keeps every finished result
-until RL sends an ACK for it (a short "received, you may drop it" message). Its code says so:
+until RL sends an ACK for it (a short "I have saved this result, you can delete your copy" message). Its code says so:
 results "remain replayable until their receipt is acknowledged", and Gym
 <a href="https://github.com/NVIDIA-NeMo/Gym/blob/f4fcf8cf98272740fd7585aa49cee00fa2c099f0/nemo_gym/_checkpoint/agent.py#L722">will not commit a checkpoint</a>
 while any finished result is still un-ACKed. So RL must ACK each result, but only <em>after</em> the
@@ -170,7 +198,7 @@ This PR builds that hand-off.</p>
   <path class="arr-new" d="M726 254 L766 254"/>
   <rect class="box-new" x="770" y="214" width="154" height="80" rx="6"/>
   <text class="lbl" x="780" y="234">send ACK</text>
-  <text class="lbl" x="780" y="252">Gym drops result</text>
+  <text class="lbl" x="780" y="252">Gym deletes its copy</text>
   <text class="lbl" x="780" y="268">RL removes debt</text>
   <text class="note" x="780" y="286">(triggered by #4266)</text>
 
@@ -214,7 +242,7 @@ Gym prepare              409 while any result un-ACKed  same rule; now RL can cl
 <p>The ACK debt is written in the same locked step as the seal
 (<a href="https://github.com/NVIDIA-NeMo/RL/blob/ed1440266ca2e02ca3942d7837777fbdeff64aae/nemo_rl/experience/rollout_manager.py#L2445">rollout_manager.py:2445-2465</a>),
 and the network send happens after the lock is released. That order is required: if RL crashed after
-sending the ACK but before saving, Gym would have dropped a result RL never stored. Debts are removed only
+sending the ACK but before saving, Gym would have deleted its copy of a result RL never saved. Debts are removed only
 after Gym accepts the ACK
 (<a href="https://github.com/NVIDIA-NeMo/RL/blob/ed1440266ca2e02ca3942d7837777fbdeff64aae/nemo_rl/experience/rollout_recovery.py#L1031"><code>mark_completed_executions_acknowledged</code></a>).</p>
 
