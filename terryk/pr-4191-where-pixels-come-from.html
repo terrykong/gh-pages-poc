@@ -123,7 +123,8 @@ packs it into the learner's patch layout
 (<a href="https://github.com/NVIDIA-NeMo/RL/blob/32cfbcdf8196ee12146572594528ae3646604b6a/nemo_rl/data/captured_media.py#L157"><code>pack_images</code></a>),
 and saves it in the same write as the tokens
 (<a href="https://github.com/NVIDIA-NeMo/RL/blob/32cfbcdf8196ee12146572594528ae3646604b6a/nemo_rl/data_plane/tq_token_sink.py#L400"><code>TQTokenSink.stage</code></a>).
-A later call saves only the images that are new. Images it re-sends are checked against the earlier call (size and placeholder tokens) instead of being saved again.</p>
+On a later call, Gym re-sends every earlier image as base64 and vLLM processes it again. The worker never reads the saved pixels back.
+It checks each old image against a small record saved with the earlier call (size, position, and a hash of its slot tokens) and saves only the new images.</p>
 
 <h2>The two paths, one rollout with two model calls</h2>
 
@@ -153,8 +154,8 @@ A later call saves only the images that are new. Images it re-sends are checked 
   <a href="https://github.com/NVIDIA-NeMo/RL/blob/32cfbcdf8196ee12146572594528ae3646604b6a/nemo_rl/models/generation/vllm/vllm_worker_async.py#L724" target="_blank" rel="noopener"><text x="504" y="146">vllm_worker_async.py:724</text></a>
 
   <rect class="box-new" x="490" y="178" width="434" height="96" rx="8"/>
-  <text class="lbl-b" x="504" y="200">call 2: re-sends A, adds B</text>
-  <text class="lbl" x="504" y="220">check A (size + placeholder tokens) = call 1</text>
+  <text class="lbl-b" x="504" y="200">call 2: Gym re-sends A (base64) and adds B</text>
+  <text class="lbl" x="504" y="220">vLLM re-processes A; check it vs call 1's record</text>
   <text class="lbl" x="504" y="238">save only B: imgs [80, 768], sizes [[128,160]]</text>
   <a href="https://github.com/NVIDIA-NeMo/RL/blob/32cfbcdf8196ee12146572594528ae3646604b6a/nemo_rl/models/generation/vllm/vllm_worker_async.py#L639" target="_blank" rel="noopener"><text x="504" y="262">_capture_request_media :639</text></a>
 
