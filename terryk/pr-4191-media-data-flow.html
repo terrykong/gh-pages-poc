@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NVIDIA-NeMo/RL #4191 — how one image travels from the dataset row to the learner, and how many copies exist</title>
+<style>
+:root{
+  --bg:#0d1117; --surface:#161b22; --surface2:#1c2128; --border:#30363d;
+  --text:#e6edf3; --dim:#8b949e; --accent:#58a6ff; --green:#3fb950;
+  --orange:#d29922; --red:#f85149; --purple:#bc8cff;
+}
+:root[data-theme="light"]{
+  --bg:#ffffff; --surface:#f6f8fa; --surface2:#eaeef2; --border:#d0d7de;
+  --text:#1f2328; --dim:#59636e; --accent:#0969da; --green:#1a7f37;
+  --orange:#9a6700; --red:#cf222e; --purple:#8250df;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:28px 20px 70px}
+h1{font-size:22px;margin:0 0 8px;line-height:1.3}
+h2{font-size:18px;margin:30px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;
+  font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
+.sub{color:var(--dim);font-size:13.5px;margin:0 0 14px}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);
+  border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;
+  font:13px/1 ui-monospace,Menlo,monospace;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.18)}
+.hl{border-left:3px solid var(--accent);background:var(--surface);
+  padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0}
+.bg{border:1px dashed var(--border);border-radius:8px;padding:10px 14px;margin:0 0 16px;font-size:14px}
+.status{border:1px solid var(--border);border-radius:10px;background:var(--surface);
+  padding:2px 16px 10px;margin:0 0 16px}
+.status dl{display:grid;grid-template-columns:max-content 1fr;gap:4px 14px;margin:12px 0 0}
+.status dt{color:var(--dim);font-size:12px;text-transform:uppercase;letter-spacing:.04em;
+  white-space:nowrap;padding-top:2px}
+.status dd{margin:0;font-size:14px}
+.verdict{font-weight:700}
+.verdict.good{color:var(--green)}
+nav.chain{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 6px;padding:0}
+nav.chain a,nav.chain span{display:inline-block;padding:5px 11px;border:1px solid var(--border);
+  border-radius:20px;background:var(--surface);text-decoration:none;color:var(--accent);
+  font-size:12.5px;line-height:1.3;white-space:nowrap}
+nav.chain a:hover{background:var(--surface2)}
+nav.chain span.here{background:var(--accent);color:var(--bg);border-color:var(--accent);font-weight:600}
+p.chainnote{color:var(--dim);font-size:12px;margin:0 0 18px}
+.tip{border-bottom:1px dotted var(--dim);cursor:help;position:relative;outline:none}
+.tip:hover::after,.tip:focus::after{content:attr(data-tip);position:absolute;left:0;top:1.7em;z-index:60;
+  width:max-content;max-width:min(340px,80vw);white-space:normal;background:var(--surface2);color:var(--text);
+  border:1px solid var(--border);border-radius:6px;padding:7px 10px;font:13px/1.45 -apple-system,sans-serif;
+  font-weight:400;box-shadow:0 4px 14px rgba(0,0,0,.3)}
+table{border-collapse:collapse;width:100%;font-size:13.5px;margin:10px 0}
+th,td{border:1px solid var(--border);padding:6px 9px;text-align:left;vertical-align:top}
+th{background:var(--surface2);font-weight:600}
+td.n{text-align:right;font:13px ui-monospace,Menlo,monospace;white-space:nowrap}
+.px{color:var(--green);font-weight:700}
+.ref{color:var(--accent);font-weight:700}
+svg{max-width:100%;height:auto;display:block;margin:16px 0}
+svg .lane{fill:var(--surface);stroke:var(--border);stroke-width:1.2}
+svg .lane-lbl{fill:var(--dim);font:bold 11.5px -apple-system,sans-serif;letter-spacing:.04em}
+svg .b-ref{fill:var(--surface2);stroke:var(--accent);stroke-width:1.8}
+svg .b-px{fill:var(--surface2);stroke:var(--green);stroke-width:1.8}
+svg .b-hash{fill:var(--surface2);stroke:var(--purple);stroke-width:1.6;stroke-dasharray:5 3}
+svg .t{fill:var(--text);font:bold 12px -apple-system,sans-serif}
+svg .m{fill:var(--text);font:11.5px ui-monospace,Menlo,monospace}
+svg .note{fill:var(--dim);font:11px -apple-system,sans-serif}
+svg .arr{stroke:var(--dim);stroke-width:1.6;fill:none}
+svg .arr-http{stroke:var(--accent);stroke-width:1.8;fill:none;stroke-dasharray:6 4}
+svg .arr-px{stroke:var(--green);stroke-width:2;fill:none}
+svg .ah{fill:var(--dim)} svg .ah-http{fill:var(--accent)} svg .ah-px{fill:var(--green)}
+svg .al{fill:var(--dim);font:italic 10.5px -apple-system,sans-serif}
+svg a text{text-decoration:underline;fill:var(--accent);font:10.5px ui-monospace,Menlo,monospace}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+  document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head>
+<body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+  function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+  function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
+    b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
+      else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+  document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+<div class="wrap">
+
+<h1>How one image travels from the dataset row to the learner, and how many copies exist on the way</h1>
+<p class="sub"><a href="https://github.com/NVIDIA-NeMo/RL/pull/4191">NVIDIA-NeMo/RL #4191</a>
+with <a href="https://github.com/NVIDIA-NeMo/Gym/pull/3513">NVIDIA-NeMo/Gym #3513</a>.
+RL permalinks pin <code>32cfbcd</code>; Gym permalinks pin <code>17abf2d</code>.</p>
+
+<div class="status">
+<dl>
+  <dt>Before</dt>
+  <dd>With token capture on, only tokens were saved per model call. Pixels were not saved anywhere the learner could read.</dd>
+  <dt>This PR</dt>
+  <dd>The processed pixels go from vLLM straight into the same TQ row as that call's tokens. The finalizer copies them into the training row.</dd>
+  <dt>Status</dt>
+  <dd><span class="verdict good">How the new feature works, at the PR head.</span> Not a bug report. Two facts worth knowing: images are not shared across the rollouts of one prompt, and processed pixels never go through Gym.</dd>
+</dl>
+</div>
+
+<nav class="chain">
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4191-where-pixels-come-from.html">1 · where pixels come from</a>
+  <span class="here">2 · how the image data flows</span>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4191-rebase-breaks-splice.html">3 · the rebase that breaks splicing</a>
+</nav>
+<p class="chainnote">Three pages on this PR. This one: every place the image lives, in what form, and who reads it.</p>
+
+<div class="bg"><b>Background.</b> <span class="tip" tabindex="0" data-tip="TransferQueue: RL's shared row store. Workers write rows into it and the trainer reads them.">TQ</span> has two areas here: a <b>staging</b> area with one row per model call, and a <b>train</b> area with one row per finished rollout.
+The <span class="tip" tabindex="0" data-tip="RolloutReassembler: when a rollout ends, it reads that rollout's staging rows, checks them, and writes one training row.">finalizer</span> turns the first into the second.
+Gym is the environment framework that drives the conversation. It talks to the vLLM worker over HTTP, but part of Gym (its <span class="tip" tabindex="0" data-tip="RolloutTokenCapture, installed by install_capture. It runs as a Python object inside the vLLM worker process, not as a separate server.">capture code</span>) also runs inside the vLLM worker process. Dotted words have a short explanation: hover or tap them.</div>
+
+<p>The dataset row never holds pixels for an image. It keeps only the image's path, inside the Gym request
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/32cfbcdf8196ee12146572594528ae3646604b6a/nemo_rl/data/processors.py#L966-L974"><code>processors.py:966</code></a>).
+Just before the rollout, RL turns each path into a base64 text URL, once per unique image in the batch
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/32cfbcdf8196ee12146572594528ae3646604b6a/nemo_rl/environments/nemo_gym_multimodal.py#L145-L156"><code>nemo_gym_multimodal.py:145</code></a>).
+That text travels through Gym to the vLLM worker as part of the chat request. vLLM decodes it and runs its own image processor.
+From there on the pixels stay in RL's hands: the worker packs them and writes them to TQ in the same call that saves the tokens. Gym passes the tensors along without reading them
+(<a href="https://github.com/NVIDIA-NeMo/Gym/blob/17abf2ddc76f74e40d0ba5a15b0401710a46db26/nemo_gym/token_id_capture/staging/capture.py#L241-L244">Gym <code>capture.py:241</code></a>).</p>
+
+<h2>The path of one image, one rollout, two model calls</h2>
+
+<svg viewBox="0 0 940 640" role="img" aria-label="Lanes for RL driver, Gym, vLLM worker, TQ, finalizer and learner. The image is a path, then base64 text over HTTP, then pixels inside the vLLM worker, then a TQ staging row, then a training row, then the learner.">
+  <!-- legend -->
+  <rect class="b-ref" x="16" y="10" width="14" height="12" rx="2"/><text class="note" x="36" y="20">image as text (a path or a base64 URL)</text>
+  <rect class="b-px" x="262" y="10" width="14" height="12" rx="2"/><text class="note" x="282" y="20">processed pixels</text>
+  <rect class="b-hash" x="400" y="10" width="14" height="12" rx="2"/><text class="note" x="420" y="20">hashes only, no pixels</text>
+  <path class="arr-http" d="M572 16 L612 16"/><text class="note" x="618" y="20">HTTP</text>
+  <path class="arr-px" d="M662 16 L702 16"/><text class="note" x="708" y="20">function call in one process</text>
+
+  <!-- lanes -->
+  <rect class="lane" x="10" y="34" width="920" height="84" rx="6"/><text class="lane-lbl" x="20" y="50">RL DRIVER</text>
+  <rect class="lane" x="10" y="124" width="920" height="84" rx="6"/><text class="lane-lbl" x="20" y="140">GYM (agent + model server)</text>
+  <rect class="lane" x="10" y="214" width="920" height="130" rx="6"/><text class="lane-lbl" x="20" y="230">vLLM WORKER PROCESS</text>
+  <rect class="lane" x="10" y="350" width="920" height="84" rx="6"/><text class="lane-lbl" x="20" y="366">TQ</text>
+  <rect class="lane" x="10" y="440" width="920" height="84" rx="6"/><text class="lane-lbl" x="20" y="456">FINALIZER</text>
+  <rect class="lane" x="10" y="530" width="920" height="100" rx="6"/><text class="lane-lbl" x="20" y="546">LEARNER (Megatron + Bridge)</text>
+
+  <!-- driver -->
+  <rect class="b-ref" x="30" y="58" width="260" height="52" rx="6"/>
+  <text class="t" x="40" y="76">dataset row</text><text class="m" x="40" y="94">"a.png" (a path, 0 pixels)</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/32cfbcdf8196ee12146572594528ae3646604b6a/nemo_rl/data/processors.py#L966-L974" target="_blank" rel="noopener"><text x="40" y="106">processors.py:966</text></a>
+  <rect class="b-ref" x="330" y="58" width="300" height="52" rx="6"/>
+  <text class="t" x="340" y="76">before the rollout: path → base64 URL</text><text class="m" x="340" y="94">once per unique image per batch</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/32cfbcdf8196ee12146572594528ae3646604b6a/nemo_rl/environments/nemo_gym_multimodal.py#L145-L156" target="_blank" rel="noopener"><text x="340" y="106">nemo_gym_multimodal.py:145</text></a>
+  <path class="arr" d="M290 84 L328 84"/><path class="ah" d="M322 79 L330 84 L322 89 Z"/>
+
+  <!-- gym -->
+  <rect class="b-ref" x="330" y="148" width="300" height="52" rx="6"/>
+  <text class="t" x="340" y="166">chat request, full history each turn</text><text class="m" x="340" y="184">turn 2 sends A again, plus B</text>
+  <a href="https://github.com/NVIDIA-NeMo/Gym/blob/17abf2ddc76f74e40d0ba5a15b0401710a46db26/responses_api_agents/simple_agent/app.py#L111-L118" target="_blank" rel="noopener"><text x="340" y="196">simple_agent/app.py:111</text></a>
+  <path class="arr-http" d="M480 110 L480 146"/><path class="ah-http" d="M475 140 L480 148 L485 140 Z"/>
+  <text class="al" x="488" y="132">rollout request</text>
+  <rect class="b-hash" x="670" y="148" width="250" height="52" rx="6"/>
+  <text class="t" x="680" y="166">Gym ledger: hashes only</text><text class="note" x="680" y="182">hashes the conversation, URL included;</text><text class="note" x="680" y="195">no pixels kept</text>
+
+  <!-- vllm worker -->
+  <path class="arr-http" d="M480 200 L480 238"/><path class="ah-http" d="M475 232 L480 240 L485 232 Z"/>
+  <text class="al" x="488" y="224">/v1/chat/completions</text>
+  <rect class="b-px" x="30" y="240" width="270" height="92" rx="6"/>
+  <text class="t" x="40" y="258">vLLM's image processor</text>
+  <text class="m" x="40" y="276">decodes A (and B), runs on</text><text class="m" x="40" y="292">every turn, cache bypassed</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/32cfbcdf8196ee12146572594528ae3646604b6a/nemo_rl/models/generation/vllm/vllm_worker_async.py#L1027-L1033" target="_blank" rel="noopener"><text x="40" y="318">vllm_worker_async.py:1027</text></a>
+  <rect class="b-px" x="330" y="240" width="300" height="92" rx="6"/>
+  <text class="t" x="340" y="258">capture_processed_media</text>
+  <text class="m" x="340" y="276">pack to patches; turn 2: check A</text><text class="m" x="340" y="292">vs turn 1, keep only B</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/32cfbcdf8196ee12146572594528ae3646604b6a/nemo_rl/data/captured_media.py#L353-L377" target="_blank" rel="noopener"><text x="340" y="318">captured_media.py:353-377</text></a>
+  <rect class="b-px" x="670" y="240" width="250" height="92" rx="6"/>
+  <text class="t" x="680" y="258">Gym capture code (in process)</text>
+  <text class="m" x="680" y="276">passes the tensors to the</text><text class="m" x="680" y="292">RL sink, never reads them</text>
+  <a href="https://github.com/NVIDIA-NeMo/Gym/blob/17abf2ddc76f74e40d0ba5a15b0401710a46db26/nemo_gym/token_id_capture/staging/capture.py#L241-L244" target="_blank" rel="noopener"><text x="680" y="318">Gym capture.py:241</text></a>
+  <path class="arr-px" d="M300 286 L328 286"/><path class="ah-px" d="M322 281 L330 286 L322 291 Z"/>
+  <path class="arr-px" d="M630 286 L668 286"/><path class="ah-px" d="M662 281 L670 286 L662 291 Z"/>
+  <text class="al" x="634" y="278">attachments</text>
+
+  <!-- tq -->
+  <path class="arr-px" d="M795 332 L795 372"/><path class="ah-px" d="M790 366 L795 374 L800 366 Z"/>
+  <text class="al" x="787" y="356" text-anchor="end">TQTokenSink.stage: one write</text>
+  <rect class="b-px" x="560" y="374" width="360" height="52" rx="6"/>
+  <text class="t" x="570" y="392">staging: one row per call, only NEW images</text>
+  <text class="m" x="570" y="410">call 1: A [6,768]   call 2: B [20,768]</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/32cfbcdf8196ee12146572594528ae3646604b6a/nemo_rl/data_plane/tq_token_sink.py#L400" target="_blank" rel="noopener"><text x="570" y="422">tq_token_sink.py:400</text></a>
+  <rect class="b-px" x="30" y="374" width="330" height="52" rx="6"/>
+  <text class="t" x="40" y="392">train: one row per rollout</text>
+  <text class="m" x="40" y="410">pixel_values [26,768] = A then B</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/32cfbcdf8196ee12146572594528ae3646604b6a/nemo_rl/experience/rollout_reassembler.py#L746" target="_blank" rel="noopener"><text x="40" y="422">rollout_reassembler.py:746</text></a>
+
+  <!-- finalizer -->
+  <path class="arr" d="M700 426 L700 462"/><path class="ah" d="M695 456 L700 464 L705 456 Z"/>
+  <text class="al" x="708" y="448">2 reads: flags, then pixels</text>
+  <rect class="b-px" x="400" y="464" width="360" height="52" rx="6"/>
+  <text class="t" x="410" y="482">join the calls in order, then delete staging</text>
+  <text class="m" x="410" y="500">[6,768] + [20,768] → [26,768]</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/32cfbcdf8196ee12146572594528ae3646604b6a/nemo_rl/experience/rollout_reassembler.py#L436-L474" target="_blank" rel="noopener"><text x="410" y="512">_resolve_media :436</text></a>
+  <path class="arr" d="M400 490 L240 490 L240 428"/><path class="ah" d="M235 434 L240 426 L245 434 Z"/>
+  <text class="al" x="250" y="484">writes the train row</text>
+
+  <!-- learner -->
+  <path class="arr" d="M140 426 L140 568"/><path class="ah" d="M135 562 L140 570 L145 562 Z"/>
+  <text class="al" x="148" y="470">read after the group is ready</text>
+  <rect class="b-px" x="30" y="570" width="560" height="52" rx="6"/>
+  <text class="t" x="40" y="588">model_forward → Bridge Omni encoder</text>
+  <text class="m" x="40" y="606">batch of rows joined → [1, total, 768]; train row deleted after the step</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/32cfbcdf8196ee12146572594528ae3646604b6a/nemo_rl/models/megatron/train.py#L195-L206" target="_blank" rel="noopener"><text x="40" y="618">train.py:195-206</text></a>
+</svg>
+
+<p>Example numbers, as on page 1: a patch is 16×16 px = 768 numbers. Image A (32×48 px) is 6 patches; image B (80×64 px), added on turn 2, is 20 patches.
+Gym sends the whole conversation on each turn, so vLLM decodes and processes A again on turn 2. The worker then compares A against the
+<span class="tip" tabindex="0" data-tip="media_spans: for each image, its size, where its placeholder tokens sit, and a hash of those tokens. Saved in the staging row's small JSON field, with a SHA-256 check value next to it.">image list saved with call 1</span>
+and drops it, so only B is written
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/32cfbcdf8196ee12146572594528ae3646604b6a/nemo_rl/models/generation/vllm/vllm_worker_async.py#L709-L720"><code>vllm_worker_async.py:709</code></a>).
+The shipped CLEVR smoke is single-turn, so turn 2 is covered by unit tests only.</p>
+
+<h2>Copies and dedup, for one prompt with 4 rollouts</h2>
+
+<table>
+<tr><th>Where</th><th>Form</th><th>Copies of A</th><th>Deleted when</th></tr>
+<tr><td>Dataset row</td><td><span class="ref">path</span> only</td><td class="n">1</td><td>with the prompt</td></tr>
+<tr><td>Gym request</td><td><span class="ref">base64 text</span>, encoded once, re-sent every turn</td><td class="n">1 per request</td><td>after the request</td></tr>
+<tr><td>vLLM processor output</td><td><span class="px">pixels</span></td><td class="n">4 rollouts × 2 turns = 8</td><td>after each request</td></tr>
+<tr><td>TQ staging row</td><td><span class="px">packed patches</span>, only on the call where A is new</td><td class="n">4</td><td>right after the finalizer writes the train rows (<a href="https://github.com/NVIDIA-NeMo/RL/blob/32cfbcdf8196ee12146572594528ae3646604b6a/nemo_rl/experience/rollout_reassembler.py#L794-L797">:796</a>)</td></tr>
+<tr><td>TQ train row</td><td><span class="px">pixel_values</span>, one per rollout</td><td class="n">4</td><td>after the step that trains on it (<a href="https://github.com/NVIDIA-NeMo/RL/blob/32cfbcdf8196ee12146572594528ae3646604b6a/nemo_rl/algorithms/single_controller.py#L1884-L1886"><code>single_controller.py:1884</code></a>)</td></tr>
+<tr><td>Gym</td><td>hashes of the text URL and of the placeholder tokens</td><td class="n">0 pixels</td><td>—</td></tr>
+</table>
+
+<p><b>Within one rollout</b>, an image is stored once: later calls check it and skip it.
+<b>Across the rollouts of one prompt</b>, nothing is shared. Each rollout is a separate vLLM request, so each one processes, stores and trains on its own copy of A.
+The dataset's own pixels are not used on this path. For images, RL never makes them. For native video, the dataset code still decodes frames into the prompt
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/32cfbcdf8196ee12146572594528ae3646604b6a/nemo_rl/environments/nemo_gym_multimodal.py#L825"><code>nemo_gym_multimodal.py:825</code></a>),
+but with capture on the Gym actor returns no message log
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/32cfbcdf8196ee12146572594528ae3646604b6a/nemo_rl/environments/nemo_gym.py#L884-L891"><code>nemo_gym.py:884</code></a>),
+so the finalizer is the only thing that writes <code>pixel_values</code>. That dataset copy is unused work.</p>
+
+<div class="hl">
+<strong>What to take away.</strong> Pixels are made once per request by vLLM and written to TQ from inside the vLLM worker. They never travel over HTTP and Gym never reads them.
+The learner reads them only from the finalizer's training row. The cost to watch is the group size: a prompt with G rollouts stores and trains on G copies of every image,
+with no sharing between them. Not measured here; nothing was run on a GPU for this page.
+</div>
+
+</div>
+</body>
+</html>
