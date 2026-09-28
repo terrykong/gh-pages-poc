@@ -124,7 +124,7 @@ Omni makes one slot per 4 patches of 16×16 px (<a href="https://github.com/vllm
 In the example, image A is 64×96 px = 24 patches = <b>6 slots</b>, and image B is 128×160 px = 80 patches = <b>20 slots</b>.
 Everything in TQ and in the learner uses the <b>expanded</b> form, with the slots written out. Dotted words have a short explanation: hover or tap them.</div>
 
-<p>Gym never handles a token id in capture mode. Each turn it sends the chat text, the images as base64 URLs, and a pointer to the earlier rows in TQ
+<p>Gym never handles a token id in capture mode. Each turn it sends the chat text, every image in full (as base64 text of a PNG, not a link), and a pointer to the earlier rows in TQ
 (<a href="https://github.com/NVIDIA-NeMo/Gym/blob/17abf2ddc76f74e40d0ba5a15b0401710a46db26/nemo_gym/token_id_capture/sink.py#L255-L264">Gym sink.py:255</a>).
 The worker reads the earlier tokens, image slots included, from TQ by that pointer. vLLM renders the whole conversation from text again, so old images are expanded and processed again too.
 The worker then glues the exact old tokens onto the new part of the render (the <b>splice</b>) and moves the image positions to match
@@ -176,7 +176,7 @@ Tokens and pixels are joined only inside the model, by order.</p>
 <text class="ct" x="439.0" y="65" text-anchor="middle">EOS</text>
 <text class="nt" x="458" y="65">+ pixels of A: [24, 768] in the same row</text>
 <rect class="wire" x="176" y="86" width="740" height="42" rx="6"/>
-<text class="wt" x="188" y="104">Gym → worker, turn 2 (HTTP): chat text + A and B as base64 URLs + a pointer to row 1, prev_len = 16</text>
+<text class="wt" x="188" y="104">Gym → worker, turn 2 (HTTP): chat text + whole images A and B (base64 PNG) + a pointer to row 1, prev_len = 16</text>
 <text class="wn" x="188" y="120">No token ids cross the wire. The worker reads row 1's tokens from TQ by that pointer.</text>
 <a href="https://github.com/NVIDIA-NeMo/RL/blob/32cfbcdf8196ee12146572594528ae3646604b6a/nemo_rl/models/generation/vllm/vllm_worker_async.py#L1076-L1083" target="_blank" rel="noopener"><text x="14" y="112">worker reads TQ :1076</text></a>
 <text class="ix" x="184" y="148" text-anchor="middle">0</text>
@@ -326,7 +326,7 @@ Tokens and pixels are joined only inside the model, by order.</p>
 
 <table>
 <tr><th>Question</th><th>Answer</th></tr>
-<tr><td>Does Gym send tokens, or media?</td><td>Neither tokens nor pixels. It sends chat text with images as base64 URLs, plus a pointer to the parent rows and <code>prev_len</code>. The inline token field is left empty in this mode (<a href="https://github.com/NVIDIA-NeMo/Gym/blob/17abf2ddc76f74e40d0ba5a15b0401710a46db26/responses_api_models/vllm_model/app.py#L724-L727">vllm_model/app.py:724</a>). Gym also strips token ids from the worker's reply (<a href="https://github.com/NVIDIA-NeMo/Gym/blob/17abf2ddc76f74e40d0ba5a15b0401710a46db26/nemo_gym/token_id_capture/external_capture.py#L62-L74">external_capture.py:62</a>).</td></tr>
+<tr><td>Does Gym send tokens, or media?</td><td>No token ids and no processed pixels. But it does send each whole image, every turn: the picture saved as PNG and written out as base64 text inside the chat JSON (about 1.33× the PNG size). Plus a pointer to the parent rows and <code>prev_len</code>. The inline token field is left empty in this mode (<a href="https://github.com/NVIDIA-NeMo/Gym/blob/17abf2ddc76f74e40d0ba5a15b0401710a46db26/responses_api_models/vllm_model/app.py#L724-L727">vllm_model/app.py:724</a>). Gym also strips token ids from the worker's reply (<a href="https://github.com/NVIDIA-NeMo/Gym/blob/17abf2ddc76f74e40d0ba5a15b0401710a46db26/nemo_gym/token_id_capture/external_capture.py#L62-L74">external_capture.py:62</a>).</td></tr>
 <tr><td>Where do the old turns' image tokens live?</td><td>In the TQ row of the call that first saw the image, as ordinary prompt tokens. The worker reads them back by pointer, with a small cache (<a href="https://github.com/NVIDIA-NeMo/RL/blob/32cfbcdf8196ee12146572594528ae3646604b6a/nemo_rl/models/generation/vllm/vllm_worker_async.py#L758-L785">vllm_worker_async.py:758</a>).</td></tr>
 <tr><td>Does vLLM see the old images again?</td><td>Yes. The request text contains A again, so vLLM decodes it, runs the processor, and runs the vision encoder on it again every turn. The recipe turns prefix caching off (<a href="https://github.com/NVIDIA-NeMo/RL/blob/32cfbcdf8196ee12146572594528ae3646604b6a/examples/nemo_gym/vlm_grpo_nemotron_omni_clevr_vllm_token_capture_single_controller.yaml#L55">yaml:55</a>), so no old work is reused. Whether vLLM's encoder cache reuses it is not verified.</td></tr>
 <tr><td>Where are old turns' pixels stored?</td><td>Only in row 1, once. Row 2 stores only B's pixels and the tokens after <code>prev_len</code>.</td></tr>

@@ -117,7 +117,7 @@ Gym is the environment framework that drives the conversation. It talks to the v
 
 <p>The dataset row never holds pixels for an image. It keeps only the image's path, inside the Gym request
 (<a href="https://github.com/NVIDIA-NeMo/RL/blob/32cfbcdf8196ee12146572594528ae3646604b6a/nemo_rl/data/processors.py#L966-L974"><code>processors.py:966</code></a>).
-Just before the rollout, RL opens each image file, converts it to RGB, saves it again as a PNG, and base64-encodes those PNG bytes into a <code>data:</code> URL, once per unique image in the batch (<a href="https://github.com/NVIDIA-NeMo/RL/blob/32cfbcdf8196ee12146572594528ae3646604b6a/nemo_rl/data/multimodal_utils.py#L1469-L1512"><code>resolve_to_image</code> + <code>image_to_data_url</code></a>; videos are base64 of the raw file bytes)
+Just before the rollout, RL opens each image file, converts it to RGB, saves it again as a PNG, and base64-encodes those PNG bytes into a <code>data:</code> URL, once per unique image in the batch. The URL is not a pointer: it holds the whole image, about 1.33× the PNG size, so a 100 KB PNG becomes about 133 KB of text inside every chat request that includes it (<a href="https://github.com/NVIDIA-NeMo/RL/blob/32cfbcdf8196ee12146572594528ae3646604b6a/nemo_rl/data/multimodal_utils.py#L1469-L1512"><code>resolve_to_image</code> + <code>image_to_data_url</code></a>; videos are base64 of the raw file bytes)
 (<a href="https://github.com/NVIDIA-NeMo/RL/blob/32cfbcdf8196ee12146572594528ae3646604b6a/nemo_rl/environments/nemo_gym_multimodal.py#L145-L156"><code>nemo_gym_multimodal.py:145</code></a>).
 That text travels through Gym to the vLLM worker as part of the chat request. vLLM decodes it and runs its own image processor.
 From there on the pixels stay in RL's hands: the worker packs them and writes them to TQ in the same call that saves the tokens. Gym passes the tensors along without reading them
@@ -157,7 +157,7 @@ the features with its own current weights, and with gradients when the encoder i
 
 <svg viewBox="0 0 940 640" role="img" aria-label="Lanes for RL driver, Gym, vLLM worker, TQ, finalizer and learner. The image is a path, then base64 text over HTTP, then pixels inside the vLLM worker, then a TQ staging row, then a training row, then the learner.">
   <!-- legend -->
-  <rect class="b-ref" x="16" y="10" width="14" height="12" rx="2"/><text class="note" x="36" y="20">image as text (a path or a base64 URL)</text>
+  <rect class="b-ref" x="16" y="10" width="14" height="12" rx="2"/><text class="note" x="36" y="20">path, or base64 image</text>
   <rect class="b-px" x="262" y="10" width="14" height="12" rx="2"/><text class="note" x="282" y="20">processed pixels</text>
   <rect class="b-hash" x="400" y="10" width="14" height="12" rx="2"/><text class="note" x="420" y="20">hashes only, no pixels</text>
   <path class="arr-http" d="M572 16 L612 16"/><text class="note" x="618" y="20">HTTP</text>
@@ -176,13 +176,13 @@ the features with its own current weights, and with gradients when the encoder i
   <text class="t" x="40" y="76">dataset row</text><text class="m" x="40" y="94">"a.png" (a path, 0 pixels)</text>
   <a href="https://github.com/NVIDIA-NeMo/RL/blob/32cfbcdf8196ee12146572594528ae3646604b6a/nemo_rl/data/processors.py#L966-L974" target="_blank" rel="noopener"><text x="40" y="106">processors.py:966</text></a>
   <rect class="b-ref" x="330" y="58" width="300" height="52" rx="6"/>
-  <text class="t" x="340" y="76">before the rollout: path → base64 URL</text><text class="m" x="340" y="94">once per unique image per batch</text>
+  <text class="t" x="340" y="76">before the rollout: file → PNG → base64</text><text class="m" x="340" y="94">whole image as text, ~1.33× PNG</text>
   <a href="https://github.com/NVIDIA-NeMo/RL/blob/32cfbcdf8196ee12146572594528ae3646604b6a/nemo_rl/environments/nemo_gym_multimodal.py#L145-L156" target="_blank" rel="noopener"><text x="340" y="106">nemo_gym_multimodal.py:145</text></a>
   <path class="arr" d="M290 84 L328 84"/><path class="ah" d="M322 79 L330 84 L322 89 Z"/>
 
   <!-- gym -->
   <rect class="b-ref" x="330" y="148" width="300" height="52" rx="6"/>
-  <text class="t" x="340" y="166">chat request, full history each turn</text><text class="m" x="340" y="184">turn 2 sends A again, plus B</text>
+  <text class="t" x="340" y="166">chat JSON, full history each turn</text><text class="m" x="340" y="184">turn 2 carries all of A again + B</text>
   <a href="https://github.com/NVIDIA-NeMo/Gym/blob/17abf2ddc76f74e40d0ba5a15b0401710a46db26/responses_api_agents/simple_agent/app.py#L111-L118" target="_blank" rel="noopener"><text x="340" y="196">simple_agent/app.py:111</text></a>
   <path class="arr-http" d="M480 110 L480 146"/><path class="ah-http" d="M475 140 L480 148 L485 140 Z"/>
   <text class="al" x="488" y="132">rollout request</text>
