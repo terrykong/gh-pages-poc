@@ -1,0 +1,344 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NVIDIA-NeMo/RL #4191 — how text and image tokens travel across turns and meet the pixels</title>
+<style>
+:root{
+  --bg:#0d1117; --surface:#161b22; --surface2:#1c2128; --border:#30363d;
+  --text:#e6edf3; --dim:#8b949e; --accent:#58a6ff; --green:#3fb950;
+  --orange:#d29922; --red:#f85149; --purple:#bc8cff;
+}
+:root[data-theme="light"]{
+  --bg:#ffffff; --surface:#f6f8fa; --surface2:#eaeef2; --border:#d0d7de;
+  --text:#1f2328; --dim:#59636e; --accent:#0969da; --green:#1a7f37;
+  --orange:#9a6700; --red:#cf222e; --purple:#8250df;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:28px 20px 70px}
+h1{font-size:22px;margin:0 0 8px;line-height:1.3}
+h2{font-size:18px;margin:30px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;
+  font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
+.sub{color:var(--dim);font-size:13.5px;margin:0 0 14px}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);
+  border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;
+  font:13px/1 ui-monospace,Menlo,monospace;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.18)}
+.hl{border-left:3px solid var(--accent);background:var(--surface);
+  padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0}
+.bg{border:1px dashed var(--border);border-radius:8px;padding:10px 14px;margin:0 0 16px;font-size:14px}
+.status{border:1px solid var(--border);border-radius:10px;background:var(--surface);
+  padding:2px 16px 10px;margin:0 0 16px}
+.status dl{display:grid;grid-template-columns:max-content 1fr;gap:4px 14px;margin:12px 0 0}
+.status dt{color:var(--dim);font-size:12px;text-transform:uppercase;letter-spacing:.04em;
+  white-space:nowrap;padding-top:2px}
+.status dd{margin:0;font-size:14px}
+.verdict{font-weight:700}
+.verdict.good{color:var(--green)}
+nav.chain{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 6px;padding:0}
+nav.chain a,nav.chain span{display:inline-block;padding:5px 11px;border:1px solid var(--border);
+  border-radius:20px;background:var(--surface);text-decoration:none;color:var(--accent);
+  font-size:12.5px;line-height:1.3;white-space:nowrap}
+nav.chain a:hover{background:var(--surface2)}
+nav.chain span.here{background:var(--accent);color:var(--bg);border-color:var(--accent);font-weight:600}
+p.chainnote{color:var(--dim);font-size:12px;margin:0 0 18px}
+.tip{border-bottom:1px dotted var(--dim);cursor:help;position:relative;outline:none}
+.tip:hover::after,.tip:focus::after{content:attr(data-tip);position:absolute;left:0;top:1.7em;z-index:60;
+  width:max-content;max-width:min(340px,80vw);white-space:normal;background:var(--surface2);color:var(--text);
+  border:1px solid var(--border);border-radius:6px;padding:7px 10px;font:13px/1.45 -apple-system,sans-serif;
+  font-weight:400;box-shadow:0 4px 14px rgba(0,0,0,.3)}
+table{border-collapse:collapse;width:100%;font-size:13.5px;margin:10px 0}
+th,td{border:1px solid var(--border);padding:6px 9px;text-align:left;vertical-align:top}
+th{background:var(--surface2);font-weight:600}
+td.n{text-align:right;font:13px ui-monospace,Menlo,monospace;white-space:nowrap}
+.px{color:var(--green);font-weight:700}
+.ref{color:var(--accent);font-weight:700}
+svg{max-width:100%;height:auto;display:block;margin:16px 0}
+svg .k-t{fill:var(--surface2);stroke:var(--border)}
+svg .k-b{fill:var(--orange);opacity:.55}
+svg .k-a{fill:var(--green);opacity:.75}
+svg .k-n{fill:var(--accent);opacity:.7}
+svg .k-g{fill:var(--purple);opacity:.45}
+svg .k-e{fill:var(--dim);opacity:.45}
+svg .k-r{fill:var(--red);opacity:.45}
+svg .ct{fill:var(--text);font:8.5px ui-monospace,Menlo,monospace}
+svg .ix{fill:var(--dim);font:9px ui-monospace,Menlo,monospace}
+svg .rl{fill:var(--text);font:bold 12px -apple-system,sans-serif}
+svg .rs{fill:var(--dim);font:10.5px -apple-system,sans-serif}
+svg .lg{fill:var(--dim);font:11px -apple-system,sans-serif}
+svg .nt{fill:var(--dim);font:11px -apple-system,sans-serif}
+svg .wire{fill:var(--surface);stroke:var(--accent);stroke-width:1.6;stroke-dasharray:6 4}
+svg .wt{fill:var(--text);font:bold 11.5px -apple-system,sans-serif}
+svg .wn{fill:var(--dim);font:11px -apple-system,sans-serif}
+svg .cut{stroke:var(--red);stroke-width:2;fill:none}
+svg .cutl{fill:var(--red);font:bold 10.5px -apple-system,sans-serif}
+svg .pt{fill:var(--bg);font:bold 11px -apple-system,sans-serif}
+svg a text{text-decoration:underline;fill:var(--accent);font:10.5px ui-monospace,Menlo,monospace}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+  document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head>
+<body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+  function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+  function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
+    b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
+      else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+  document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+<div class="wrap">
+
+<h1>How the text and the image tokens travel together across turns, and where they meet the pixels</h1>
+<p class="sub"><a href="https://github.com/NVIDIA-NeMo/RL/pull/4191">NVIDIA-NeMo/RL #4191</a>
+with <a href="https://github.com/NVIDIA-NeMo/Gym/pull/3513">NVIDIA-NeMo/Gym #3513</a>.
+Pins: RL <code>32cfbcd</code>, Gym <code>17abf2d</code>, vLLM <code>v0.26.0</code>, Bridge <code>1f8873b</code>.</p>
+
+<div class="status">
+<dl>
+  <dt>Before</dt>
+  <dd>Token capture already kept every call's tokens in TQ and sent Gym only text and a pointer. Image tokens were saved like any other prompt token, but no pixels were saved to match them.</dd>
+  <dt>This PR</dt>
+  <dd>Keeps that token path unchanged. It saves the pixels next to the tokens, records where each image's tokens sit, and checks old images on later turns.</dd>
+  <dt>Status</dt>
+  <dd><span class="verdict good">How the new feature works, at the PR head.</span> Not a bug report. Turn 2 is covered by unit tests only; the shipped CLEVR smoke is single-turn.</dd>
+</dl>
+</div>
+
+<nav class="chain">
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4191-where-pixels-come-from.html">1 · where pixels come from</a>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4191-media-data-flow.html">2 · how the image data flows</a>
+  <span class="here">3 · text and image tokens across turns</span>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4191-rebase-breaks-splice.html">4 · the rebase that breaks splicing</a>
+</nav>
+<p class="chainnote">Four pages on this PR. This one: what crosses the wire each turn, where the image tokens live, and where they are joined to the pixels.</p>
+
+<div class="bg"><b>Background.</b> The chat template writes <b>one tag per image</b>. vLLM's image processor then replaces that tag with
+<code>&lt;img&gt;</code>, one <span class="tip" tabindex="0" data-tip="The IMG_CONTEXT token. Each one is a slot that the model later fills with one vision feature.">image slot token</span> per vision feature, and <code>&lt;/img&gt;</code>
+(<a href="https://github.com/vllm-project/vllm/blob/v0.26.0/vllm/transformers_utils/processors/nano_nemotron_vl.py#L1076-L1084">get_image_repl</a>).
+Omni makes one slot per 4 patches of 16×16 px (<a href="https://github.com/vllm-project/vllm/blob/v0.26.0/vllm/transformers_utils/processors/nano_nemotron_vl.py#L285-L288">processor :285</a>).
+In the example, image A is 64×96 px = 24 patches = <b>6 slots</b>, and image B is 128×160 px = 80 patches = <b>20 slots</b>.
+Everything in TQ and in the learner uses the <b>expanded</b> form, with the slots written out. Dotted words have a short explanation: hover or tap them.</div>
+
+<p>Gym never handles a token id in capture mode. Each turn it sends the chat text, the images as base64 URLs, and a pointer to the earlier rows in TQ
+(<a href="https://github.com/NVIDIA-NeMo/Gym/blob/17abf2ddc76f74e40d0ba5a15b0401710a46db26/nemo_gym/token_id_capture/sink.py#L255-L264">Gym sink.py:255</a>).
+The worker reads the earlier tokens, image slots included, from TQ by that pointer. vLLM renders the whole conversation from text again, so old images are expanded and processed again too.
+The worker then glues the exact old tokens onto the new part of the render (the <b>splice</b>) and moves the image positions to match
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/32cfbcdf8196ee12146572594528ae3646604b6a/nemo_rl/data/captured_media.py#L318-L330">captured_media.py:318</a>).
+Tokens and pixels are joined only inside the model, by order.</p>
+
+<h2>One rollout, two turns, token by token</h2>
+
+<svg viewBox="0 0 940 390" role="img" aria-label="Token ribbons for turn 1, the turn-2 template render, the turn-2 spliced prompt, and how Bridge fills the image slots with pixel features in order.">
+<rect class="k-t" x="14" y="8" width="13" height="13" rx="2"/>
+<text class="lg" x="32" y="19">text</text>
+<rect class="k-b" x="72.8" y="8" width="13" height="13" rx="2"/>
+<text class="lg" x="90.8" y="19">[ ] = &lt;img&gt; &lt;/img&gt;</text>
+<rect class="k-a" x="218.40000000000003" y="8" width="13" height="13" rx="2"/>
+<text class="lg" x="236.40000000000003" y="19">image A slot (6)</text>
+<rect class="k-n" x="351.6" y="8" width="13" height="13" rx="2"/>
+<text class="lg" x="369.6" y="19">image B slot (20)</text>
+<rect class="k-g" x="491.0" y="8" width="13" height="13" rx="2"/>
+<text class="lg" x="509.0" y="19">generated</text>
+<rect class="k-r" x="580.8" y="8" width="13" height="13" rx="2"/>
+<text class="lg" x="598.8" y="19">history re-tokenized by the template</text>
+<text class="ix" x="184" y="44" text-anchor="middle">0</text>
+<text class="ix" x="252" y="44" text-anchor="middle">4</text>
+<text class="ix" x="320" y="44" text-anchor="middle">8</text>
+<text class="ix" x="388" y="44" text-anchor="middle">12</text>
+<text class="rl" x="14" y="65">turn 1, staged</text>
+<text class="rs" x="14" y="79">row 1 in TQ, cum_len 16</text>
+<rect class="k-t" x="176" y="50" width="16" height="22" rx="2"/>
+<rect class="k-t" x="193" y="50" width="16" height="22" rx="2"/>
+<rect class="k-b" x="210" y="50" width="16" height="22" rx="2"/>
+<text class="ct" x="218.0" y="65" text-anchor="middle">[</text>
+<rect class="k-a" x="227" y="50" width="16" height="22" rx="2"/>
+<rect class="k-a" x="244" y="50" width="16" height="22" rx="2"/>
+<rect class="k-a" x="261" y="50" width="16" height="22" rx="2"/>
+<rect class="k-a" x="278" y="50" width="16" height="22" rx="2"/>
+<rect class="k-a" x="295" y="50" width="16" height="22" rx="2"/>
+<rect class="k-a" x="312" y="50" width="16" height="22" rx="2"/>
+<rect class="k-b" x="329" y="50" width="16" height="22" rx="2"/>
+<text class="ct" x="337.0" y="65" text-anchor="middle">]</text>
+<rect class="k-t" x="346" y="50" width="16" height="22" rx="2"/>
+<rect class="k-t" x="363" y="50" width="16" height="22" rx="2"/>
+<rect class="k-g" x="380" y="50" width="16" height="22" rx="2"/>
+<text class="ct" x="388.0" y="65" text-anchor="middle">g1</text>
+<rect class="k-g" x="397" y="50" width="16" height="22" rx="2"/>
+<text class="ct" x="405.0" y="65" text-anchor="middle">g2</text>
+<rect class="k-g" x="414" y="50" width="16" height="22" rx="2"/>
+<text class="ct" x="422.0" y="65" text-anchor="middle">g3</text>
+<rect class="k-e" x="431" y="50" width="16" height="22" rx="2"/>
+<text class="ct" x="439.0" y="65" text-anchor="middle">EOS</text>
+<text class="nt" x="458" y="65">+ pixels of A: [24, 768] in the same row</text>
+<rect class="wire" x="176" y="86" width="740" height="42" rx="6"/>
+<text class="wt" x="188" y="104">Gym → worker, turn 2 (HTTP): chat text + A and B as base64 URLs + a pointer to row 1, prev_len = 16</text>
+<text class="wn" x="188" y="120">No token ids cross the wire. The worker reads row 1's tokens from TQ by that pointer.</text>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/32cfbcdf8196ee12146572594528ae3646604b6a/nemo_rl/models/generation/vllm/vllm_worker_async.py#L1076-L1083" target="_blank" rel="noopener"><text x="14" y="112">worker reads TQ :1076</text></a>
+<text class="ix" x="184" y="148" text-anchor="middle">0</text>
+<text class="ix" x="252" y="148" text-anchor="middle">4</text>
+<text class="ix" x="320" y="148" text-anchor="middle">8</text>
+<text class="ix" x="388" y="148" text-anchor="middle">12</text>
+<text class="ix" x="456" y="148" text-anchor="middle">16</text>
+<text class="ix" x="524" y="148" text-anchor="middle">20</text>
+<text class="ix" x="592" y="148" text-anchor="middle">24</text>
+<text class="ix" x="660" y="148" text-anchor="middle">28</text>
+<text class="ix" x="728" y="148" text-anchor="middle">32</text>
+<text class="ix" x="796" y="148" text-anchor="middle">36</text>
+<text class="rl" x="14" y="169">turn 2, template</text>
+<text class="rs" x="14" y="183">re-rendered from text</text>
+<rect class="k-t" x="176" y="154" width="16" height="22" rx="2"/>
+<rect class="k-t" x="193" y="154" width="16" height="22" rx="2"/>
+<rect class="k-b" x="210" y="154" width="16" height="22" rx="2"/>
+<text class="ct" x="218.0" y="169" text-anchor="middle">[</text>
+<rect class="k-a" x="227" y="154" width="16" height="22" rx="2"/>
+<rect class="k-a" x="244" y="154" width="16" height="22" rx="2"/>
+<rect class="k-a" x="261" y="154" width="16" height="22" rx="2"/>
+<rect class="k-a" x="278" y="154" width="16" height="22" rx="2"/>
+<rect class="k-a" x="295" y="154" width="16" height="22" rx="2"/>
+<rect class="k-a" x="312" y="154" width="16" height="22" rx="2"/>
+<rect class="k-b" x="329" y="154" width="16" height="22" rx="2"/>
+<text class="ct" x="337.0" y="169" text-anchor="middle">]</text>
+<rect class="k-t" x="346" y="154" width="16" height="22" rx="2"/>
+<rect class="k-t" x="363" y="154" width="16" height="22" rx="2"/>
+<rect class="k-r" x="380" y="154" width="16" height="22" rx="2"/>
+<text class="ct" x="388.0" y="169" text-anchor="middle">g1'</text>
+<rect class="k-r" x="397" y="154" width="16" height="22" rx="2"/>
+<text class="ct" x="405.0" y="169" text-anchor="middle">g2'</text>
+<rect class="k-e" x="414" y="154" width="16" height="22" rx="2"/>
+<text class="ct" x="422.0" y="169" text-anchor="middle">EOS</text>
+<rect class="k-t" x="431" y="154" width="16" height="22" rx="2"/>
+<rect class="k-t" x="448" y="154" width="16" height="22" rx="2"/>
+<rect class="k-b" x="465" y="154" width="16" height="22" rx="2"/>
+<text class="ct" x="473.0" y="169" text-anchor="middle">[</text>
+<rect class="k-n" x="482" y="154" width="16" height="22" rx="2"/>
+<rect class="k-n" x="499" y="154" width="16" height="22" rx="2"/>
+<rect class="k-n" x="516" y="154" width="16" height="22" rx="2"/>
+<rect class="k-n" x="533" y="154" width="16" height="22" rx="2"/>
+<rect class="k-n" x="550" y="154" width="16" height="22" rx="2"/>
+<rect class="k-n" x="567" y="154" width="16" height="22" rx="2"/>
+<rect class="k-n" x="584" y="154" width="16" height="22" rx="2"/>
+<rect class="k-n" x="601" y="154" width="16" height="22" rx="2"/>
+<rect class="k-n" x="618" y="154" width="16" height="22" rx="2"/>
+<rect class="k-n" x="635" y="154" width="16" height="22" rx="2"/>
+<rect class="k-n" x="652" y="154" width="16" height="22" rx="2"/>
+<rect class="k-n" x="669" y="154" width="16" height="22" rx="2"/>
+<rect class="k-n" x="686" y="154" width="16" height="22" rx="2"/>
+<rect class="k-n" x="703" y="154" width="16" height="22" rx="2"/>
+<rect class="k-n" x="720" y="154" width="16" height="22" rx="2"/>
+<rect class="k-n" x="737" y="154" width="16" height="22" rx="2"/>
+<rect class="k-n" x="754" y="154" width="16" height="22" rx="2"/>
+<rect class="k-n" x="771" y="154" width="16" height="22" rx="2"/>
+<rect class="k-n" x="788" y="154" width="16" height="22" rx="2"/>
+<rect class="k-n" x="805" y="154" width="16" height="22" rx="2"/>
+<rect class="k-b" x="822" y="154" width="16" height="22" rx="2"/>
+<text class="ct" x="830.0" y="169" text-anchor="middle">]</text>
+<rect class="k-t" x="839" y="154" width="16" height="22" rx="2"/>
+<text class="nt" x="176" y="192">A is expanded again from its [img] tag; the old answer re-tokenizes to 2 tokens (g1', g2'), so B starts at 17</text>
+<text class="ix" x="184" y="214" text-anchor="middle">0</text>
+<text class="ix" x="252" y="214" text-anchor="middle">4</text>
+<text class="ix" x="320" y="214" text-anchor="middle">8</text>
+<text class="ix" x="388" y="214" text-anchor="middle">12</text>
+<text class="ix" x="456" y="214" text-anchor="middle">16</text>
+<text class="ix" x="524" y="214" text-anchor="middle">20</text>
+<text class="ix" x="592" y="214" text-anchor="middle">24</text>
+<text class="ix" x="660" y="214" text-anchor="middle">28</text>
+<text class="ix" x="728" y="214" text-anchor="middle">32</text>
+<text class="ix" x="796" y="214" text-anchor="middle">36</text>
+<text class="ix" x="864" y="214" text-anchor="middle">40</text>
+<text class="rl" x="14" y="235">turn 2, spliced</text>
+<text class="rs" x="14" y="249">run by vLLM, trained on</text>
+<rect class="k-t" x="176" y="220" width="16" height="22" rx="2"/>
+<rect class="k-t" x="193" y="220" width="16" height="22" rx="2"/>
+<rect class="k-b" x="210" y="220" width="16" height="22" rx="2"/>
+<text class="ct" x="218.0" y="235" text-anchor="middle">[</text>
+<rect class="k-a" x="227" y="220" width="16" height="22" rx="2"/>
+<rect class="k-a" x="244" y="220" width="16" height="22" rx="2"/>
+<rect class="k-a" x="261" y="220" width="16" height="22" rx="2"/>
+<rect class="k-a" x="278" y="220" width="16" height="22" rx="2"/>
+<rect class="k-a" x="295" y="220" width="16" height="22" rx="2"/>
+<rect class="k-a" x="312" y="220" width="16" height="22" rx="2"/>
+<rect class="k-b" x="329" y="220" width="16" height="22" rx="2"/>
+<text class="ct" x="337.0" y="235" text-anchor="middle">]</text>
+<rect class="k-t" x="346" y="220" width="16" height="22" rx="2"/>
+<rect class="k-t" x="363" y="220" width="16" height="22" rx="2"/>
+<rect class="k-g" x="380" y="220" width="16" height="22" rx="2"/>
+<text class="ct" x="388.0" y="235" text-anchor="middle">g1</text>
+<rect class="k-g" x="397" y="220" width="16" height="22" rx="2"/>
+<text class="ct" x="405.0" y="235" text-anchor="middle">g2</text>
+<rect class="k-g" x="414" y="220" width="16" height="22" rx="2"/>
+<text class="ct" x="422.0" y="235" text-anchor="middle">g3</text>
+<rect class="k-e" x="431" y="220" width="16" height="22" rx="2"/>
+<text class="ct" x="439.0" y="235" text-anchor="middle">EOS</text>
+<rect class="k-t" x="448" y="220" width="16" height="22" rx="2"/>
+<rect class="k-t" x="465" y="220" width="16" height="22" rx="2"/>
+<rect class="k-b" x="482" y="220" width="16" height="22" rx="2"/>
+<text class="ct" x="490.0" y="235" text-anchor="middle">[</text>
+<rect class="k-n" x="499" y="220" width="16" height="22" rx="2"/>
+<rect class="k-n" x="516" y="220" width="16" height="22" rx="2"/>
+<rect class="k-n" x="533" y="220" width="16" height="22" rx="2"/>
+<rect class="k-n" x="550" y="220" width="16" height="22" rx="2"/>
+<rect class="k-n" x="567" y="220" width="16" height="22" rx="2"/>
+<rect class="k-n" x="584" y="220" width="16" height="22" rx="2"/>
+<rect class="k-n" x="601" y="220" width="16" height="22" rx="2"/>
+<rect class="k-n" x="618" y="220" width="16" height="22" rx="2"/>
+<rect class="k-n" x="635" y="220" width="16" height="22" rx="2"/>
+<rect class="k-n" x="652" y="220" width="16" height="22" rx="2"/>
+<rect class="k-n" x="669" y="220" width="16" height="22" rx="2"/>
+<rect class="k-n" x="686" y="220" width="16" height="22" rx="2"/>
+<rect class="k-n" x="703" y="220" width="16" height="22" rx="2"/>
+<rect class="k-n" x="720" y="220" width="16" height="22" rx="2"/>
+<rect class="k-n" x="737" y="220" width="16" height="22" rx="2"/>
+<rect class="k-n" x="754" y="220" width="16" height="22" rx="2"/>
+<rect class="k-n" x="771" y="220" width="16" height="22" rx="2"/>
+<rect class="k-n" x="788" y="220" width="16" height="22" rx="2"/>
+<rect class="k-n" x="805" y="220" width="16" height="22" rx="2"/>
+<rect class="k-n" x="822" y="220" width="16" height="22" rx="2"/>
+<rect class="k-b" x="839" y="220" width="16" height="22" rx="2"/>
+<text class="ct" x="847.0" y="235" text-anchor="middle">]</text>
+<rect class="k-t" x="856" y="220" width="16" height="22" rx="2"/>
+<rect class="k-g" x="873" y="220" width="16" height="22" rx="2"/>
+<text class="ct" x="881.0" y="235" text-anchor="middle">h1</text>
+<rect class="k-g" x="890" y="220" width="16" height="22" rx="2"/>
+<text class="ct" x="898.0" y="235" text-anchor="middle">h2</text>
+<rect class="k-e" x="907" y="220" width="16" height="22" rx="2"/>
+<text class="ct" x="915.0" y="235" text-anchor="middle">EOS</text>
+<path class="cut" d="M447 212 L447 270"/>
+<text class="cutl" x="451" y="266">prev_len 16</text>
+<text class="nt" x="176" y="258">0–15: row 1's exact tokens from TQ</text>
+<text class="nt" x="519" y="258">16–43: new, staged as row 2 with pixels of B only</text>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/32cfbcdf8196ee12146572594528ae3646604b6a/nemo_rl/models/generation/vllm/vllm_worker_async.py#L1152-L1157" target="_blank" rel="noopener"><text x="14" y="258">splice :1152</text></a>
+<text class="rl" x="14" y="318">learner</text><text class="rs" x="14" y="332">fills slots in order</text>
+<rect class="k-a" x="227" y="322" width="101" height="22" rx="3"/>
+<text class="pt" x="231" y="337">A</text>
+<rect class="k-n" x="499" y="322" width="339" height="22" rx="3"/>
+<text class="pt" x="505" y="337">B: 80 patch rows → 20 features</text>
+<text class="nt" x="176" y="362">pixel_values [104, 768] = A's 24 rows then B's 80 (each block sits under the slots it fills)</text>
+<text class="nt" x="176" y="378">vision encoder → 6 + 20 = 26 features → written into the 26 slots, left to right. Only check: 26 slots = 26 features.</text>
+<a href="https://github.com/NVIDIA-NeMo/Megatron-Bridge/blob/1f8873bb00a8ddf3af811649f0a7efdb2363570c/src/megatron/bridge/models/nemotron_omni/modeling_nemotron_omni.py#L397-L418" target="_blank" rel="noopener"><text x="14" y="362">_merge_projected_media</text></a>
+</svg>
+
+<h2>Your questions, answered</h2>
+
+<table>
+<tr><th>Question</th><th>Answer</th></tr>
+<tr><td>Does Gym send tokens, or media?</td><td>Neither tokens nor pixels. It sends chat text with images as base64 URLs, plus a pointer to the parent rows and <code>prev_len</code>. The inline token field is left empty in this mode (<a href="https://github.com/NVIDIA-NeMo/Gym/blob/17abf2ddc76f74e40d0ba5a15b0401710a46db26/responses_api_models/vllm_model/app.py#L724-L727">vllm_model/app.py:724</a>). Gym also strips token ids from the worker's reply (<a href="https://github.com/NVIDIA-NeMo/Gym/blob/17abf2ddc76f74e40d0ba5a15b0401710a46db26/nemo_gym/token_id_capture/external_capture.py#L62-L74">external_capture.py:62</a>).</td></tr>
+<tr><td>Where do the old turns' image tokens live?</td><td>In the TQ row of the call that first saw the image, as ordinary prompt tokens. The worker reads them back by pointer, with a small cache (<a href="https://github.com/NVIDIA-NeMo/RL/blob/32cfbcdf8196ee12146572594528ae3646604b6a/nemo_rl/models/generation/vllm/vllm_worker_async.py#L758-L785">vllm_worker_async.py:758</a>).</td></tr>
+<tr><td>Does vLLM see the old images again?</td><td>Yes. The request text contains A again, so vLLM decodes it, runs the processor, and runs the vision encoder on it again every turn. The recipe turns prefix caching off (<a href="https://github.com/NVIDIA-NeMo/RL/blob/32cfbcdf8196ee12146572594528ae3646604b6a/examples/nemo_gym/vlm_grpo_nemotron_omni_clevr_vllm_token_capture_single_controller.yaml#L55">yaml:55</a>), so no old work is reused. Whether vLLM's encoder cache reuses it is not verified.</td></tr>
+<tr><td>Where are old turns' pixels stored?</td><td>Only in row 1, once. Row 2 stores only B's pixels and the tokens after <code>prev_len</code>.</td></tr>
+<tr><td>How do the tokens know which images are old?</td><td>They don't. The tokens for old and new images look the same. The worker decides by position: a slot run that ends before <code>prev_len</code> must match the record saved with row 1 (position, length, token hash, size), and anything after is new. A run across the line is rejected (<a href="https://github.com/NVIDIA-NeMo/RL/blob/32cfbcdf8196ee12146572594528ae3646604b6a/nemo_rl/data/captured_media.py#L349-L361">captured_media.py:349</a>).</td></tr>
+<tr><td>Where do tokens and pixels meet?</td><td>Only in Bridge. It finds every slot token, requires that the count equals the feature count, and fills them left to right (<a href="https://github.com/NVIDIA-NeMo/Megatron-Bridge/blob/1f8873bb00a8ddf3af811649f0a7efdb2363570c/src/megatron/bridge/models/nemotron_omni/modeling_nemotron_omni.py#L397-L418">_merge_projected_media</a>). Nothing ties a run of slots to a specific image except order. That holds because tokens and pixels are both joined in the same call order.</td></tr>
+</table>
+
+<div class="hl">
+<strong>What to take away.</strong> The existing token path is unchanged: Gym carries text plus a pointer, and TQ carries the tokens, image slots included.
+The PR adds the pixels beside them and a record of where each image's slots sit. The costs: every turn re-processes and re-encodes all earlier images inside vLLM, and the join to the pixels is by order, with only a total-count check in the model.
+</div>
+
+</div>
+</body>
+</html>

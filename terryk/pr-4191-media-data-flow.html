@@ -106,9 +106,10 @@ RL permalinks pin <code>32cfbcd</code>; Gym permalinks pin <code>17abf2d</code>.
 <nav class="chain">
   <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4191-where-pixels-come-from.html">1 · where pixels come from</a>
   <span class="here">2 · how the image data flows</span>
-  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4191-rebase-breaks-splice.html">3 · the rebase that breaks splicing</a>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4191-tokens-and-images.html">3 · text and image tokens across turns</a>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4191-rebase-breaks-splice.html">4 · the rebase that breaks splicing</a>
 </nav>
-<p class="chainnote">Three pages on this PR. This one: every place the image lives, in what form, and who reads it.</p>
+<p class="chainnote">Four pages on this PR. This one: every place the image lives, in what form, and who reads it.</p>
 
 <div class="bg"><b>Background.</b> <span class="tip" tabindex="0" data-tip="TransferQueue: RL's shared row store. Workers write rows into it and the trainer reads them.">TQ</span> has two areas here: a <b>staging</b> area with one row per model call, and a <b>train</b> area with one row per finished rollout.
 The <span class="tip" tabindex="0" data-tip="RolloutReassembler: when a rollout ends, it reads that rollout's staging rows, checks them, and writes one training row.">finalizer</span> turns the first into the second.
@@ -182,11 +183,11 @@ From there on the pixels stay in RL's hands: the worker packs them and writes th
   <text class="al" x="787" y="356" text-anchor="end">TQTokenSink.stage: one write</text>
   <rect class="b-px" x="560" y="374" width="360" height="52" rx="6"/>
   <text class="t" x="570" y="392">staging: one row per call, only NEW images</text>
-  <text class="m" x="570" y="410">call 1: A [6,768]   call 2: B [20,768]</text>
+  <text class="m" x="570" y="410">call 1: A [24,768]   call 2: B [80,768]</text>
   <a href="https://github.com/NVIDIA-NeMo/RL/blob/32cfbcdf8196ee12146572594528ae3646604b6a/nemo_rl/data_plane/tq_token_sink.py#L400" target="_blank" rel="noopener"><text x="570" y="422">tq_token_sink.py:400</text></a>
   <rect class="b-px" x="30" y="374" width="330" height="52" rx="6"/>
   <text class="t" x="40" y="392">train: one row per rollout</text>
-  <text class="m" x="40" y="410">pixel_values [26,768] = A then B</text>
+  <text class="m" x="40" y="410">pixel_values [104,768] = A then B</text>
   <a href="https://github.com/NVIDIA-NeMo/RL/blob/32cfbcdf8196ee12146572594528ae3646604b6a/nemo_rl/experience/rollout_reassembler.py#L746" target="_blank" rel="noopener"><text x="40" y="422">rollout_reassembler.py:746</text></a>
 
   <!-- finalizer -->
@@ -194,7 +195,7 @@ From there on the pixels stay in RL's hands: the worker packs them and writes th
   <text class="al" x="708" y="448">2 reads: flags, then pixels</text>
   <rect class="b-px" x="400" y="464" width="360" height="52" rx="6"/>
   <text class="t" x="410" y="482">join the calls in order, then delete staging</text>
-  <text class="m" x="410" y="500">[6,768] + [20,768] → [26,768]</text>
+  <text class="m" x="410" y="500">[24,768] + [80,768] → [104,768]</text>
   <a href="https://github.com/NVIDIA-NeMo/RL/blob/32cfbcdf8196ee12146572594528ae3646604b6a/nemo_rl/experience/rollout_reassembler.py#L436-L474" target="_blank" rel="noopener"><text x="410" y="512">_resolve_media :436</text></a>
   <path class="arr" d="M400 490 L240 490 L240 428"/><path class="ah" d="M235 434 L240 426 L245 434 Z"/>
   <text class="al" x="250" y="484">writes the train row</text>
@@ -208,7 +209,7 @@ From there on the pixels stay in RL's hands: the worker packs them and writes th
   <a href="https://github.com/NVIDIA-NeMo/RL/blob/32cfbcdf8196ee12146572594528ae3646604b6a/nemo_rl/models/megatron/train.py#L195-L206" target="_blank" rel="noopener"><text x="40" y="618">train.py:195-206</text></a>
 </svg>
 
-<p>Example numbers, as on page 1: a patch is 16×16 px = 768 numbers. Image A (32×48 px) is 6 patches; image B (80×64 px), added on turn 2, is 20 patches.
+<p>Example numbers, as on page 1: a patch is 16×16 px = 768 numbers. Image A (64×96 px) is 24 patches; image B (128×160 px), added on turn 2, is 80 patches. Page 3 shows the matching tokens.
 Gym sends the whole conversation on each turn, so vLLM decodes and processes A again on turn 2. The worker then compares A against the
 <span class="tip" tabindex="0" data-tip="media_spans: for each image, its size, where its placeholder tokens sit, and a hash of those tokens. Saved in the staging row's small JSON field, with a SHA-256 check value next to it.">image list saved with call 1</span>
 and drops it, so only B is written

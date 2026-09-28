@@ -100,16 +100,17 @@ All permalinks pin the PR head <code>32cfbcd</code>.</p>
   <dt>This PR</dt>
   <dd>The vLLM worker saves the exact processed pixels for each model call, next to that call's tokens. The finalizer joins them per rollout and hands them to the Megatron learner.</dd>
   <dt>Status</dt>
-  <dd><span class="verdict good">New feature, works at the PR head</span> (GB200 image and video smokes pass). It needs a rebase onto main first, and one file breaks silently in that rebase: see page 3. Page 2 follows the image hop by hop.</dd>
+  <dd><span class="verdict good">New feature, works at the PR head</span> (GB200 image and video smokes pass). It needs a rebase onto main first, and one file breaks silently in that rebase: see page 4. Pages 2 and 3 follow the image and its tokens hop by hop.</dd>
 </dl>
 </div>
 
 <nav class="chain">
   <span class="here">1 · where pixels come from</span>
   <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4191-media-data-flow.html">2 · how the image data flows</a>
-  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4191-rebase-breaks-splice.html">3 · the rebase that breaks splicing</a>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4191-tokens-and-images.html">3 · text and image tokens across turns</a>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4191-rebase-breaks-splice.html">4 · the rebase that breaks splicing</a>
 </nav>
-<p class="chainnote">Three pages on this PR. This one: what the feature is and how it compares to the old path.</p>
+<p class="chainnote">Four pages on this PR. This one: what the feature is and how it compares to the old path.</p>
 
 <div class="bg"><b>Background.</b> In <span class="tip" tabindex="0" data-tip="RL's asynchronous training loop. One controller drives rollouts, a finalizer, and the trainer at the same time.">SingleController</span> training with <span class="tip" tabindex="0" data-tip="token_capture.enabled=true. The inference worker records the exact prompt and output token ids of every model call, so training never has to re-tokenize text.">token capture</span>, each model call in a rollout is saved as a small row in <span class="tip" tabindex="0" data-tip="TransferQueue: RL's shared store that moves rows between workers and the trainer.">TQ</span>: only the tokens that are new since the previous call. A <span class="tip" tabindex="0" data-tip="RolloutReassembler: joins a rollout's saved call rows back into one training row once the rollout ends.">finalizer</span> joins those rows into one training row. A vision model also needs pixels, and this PR adds them to the same rows. Dotted words have a short explanation: hover or tap them.</div>
 
@@ -128,7 +129,7 @@ A later call saves only the images that are new. Images it re-sends are checked 
 
 <svg viewBox="0 0 940 560" role="img" aria-label="Two paths feeding pixels to the learner. Old path: RL's processor on the dataset row. New path: vLLM's processed pixels saved per call and joined by the finalizer. Both meet at Bridge's _patchify_dynamic_images.">
   <text class="note" x="16" y="16">Example: a patch is 16×16 px = 768 numbers (3 colors × 16 × 16).</text>
-  <text class="note" x="16" y="32">Image A is 32×48 px → 6 patches. Image B is 80×64 px → 20 patches.</text>
+  <text class="note" x="16" y="32">Image A is 64×96 px → 24 patches (6 tokens). Image B is 128×160 px → 80 patches (20 tokens).</text>
 
   <!-- old path -->
   <text class="hdr-old" x="16" y="54">Without capture (token_capture off)</text>
@@ -147,20 +148,20 @@ A later call saves only the images that are new. Images it re-sends are checked 
   <text class="hdr-new" x="490" y="54">With capture (this PR)</text>
   <rect class="box-new" x="490" y="64" width="434" height="96" rx="8"/>
   <text class="lbl-b" x="504" y="86">call 1: image A</text>
-  <text class="lbl" x="504" y="106">save A: imgs [6, 768], sizes [[32,48]]</text>
+  <text class="lbl" x="504" y="106">save A: imgs [24, 768], sizes [[64,96]]</text>
   <text class="note" x="504" y="124">vLLM's own processed pixels, same write as the tokens</text>
   <a href="https://github.com/NVIDIA-NeMo/RL/blob/32cfbcdf8196ee12146572594528ae3646604b6a/nemo_rl/models/generation/vllm/vllm_worker_async.py#L724" target="_blank" rel="noopener"><text x="504" y="146">vllm_worker_async.py:724</text></a>
 
   <rect class="box-new" x="490" y="178" width="434" height="96" rx="8"/>
   <text class="lbl-b" x="504" y="200">call 2: re-sends A, adds B</text>
   <text class="lbl" x="504" y="220">check A (size + placeholder tokens) = call 1</text>
-  <text class="lbl" x="504" y="238">save only B: imgs [20, 768], sizes [[80,64]]</text>
+  <text class="lbl" x="504" y="238">save only B: imgs [80, 768], sizes [[128,160]]</text>
   <a href="https://github.com/NVIDIA-NeMo/RL/blob/32cfbcdf8196ee12146572594528ae3646604b6a/nemo_rl/models/generation/vllm/vllm_worker_async.py#L639" target="_blank" rel="noopener"><text x="504" y="262">_capture_request_media :639</text></a>
 
   <rect class="box-new" x="490" y="292" width="434" height="96" rx="8"/>
   <text class="lbl-b" x="504" y="314">finalizer joins the calls in order</text>
-  <text class="lbl" x="504" y="334">pixel_values [26, 768]  (6 + 20)</text>
-  <text class="lbl" x="504" y="352">imgs_sizes [[32,48],[80,64]]</text>
+  <text class="lbl" x="504" y="334">pixel_values [104, 768]  (24 + 80)</text>
+  <text class="lbl" x="504" y="352">imgs_sizes [[64,96],[128,160]]</text>
   <a href="https://github.com/NVIDIA-NeMo/RL/blob/32cfbcdf8196ee12146572594528ae3646604b6a/nemo_rl/experience/rollout_reassembler.py#L436" target="_blank" rel="noopener"><text x="504" y="376">_resolve_media :436</text></a>
 
   <path class="arr" d="M707 160 L707 178"/><path class="arrh" d="M701 172 L707 178 L713 172 Z"/>
@@ -200,7 +201,7 @@ and step time went from 44.7 s to 46.2 s.</p>
 <div class="hl">
 <strong>What to take away.</strong> Media capture makes the learner train on the exact pixels vLLM generated from, instead of a second copy
 made by RL. The data joins the old path inside the model, so nothing downstream of Bridge changes. Before merging, the branch has to be
-rebased onto main, and one file breaks there without a conflict marker. That is page 3.
+rebased onto main, and one file breaks there without a conflict marker. That is page 4.
 </div>
 
 </div>
