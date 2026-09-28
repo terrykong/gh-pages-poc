@@ -187,7 +187,7 @@ the features with its own current weights, and with gradients when the encoder i
   <path class="arr-http" d="M480 110 L480 146"/><path class="ah-http" d="M475 140 L480 148 L485 140 Z"/>
   <text class="al" x="488" y="132">rollout request</text>
   <rect class="b-hash" x="670" y="148" width="250" height="52" rx="6"/>
-  <text class="t" x="680" y="166">Gym ledger: hashes only</text><text class="note" x="680" y="182">hashes the conversation, URL included;</text><text class="note" x="680" y="195">no pixels kept</text>
+  <text class="t" x="680" y="166">Gym ledger: 1 record per call</text><text class="note" x="680" y="182">hash of chat incl. image base64,</text><text class="note" x="680" y="195">TQ-row hashes, lengths; no image</text>
 
   <!-- vllm worker -->
   <path class="arr-http" d="M480 200 L480 238"/><path class="ah-http" d="M475 232 L480 240 L485 232 Z"/>
@@ -255,8 +255,10 @@ The shipped CLEVR smoke is single-turn, so turn 2 is covered by unit tests only.
 <tr><td>vLLM processor output</td><td><span class="px">pixels</span></td><td class="n">4 rollouts × 2 turns = 8</td><td>after each request</td></tr>
 <tr><td>TQ staging row</td><td><span class="px">packed patches</span>, only on the call where A is new</td><td class="n">4</td><td>right after the finalizer writes the train rows (<a href="https://github.com/NVIDIA-NeMo/RL/blob/32cfbcdf8196ee12146572594528ae3646604b6a/nemo_rl/experience/rollout_reassembler.py#L794-L797">:796</a>)</td></tr>
 <tr><td>TQ train row</td><td><span class="px">pixel_values</span>, one per rollout</td><td class="n">4</td><td>after the step that trains on it (<a href="https://github.com/NVIDIA-NeMo/RL/blob/32cfbcdf8196ee12146572594528ae3646604b6a/nemo_rl/algorithms/single_controller.py#L1884-L1886"><code>single_controller.py:1884</code></a>)</td></tr>
-<tr><td>Gym</td><td>hashes of the text URL and of the placeholder tokens</td><td class="n">0 pixels</td><td>—</td></tr>
+<tr><td>Gym ledger</td><td>one small record per call: a hash of the whole chat, which covers the image's base64 PNG text; hashes of the TQ row and its image list; lengths. No tokens, no image, no pixels (<a href="https://github.com/NVIDIA-NeMo/Gym/blob/17abf2ddc76f74e40d0ba5a15b0401710a46db26/nemo_gym/token_id_capture/lineage.py#L880-L890">lineage.py:880</a>)</td><td class="n">0</td><td>—</td></tr>
 </table>
+
+<p><b>What is checked by a hash, and what is not.</b> The source image is: Gym hashes the whole chat, base64 PNG included, and a changed image on turn 2 breaks the match to the earlier call (<a href="https://github.com/NVIDIA-NeMo/Gym/blob/17abf2ddc76f74e40d0ba5a15b0401710a46db26/nemo_gym/token_id_capture/fingerprint.py#L77-L101">fingerprint.py:77</a>). The image list (slot positions and sizes) is, in Gym and again in RL. The tokens are. The <b>processed pixels stored in TQ are not</b>: the PR documents instead that images must not change and processing must repeat exactly. A size change is still caught on the next turn; same-size pixel differences, or damage to the stored pixels, are not.</p>
 
 <p><b>Within one rollout</b>, an image is stored once: later calls check it and skip it.
 <b>Across the rollouts of one prompt</b>, nothing is shared. Each rollout is a separate vLLM request, so each one processes, stores and trains on its own copy of A.
