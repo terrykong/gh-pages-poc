@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NVIDIA-NeMo/RL #4191 — a clean rebase onto main breaks the multi-turn token splice</title>
+<style>
+:root{
+  --bg:#0d1117; --surface:#161b22; --surface2:#1c2128; --border:#30363d;
+  --text:#e6edf3; --dim:#8b949e; --accent:#58a6ff; --green:#3fb950;
+  --orange:#d29922; --red:#f85149;
+}
+:root[data-theme="light"]{
+  --bg:#ffffff; --surface:#f6f8fa; --surface2:#eaeef2; --border:#d0d7de;
+  --text:#1f2328; --dim:#59636e; --accent:#0969da; --green:#1a7f37;
+  --orange:#9a6700; --red:#cf222e;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:28px 20px 70px}
+h1{font-size:22px;margin:0 0 8px;line-height:1.3}
+h2{font-size:18px;margin:30px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;
+  font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
+.sub{color:var(--dim);font-size:13.5px;margin:0 0 14px}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);
+  border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;
+  font:13px/1 ui-monospace,Menlo,monospace;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.18)}
+.mono{font:12.5px ui-monospace,SFMono-Regular,Menlo,monospace;
+  background:var(--surface);border:1px solid var(--border);border-radius:8px;
+  padding:13px;overflow-x:auto;white-space:pre}
+.warn{border-left:3px solid var(--red);background:var(--surface);
+  padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0}
+.where{border-left:4px solid var(--accent);background:var(--surface);padding:6px 12px;margin:6px 0 10px}
+.add{color:var(--green);font-weight:700}
+.bad{color:var(--red);font-weight:700}
+.status{border:1px solid var(--border);border-radius:10px;background:var(--surface);
+  padding:2px 16px 10px;margin:0 0 16px}
+.status dl{display:grid;grid-template-columns:max-content 1fr;gap:4px 14px;margin:12px 0 0}
+.status dt{color:var(--dim);font-size:12px;text-transform:uppercase;letter-spacing:.04em;
+  white-space:nowrap;padding-top:2px}
+.status dd{margin:0;font-size:14px}
+.verdict{font-weight:700}
+.verdict.good{color:var(--green)}
+.verdict.open{color:var(--red)}
+nav.chain{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 6px;padding:0}
+nav.chain a,nav.chain span{display:inline-block;padding:5px 11px;border:1px solid var(--border);
+  border-radius:20px;background:var(--surface);text-decoration:none;color:var(--accent);
+  font-size:12.5px;line-height:1.3;white-space:nowrap}
+nav.chain a:hover{background:var(--surface2)}
+nav.chain span.here{background:var(--accent);color:var(--bg);border-color:var(--accent);font-weight:600}
+p.chainnote{color:var(--dim);font-size:12px;margin:0 0 18px}
+.tip{border-bottom:1px dotted var(--dim);cursor:help;position:relative;outline:none}
+.tip:hover::after,.tip:focus::after{content:attr(data-tip);position:absolute;left:0;top:1.7em;z-index:60;
+  width:max-content;max-width:min(340px,80vw);white-space:normal;background:var(--surface2);color:var(--text);
+  border:1px solid var(--border);border-radius:6px;padding:7px 10px;font:13px/1.45 -apple-system,sans-serif;
+  font-weight:400;box-shadow:0 4px 14px rgba(0,0,0,.3)}
+.cref{margin:6px 0 0;font-size:13px}
+.cref a{display:inline-block;padding:4px 10px;border:1px solid var(--border);
+  border-radius:16px;background:var(--surface);font:12.5px ui-monospace,Menlo,monospace}
+.cref a:hover{background:var(--surface2);text-decoration:none}
+svg{max-width:100%;height:auto;display:block;margin:16px 0}
+svg .box{fill:var(--surface);stroke:var(--border);stroke-width:1.4}
+svg .box-pr{fill:var(--surface);stroke:var(--accent);stroke-width:1.8}
+svg .box-main{fill:var(--surface);stroke:var(--orange);stroke-width:1.8}
+svg .box-bad{fill:var(--surface);stroke:var(--red);stroke-width:2.2}
+svg .code{fill:var(--text);font:11.5px ui-monospace,Menlo,monospace}
+svg .code-add{fill:var(--green);font:bold 11.5px ui-monospace,Menlo,monospace}
+svg .code-bad{fill:var(--red);font:bold 11.5px ui-monospace,Menlo,monospace}
+svg .code-dim{fill:var(--dim);font:11.5px ui-monospace,Menlo,monospace}
+svg .lbl-b{fill:var(--text);font:bold 13px -apple-system,sans-serif}
+svg .note{fill:var(--dim);font:11.5px -apple-system,sans-serif}
+svg .hdr-pr{fill:var(--accent);font:bold 13px -apple-system,sans-serif}
+svg .hdr-main{fill:var(--orange);font:bold 13px -apple-system,sans-serif}
+svg .hdr-bad{fill:var(--red);font:bold 13px -apple-system,sans-serif}
+svg .arr{stroke:var(--dim);stroke-width:1.6;fill:none}
+svg .arrh{fill:var(--dim)}
+svg a text{text-decoration:underline;fill:var(--accent);font:11.5px ui-monospace,Menlo,monospace}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+  document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head>
+<body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+  function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+  function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
+    b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
+      else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+  document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+<div class="wrap">
+
+<h1>Rebasing this PR onto main breaks the multi-turn token splice, with no conflict marker</h1>
+<p class="sub"><a href="https://github.com/NVIDIA-NeMo/RL/pull/4191">NVIDIA-NeMo/RL #4191</a> against main's
+<a href="https://github.com/NVIDIA-NeMo/RL/pull/4129">#4129</a>.
+PR permalinks pin the PR head <code>32cfbcd</code>; main permalinks pin <code>ebbc8fd</code>.</p>
+
+<div class="status">
+<dl>
+  <dt>Before</dt>
+  <dd>At the PR head the splice works. Main changed the same function in a different way.</dd>
+  <dt>This PR</dt>
+  <dd>Moves the body of <code>replace_prefix_tokens</code> into a new <code>splice_prefix_tokens</code>, so it can also return where the cut happened.</dd>
+  <dt>Status</dt>
+  <dd><span class="verdict open">Open — not in the PR head, appears on rebase.</span> Git merges the file with no conflict, and the result raises on every multi-turn call. Raised in the review.</dd>
+</dl>
+</div>
+
+<nav class="chain">
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4191-where-pixels-come-from.html">1 · where pixels come from</a>
+  <span class="here">2 · the rebase that breaks splicing</span>
+</nav>
+<p class="chainnote">Two pages on this PR. This one: a file that breaks silently in the rebase.</p>
+
+<p>On every call after the first, the server has to glue the model's exact earlier tokens onto the newly rendered chat template.
+<span class="tip" tabindex="0" data-tip="Re-tokenizing the model's old answer can give different ids. The splice keeps the ids the model actually produced, and takes only the new part from the template.">That is the splice.</span>
+It finds the cut by counting end-of-sequence (EOS) tokens.
+Main (<a href="https://github.com/NVIDIA-NeMo/RL/pull/4129">#4129</a>) added an <code>eos_token_id</code> argument to
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/ebbc8fdc8fd929390d1d7531e142d7b35333b222/nemo_rl/models/generation/openai_server_utils.py#L28-L35"><code>replace_prefix_tokens</code></a>,
+because the Megatron inference caller has no tokenizer
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/ebbc8fdc8fd929390d1d7531e142d7b35333b222/nemo_rl/models/generation/megatron/token_capture.py#L132-L138"><code>token_capture.py:132</code></a>).
+This PR moved the same function's body into
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/32cfbcdf8196ee12146572594528ae3646604b6a/nemo_rl/models/generation/openai_server_utils.py#L53-L59"><code>splice_prefix_tokens</code></a>.
+Git applies each side to the lines it changed, and the two edits do not overlap.</p>
+
+<h2>What git produces</h2>
+
+<svg viewBox="0 0 940 470" role="img" aria-label="PR side, main side, and the auto-merged file. The merged splice_prefix_tokens reads eos_token_id without having it as a parameter.">
+  <text class="hdr-pr" x="16" y="22">This PR</text>
+  <rect class="box-pr" x="16" y="32" width="440" height="140" rx="8"/>
+  <text class="code" x="28" y="54">def replace_prefix_tokens(tokenizer, …):</text>
+  <text class="code" x="44" y="72">return splice_prefix_tokens(…).token_ids</text>
+  <text class="code" x="28" y="98">def splice_prefix_tokens(*, tokenizer, …):</text>
+  <text class="code-dim" x="44" y="116">… (the old body, moved here)</text>
+  <text class="code" x="44" y="134">eos_token_id = tokenizer.eos_token_id</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/32cfbcdf8196ee12146572594528ae3646604b6a/nemo_rl/models/generation/openai_server_utils.py#L121" target="_blank" rel="noopener"><text x="44" y="158">openai_server_utils.py:53, :121</text></a>
+
+  <text class="hdr-main" x="484" y="22">main (#4129)</text>
+  <rect class="box-main" x="484" y="32" width="440" height="140" rx="8"/>
+  <text class="code" x="496" y="54">def replace_prefix_tokens(tokenizer, …,</text>
+  <text class="code-add" x="512" y="72">*, eos_token_id=None):</text>
+  <text class="code-dim" x="512" y="98">… (old body, still here)</text>
+  <text class="code-add" x="512" y="116">if eos_token_id is None:</text>
+  <text class="code-add" x="528" y="134">eos_token_id = tokenizer.eos_token_id</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/ebbc8fdc8fd929390d1d7531e142d7b35333b222/nemo_rl/models/generation/openai_server_utils.py#L101-L103" target="_blank" rel="noopener"><text x="512" y="158">openai_server_utils.py:34, :101</text></a>
+
+  <path class="arr" d="M236 172 L380 212"/><path class="arrh" d="M372 206 L382 213 L370 216 Z"/>
+  <path class="arr" d="M704 172 L560 212"/><path class="arrh" d="M570 206 L558 213 L568 216 Z"/>
+  <text class="note" x="398" y="200">git merge / rebase: no conflict</text>
+
+  <text class="hdr-bad" x="16" y="236">Auto-merged result</text>
+  <rect class="box-bad" x="16" y="246" width="908" height="160" rx="8"/>
+  <text class="code" x="28" y="268">def replace_prefix_tokens(tokenizer, …, *, eos_token_id=None):</text>
+  <text class="code" x="44" y="286">return splice_prefix_tokens(tokenizer=…, …).token_ids</text>
+  <text class="code-bad" x="500" y="286">← eos_token_id is never passed on</text>
+  <text class="code" x="28" y="312">def splice_prefix_tokens(*, tokenizer, …):</text>
+  <text class="code-bad" x="500" y="312">← no eos_token_id parameter</text>
+  <text class="code-bad" x="44" y="330">if eos_token_id is None:</text>
+  <text class="code-bad" x="500" y="330">← reads a local that is not set yet</text>
+  <text class="code" x="60" y="348">eos_token_id = tokenizer.eos_token_id</text>
+  <text class="note" x="28" y="376">Because the name is assigned later in the function, Python treats it as a local, so the first read raises:</text>
+  <text class="code-bad" x="28" y="394">UnboundLocalError: cannot access local variable 'eos_token_id' where it is not associated with a value</text>
+
+  <text class="note" x="16" y="432">Legend: blue = PR side, orange = main side, green = lines main added, red = the broken result.</text>
+  <text class="note" x="16" y="450">Reproduced on CPU with git merge-tree and a replay of the one PR commit that touches this file.</text>
+</svg>
+
+<p>Who calls it: every call after the first on the vLLM worker
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/32cfbcdf8196ee12146572594528ae3646604b6a/nemo_rl/models/generation/vllm/vllm_worker_async.py#L1152"><code>vllm_worker_async.py:1152</code></a>),
+and main's Megatron inference capture. A first call has an empty prefix and returns early, so single-turn runs, including both GB200 smokes, would still pass.
+Main's own unit tests for this function
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/ebbc8fdc8fd929390d1d7531e142d7b35333b222/tests/unit/models/generation/test_openai_server_utils.py#L85">test_openai_server_utils.py</a>)
+run in the vLLM unit lanes and should catch it after the rebase. The risk is that eight other files do show conflicts, and this one does not.</p>
+
+<h2>The fix — give both functions the argument</h2>
+
+<p class="where"><b>Where the fix lands: RL only, one file,</b>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/32cfbcdf8196ee12146572594528ae3646604b6a/nemo_rl/models/generation/openai_server_utils.py#L38-L59"><code>openai_server_utils.py</code></a>, while rebasing.
+Keep main's <code>if eos_token_id is None:</code> body. Callers do not change.</p>
+
+<div class="mono">def replace_prefix_tokens(tokenizer, model_prefix_token_ids, template_prefix_token_ids,
+                          template_token_ids, *, <span class="add">eos_token_id: int | None = None</span>):
+    return splice_prefix_tokens(tokenizer=tokenizer, …, <span class="add">eos_token_id=eos_token_id</span>).token_ids
+
+def splice_prefix_tokens(*, tokenizer, model_prefix_token_ids, template_prefix_token_ids,
+                         template_token_ids, <span class="add">eos_token_id: int | None = None</span>):
+    ...
+    if eos_token_id is None:            # vLLM worker: tokenizer given, eos_token_id = 2 comes from it
+        eos_token_id = tokenizer.eos_token_id
+    # Megatron caller: tokenizer=None, eos_token_id=2 passed in, so this line is skipped
+
+# turn 2, EOS = 2:
+#   model prefix     [11, 12, 40, 17, 2]         what the model really produced
+#   template         [11, 12, 40, 1001, 2, 21, 22]  re-rendered; 17 became 1001
+#   splice result    [11, 12, 40, 17, 2, 21, 22]  old ids kept, new turn appended</div>
+
+<div class="warn">
+<strong>So what.</strong> Nothing is wrong at the PR head. The break appears only after the rebase main needs, and the file gives no conflict to look at.
+If it lands, every multi-turn rollout fails on its second call, on both the vLLM path and main's Megatron capture path.
+Run <code>tests/unit/models/generation/test_openai_server_utils.py</code> after rebasing.
+</div>
+
+</div>
+</body>
+</html>
