@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NVIDIA-NeMo/RL #4191 — why slice_media_tensors can be a list slice</title>
+<style>
+:root{
+  --bg:#0d1117; --surface:#161b22; --surface2:#1c2128; --border:#30363d;
+  --text:#e6edf3; --dim:#8b949e; --accent:#58a6ff; --green:#3fb950;
+  --orange:#d29922; --red:#f85149; --purple:#bc8cff;
+}
+:root[data-theme="light"]{
+  --bg:#ffffff; --surface:#f6f8fa; --surface2:#eaeef2; --border:#d0d7de;
+  --text:#1f2328; --dim:#59636e; --accent:#0969da; --green:#1a7f37;
+  --orange:#9a6700; --red:#cf222e; --purple:#8250df;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:28px 20px 70px}
+h1{font-size:22px;margin:0 0 8px;line-height:1.3}
+h2{font-size:18px;margin:30px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;
+  font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
+.sub{color:var(--dim);font-size:13.5px;margin:0 0 14px}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);
+  border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;
+  font:13px/1 ui-monospace,Menlo,monospace;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.18)}
+.hl{border-left:3px solid var(--accent);background:var(--surface);
+  padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0}
+.bg{border:1px dashed var(--border);border-radius:8px;padding:10px 14px;margin:0 0 16px;font-size:14px}
+.status{border:1px solid var(--border);border-radius:10px;background:var(--surface);
+  padding:2px 16px 10px;margin:0 0 16px}
+.status dl{display:grid;grid-template-columns:max-content 1fr;gap:4px 14px;margin:12px 0 0}
+.status dt{color:var(--dim);font-size:12px;text-transform:uppercase;letter-spacing:.04em;
+  white-space:nowrap;padding-top:2px}
+.status dd{margin:0;font-size:14px}
+.verdict{font-weight:700}
+.verdict.good{color:var(--green)}
+nav.chain{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 6px;padding:0}
+nav.chain a,nav.chain span{display:inline-block;padding:5px 11px;border:1px solid var(--border);
+  border-radius:20px;background:var(--surface);text-decoration:none;color:var(--accent);
+  font-size:12.5px;line-height:1.3;white-space:nowrap}
+nav.chain a:hover{background:var(--surface2)}
+nav.chain span.here{background:var(--accent);color:var(--bg);border-color:var(--accent);font-weight:600}
+p.chainnote{color:var(--dim);font-size:12px;margin:0 0 18px}
+.tip{border-bottom:1px dotted var(--dim);cursor:help;position:relative;outline:none}
+.tip:hover::after,.tip:focus::after{content:attr(data-tip);position:absolute;left:0;top:1.7em;z-index:60;
+  width:max-content;max-width:min(340px,80vw);white-space:normal;background:var(--surface2);color:var(--text);
+  border:1px solid var(--border);border-radius:6px;padding:7px 10px;font:13px/1.45 -apple-system,sans-serif;
+  font-weight:400;box-shadow:0 4px 14px rgba(0,0,0,.3)}
+table{border-collapse:collapse;width:100%;font-size:13.5px;margin:10px 0}
+th,td{border:1px solid var(--border);padding:6px 9px;text-align:left;vertical-align:top}
+th{background:var(--surface2);font-weight:600}
+td.n{text-align:right;font:13px ui-monospace,Menlo,monospace;white-space:nowrap}
+.px{color:var(--green);font-weight:700}
+.ref{color:var(--accent);font-weight:700}
+.where{border-left:4px solid var(--accent);background:var(--surface);padding:6px 12px;margin:6px 0 10px}
+.cref{margin:6px 0 0;font-size:13px}
+.cref a{display:inline-block;padding:4px 10px;border:1px solid var(--border);
+  border-radius:16px;background:var(--surface);font:12.5px ui-monospace,Menlo,monospace}
+.cref a:hover{background:var(--surface2);text-decoration:none}
+.mono{font:12.5px ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--surface);
+  border:1px solid var(--border);border-radius:8px;padding:13px;overflow-x:auto;white-space:pre}
+svg{max-width:100%;height:auto;display:block;margin:16px 0}
+svg .lane{fill:var(--surface);stroke:var(--border);stroke-width:1.2}
+svg .A{fill:var(--dim);opacity:.45}
+svg .B{fill:var(--green);opacity:.75}
+svg .box{fill:var(--surface2);stroke:var(--border);stroke-width:1.2}
+svg .work{fill:var(--surface2);stroke:var(--orange);stroke-width:1.8}
+svg .ok{fill:var(--surface2);stroke:var(--green);stroke-width:2}
+svg .h{fill:var(--text);font:bold 13px -apple-system,sans-serif}
+svg .t{fill:var(--text);font:bold 12px -apple-system,sans-serif}
+svg .m{fill:var(--text);font:11.5px ui-monospace,Menlo,monospace}
+svg .n{fill:var(--dim);font:11px -apple-system,sans-serif}
+svg .in{fill:var(--bg);font:bold 11px -apple-system,sans-serif}
+svg .arr{stroke:var(--dim);stroke-width:1.6;fill:none}
+svg .ah{fill:var(--dim)}
+svg a text{text-decoration:underline;fill:var(--accent);font:10.5px ui-monospace,Menlo,monospace}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+  document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head>
+<body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+  function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+  function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
+    b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
+      else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+  document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+<div class="wrap">
+
+<h1>Why the new 65-line <code>slice_media_tensors</code> can be a one-line list slice</h1>
+<p class="sub"><a href="https://github.com/NVIDIA-NeMo/RL/pull/4191">NVIDIA-NeMo/RL #4191</a>.
+All permalinks pin the PR head <code>32cfbcd</code>.</p>
+
+<div class="status">
+<dl>
+  <dt>Before</dt>
+  <dd>No such code: this PR adds both the helper and its only caller.</dd>
+  <dt>This PR</dt>
+  <dd>Glues every image in the prompt into one tensor, then a helper works out by arithmetic where the old images end and cuts them off.</dd>
+  <dt>Status</dt>
+  <dd><span class="verdict good">Works correctly. Nothing is broken.</span> The review proposes a simpler version with the same result. Proposed, not in the PR.</dd>
+</dl>
+</div>
+
+<nav class="chain">
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4191-where-pixels-come-from.html">1 · where pixels come from</a>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4191-media-data-flow.html">2 · how the image data flows</a>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4191-tokens-and-images.html">3 · text and image tokens across turns</a>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4191-rebase-breaks-splice.html">4 · the rebase that breaks splicing</a>
+  <span class="here">5 · a simpler media slice</span>
+</nav>
+<p class="chainnote">Five pages on this PR. This one: a cleanup the review asks for, and why it is safe.</p>
+
+<p>On turn 2, vLLM hands the worker every image in the prompt: old image A again, plus new image B. Only B should be saved.
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/32cfbcdf8196ee12146572594528ae3646604b6a/nemo_rl/data/captured_media.py#L220"><code>capture_processed_media</code></a> already builds one list entry per image, old images first
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/32cfbcdf8196ee12146572594528ae3646604b6a/nemo_rl/data/captured_media.py#L260-L290">captured_media.py:260</a>). Today it glues those entries into one tensor and then calls
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/32cfbcdf8196ee12146572594528ae3646604b6a/nemo_rl/data_plane/tq_token_sink.py#L648-L713"><code>slice_media_tensors</code></a>, which has to work out again, from totals, where A ends.
+The simpler way is to drop A's entry before gluing.</p>
+
+<h2>Same input, same output, less work</h2>
+
+<svg viewBox="0 0 940 470" role="img" aria-label="Today the code glues A and B into one tensor, then a helper does arithmetic to find where A ends and cuts it off. The suggested code drops A from the per-image list before gluing. Both give B's 80 patches.">
+  <rect class="A" x="16" y="10" width="14" height="12" rx="2"/><text class="n" x="36" y="20">image A, already saved on turn 1 (24 patches)</text>
+  <rect class="B" x="330" y="10" width="14" height="12" rx="2"/><text class="n" x="350" y="20">image B, new this turn (80 patches)</text>
+  <rect class="work" x="590" y="10" width="14" height="12" rx="2"/><text class="n" x="610" y="20">extra work the lists already made unnecessary</text>
+
+  <text class="h" x="16" y="52">Both start with the per-image lists this function already builds</text>
+  <text class="m" x="16" y="72">packed      = [A: 24 patches, B: 80 patches]</text>
+  <text class="m" x="16" y="88">sizes_parts = [[64,96], [128,160]]      retained (old images) = 1</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/32cfbcdf8196ee12146572594528ae3646604b6a/nemo_rl/data/captured_media.py#L260-L290" target="_blank" rel="noopener"><text x="620" y="88">captured_media.py:260-290</text></a>
+
+  <!-- today -->
+  <rect class="lane" x="10" y="102" width="920" height="170" rx="6"/>
+  <text class="h" x="20" y="122">Today</text>
+  <rect class="A" x="20" y="134" width="46" height="22"/><rect class="B" x="66" y="134" width="154" height="22"/>
+  <text class="in" x="28" y="149">A</text><text class="in" x="130" y="149">B</text>
+  <text class="n" x="20" y="172">1. glue both: one tensor, 104 patches</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/32cfbcdf8196ee12146572594528ae3646604b6a/nemo_rl/data/captured_media.py#L366-L372" target="_blank" rel="noopener"><text x="20" y="186">:366-372</text></a>
+  <path class="arr" d="M228 145 L262 145"/><path class="ah" d="M256 140 L264 145 L256 150 Z"/>
+  <rect class="work" x="266" y="128" width="420" height="132" rx="6"/>
+  <text class="t" x="278" y="146">2. slice_media_tensors: find where A ends, by arithmetic</text>
+  <text class="m" x="278" y="166">areas      = 64×96, 128×160 = 6144, 20480 px</text>
+  <text class="m" x="278" y="184">patch area = 26624 px ÷ 104 patches = 256 px</text>
+  <text class="m" x="278" y="202">skip       = 6144 ÷ 256 = 24 patches (A)</text>
+  <text class="m" x="278" y="220">keep       = patches 24..103</text>
+  <text class="n" x="278" y="240">+ exact-division checks, a padded branch capture never uses</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/32cfbcdf8196ee12146572594528ae3646604b6a/nemo_rl/data_plane/tq_token_sink.py#L648-L713" target="_blank" rel="noopener"><text x="278" y="254">tq_token_sink.py:648-713 (65 lines)</text></a>
+  <path class="arr" d="M686 190 L730 190"/><path class="ah" d="M724 185 L732 190 L724 195 Z"/>
+  <rect class="ok" x="734" y="170" width="186" height="40" rx="6"/>
+  <rect class="B" x="744" y="180" width="80" height="20"/><text class="in" x="776" y="194">B</text>
+  <text class="t" x="832" y="194">80 patches</text>
+
+  <!-- suggested -->
+  <rect class="lane" x="10" y="282" width="920" height="120" rx="6"/>
+  <text class="h" x="20" y="302">Suggested (the review's suggestion block)</text>
+  <rect class="A" x="20" y="316" width="46" height="22" opacity=".15"/><rect class="B" x="66" y="316" width="154" height="22"/>
+  <text class="in" x="28" y="331">A</text><text class="in" x="130" y="331">B</text>
+  <path class="arr" d="M20 327 L66 327" style="stroke:var(--red);stroke-width:2"/>
+  <text class="n" x="20" y="356">1. drop the first 1 entry of each list: packed[1:], sizes_parts[1:]</text>
+  <text class="n" x="20" y="372">2. glue what is left</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/32cfbcdf8196ee12146572594528ae3646604b6a/nemo_rl/data/captured_media.py#L365-L379" target="_blank" rel="noopener"><text x="20" y="390">suggestion for captured_media.py:365-379</text></a>
+  <path class="arr" d="M228 327 L732 327"/><path class="ah" d="M726 322 L734 327 L726 332 Z"/>
+  <text class="n" x="400" y="320">no totals, no division, no helper</text>
+  <rect class="ok" x="734" y="307" width="186" height="40" rx="6"/>
+  <rect class="B" x="744" y="317" width="80" height="20"/><text class="in" x="776" y="331">B</text>
+  <text class="t" x="832" y="331">80 patches</text>
+
+  <text class="h" x="734" y="240">same result ✓</text>
+  <text class="n" x="16" y="428">Why dropping the first entry is always right: images are sorted by position, old images must end before the</text>
+  <text class="n" x="16" y="444">previous prompt length, and the code already raises unless the old ones match exactly (captured_media.py:253, :346, :363).</text>
+</svg>
+
+<h2>The change — proposed, not in the PR</h2>
+
+<p class="where"><b>Where it lands: RL only, two files.</b> Replace <a href="https://github.com/NVIDIA-NeMo/RL/blob/32cfbcdf8196ee12146572594528ae3646604b6a/nemo_rl/data/captured_media.py#L365-L379">captured_media.py:365-379</a> with the block below,
+then delete <a href="https://github.com/NVIDIA-NeMo/RL/blob/32cfbcdf8196ee12146572594528ae3646604b6a/nemo_rl/data_plane/tq_token_sink.py#L648-L713"><code>slice_media_tensors</code></a> and the <a href="https://github.com/NVIDIA-NeMo/RL/blob/32cfbcdf8196ee12146572594528ae3646604b6a/nemo_rl/data/captured_media.py#L230-L232">function-local import</a> that reaches it.
+Nothing else calls the helper.</p>
+
+<div class="mono">new = slice(len(retained), None)       # len(retained) = 1 → keep entries 1..end = [B]
+if packed[new]:
+    delta = {"imgs": torch.cat(packed[new], dim=1),              # [1, 80, 768]
+             "imgs_sizes": torch.cat(sizes_parts[new], dim=0)}  # [[128, 160]]
+    if occurrences[0][1] == "video":
+        delta["num_frames"] = torch.tensor(frame_counts[new], dtype=torch.int32)</div>
+
+<p class="cref">💡 <a href="https://github.com/NVIDIA-NeMo/RL/pull/4191#discussion_r4125427356">review comment — captured_media.py:365</a></p>
+
+<div class="hl">
+<strong>So what.</strong> Nothing breaks today, and the output is identical. The gain is less code in this PR:
+65 fewer lines of arithmetic that has to agree with the lists it re-derives, one branch capture never uses, and an import
+whose comment gives a wrong reason. It is a cleanup the author can take or leave. Not run on a GPU.
+</div>
+
+</div>
+</body>
+</html>
