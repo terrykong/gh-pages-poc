@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>NVIDIA-NeMo/RL #4265 — why discovery without token capture crashes the first rollout</title>
+<title>NVIDIA-NeMo/RL #4265 — why discovery without token capture crashes the first rollout (only without #4266)</title>
 <style>
 :root{
   --bg:#0d1117; --surface:#161b22; --surface2:#1c2128; --border:#30363d;
@@ -37,6 +37,7 @@ code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;
 .status dd{margin:0;font-size:14px}
 .verdict{font-weight:700}
 .verdict.open{color:var(--red)}
+.verdict.cond{color:var(--accent)}
 nav.chain{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 6px;padding:0}
 nav.chain a,nav.chain span{display:inline-block;padding:5px 11px;border:1px solid var(--border);
   border-radius:20px;background:var(--surface);text-decoration:none;color:var(--accent);
@@ -99,7 +100,7 @@ p.walknote{margin:10px 0 2px;color:var(--dim);font-size:14px}
   document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
 <div class="wrap">
 
-<h1>Why turning on Gym capability discovery without token capture crashes the first rollout</h1>
+<h1>Why turning on Gym capability discovery without token capture crashes the first rollout, if #4265 merges without #4266</h1>
 <p class="sub"><a href="https://github.com/NVIDIA-NeMo/RL/pull/4265">NVIDIA-NeMo/RL #4265</a>.
 RL links pin head <code>ed14402</code>; #4266 links pin <code>98b3b6c</code>. Traced from source; not run.</p>
 
@@ -110,7 +111,7 @@ RL links pin head <code>ed14402</code>; #4266 links pin <code>98b3b6c</code>. Tr
   <dt>This PR</dt>
   <dd>Registers every rollout with the Gym actor whenever discovery succeeded, reading two row keys that exist only with token capture.</dd>
   <dt>Status</dt>
-  <dd><span class="verdict open">Open — not fixed in this PR.</span> Raised in the review comments.</dd>
+  <dd><span class="verdict cond">Only if #4265 merges without #4266.</span> #4266 rejects this config at setup: <a href="https://github.com/NVIDIA-NeMo/RL/blob/98b3b6c3d550ecdebd4a5ae80e00feb5896c547f/nemo_rl/algorithms/single_controller_utils/setup.py#L1105-L1111">discovery needs a snapshot interval</a>, and <a href="https://github.com/NVIDIA-NeMo/RL/blob/98b3b6c3d550ecdebd4a5ae80e00feb5896c547f/nemo_rl/algorithms/single_controller_utils/setup.py#L1250-L1253">a snapshot interval needs token capture</a>. The stack merges #4265 and #4266 together, so the crash will not reach users. What stays true in the stack is smaller: the new per-row bookkeeping turns on with discovery instead of with turn-level checkpointing (low priority, in the review comments).</dd>
 </dl>
 </div>
 
@@ -134,14 +135,14 @@ RL links pin head <code>ed14402</code>; #4266 links pin <code>98b3b6c</code>. Tr
 <a href="https://github.com/NVIDIA-NeMo/RL/blob/ed1440266ca2e02ca3942d7837777fbdeff64aae/nemo_rl/environments/nemo_gym.py#L923">"without enabling saves"</a>, so it looks safe to turn on by itself.</li>
 <li><span class="tip" tabindex="0" data-tip="token_capture.enabled: Gym writes each model call's tokens to TQ, and RL sends a stable rollout ID and try number with each row.">Token capture</span>: only when it is on does RL
 <a href="https://github.com/NVIDIA-NeMo/RL/blob/ed1440266ca2e02ca3942d7837777fbdeff64aae/nemo_rl/experience/rollout_manager.py#L1174-L1179">put <code>_ng_rollout_id</code> and <code>_ng_attempt_index</code> on each row</a>.</li>
-<li><span class="tip" tabindex="0" data-tip="rollout_checkpointing.gym.participant_checkpointing_enabled (added in #4266): Gym servers actually take part in checkpoints.">Participant checkpointing</span>: what the new per-rollout bookkeeping is for. #4266
-<a href="https://github.com/NVIDIA-NeMo/RL/blob/98b3b6c3d550ecdebd4a5ae80e00feb5896c547f/nemo_rl/algorithms/single_controller_utils/setup.py#L1118-L1124">requires token capture for it</a>, but not for discovery alone.</li>
+<li><span class="tip" tabindex="0" data-tip="Today rollout_checkpointing.gym.participant_checkpointing_enabled (added in #4266). The #4266 review proposes replacing it with rollout_recovery.target_level: turn.">Turn-level checkpointing</span>: what the new per-rollout bookkeeping is for. #4266
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/98b3b6c3d550ecdebd4a5ae80e00feb5896c547f/nemo_rl/algorithms/single_controller_utils/setup.py#L1118-L1124">requires token capture for it</a>, and also, through a chain of checks, for discovery: <a href="https://github.com/NVIDIA-NeMo/RL/blob/98b3b6c3d550ecdebd4a5ae80e00feb5896c547f/nemo_rl/algorithms/single_controller_utils/setup.py#L1105-L1111">discovery needs a snapshot interval</a>, and <a href="https://github.com/NVIDIA-NeMo/RL/blob/98b3b6c3d550ecdebd4a5ae80e00feb5896c547f/nemo_rl/algorithms/single_controller_utils/setup.py#L1250-L1253">a snapshot interval needs token capture</a>.</li>
 </ul>
 Dotted words have a short explanation: hover or tap them.
 </div>
 
 <p>The new bookkeeping in <code>run_rollouts</code> turns on when discovery has found Gym servers,
-not when participant checkpointing is on. It then reads the two row keys that only token capture adds.</p>
+not when turn-level checkpointing is on. It then reads the two row keys that only token capture adds.</p>
 
 <h2>Same setup, token capture on and off</h2>
 
@@ -199,36 +200,40 @@ token_capture:
   enabled: false                         <span class="cm"># rows carry no _ng_rollout_id</span></div>
 <ul>
 <li>This PR's config check <a href="https://github.com/NVIDIA-NeMo/RL/blob/ed1440266ca2e02ca3942d7837777fbdeff64aae/nemo_rl/algorithms/single_controller_utils/config.py#L1280-L1294">only checks the Gym shard count</a>.</li>
-<li>#4266 <a href="https://github.com/NVIDIA-NeMo/RL/blob/98b3b6c3d550ecdebd4a5ae80e00feb5896c547f/nemo_rl/algorithms/single_controller_utils/setup.py#L1118-L1124">rejects token capture off only when participant checkpointing is on</a>, so discovery alone still passes.</li>
+<li>#4266 closes the crash: <a href="https://github.com/NVIDIA-NeMo/RL/blob/98b3b6c3d550ecdebd4a5ae80e00feb5896c547f/nemo_rl/algorithms/single_controller_utils/setup.py#L1105-L1111">discovery needs a snapshot interval</a>, and <a href="https://github.com/NVIDIA-NeMo/RL/blob/98b3b6c3d550ecdebd4a5ae80e00feb5896c547f/nemo_rl/algorithms/single_controller_utils/setup.py#L1250-L1253">a snapshot interval needs token capture</a>. So it needs this PR without #4266.</li>
+<li>What stays true with #4266: discovery on with turn-level checkpointing off is a valid config. Every row still registers with the Gym actor and fetches a receipt that nothing uses.</li>
 <li>The same gate also turns on a per-row receipt fetch (<a href="https://github.com/NVIDIA-NeMo/RL/blob/ed1440266ca2e02ca3942d7837777fbdeff64aae/nemo_rl/environments/nemo_gym.py#L1904-L1909">nemo_gym.py:1904</a>) that nothing ever uses in discovery-only mode.</li>
 </ul>
 <p class="cref">🔴 <a href="https://github.com/NVIDIA-NeMo/RL/pull/4265#discussion_r4109065704">review comment — nemo_gym.py:1843</a></p>
 <p class="small">The review is still pending, so this link opens for others only after it is published.</p>
 
 <h2>What would fix it — proposed, not in the PR</h2>
-<p class="where"><b>Where the fix lands:</b> RL only. A new flag, set in <a href="https://github.com/NVIDIA-NeMo/RL/blob/ed1440266ca2e02ca3942d7837777fbdeff64aae/nemo_rl/algorithms/single_controller_utils/setup.py#L1798-L1801">setup.py</a> from the participant checkpointing setting (the config field #4266 adds, <a href="https://github.com/NVIDIA-NeMo/RL/blob/98b3b6c3d550ecdebd4a5ae80e00feb5896c547f/nemo_rl/algorithms/single_controller_utils/config.py#L760">config.py:760</a> there), and read at the two gates in <a href="https://github.com/NVIDIA-NeMo/RL/blob/ed1440266ca2e02ca3942d7837777fbdeff64aae/nemo_rl/environments/nemo_gym.py#L1843">nemo_gym.py:1843</a> and <a href="https://github.com/NVIDIA-NeMo/RL/blob/ed1440266ca2e02ca3942d7837777fbdeff64aae/nemo_rl/environments/nemo_gym.py#L1904">nemo_gym.py:1904</a>. No Gym change: the crash is in how RL decides to turn on its own tracking.</p>
+<p class="where"><b>Where the fix lands:</b> RL only. A new flag, set in <a href="https://github.com/NVIDIA-NeMo/RL/blob/ed1440266ca2e02ca3942d7837777fbdeff64aae/nemo_rl/algorithms/single_controller_utils/setup.py#L1798-L1801">setup.py</a> from the turn-level checkpointing setting (today the config field #4266 adds, <a href="https://github.com/NVIDIA-NeMo/RL/blob/98b3b6c3d550ecdebd4a5ae80e00feb5896c547f/nemo_rl/algorithms/single_controller_utils/config.py#L760">config.py:760</a> there), and read at the two gates in <a href="https://github.com/NVIDIA-NeMo/RL/blob/ed1440266ca2e02ca3942d7837777fbdeff64aae/nemo_rl/environments/nemo_gym.py#L1843">nemo_gym.py:1843</a> and <a href="https://github.com/NVIDIA-NeMo/RL/blob/ed1440266ca2e02ca3942d7837777fbdeff64aae/nemo_rl/environments/nemo_gym.py#L1904">nemo_gym.py:1904</a>. The <a href="https://github.com/NVIDIA-NeMo/RL/pull/4266#discussion_r4101849735">target-level proposal on #4266</a> replaces that field with <code>rollout_recovery.target_level: turn</code>. No Gym change. The switch arrives in #4266, so the fix can land there.</p>
 
-<p>Nothing below is implemented. Turn the bookkeeping on with the switch it serves, participant
+<p>Nothing below is implemented. Turn the bookkeeping on with the switch it serves, turn-level
 checkpointing, instead of "discovery found servers". Setup already knows that switch; it only has to pass it
 to the actor.</p>
 
 <div class="mono"><span class="cm"># setup (proposed): pass the switch into the Gym actor</span>
-actor_cfg["participant_checkpointing"] = cfg.gym.participant_checkpointing_enabled  <span class="cm"># False</span>
+actor_cfg["turn_level_checkpointing"] = cfg.gym.participant_checkpointing_enabled  <span class="cm"># False; target_level == "turn" under the proposal</span>
 
 <span class="cm"># nemo_gym.py run_rollouts, at the gate (proposed)</span>
-if self._participant_checkpointing:           <span class="cm"># False → skip registration</span>
+if self._turn_level_checkpointing:           <span class="cm"># False → skip registration</span>
     register(row["_ng_rollout_id"], row["_ng_attempt_index"])
 <span class="cm"># same check before the receipt fetch at :1904</span>
-<span class="cm"># result: discovery-only + token capture off runs the rollout normally</span></div>
+<span class="cm"># result: discovery-only runs the rollout with no extra per-row work</span></div>
 <p class="small">Real code this changes: the gate at
 <a href="https://github.com/NVIDIA-NeMo/RL/blob/ed1440266ca2e02ca3942d7837777fbdeff64aae/nemo_rl/environments/nemo_gym.py#L1843">nemo_gym.py:1843</a>, the receipt fetch at
 <a href="https://github.com/NVIDIA-NeMo/RL/blob/ed1440266ca2e02ca3942d7837777fbdeff64aae/nemo_rl/environments/nemo_gym.py#L1904">nemo_gym.py:1904</a>, and the actor config built in setup
 (the switch itself is added by <a href="https://github.com/NVIDIA-NeMo/RL/blob/98b3b6c3d550ecdebd4a5ae80e00feb5896c547f/nemo_rl/algorithms/single_controller_utils/config.py#L760">#4266</a>).</p>
 
 <div class="warn">
-<strong>So what.</strong> Anyone who turns on discovery by itself, which its own docs describe as safe, and
-does not use token capture, gets a <code>KeyError</code> on the first rollout batch. Gating on participant
-checkpointing makes discovery do only what it says: look, not change how rollouts run.
+<strong>So what.</strong> In the stack, the <code>KeyError</code> cannot happen: #4266 refuses discovery without a
+snapshot interval, and a snapshot interval without token capture. It needs #4265 on its own. What is left is
+smaller: turning on discovery by itself, which its docs describe as "look, don't change anything", still makes
+every row register with the Gym actor and fetch a receipt nobody uses. Gating that work on turn-level
+checkpointing fixes it, and that switch arrives in #4266. Under the target-level proposal, discovery runs on every
+token-capture run, so this gate matters for every run below target <code>turn</code>.
 </div>
 
 </div>
