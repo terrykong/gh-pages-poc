@@ -194,7 +194,7 @@ the features with its own current weights, and with gradients when the encoder i
   <text class="al" x="488" y="224">/v1/chat/completions</text>
   <rect class="b-px" x="30" y="240" width="270" height="92" rx="6"/>
   <text class="t" x="40" y="258">vLLM's image processor</text>
-  <text class="m" x="40" y="276">decodes A (and B), runs on</text><text class="m" x="40" y="292">every turn, cache bypassed</text>
+  <text class="m" x="40" y="276">decodes A (and B) each turn;</text><text class="m" x="40" y="292">cache set to return real pixels</text>
   <a href="https://github.com/NVIDIA-NeMo/RL/blob/32cfbcdf8196ee12146572594528ae3646604b6a/nemo_rl/models/generation/vllm/vllm_worker_async.py#L1027-L1033" target="_blank" rel="noopener"><text x="40" y="318">vllm_worker_async.py:1027</text></a>
   <rect class="b-px" x="330" y="240" width="300" height="92" rx="6"/>
   <text class="t" x="340" y="258">capture_processed_media</text>
@@ -238,6 +238,8 @@ the features with its own current weights, and with gradients when the encoder i
   <text class="m" x="40" y="606">batch of rows joined → [1, total, 768]; train row deleted after the step</text>
   <a href="https://github.com/NVIDIA-NeMo/RL/blob/32cfbcdf8196ee12146572594528ae3646604b6a/nemo_rl/models/megatron/train.py#L195-L206" target="_blank" rel="noopener"><text x="40" y="618">train.py:195-206</text></a>
 </svg>
+
+<p><b>About the processor cache.</b> vLLM remembers processed images by a hash of their content. In its normal mode, a repeat image is not processed again and the front end hands the engine only the hash, so the front end's copy of the pixels is empty (<a href="https://github.com/vllm-project/vllm/blob/v0.26.0/vllm/multimodal/cache.py#L410-L416"><code>cache.py:415</code></a>). Capture reads pixels in the front end, so for captured calls the worker sets <code>skip_mm_cache</code>, which swaps in a read-only cache that always returns real pixels (<a href="https://github.com/vllm-project/vllm/blob/v0.26.0/vllm/renderers/base.py#L736-L741"><code>base.py:738</code></a>). The shipped recipe goes further and turns the processor cache off (<code>mm_processor_cache_gb: 0</code>), so every image is processed fresh on every call. This is not the prefix (KV) cache, which the recipe also turns off.</p>
 
 <p>Example numbers, as on page 1: a patch is 16×16 px = 768 numbers. Image A (64×96 px) is 24 patches; image B (128×160 px), added on turn 2, is 80 patches. Page 3 shows the matching tokens.
 Gym sends the whole conversation on each turn, so vLLM decodes and processes A again on turn 2. The worker then compares A against the
