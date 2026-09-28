@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NVIDIA-NeMo/RL #4266 — why a slow Gym snapshot can stop every later snapshot</title>
+<style>
+:root{
+  --bg:#0d1117; --surface:#161b22; --surface2:#1c2128; --border:#30363d;
+  --text:#e6edf3; --dim:#8b949e; --accent:#58a6ff; --green:#3fb950;
+  --orange:#d29922; --red:#f85149;
+}
+:root[data-theme="light"]{
+  --bg:#ffffff; --surface:#f6f8fa; --surface2:#eaeef2; --border:#d0d7de;
+  --text:#1f2328; --dim:#59636e; --accent:#0969da; --green:#1a7f37;
+  --orange:#9a6700; --red:#cf222e;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:28px 20px 70px}
+h1{font-size:22px;margin:0 0 8px;line-height:1.3}
+h2{font-size:18px;margin:32px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;
+  font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
+.sub{color:var(--dim);font-size:13.5px;margin:0 0 16px}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);
+  border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;
+  font:13px/1 ui-monospace,Menlo,monospace;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.18)}
+.status{border:1px solid var(--border);border-radius:10px;background:var(--surface);
+  padding:2px 16px 10px;margin:0 0 20px}
+.status dl{display:grid;grid-template-columns:max-content 1fr;gap:4px 14px;margin:12px 0 0}
+.status dt{color:var(--dim);font-size:12px;text-transform:uppercase;letter-spacing:.04em;
+  white-space:nowrap;padding-top:2px}
+.status dd{margin:0;font-size:14px}
+.verdict{font-weight:700}
+.verdict.open{color:var(--red)}
+nav.chain{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 6px;padding:0}
+nav.chain a,nav.chain span{display:inline-block;padding:5px 11px;border:1px solid var(--border);
+  border-radius:20px;background:var(--surface);text-decoration:none;color:var(--accent);
+  font-size:12.5px;line-height:1.3;white-space:nowrap}
+nav.chain a:hover{background:var(--surface2)}
+nav.chain span.here{background:var(--accent);color:var(--bg);border-color:var(--accent);font-weight:600}
+p.chainnote{color:var(--dim);font-size:12px;margin:0 0 18px}
+.cref{margin:6px 0 0;font-size:13px}
+.cref a{display:inline-block;padding:4px 10px;border:1px solid var(--border);
+  border-radius:16px;background:var(--surface);font:12.5px ui-monospace,Menlo,monospace}
+.cref a:hover{background:var(--surface2);text-decoration:none}
+.mono{font:12.5px ui-monospace,SFMono-Regular,Menlo,monospace;
+  background:var(--surface);border:1px solid var(--border);border-radius:8px;
+  padding:13px;overflow-x:auto;white-space:pre}
+.cm{color:var(--dim)}
+.warn{border-left:3px solid var(--red);background:var(--surface);
+  padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0}
+svg{max-width:100%;height:auto;display:block;margin:16px 0}
+svg .box{fill:var(--surface);stroke:var(--border);stroke-width:1.4}
+svg .ok{fill:var(--green);opacity:.5;stroke:var(--green)}
+svg .held{fill:var(--red);opacity:.5;stroke:var(--red)}
+svg .run{fill:var(--dim);opacity:.3;stroke:var(--dim)}
+svg .park{fill:var(--orange);opacity:.45;stroke:var(--orange)}
+svg .lbl{fill:var(--text);font:12px ui-monospace,Menlo,monospace}
+svg .lbl-b{fill:var(--text);font:bold 13px -apple-system,sans-serif}
+svg .note{fill:var(--dim);font:11.5px -apple-system,sans-serif}
+svg .hdr{fill:var(--accent);font:bold 12.5px -apple-system,sans-serif}
+svg .bad{fill:var(--red);font:bold 12px -apple-system,sans-serif}
+svg .good{fill:var(--green);font:bold 12px -apple-system,sans-serif}
+svg .snap{stroke:var(--orange);stroke-width:2.2;stroke-dasharray:6 4}
+svg .snap-lbl{fill:var(--orange);font:bold 11.5px -apple-system,sans-serif}
+svg a text{text-decoration:underline;fill:var(--accent);font:11px ui-monospace,Menlo,monospace}
+h3.walk{font-size:15.5px;margin:18px 0 6px}
+ol.walk{margin:4px 0 8px 22px;padding:0}ol.walk li{margin:5px 0;font-size:14.5px}
+p.walknote{margin:10px 0 2px;color:var(--dim);font-size:14px}
+.where{border-left:4px solid var(--accent);background:var(--surface);padding:6px 12px;margin:6px 0 10px;font-size:14.5px}
+.who{border-left:4px solid var(--dim);background:var(--surface);padding:6px 12px;margin:8px 0}
+.tip{border-bottom:1px dotted var(--dim);cursor:help;position:relative;outline:none}
+.tip:hover::after,.tip:focus::after{content:attr(data-tip);position:absolute;left:0;top:1.7em;z-index:60;
+  width:max-content;max-width:min(340px,80vw);white-space:normal;background:var(--surface2);color:var(--text);
+  border:1px solid var(--border);border-radius:6px;padding:7px 10px;font:13px/1.45 -apple-system,sans-serif;
+  font-weight:400;box-shadow:0 4px 14px rgba(0,0,0,.3)}
+.bg{border:1px solid var(--border);border-left:4px solid var(--accent);border-radius:8px;
+  background:var(--surface);padding:10px 16px;margin:0 0 18px;font-size:14.5px}
+.bg ul{margin:4px 0 4px 20px;padding:0}.bg li{margin:3px 0}
+</style>
+</head>
+<body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+  function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+  function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
+    b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
+      else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+  document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+<div class="wrap">
+
+<h1>Why a slow Gym snapshot can stop every later snapshot</h1>
+<p class="sub"><a href="https://github.com/NVIDIA-NeMo/RL/pull/4266">NVIDIA-NeMo/RL #4266</a> (stack part 3 of 3).
+RL links pin <code>98b3b6c</code> (#4266) and <code>ed14402</code> (#4265); Gym links pin <code>f4fcf8c</code>.
+Reproduced with Gym's real checkpoint code and RL's real deadline code, in-process; not run on a cluster.</p>
+
+<div class="status">
+<dl>
+  <dt>Before</dt>
+  <dd>RL's rollout deadline paused only while a colocated engine switched to training.</dd>
+  <dt>This PR</dt>
+  <dd>Adds Gym snapshots that park in-flight rollouts, but leaves RL's rollout deadline running while they are parked.</dd>
+  <dt>Status</dt>
+  <dd><span class="verdict open">Open — not fixed in this PR (#4266).</span> Raised in the review comments.</dd>
+</dl>
+</div>
+
+<nav class="chain">
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4264-4266-stack-overview.html">stack overview</a>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4264-4266-save-restore-sequence.html">save & restore sequence</a>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4264-gym-checkpoint-participants.html">#4264 · what it adds</a>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4264-gym-bump-metrics.html">#4264 · Gym bump breaks metrics</a>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4265-durable-gym-state.html">#4265 · what it adds</a>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4265-prompt-group-ack.html">#4265 · prompt-group ACK stall</a>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4265-lost-reply-stall.html">#4265 · lost reply stalls checkpoints</a>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4265-discovery-keyerror.html">#4265 · discovery-only KeyError</a>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4266-gym-turn-recovery.html">#4266 · turn recovery</a>
+  <span class="here">#4266 · parked-deadline stall</span>
+</nav>
+<p class="chainnote">Ten pages on this stack — this one: #4266: a snapshot that outlasts a rollout's deadline.</p>
+
+<div class="bg">
+<b>Background.</b> A Gym snapshot pauses every in-flight rollout at a saved point (Gym calls this
+<span class="tip" tabindex="0" data-tip="Gym stops the agent at a turn boundary and keeps its state so the snapshot can save it. The rollout continues when Gym resumes.">parking</span>)
+until the snapshot is saved. RL gives each prompt group a time budget,
+<span class="tip" tabindex="0" data-tip="async_rl.rollout_failure.nemo_gym.rollout_timeout_s: one deadline for a whole prompt-group stream. When it fires, RL stops waiting and retries the rollout.">rollout_timeout_s</span>.
+Gym keeps every finished rollout until RL sends an
+<span class="tip" tabindex="0" data-tip="RL telling Gym &quot;I have saved this result, you can delete your copy&quot;. Gym will not commit a snapshot while any finished rollout is un-ACKed.">ACK</span>
+for it. Dotted words have a short explanation: hover or tap them.
+</div>
+
+<p>The snapshot parks a rollout, but RL's clock for that rollout keeps running: the only place #4266
+pauses RL's deadlines is the <a href="https://github.com/NVIDIA-NeMo/RL/blob/98b3b6c3d550ecdebd4a5ae80e00feb5896c547f/nemo_rl/algorithms/single_controller.py#L3198-L3202">switch to training on a colocated engine</a>.
+If the snapshot lasts longer than the rollout's remaining budget, RL times the rollout out while it is
+parked. RL then stops reading it but does not cancel it, so Gym finishes it after the snapshot, and nobody
+ever ACKs it.</p>
+
+<h2>One rollout, one snapshot</h2>
+
+<svg viewBox="0 0 940 330" role="img" aria-label="Timeline. Try 0 starts at 0 s with a 180 s budget. A Gym snapshot parks it from 150 s to 210 s. RL's deadline fires at 180 s while it is parked, so RL gives up and starts try 1. Gym resumes try 0 at 210 s and it finishes at 240 s, but nothing ever ACKs it. The next snapshot at 450 s gets 409 until its 300 s deadline, and so does every later one.">
+  <text class="hdr" x="16" y="22">One rollout, budget rollout_timeout_s = 180 s; a snapshot starts at 150 s and takes 60 s</text>
+  <!-- time axis -->
+  <line x1="150.0" y1="44" x2="900.0" y2="44" style="stroke:var(--border);stroke-width:1"/>
+  <text class="note" x="150.0" y="38" text-anchor="middle">0 s</text>
+  <text class="note" x="358.3" y="38" text-anchor="middle">150</text>
+  <text class="note" x="400.0" y="38" text-anchor="middle">180</text>
+  <text class="note" x="483.3" y="38" text-anchor="middle">240</text>
+  <text class="note" x="775.0" y="38" text-anchor="middle">450</text>
+
+  <!-- snapshot windows -->
+  <rect class="park" x="358.3" y="52" width="83.39999999999998" height="150" style="opacity:.12"/>
+  <text class="snap-lbl" x="362.3" y="66">snapshot 1: rollout parked</text>
+  <rect class="held" x="775.0" y="52" width="125.0" height="150" style="opacity:.10"/>
+  <text class="bad" x="779.0" y="66">snapshot 2: 409 …</text>
+
+  <!-- RL view -->
+  <text class="lbl-b" x="16" y="96">RL, try 0</text>
+  <rect class="run" x="150.0" y="84" width="250.0" height="18"/>
+  <line class="snap" x1="400.0" y1="78" x2="400.0" y2="110" style="stroke:var(--red)"/>
+  <text class="bad" x="406.0" y="98">deadline fires while parked → RL gives up, starts try 1</text>
+
+  <!-- Gym view -->
+  <text class="lbl-b" x="16" y="140">Gym /run, try 0</text>
+  <rect class="run" x="150.0" y="128" width="208.3" height="18"/>
+  <rect class="park" x="358.3" y="128" width="83.39999999999998" height="18"/>
+  <rect class="run" x="441.7" y="128" width="41.60000000000002" height="18"/>
+  <rect class="held" x="483.3" y="128" width="416.7" height="18"/>
+  <text class="lbl" x="488.9" y="142">finished, never ACKed</text>
+
+  <text class="lbl-b" x="16" y="184">Gym prepare</text>
+  <text class="good" x="362.3" y="184">ready → commits</text>
+  <text class="bad" x="779.0" y="184">never ready</text>
+
+  <!-- legend -->
+  <rect class="run" x="16" y="226" width="16" height="12"/><text class="note" x="38" y="237">running</text>
+  <rect class="park" x="110" y="226" width="16" height="12"/><text class="note" x="132" y="237">parked by the snapshot</text>
+  <rect class="held" x="286" y="226" width="16" height="12"/><text class="note" x="308" y="237">finished, not ACKed</text>
+  <line class="snap" x1="446" y1="232" x2="470" y2="232" style="stroke:var(--red)"/><text class="note" x="476" y="237">RL's rollout deadline</text>
+
+  <text class="note" x="16" y="270">RL stops reading try 0 at 180 s but never cancels it, so Gym resumes it after the snapshot and it finishes.</text>
+  <text class="note" x="16" y="288">Nobody holds its receipt, so nobody ACKs it, and Gym will not commit while it is un-ACKed.</text>
+  <text class="note" x="16" y="306">Snapshot 2 and every later one wait out prepare_timeout_s (300 s) and fail, for the rest of the process.</text>
+</svg>
+
+<h3 class="walk">What happens, step by step</h3>
+<ol class="walk">
+<li><b>A snapshot starts at 150 s.</b> RL closes rollout admission
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/98b3b6c3d550ecdebd4a5ae80e00feb5896c547f/nemo_rl/algorithms/single_controller.py#L1958">single_controller.py:1958</a>) and Gym
+<a href="https://github.com/NVIDIA-NeMo/Gym/blob/f4fcf8cf98272740fd7585aa49cee00fa2c099f0/nemo_gym/_checkpoint/agent.py#L584-L592">parks every running rollout</a> at its next turn boundary.</li>
+<li><b>RL's deadline keeps running.</b> One <code>_Deadline</code>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/ed1440266ca2e02ca3942d7837777fbdeff64aae/nemo_rl/experience/rollout_manager.py#L1331-L1335">wraps the whole prompt-group stream</a>, and its
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/ed1440266ca2e02ca3942d7837777fbdeff64aae/nemo_rl/experience/rollout_manager.py#L417-L444">registry</a> is not paused for a snapshot.
+At 180 s it fires while try 0 is parked, and RL gives up and starts try 1.</li>
+<li><b>RL does not cancel try 0.</b> It reads rows from a
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/ed1440266ca2e02ca3942d7837777fbdeff64aae/nemo_rl/experience/rollout_manager.py#L1212-L1214">Ray streaming call</a> and never cancels it,
+so the <code>/run</code> keeps going inside Gym.</li>
+<li><b>Snapshot 1 commits at 210 s and Gym resumes.</b> Try 0 continues and
+<a href="https://github.com/NVIDIA-NeMo/Gym/blob/f4fcf8cf98272740fd7585aa49cee00fa2c099f0/nemo_gym/base_responses_api_agent.py#L244">finishes at 240 s</a>. Gym
+<a href="https://github.com/NVIDIA-NeMo/Gym/blob/f4fcf8cf98272740fd7585aa49cee00fa2c099f0/nemo_gym/_checkpoint/agent.py#L411-L414">keeps its reply</a> until it is ACKed.</li>
+<li><b>Nobody ACKs it.</b> RL gave up on try 0, so it never fetches its receipt. Gym's
+<a href="https://github.com/NVIDIA-NeMo/Gym/blob/f4fcf8cf98272740fd7585aa49cee00fa2c099f0/nemo_gym/_checkpoint/agent.py#L652-L660"><code>retire()</code> refuses a finished run</a>, so nothing else can release it.</li>
+<li><b>Every later snapshot fails.</b> Gym's <a href="https://github.com/NVIDIA-NeMo/Gym/blob/f4fcf8cf98272740fd7585aa49cee00fa2c099f0/nemo_gym/_checkpoint/agent.py#L712-L722"><code>status()</code></a>
+is never ready while a finished run is un-ACKed, so snapshot 2 at 450 s and every one after it waits out
+<code>prepare_timeout_s</code> (300 s by default) and fails.</li>
+</ol>
+
+<p>This is a new way to reach the <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4265-lost-reply-stall.html">lost-reply stall</a>: there, RL
+never uses a finished reply; here, the snapshot itself is what makes RL give up on the reply. The numbers above
+are the ones #4266's functional test uses (<code>rollout_timeout_s=180</code>) and #4266's default
+<code>prepare_timeout_s=300</code>; any snapshot that outlasts a rollout's remaining budget does the same.</p>
+
+<div class="mono"><span class="cm"># scratch run with Gym's real AgentCheckpointParticipant and RL's real _Deadline (budget shortened to 0.05 s)</span>
+prepare: ready_to_commit=True parked=1  (RL deadline registry suspended=False)
+RL outcome: {'timeout': 'NeMo-Gym prompt group exceeded 0.05s', 'state_when_rl_gave_up': 'parked'}
+agent: bodies started=1 finished=1
+next snapshot's prepare: ready_to_commit=False completed_unacknowledged=1</div>
+
+<h2>What would fix it — proposed, not in the PR</h2>
+<p class="where"><b>Where the fix lands: RL only, <code>single_controller.py</code>, plus a small change to
+<code>RequestDeadlineRegistry</code>.</b> No Gym change.</p>
+<p>Nothing below is implemented. Pause RL's rollout deadlines for as long as a Gym snapshot holds admission,
+the same way RL already pauses them for the switch to training:</p>
+<div class="mono"><span class="cm"># single_controller.py, _prepare_and_commit_gym_checkpoint (proposed)</span>
+self._gym_checkpoint_rollout_permitted.clear()             <span class="cm"># L1958: admission closes at 150 s</span>
+self._rollout_manager.suspend_request_deadlines()          <span class="cm"># try 0 has 30 s left; clock stops</span>
+...
+<span class="cm"># every place admission reopens resumes the clocks:</span>
+<span class="cm">#   L2022 (prepare never attempted) and L2041 (after Gym resumes, commit or abort)</span>
+self._gym_checkpoint_rollout_permitted.set()
+self._rollout_manager.resume_request_deadlines()           <span class="cm"># 210 s: try 0 still has 30 s left</span></div>
+<p>One detail: the registry keeps a single on/off flag, and the training switch uses it too. It needs to count
+who paused it, so a snapshot that ends while the engine is still training does not restart the clocks early.
+The same scratch run with the pause added: <code>prepare: ready_to_commit=True parked=1 (RL deadline registry
+suspended=True)</code>, then <code>RL outcome: {'reply': {'reward': 1.0}}</code> and <code>finished=1</code>.
+Links: <a href="https://github.com/NVIDIA-NeMo/RL/blob/98b3b6c3d550ecdebd4a5ae80e00feb5896c547f/nemo_rl/algorithms/single_controller.py#L2022">L2022</a>,
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/98b3b6c3d550ecdebd4a5ae80e00feb5896c547f/nemo_rl/algorithms/single_controller.py#L2041">L2041</a>,
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/ed1440266ca2e02ca3942d7837777fbdeff64aae/nemo_rl/experience/rollout_manager.py#L1761-L1767"><code>suspend_request_deadlines</code> / <code>resume_request_deadlines</code></a>.</p>
+<!--CREF-R1-->
+
+<div class="warn">
+<strong>So what.</strong> With turn-level checkpointing on and a rollout deadline set, any snapshot that takes
+longer than some rollout's remaining budget strands a finished result, and from then on no Gym-aware snapshot
+can be saved for the rest of the process. Pausing the deadline during the snapshot removes the trigger; the
+retire-then-adopt fix on the lost-reply page removes the stall itself.
+</div>
+
+</div>
+</body>
+</html>
