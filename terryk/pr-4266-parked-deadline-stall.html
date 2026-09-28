@@ -233,14 +233,16 @@ self._rollout_manager.suspend_request_deadlines()          <span class="cm"># tr
 <span class="cm">#   L2022 (prepare never attempted) and L2041 (after Gym resumes, commit or abort)</span>
 self._gym_checkpoint_rollout_permitted.set()
 self._rollout_manager.resume_request_deadlines()           <span class="cm"># 210 s: try 0 still has 30 s left</span></div>
-<p>One detail: the registry keeps a single on/off flag, and the training switch uses it too. It needs to count
-who paused it, so a snapshot that ends while the engine is still training does not restart the clocks early.
+<p>One detail: <a href="https://github.com/NVIDIA-NeMo/RL/blob/ed1440266ca2e02ca3942d7837777fbdeff64aae/nemo_rl/experience/rollout_manager.py#L417-L444"><code>RequestDeadlineRegistry</code></a> keeps a single on/off flag. A second <code>suspend()</code> returns early, and <code>resume()</code> restarts every
+live deadline. The switch to training uses the same flag, so without a count of who paused it, a snapshot that ends
+while the engine is still training would restart the training switch's clocks early. The registry needs to count
+holders and resume only when the last one lets go.
 The same scratch run with the pause added: <code>prepare: ready_to_commit=True parked=1 (RL deadline registry
 suspended=True)</code>, then <code>RL outcome: {'reply': {'reward': 1.0}}</code> and <code>finished=1</code>.
 Links: <a href="https://github.com/NVIDIA-NeMo/RL/blob/98b3b6c3d550ecdebd4a5ae80e00feb5896c547f/nemo_rl/algorithms/single_controller.py#L2022">L2022</a>,
 <a href="https://github.com/NVIDIA-NeMo/RL/blob/98b3b6c3d550ecdebd4a5ae80e00feb5896c547f/nemo_rl/algorithms/single_controller.py#L2041">L2041</a>,
 <a href="https://github.com/NVIDIA-NeMo/RL/blob/ed1440266ca2e02ca3942d7837777fbdeff64aae/nemo_rl/experience/rollout_manager.py#L1761-L1767"><code>suspend_request_deadlines</code> / <code>resume_request_deadlines</code></a>.</p>
-<!--CREF-R1-->
+<p class="cref">🔴 <a href="https://github.com/NVIDIA-NeMo/RL/pull/4266#discussion_r4118505342">review comment — single_controller.py:1958</a> <span style="color:var(--dim);font-size:12px">(the review is still pending, so this link opens for others only after it is published)</span></p>
 
 <div class="warn">
 <strong>So what.</strong> With turn-level checkpointing on and a rollout deadline set, any snapshot that takes
