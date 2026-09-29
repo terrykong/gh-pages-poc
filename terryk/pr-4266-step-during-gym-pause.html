@@ -208,13 +208,13 @@ So the check is right to throw the attempt away. The problem is that the throw-a
 and Ray delivers that cancel to an async actor as a normal <code>asyncio</code> cancel
 (<a href="https://github.com/ray-project/ray/blob/ray-2.56.1/python/ray/_private/worker.py#L3321-L3322">Ray 2.56.1 worker.py:3321</a>).</p>
 
-<p><b>The idea:</b> the snapshot can't land once a step commits, so stop waiting for Gym the moment that happens. Training tells the snapshot "a step's optimizer update is done". The snapshot cancels the Gym prepare right away, and Gym resumes its agents. In the example, rollouts restart at 40 s instead of 95 s. The snapshot is still lost, but training never waits.</p>
+<p><b>The idea:</b> the snapshot can't land once a step commits, so stop waiting for Gym the moment that happens. Training tells the snapshot "a step is starting to commit". The snapshot cancels the Gym prepare right away, and Gym resumes its agents. In the example, rollouts restart at 40 s instead of 95 s. The snapshot is still lost, but training never waits.</p>
 
 <pre class="diff"><span class="hunk">@@ single_controller.py L668 · SingleControllerActor.__init__</span>
          self._gym_checkpoint_rollout_permitted: asyncio.Event = asyncio.Event()
          self._gym_checkpoint_rollout_permitted.set()
-<span class="add">+        # Set once a training step's optimizer update is done. A Gym snapshot that
-+        # began before it can no longer land.
+<span class="add">+        # Set whenever a training step starts to commit. A Gym snapshot that
++        # began before that can no longer land.
 +        self._optimizer_commit_started = asyncio.Event()</span>
 <span class="hunk">@@ single_controller.py L1966-L1977 · _prepare_and_commit_gym_checkpoint</span>
              prepare_attempted = True
@@ -246,10 +246,14 @@ and Ray delivers that cancel to an async actor as a normal <code>asyncio</code> 
 +            step.cancel()
 +        if call.done():
 +            return call.result()
-+        ray.cancel(ref)  # Gym's prepare resumes the agents it paused
++        self._cancel_gym_control_call(ref)  # Gym's prepare resumes its agents
 +        await asyncio.gather(call, return_exceptions=True)  # wait for that resume
-+        raise _TrainerAdvancedDuringGymSnapshot()</span>
-<span class="hunk">@@ single_controller.py L3276 (PPO) and L3404 (GRPO) · both places a step's optimizer update is done</span>
++        raise _TrainerAdvancedDuringGymSnapshot()
++
++    def _cancel_gym_control_call(self, ref: ray.ObjectRef) -&gt; None:
++        """Cancel one Gym control call. A method so unit tests can fake it."""
++        ray.cancel(ref)</span>
+<span class="hunk">@@ single_controller.py L3276 (PPO) and L3404 (GRPO) · both places a step starts to commit</span>
                          self._optimizer_commit_in_progress = True
 <span class="add">+                        self._optimizer_commit_started.set()</span>
 <span class="hunk">@@ single_controller.py L4549-L4553 · _save_rollout_checkpoint_locked</span>
@@ -284,12 +288,14 @@ and Ray delivers that cancel to an async actor as a normal <code>asyncio</code> 
 <span class="add">+class _TrainerAdvancedDuringGymSnapshot(Exception):
 +    """A training step committed while Gym was preparing its snapshot."""</span></pre>
 
-<p>What each piece does, in order: training sets the event once a step's optimizer update is done
+<p>What each piece does, in order: training sets the event wherever it sets <code>_optimizer_commit_in_progress</code>
 (<a href="https://github.com/NVIDIA-NeMo/RL/blob/4db8f66406eb8ffdbabaa133824b9aa3f65645c7/nemo_rl/algorithms/single_controller.py#L3272-L3276">PPO :3276</a>,
 <a href="https://github.com/NVIDIA-NeMo/RL/blob/4db8f66406eb8ffdbabaa133824b9aa3f65645c7/nemo_rl/algorithms/single_controller.py#L3399-L3404">GRPO :3404</a>).
 The waiting prepare sees it, cancels, and waits for Gym to finish resuming. Awaiting a cancelled call on an async actor returns only after the actor's cleanup has run (measured on Ray 2.58), so Gym has already resumed its agents before RL sends its abort. The existing error path in
 <a href="https://github.com/NVIDIA-NeMo/RL/blob/4db8f66406eb8ffdbabaa133824b9aa3f65645c7/nemo_rl/algorithms/single_controller.py#L2005-L2023"><code>_prepare_and_commit_gym_checkpoint</code></a>
 then sends the same-ID abort. That abort does nothing, because Gym already cleared the checkpoint, and it reopens rollout admission. The attempt ends as <code>skipped</code>, exactly as today, just 55 s sooner.</p>
+
+<p><b>Test that should pass once fixed:</b> a fake Gym prepare that blocks until cancelled, a step that starts to commit, and <code>asyncio.wait_for(..., timeout=5.0)</code> around the attempt. It must return <code>trainer_state_changed</code> with Gym resumed, no commit, and rollouts reopened. Today it times out, because nothing on the RL side cancels the prepare. The cancel sits behind <code>_cancel_gym_control_call</code> because the unit tests' fake actor returns plain tasks, not Ray object refs.</p>
 
 <p><b>The other option</b> is to hold training right before its optimizer update until the snapshot's cut is taken
 (before <a href="https://github.com/NVIDIA-NeMo/RL/blob/4db8f66406eb8ffdbabaa133824b9aa3f65645c7/nemo_rl/algorithms/single_controller.py#L3399-L3401"><code>finish_train_step</code></a>, and before the PPO critic update at
