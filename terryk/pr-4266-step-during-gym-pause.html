@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NVIDIA-NeMo/RL #4266 — a training step that finishes during the Gym pause throws the snapshot away</title>
+<style>
+:root{
+  --bg:#0d1117; --surface:#161b22; --surface2:#1c2128; --border:#30363d;
+  --text:#e6edf3; --dim:#8b949e; --accent:#58a6ff; --green:#3fb950;
+  --orange:#d29922; --red:#f85149;
+}
+:root[data-theme="light"]{
+  --bg:#ffffff; --surface:#f6f8fa; --surface2:#eaeef2; --border:#d0d7de;
+  --text:#1f2328; --dim:#59636e; --accent:#0969da; --green:#1a7f37;
+  --orange:#9a6700; --red:#cf222e;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:28px 20px 70px}
+h1{font-size:22px;margin:0 0 8px;line-height:1.3}
+h2{font-size:18px;margin:32px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;
+  font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
+.sub{color:var(--dim);font-size:13.5px;margin:0 0 16px}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);
+  border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;
+  font:13px/1 ui-monospace,Menlo,monospace;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.18)}
+nav.chain{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 6px;padding:0}
+nav.chain a,nav.chain span{display:inline-block;padding:5px 11px;border:1px solid var(--border);
+  border-radius:20px;background:var(--surface);text-decoration:none;color:var(--accent);
+  font-size:12.5px;line-height:1.3;white-space:nowrap}
+nav.chain a:hover{background:var(--surface2)}
+nav.chain span.here{background:var(--accent);color:var(--bg);border-color:var(--accent);font-weight:600}
+p.chainnote{color:var(--dim);font-size:12px;margin:0 0 18px}
+.status{border:1px solid var(--border);border-radius:10px;background:var(--surface);
+  padding:2px 16px 10px;margin:0 0 20px}
+.status dl{display:grid;grid-template-columns:max-content 1fr;gap:4px 14px;margin:12px 0 0}
+.status dt{color:var(--dim);font-size:12px;text-transform:uppercase;letter-spacing:.04em;
+  white-space:nowrap;padding-top:2px}
+.status dd{margin:0;font-size:14px}
+.verdict{font-weight:700}
+.verdict.open{color:var(--red)}
+.bg{border:1px dashed var(--border);border-radius:8px;padding:8px 14px;margin:0 0 16px;font-size:14px;color:var(--text)}
+.mono{font:12.5px ui-monospace,SFMono-Regular,Menlo,monospace;
+  background:var(--surface);border:1px solid var(--border);border-radius:8px;
+  padding:13px;overflow-x:auto;white-space:pre}
+.warn{border-left:3px solid var(--red);background:var(--surface);
+  padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0}
+.where{border-left:4px solid var(--accent);background:var(--surface);padding:6px 12px;margin:6px 0 10px}
+.cref{margin:6px 0 0;font-size:13px}
+.cref a{display:inline-block;padding:4px 10px;border:1px solid var(--border);
+  border-radius:16px;background:var(--surface);font:12.5px ui-monospace,Menlo,monospace}
+.cref a:hover{background:var(--surface2);text-decoration:none}
+.tip{border-bottom:1px dotted var(--dim);cursor:help;position:relative;outline:none}
+.tip:hover::after,.tip:focus::after{content:attr(data-tip);position:absolute;left:0;top:1.7em;z-index:60;
+  width:max-content;max-width:min(340px,80vw);white-space:normal;background:var(--surface2);color:var(--text);
+  border:1px solid var(--border);border-radius:6px;padding:7px 10px;font:13px/1.45 -apple-system,sans-serif;
+  font-weight:400;box-shadow:0 4px 14px rgba(0,0,0,.3)}
+.drop{color:var(--red);font-weight:700}
+.kept{color:var(--green);font-weight:700}
+svg{max-width:100%;height:auto;display:block;margin:16px 0}
+svg .axis{stroke:var(--border);stroke-width:1.2}
+svg .tick{fill:var(--dim);font:11px ui-monospace,Menlo,monospace}
+svg .lane{fill:var(--text);font:bold 12.5px -apple-system,sans-serif}
+svg .lbl{fill:var(--text);font:12px ui-monospace,Menlo,monospace}
+svg .note{fill:var(--dim);font:11.5px -apple-system,sans-serif}
+svg .hdr{fill:var(--accent);font:bold 12.5px -apple-system,sans-serif}
+svg .train{fill:var(--accent);opacity:.35;stroke:var(--accent)}
+svg .gym{fill:var(--orange);opacity:.35;stroke:var(--orange)}
+svg .closed{fill:var(--red);opacity:.35;stroke:var(--red)}
+svg .ok{fill:var(--green);opacity:.4;stroke:var(--green)}
+svg .wait{fill:var(--dim);opacity:.25;stroke:var(--dim);stroke-dasharray:4 3}
+svg .mark{stroke:var(--red);stroke-width:2.2}
+svg .markok{stroke:var(--green);stroke-width:2.2}
+svg .cross{fill:var(--red);font:bold 13px -apple-system,sans-serif}
+svg .tickok{fill:var(--green);font:bold 13px -apple-system,sans-serif}
+svg a text{text-decoration:underline;fill:var(--accent);font:11px ui-monospace,Menlo,monospace}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+  document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head>
+<body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+  function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+  function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
+    b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
+      else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+  document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+<div class="wrap">
+
+<h1>A training step that finishes during the Gym pause throws the snapshot away</h1>
+<p class="sub">Explainer for <a href="https://github.com/NVIDIA-NeMo/RL/pull/4266">NVIDIA-NeMo/RL #4266</a>.
+Permalinks pin the PR head <code>4db8f66</code>; "before" links pin the base <code>ed14402</code>.</p>
+
+<div class="status">
+<dl>
+  <dt>Before</dt>
+  <dd>A periodic rollout snapshot took the data-plane barrier and checked that no training step had finished since it started. If one had, it dropped the attempt. That cost almost nothing, because nothing had been paused yet.</dd>
+  <dt>This PR</dt>
+  <dd>With Gym checkpointing on, each attempt first pauses Gym and waits for it to drain and write its state, and only then runs the same check. A step that finishes during that wait still drops the attempt, but now after rollouts were stopped for the whole pause.</dd>
+  <dt>Status</dt>
+  <dd><span class="verdict open">Open — not fixed in this PR.</span> No data is lost; the cost is wasted pauses and snapshots that never land. Raised in the review; a fix is proposed below.</dd>
+</dl>
+</div>
+
+<nav class="chain">
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4264-4266-stack-overview.html">stack overview</a>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4264-4266-save-restore-sequence.html">save &amp; restore sequence</a>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4264-gym-checkpoint-participants.html">#4264 · what it adds</a>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4264-gym-bump-metrics.html">#4264 · Gym bump breaks metrics</a>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4265-durable-gym-state.html">#4265 · what it adds</a>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4265-prompt-group-ack.html">#4265 · prompt-group ACK stall</a>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4265-lost-reply-stall.html">#4265 · lost reply stalls checkpoints</a>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4266-gym-turn-recovery.html">#4266 · turn recovery</a>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4266-parked-deadline-stall.html">#4266 · parked-deadline stall</a>
+  <span class="here">#4266 · step during Gym pause</span>
+</nav>
+<p class="chainnote">Ten pages on this stack — this one: #4266: a training step that lands while Gym is paused.</p>
+
+<div class="bg"><b>Background.</b> Single Controller trains and generates at the same time. Every
+<span class="tip" tabindex="0" data-tip="rollout_checkpointing.snapshot_attempt_interval_s, e.g. 120 s. Each attempt tries to save the rollout state (data plane, replay index, recovery ledger, and with this PR, Gym's state).">few minutes</span>
+it tries a <b>rollout snapshot</b>. The snapshot is filed under the newest trainer checkpoint, say <code>step_10</code>, and must describe the rollout data exactly as it was when those weights were saved.
+With this PR, Gym's paused agents are saved in the same snapshot, so Gym has to stop first.
+Dotted words have a short explanation: hover or tap them.</div>
+
+<p>An attempt records the current step (10) and prepares a folder under <code>step_10</code>
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/4db8f66406eb8ffdbabaa133824b9aa3f65645c7/nemo_rl/algorithms/single_controller.py#L4626-L4630">single_controller.py:4626</a>).
+It then closes rollout admission and asks Gym to
+<span class="tip" tabindex="0" data-tip="Gym prepare: stop taking new model calls, wait for calls already running to finish, park each agent at a turn boundary, then commit: every Gym server writes its state into the snapshot folder. Bounded by prepare_timeout_s (300 s by default).">drain and write its state</span>
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/4db8f66406eb8ffdbabaa133824b9aa3f65645c7/nemo_rl/algorithms/single_controller.py#L4648-L4655">:4648</a>).
+The training loop is not paused, so it keeps going. Only after Gym is done does the attempt take the data-plane barrier and compare the step again
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/4db8f66406eb8ffdbabaa133824b9aa3f65645c7/nemo_rl/algorithms/single_controller.py#L4664-L4684">:4664</a>).
+If step 11 finished in between, the attempt deletes the folder, aborts Gym, and logs <code>skipped</code>
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/4db8f66406eb8ffdbabaa133824b9aa3f65645c7/nemo_rl/algorithms/single_controller.py#L4911-L4915">:4911</a>). A skipped attempt never counts as a failure.</p>
+
+<h2>One attempt, second by second</h2>
+
+<svg viewBox="0 0 940 330" role="img" aria-label="Timeline: step 11 finishes at 40 s, 15 s into a Gym pause that runs from 25 s to 95 s. At 95 s the step check fails and the snapshot is thrown away; rollouts were stopped for 70 s for nothing.">
+  <text class="hdr" x="16" y="22">save_period 5 → last trainer checkpoint is step_10. Step 11 is training. Times in seconds.</text>
+
+  <line class="axis" x1="150" y1="270" x2="910" y2="270"/>
+  <text class="tick" x="150" y="288" text-anchor="middle">0</text>
+  <text class="tick" x="340" y="288" text-anchor="middle">25</text>
+  <text class="tick" x="454" y="288" text-anchor="middle">40</text>
+  <text class="tick" x="872" y="288" text-anchor="middle">95</text>
+
+  <text class="lane" x="16" y="70">training</text>
+  <rect class="train" x="150" y="52" width="304" height="28" rx="5"/>
+  <text class="lbl" x="160" y="71">step 11 (40 s)</text>
+  <line class="mark" x1="454" y1="44" x2="454" y2="262"/>
+  <text class="note" x="462" y="64">step 11 commits at 40 s:</text>
+  <text class="note" x="462" y="79">its trained groups are deleted,</text>
+  <text class="note" x="462" y="94">step count 10 → 11</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/4db8f66406eb8ffdbabaa133824b9aa3f65645c7/nemo_rl/algorithms/single_controller.py#L3412-L3459" target="_blank" rel="noopener"><text x="462" y="110">single_controller.py:3412-3459</text></a>
+
+  <text class="lane" x="16" y="152">Gym snapshot</text>
+  <rect class="gym" x="340" y="134" width="532" height="28" rx="5"/>
+  <text class="lbl" x="462" y="153">drain + write (70 s), began at step 10</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/4db8f66406eb8ffdbabaa133824b9aa3f65645c7/nemo_rl/algorithms/single_controller.py#L1949" target="_blank" rel="noopener"><text x="350" y="178">_prepare_and_commit_gym_checkpoint</text></a>
+
+  <text class="lane" x="16" y="222">new rollouts</text>
+  <rect class="ok" x="150" y="204" width="190" height="28" rx="5"/>
+  <rect class="closed" x="340" y="204" width="532" height="28" rx="5"/>
+  <text class="lbl" x="462" y="223">stopped for 70 s</text>
+
+  <line class="mark" x1="872" y1="134" x2="872" y2="262"/>
+  <text class="cross" x="866" y="128" text-anchor="end">✗ step is 11, not 10 → throw it away</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/4db8f66406eb8ffdbabaa133824b9aa3f65645c7/nemo_rl/algorithms/single_controller.py#L4664-L4684" target="_blank" rel="noopener"><text x="866" y="250" text-anchor="end">step check :4664</text></a>
+
+  <rect class="train" x="150" y="304" width="14" height="12" rx="2"/><text class="note" x="170" y="314">training</text>
+  <rect class="gym" x="250" y="304" width="14" height="12" rx="2"/><text class="note" x="270" y="314">Gym paused for the snapshot</text>
+  <rect class="closed" x="460" y="304" width="14" height="12" rx="2"/><text class="note" x="480" y="314">no new rollouts (wasted)</text>
+  <rect class="ok" x="650" y="304" width="14" height="12" rx="2"/><text class="note" x="670" y="314">rollouts flowing</text>
+</svg>
+
+<p><b>Why it can't just finish into <code>step_10</code> anyway.</b> When step 11 commits, it deletes the rollout groups it trained on
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/4db8f66406eb8ffdbabaa133824b9aa3f65645c7/nemo_rl/algorithms/single_controller.py#L3412-L3416"><code>_cleanup_consumed_metas_unlocked</code></a>).
+A <code>step_10</code> snapshot taken after that is missing those groups. But the <code>step_10</code> weights never learned from them, so a restart from it would silently drop them.
+So the check is right to throw the attempt away. The problem is that the throw-away now happens after a 70 s Gym pause, not before one.</p>
+
+<p><b>How often.</b> An attempt is wasted whenever a step finishes during the pause. In this example the pause (70 s) is longer than a step (40 s), so every attempt overlaps the end of some step, as long as the buffer holds enough finished rollouts to keep training going while new rollouts are stopped. The check before the pause only looks at whether a trainer checkpoint exists for the current step
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/4db8f66406eb8ffdbabaa133824b9aa3f65645c7/nemo_rl/algorithms/single_controller.py#L4598-L4610">:4598</a>), not at whether a step is about to finish.</p>
+
+<h2>What would fix it — proposed, not in the PR</h2>
+
+<p>Nothing below is implemented.</p>
+<p class="where"><b>Where the fix lands: RL only, one file.</b>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/4db8f66406eb8ffdbabaa133824b9aa3f65645c7/nemo_rl/algorithms/single_controller.py"><code>single_controller.py</code></a>:
+the snapshot attempt opens a hold before Gym prepare and releases it after its cut; the training loop waits on that hold just before its optimizer step.
+<b>No Gym change:</b> Gym only sees a normal prepare, commit and resume.</p>
+
+<div class="mono"># snapshot attempt (_save_rollout_checkpoint_locked)
+self._snapshot_cut_pending.clear()          # t = 25 s: "don't commit a step yet"
+try:
+    await prepare_and_commit_gym(...)         # 25 s → 95 s, step count still 10
+    async with barrier.checkpoint() as cut:   # 95 s: step 10 == 10 ✓ → cut saved
+        ...
+finally:
+    self._snapshot_cut_pending.set()          # 95 s: training may commit again
+
+# training loop, just before the optimizer step
+await self._snapshot_cut_pending.wait()       # step 11 ready at 40 s, waits 55 s
+policy_result = finish_train_step()           # 95 s: step 11 commits, count → 11</div>
+<p class="cref">The two places the loop starts an optimizer step:
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/4db8f66406eb8ffdbabaa133824b9aa3f65645c7/nemo_rl/algorithms/single_controller.py#L3399-L3404">GRPO <code>finish_train_step</code> :3399</a>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/4db8f66406eb8ffdbabaa133824b9aa3f65645c7/nemo_rl/algorithms/single_controller.py#L3272-L3281">PPO critic epochs :3272</a></p>
+
+<p>Holding before the optimizer step keeps the model and the data plane at step 10 until the cut is taken. The code already treats that point as safe: rows picked for the running step are kept in the snapshot and offered again after a restart
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/4db8f66406eb8ffdbabaa133824b9aa3f65645c7/nemo_rl/algorithms/single_controller.py#L656-L660">comment at :656</a>).
+The cost moves from rollouts to training: step 11 waits 55 s, but only when a step happens to finish during a pause. Rollouts are stopped for the same 70 s either way, and now the snapshot lands. The hold must be released on every exit path, including a Gym abort, or training stops for good.</p>
+
+<div class="warn">
+<strong>So what.</strong> Nothing is lost or corrupted: throwing the attempt away is the correct response. But when a training step is shorter than Gym's drain plus write, the periodic Gym snapshots between trainer checkpoints can nearly all be wasted. Each one stops new rollouts for the full pause, and each is logged only as <code>skipped</code> with reason <code>trainer_state_changed</code>. The review asks the author to measure that rate first; the hold above is the fix if it is high.
+</div>
+<p class="cref">🔴 <a href="https://github.com/NVIDIA-NeMo/RL/pull/4266#discussion_r4129034924">review comment — single_controller.py:4626</a></p>
+
+</div>
+</body>
+</html>
