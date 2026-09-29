@@ -114,8 +114,9 @@ both sides; not run against a live Gym.</p>
   <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4265-lost-reply-stall.html">#4265 · lost reply stalls checkpoints</a>
   <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4266-gym-turn-recovery.html">#4266 · turn recovery</a>
   <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4266-parked-deadline-stall.html">#4266 · parked-deadline stall</a>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4266-step-during-gym-pause.html">#4266 · step during Gym pause</a>
 </nav>
-<p class="chainnote">Nine pages on this stack — this one: #4265: the bug in prompt-group mode.</p>
+<p class="chainnote">Ten pages on this stack — this one: #4265: the bug in prompt-group mode.</p>
 
 <p id="mechanism">Gym keeps each finished result until RL ACKs it, and its
 <a href="https://github.com/NVIDIA-NeMo/Gym/blob/f4fcf8cf98272740fd7585aa49cee00fa2c099f0/nemo_gym/_checkpoint/agent.py#L722"><code>status()</code></a>
@@ -202,7 +203,7 @@ then gives up on this snapshot.</li>
 snapshot, for the rest of the process.</li>
 </ol>
 
-<p class="who"><b>Who hits this.</b> Any environment whose group RL retries as a whole while turn-level checkpointing is on. Environments that score each sibling on its own hit it most: their siblings finish at different times, so a group is often half done when a snapshot starts, exactly as drawn above. Under the <a href="https://github.com/NVIDIA-NeMo/RL/pull/4266#discussion_r4101849735">target-level comment on #4266</a> that happens when an override forces <code>prompt_group</code> on such an environment. GenRM compare also runs this path, but rarely stalls: its siblings all finish together once the group is scored.</p>
+<p class="who"><b>Who hits this.</b> Any environment whose group RL retries as a whole while turn-level checkpointing is on. Environments that score each sibling on its own hit it most: their siblings finish at different times, so a group is often half done when a snapshot starts, exactly as drawn above. Under the <a href="https://github.com/NVIDIA-NeMo/RL/pull/4266#discussion_r4129033711">target-level comment on #4266</a> that happens when an override forces <code>prompt_group</code> on such an environment. GenRM compare also runs this path, but rarely stalls: its siblings all finish together once the group is scored.</p>
 <p id="reachable">This setup is meant to work, so the fix is to ACK earlier, not to reject the combination. This PR even adds
 <a href="https://github.com/NVIDIA-NeMo/RL/blob/ed1440266ca2e02ca3942d7837777fbdeff64aae/nemo_rl/experience/rollout_recovery.py#L982"><code>record_sealed_group_acknowledgements</code></a>
 for it. A lost <code>/run</code> reply strands a finished result the same way; see <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4265-lost-reply-stall.html">the lost-reply page</a>.</p>
@@ -221,7 +222,7 @@ not know or care about prompt groups.</p>
 <p>Nothing below is implemented. Record each sibling's ACK debt as soon as it arrives, like sibling mode does,
 and keep only the <em>seal</em> all-or-nothing. That is safe: g0 is ACKed but not yet published, so it is not in
 RL's snapshot. On restore it is simply rerun under a new try number; nothing is lost or counted twice.</p>
-<p class="where"><b>Scope:</b> this only removes the stall. What the group does on restore (start over, or resume g1 and g2 from their saved turns) is set by the target level in the <a href="https://github.com/NVIDIA-NeMo/RL/pull/4266#discussion_r4101849735">target-level comment on #4266</a>. This fix works with either.</p>
+<p class="where"><b>Scope:</b> this only removes the stall. What the group does on restore (start over, or resume g1 and g2 from their saved turns) is set by the target level in the <a href="https://github.com/NVIDIA-NeMo/RL/pull/4266#discussion_r4129033711">target-level comment on #4266</a>. This fix works with either.</p>
 
 <div class="mono"><span class="cm"># rollout_manager.py, PROMPT_GROUP branch of _record_streamed_completion (proposed)</span>
 pending_group_results[0] = result_g0          <span class="cm"># {0: g0}, 1 of 3 in</span>
