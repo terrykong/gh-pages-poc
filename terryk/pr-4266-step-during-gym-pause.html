@@ -136,7 +136,7 @@ Dotted words have a short explanation: hover or tap them.</div>
 <p>An attempt records the current step (10) and prepares a folder under <code>step_10</code>
 (<a href="https://github.com/NVIDIA-NeMo/RL/blob/4db8f66406eb8ffdbabaa133824b9aa3f65645c7/nemo_rl/algorithms/single_controller.py#L4626-L4630">single_controller.py:4626</a>).
 It then closes rollout admission and asks Gym to
-<span class="tip" tabindex="0" data-tip="Gym prepare: stop taking new model calls, wait for calls already running to finish, park each agent at a turn boundary, then commit: every Gym server writes its state into the snapshot folder. Bounded by prepare_timeout_s (300 s by default).">drain and write its state</span>
+<span class="tip" tabindex="0" data-tip="Gym prepare: stop taking new model calls, wait for calls already running to finish, park each agent at a turn boundary, then commit: every Gym server writes its state into the snapshot folder. Prepare and commit each get their own prepare_timeout_s (300 s by default), shared by all Gym servers in that step.">drain and write its state</span>
 (<a href="https://github.com/NVIDIA-NeMo/RL/blob/4db8f66406eb8ffdbabaa133824b9aa3f65645c7/nemo_rl/algorithms/single_controller.py#L4648-L4655">:4648</a>).
 The training loop is not paused, so it keeps going. Only after Gym is done does the attempt take the data-plane barrier and compare the step again
 (<a href="https://github.com/NVIDIA-NeMo/RL/blob/4db8f66406eb8ffdbabaa133824b9aa3f65645c7/nemo_rl/algorithms/single_controller.py#L4664-L4684">:4664</a>).
@@ -294,7 +294,7 @@ then sends the same-ID abort. That abort does nothing, because Gym already clear
 <p><b>The other option</b> is to hold training right before its optimizer update until the snapshot's cut is taken
 (before <a href="https://github.com/NVIDIA-NeMo/RL/blob/4db8f66406eb8ffdbabaa133824b9aa3f65645c7/nemo_rl/algorithms/single_controller.py#L3399-L3401"><code>finish_train_step</code></a>, and before the PPO critic update at
 <a href="https://github.com/NVIDIA-NeMo/RL/blob/4db8f66406eb8ffdbabaa133824b9aa3f65645c7/nemo_rl/algorithms/single_controller.py#L3272-L3276">:3276</a>, which the code calls "already irreversible").
-That saves the snapshot, but training then waits out every Gym pause, up to <code>prepare_timeout_s</code> (300 s) whenever a prepare runs to its deadline.
+That saves the snapshot, but training then waits out every Gym pause, up to <code>prepare_timeout_s</code> (300 s) for the drain and the same again for the write, whenever a step runs to its deadline.
 Training is the part that must not wait, so the abort is the better default.</p>
 
 <p><b>With <code>save_period: 1</code>.</b> Every step is a trainer checkpoint, and each one takes the same save lock as the periodic snapshot
