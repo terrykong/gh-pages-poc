@@ -98,7 +98,7 @@ p.chainnote{color:var(--dim);font-size:12px;margin:0 0 18px}
   <dt>This PR</dt>
   <dd>Adds an opt-in mode (<code>rollout_checkpointing.gym.participant_checkpointing_enabled</code>) that pauses Gym at turn boundaries and saves its agents, model and resources into the same snapshot, so a restart continues from the last finished turn.</dd>
   <dt>Status</dt>
-  <dd><span class="verdict good">New in this PR, off by default.</span> <span class="verdict open">Two review findings are open</span> — see the last section.</dd>
+  <dd><span class="verdict good">New in this PR, off by default.</span> <span class="verdict open">Four review findings are open</span> — see the last section.</dd>
 </dl>
 </div>
 
@@ -112,8 +112,9 @@ p.chainnote{color:var(--dim);font-size:12px;margin:0 0 18px}
   <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4265-lost-reply-stall.html">#4265 · lost reply stalls checkpoints</a>
   <span class="here">#4266 · turn recovery</span>
   <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4266-parked-deadline-stall.html">#4266 · parked-deadline stall</a>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4266-step-during-gym-pause.html">#4266 · step during Gym pause</a>
 </nav>
-<p class="chainnote">Nine pages on this stack — this one: #4266: what a crash costs, before and after.</p>
+<p class="chainnote">Ten pages on this stack — this one: #4266: what a crash costs, before and after.</p>
 
 <p>Single Controller already takes a rollout snapshot every <code>snapshot_attempt_interval_s</code>: it takes the data-plane barrier, saves the data plane plus the replay and recovery files, and publishes the directory with one rename
 (<a href="https://github.com/NVIDIA-NeMo/RL/blob/ed1440266ca2e02ca3942d7837777fbdeff64aae/nemo_rl/algorithms/single_controller.py#L4000">before: <code>_save_rollout_checkpoint</code></a>).
@@ -214,13 +215,15 @@ and then tries the snapshot above. If that snapshot never lands, restore uses th
 The PR has no timing numbers yet for that pause.</p>
 
 <div class="warn">
-<strong>Two open review findings affect this mode.</strong>
+<strong>Open review findings that affect this mode.</strong>
 (1) If a Gym control call fails during a periodic snapshot, the error reaches the checkpoint loop as a <code>RuntimeError</code>. The loop only retries <code>OSError</code> and <code>TimeoutError</code>, so one HTTP 500 on commit ends the run instead of being retried
 (<a href="https://github.com/NVIDIA-NeMo/RL/blob/98b3b6c3d550ecdebd4a5ae80e00feb5896c547f/nemo_rl/algorithms/single_controller.py#L4870">:4870</a>).
-(2) With <code>prompt_group</code> recovery, a finished sibling is acknowledged only after its whole group finishes. Gym prepare waits for that acknowledgement, while its parked siblings can't finish. Every snapshot then times out after <code>prepare_timeout_s</code>, and three failures in a row end the run. Both have a one-place fix in the review.
+(2) With <code>prompt_group</code> recovery, a finished sibling is acknowledged only after its whole group finishes, while Gym prepare waits for that acknowledgement and parks the rest of the group, so every snapshot times out. The fix is to acknowledge each sibling as soon as it finishes (<a href="https://github.com/NVIDIA-NeMo/RL/pull/4265#discussion_r4109065679">#4265 review</a>); the review also proposes one <code>target_level</code> setting in place of the Gym flags.
+(3) A rollout whose time budget runs out while Gym has it parked is never acknowledged, and every later snapshot fails (<a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4266-parked-deadline-stall.html">parked-deadline stall</a>).
+(4) A training step that finishes during the Gym pause throws that snapshot away after the pause (<a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4266-step-during-gym-pause.html">step during Gym pause</a>).
 </div>
-<p class="cref">🔴 <a href="https://github.com/NVIDIA-NeMo/RL/pull/4266#discussion_r4101849722">review comment (1) — single_controller.py:1968</a>
-&nbsp;<a href="https://github.com/NVIDIA-NeMo/RL/pull/4266#discussion_r4101849735">review comment (2) — config.py:1407</a></p>
+<p class="cref">🔴 <a href="https://github.com/NVIDIA-NeMo/RL/pull/4266#discussion_r4129033619">review comment (1) — single_controller.py:1968</a>
+&nbsp;<a href="https://github.com/NVIDIA-NeMo/RL/pull/4266#discussion_r4129033711">review comment (2) — config.py:1407</a></p>
 
 </div>
 </body>
