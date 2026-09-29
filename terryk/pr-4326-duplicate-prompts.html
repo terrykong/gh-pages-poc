@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NVIDIA-NeMo/RL #4326 — when do two groups with the same prompt share a GRPO baseline?</title>
+<style>
+:root{
+  --bg:#0d1117; --surface:#161b22; --surface2:#1c2128; --border:#30363d;
+  --text:#e6edf3; --dim:#8b949e; --accent:#58a6ff; --green:#3fb950;
+  --orange:#d29922; --red:#f85149;
+}
+:root[data-theme="light"]{
+  --bg:#ffffff; --surface:#f6f8fa; --surface2:#eaeef2; --border:#d0d7de;
+  --text:#1f2328; --dim:#59636e; --accent:#0969da; --green:#1a7f37;
+  --orange:#9a6700; --red:#cf222e;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:28px 20px 70px}
+h1{font-size:22px;margin:0 0 8px;line-height:1.3}
+h2{font-size:18px;margin:32px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;
+  font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
+.sub{color:var(--dim);font-size:13.5px;margin:0 0 16px}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);
+  border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;
+  font:13px/1 ui-monospace,Menlo,monospace;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.18)}
+.mono{font:12.5px ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--surface);
+  border:1px solid var(--border);border-radius:8px;padding:13px;overflow-x:auto;white-space:pre}
+.warn{border-left:3px solid var(--orange);background:var(--surface);
+  padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0}
+.bg{border:1px dashed var(--border);border-radius:8px;padding:10px 14px;margin:0 0 16px;font-size:14px}
+.status{border:1px solid var(--border);border-radius:10px;background:var(--surface);padding:2px 16px 10px;margin:0 0 20px}
+.status dl{display:grid;grid-template-columns:max-content 1fr;gap:4px 14px;margin:12px 0 0}
+.status dt{color:var(--dim);font-size:12px;text-transform:uppercase;letter-spacing:.04em;white-space:nowrap;padding-top:2px}
+.status dd{margin:0;font-size:14px}
+.verdict{font-weight:700}
+.verdict.open{color:var(--orange)}
+.cref{margin:6px 0 0;font-size:13px}
+.cref a{display:inline-block;padding:4px 10px;border:1px solid var(--border);border-radius:16px;
+  background:var(--surface);font:12.5px ui-monospace,Menlo,monospace}
+.where{border-left:4px solid var(--accent);background:var(--surface);padding:6px 12px;margin:6px 0 10px}
+.diff{font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--surface);
+  border:1px solid var(--border);border-radius:8px;padding:12px;overflow-x:auto;white-space:pre;margin:10px 0}
+.diff .add{color:var(--green)} .diff .del{color:var(--red)} .diff .hunk{color:var(--accent)}
+.tip{border-bottom:1px dotted var(--dim);cursor:help;position:relative;outline:none}
+.tip:hover::after,.tip:focus::after{content:attr(data-tip);position:absolute;left:0;top:1.7em;z-index:60;
+  width:max-content;max-width:min(340px,80vw);white-space:normal;background:var(--surface2);color:var(--text);
+  border:1px solid var(--border);border-radius:6px;padding:7px 10px;font:13px/1.45 -apple-system,sans-serif;
+  font-weight:400;box-shadow:0 4px 14px rgba(0,0,0,.3)}
+svg{max-width:100%;height:auto;display:block;margin:16px 0}
+svg .lbl-b{fill:var(--text);font:bold 13px -apple-system,sans-serif}
+svg .note{fill:var(--dim);font:11.5px -apple-system,sans-serif}
+svg .hdr{fill:var(--accent);font:bold 12.5px -apple-system,sans-serif}
+svg .gh{fill:var(--dim);font:bold 11.5px -apple-system,sans-serif}
+svg .c-one{fill:var(--green);opacity:.5;stroke:var(--green)}
+svg .c-zero{fill:var(--dim);opacity:.25;stroke:var(--dim)}
+svg .c-txt{fill:var(--text);font:11px ui-monospace,Menlo,monospace}
+svg .pool{stroke:var(--green);stroke-width:2;fill:none}
+svg .pool-q{stroke:var(--dim);stroke-width:1.5;fill:none}
+svg .pool-t{fill:var(--green);font:11px -apple-system,sans-serif}
+svg .cut-chunk{stroke:var(--orange);stroke-width:2.2;stroke-dasharray:5 4;fill:none}
+svg .cut-chunk-t{fill:var(--orange);font:bold 11px -apple-system,sans-serif}
+svg .cut-shard{stroke:var(--red);stroke-width:2.6;fill:none}
+svg .cut-shard-t{fill:var(--red);font:bold 11px -apple-system,sans-serif}
+svg .tag-ok{fill:var(--green);font:bold 11px -apple-system,sans-serif}
+svg .tag-old{fill:var(--orange);font:bold 11px -apple-system,sans-serif}
+svg .tag-new{fill:var(--red);font:bold 11px -apple-system,sans-serif}
+svg .val{fill:var(--text);font:bold 13px ui-monospace,Menlo,monospace}
+svg a text{text-decoration:underline;fill:var(--accent);font:11.5px ui-monospace,Menlo,monospace}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+  document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head>
+<body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+  function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+  function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
+    b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
+      else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+  document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+<div class="wrap">
+
+<h1>When do two groups with the same prompt share a GRPO baseline — and what sharding changes</h1>
+<p class="sub">Explains one review comment on <a href="https://github.com/NVIDIA-NeMo/RL/pull/4326">NVIDIA-NeMo/RL #4326</a>
+(advantage stage in sharded Ray actors). All permalinks pin the PR head <code>93c8818</code>.</p>
+
+<div class="status">
+<dl>
+  <dt>Before</dt>
+  <dd>Two groups with the same prompt text share one baseline only if they land in the same
+  streaming chunk. Which chunk a group lands in is not controlled, so this already varied.</dd>
+  <dt>This PR</dt>
+  <dd>Splits each chunk across advantage actors, by position. A code comment says the split gives
+  the same numbers as the whole batch.</dd>
+  <dt>Status</dt>
+  <dd><span class="verdict open">Open — flagged in the review.</span> The pooling is pre-existing and
+  unchanged. What is new: the number of actors can now change the numbers, and the comment says it
+  cannot. The review asks for a corrected comment and a test.</dd>
+</dl>
+</div>
+
+<div class="bg"><b>Background.</b> GRPO scores each response against the other responses to the
+same prompt: advantage = (its reward − the mean reward of the <em>other</em> responses) ÷ their
+spread. That mean is the <span class="tip" tabindex="0" data-tip="The number each reward is compared to. Here: the mean reward of the other responses to the same prompt (leave-one-out, the default).">baseline</span>.
+The code decides "same prompt" by comparing the prompt's tokens
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/93c8818cad25e3b9d6b5240f4c03607b0c9deb25/nemo_rl/algorithms/utils.py#L146"><code>torch.unique(prompts, dim=0)</code></a>,
+on <a href="https://github.com/NVIDIA-NeMo/RL/blob/93c8818cad25e3b9d6b5240f4c03607b0c9deb25/nemo_rl/experience/payload.py#L174"><code>prompt_ids_for_adv</code></a>), not by
+which group a response came from. So if one call holds two groups with the same prompt text, all
+their responses form one pool. Dotted words have a short explanation: hover or tap them.</div>
+
+<p>The single controller computes advantages one
+<span class="tip" tabindex="0" data-tip="A set of prompt groups the train loop takes from the buffer at once. Its size is between min_groups_for_streaming_train and what the step still needs.">streaming chunk</span>
+at a time (<a href="https://github.com/NVIDIA-NeMo/RL/blob/93c8818cad25e3b9d6b5240f4c03607b0c9deb25/nemo_rl/algorithms/single_controller.py#L2787"><code>sampler.select</code></a>).
+This PR then cuts each chunk into whole groups, in order, and gives one piece to each
+advantage actor (<a href="https://github.com/NVIDIA-NeMo/RL/blob/93c8818cad25e3b9d6b5240f4c03607b0c9deb25/nemo_rl/algorithms/single_controller_utils/advantage_stage.py#L170"><code>split_meta_by_prompt_group</code></a>).
+The cut knows only row positions, so it can put two same-prompt groups on different actors.</p>
+
+<h2>Same batch, three ways to cut it</h2>
+<svg viewBox="0 0 900 420" role="img" aria-label="Two groups with the same prompt share one baseline only when they are in the same call. On main that depends on chunk boundaries; this PR adds a second split across advantage actors.">
+<text class="hdr" x="16" y="22">One batch: prompt P twice, prompt Q once — 5 responses each (1 = correct, 0 = wrong)</text>
+<text class="gh" x="296" y="50" text-anchor="middle">P, 1st group</text>
+<text class="gh" x="472" y="50" text-anchor="middle">Q</text>
+<text class="gh" x="648" y="50" text-anchor="middle">P, 2nd group</text>
+<text class="gh" x="748" y="42">advantage of each</text>
+<text class="gh" x="748" y="56">P group's 1st row</text>
+<text class="lbl-b" x="16" y="88">main · one chunk</text>
+<text class="note" x="16" y="105">both P groups in the same call</text>
+<text class="tag-ok" x="16" y="122">pooled</text>
+<rect class="c-one" x="220" y="78" width="28" height="24" rx="3"/><text class="c-txt" x="230" y="94">1</text><rect class="c-zero" x="251" y="78" width="28" height="24" rx="3"/><text class="c-txt" x="261" y="94">0</text><rect class="c-zero" x="282" y="78" width="28" height="24" rx="3"/><text class="c-txt" x="292" y="94">0</text><rect class="c-zero" x="313" y="78" width="28" height="24" rx="3"/><text class="c-txt" x="323" y="94">0</text><rect class="c-zero" x="344" y="78" width="28" height="24" rx="3"/><text class="c-txt" x="354" y="94">0</text><rect class="c-one" x="396" y="78" width="28" height="24" rx="3"/><text class="c-txt" x="406" y="94">1</text><rect class="c-one" x="427" y="78" width="28" height="24" rx="3"/><text class="c-txt" x="437" y="94">1</text><rect class="c-zero" x="458" y="78" width="28" height="24" rx="3"/><text class="c-txt" x="468" y="94">0</text><rect class="c-zero" x="489" y="78" width="28" height="24" rx="3"/><text class="c-txt" x="499" y="94">0</text><rect class="c-zero" x="520" y="78" width="28" height="24" rx="3"/><text class="c-txt" x="530" y="94">0</text><rect class="c-one" x="572" y="78" width="28" height="24" rx="3"/><text class="c-txt" x="582" y="94">1</text><rect class="c-one" x="603" y="78" width="28" height="24" rx="3"/><text class="c-txt" x="613" y="94">1</text><rect class="c-one" x="634" y="78" width="28" height="24" rx="3"/><text class="c-txt" x="644" y="94">1</text><rect class="c-one" x="665" y="78" width="28" height="24" rx="3"/><text class="c-txt" x="675" y="94">1</text><rect class="c-zero" x="696" y="78" width="28" height="24" rx="3"/><text class="c-txt" x="706" y="94">0</text>
+<path class="pool-q" d="M396 107 L396 112 L548 112 L548 107"/>
+<path class="pool" d="M220 107 L220 112 L372 112 L372 107"/>
+<path class="pool" d="M572 107 L572 112 L724 112 L724 107"/>
+<path class="pool" d="M296 112 C296 132 648 132 648 112"/>
+<text class="pool-t" x="472" y="138" text-anchor="middle">both P groups: one pool of 10 rows</text>
+<text class="val" x="748" y="95">1.054 · 1.054</text>
+<text class="lbl-b" x="16" y="186">main · two chunks</text>
+<text class="note" x="16" y="203">chunk boundary between them</text>
+<text class="tag-old" x="16" y="220">pre-existing: not pooled</text>
+<rect class="c-one" x="220" y="176" width="28" height="24" rx="3"/><text class="c-txt" x="230" y="192">1</text><rect class="c-zero" x="251" y="176" width="28" height="24" rx="3"/><text class="c-txt" x="261" y="192">0</text><rect class="c-zero" x="282" y="176" width="28" height="24" rx="3"/><text class="c-txt" x="292" y="192">0</text><rect class="c-zero" x="313" y="176" width="28" height="24" rx="3"/><text class="c-txt" x="323" y="192">0</text><rect class="c-zero" x="344" y="176" width="28" height="24" rx="3"/><text class="c-txt" x="354" y="192">0</text><rect class="c-one" x="396" y="176" width="28" height="24" rx="3"/><text class="c-txt" x="406" y="192">1</text><rect class="c-one" x="427" y="176" width="28" height="24" rx="3"/><text class="c-txt" x="437" y="192">1</text><rect class="c-zero" x="458" y="176" width="28" height="24" rx="3"/><text class="c-txt" x="468" y="192">0</text><rect class="c-zero" x="489" y="176" width="28" height="24" rx="3"/><text class="c-txt" x="499" y="192">0</text><rect class="c-zero" x="520" y="176" width="28" height="24" rx="3"/><text class="c-txt" x="530" y="192">0</text><rect class="c-one" x="572" y="176" width="28" height="24" rx="3"/><text class="c-txt" x="582" y="192">1</text><rect class="c-one" x="603" y="176" width="28" height="24" rx="3"/><text class="c-txt" x="613" y="192">1</text><rect class="c-one" x="634" y="176" width="28" height="24" rx="3"/><text class="c-txt" x="644" y="192">1</text><rect class="c-one" x="665" y="176" width="28" height="24" rx="3"/><text class="c-txt" x="675" y="192">1</text><rect class="c-zero" x="696" y="176" width="28" height="24" rx="3"/><text class="c-txt" x="706" y="192">0</text>
+<path class="pool-q" d="M396 205 L396 210 L548 210 L548 205"/>
+<path class="pool" d="M220 205 L220 210 L372 210 L372 205"/>
+<path class="pool" d="M572 205 L572 210 L724 210 L724 205"/>
+<text class="pool-t" x="296" y="226" text-anchor="middle">pool of 5</text>
+<text class="pool-t" x="648" y="226" text-anchor="middle">pool of 5</text>
+<path class="cut-chunk" d="M564 166 L564 216"/>
+<text class="cut-chunk-t" x="560" y="163" text-anchor="end">streaming-chunk boundary</text>
+<text class="val" x="748" y="193">1.0 · 0.5</text>
+<text class="lbl-b" x="16" y="284">this PR · one chunk</text>
+<text class="note" x="16" y="301">split across 2 advantage actors</text>
+<text class="tag-new" x="16" y="318">new: not pooled</text>
+<rect class="c-one" x="220" y="274" width="28" height="24" rx="3"/><text class="c-txt" x="230" y="290">1</text><rect class="c-zero" x="251" y="274" width="28" height="24" rx="3"/><text class="c-txt" x="261" y="290">0</text><rect class="c-zero" x="282" y="274" width="28" height="24" rx="3"/><text class="c-txt" x="292" y="290">0</text><rect class="c-zero" x="313" y="274" width="28" height="24" rx="3"/><text class="c-txt" x="323" y="290">0</text><rect class="c-zero" x="344" y="274" width="28" height="24" rx="3"/><text class="c-txt" x="354" y="290">0</text><rect class="c-one" x="396" y="274" width="28" height="24" rx="3"/><text class="c-txt" x="406" y="290">1</text><rect class="c-one" x="427" y="274" width="28" height="24" rx="3"/><text class="c-txt" x="437" y="290">1</text><rect class="c-zero" x="458" y="274" width="28" height="24" rx="3"/><text class="c-txt" x="468" y="290">0</text><rect class="c-zero" x="489" y="274" width="28" height="24" rx="3"/><text class="c-txt" x="499" y="290">0</text><rect class="c-zero" x="520" y="274" width="28" height="24" rx="3"/><text class="c-txt" x="530" y="290">0</text><rect class="c-one" x="572" y="274" width="28" height="24" rx="3"/><text class="c-txt" x="582" y="290">1</text><rect class="c-one" x="603" y="274" width="28" height="24" rx="3"/><text class="c-txt" x="613" y="290">1</text><rect class="c-one" x="634" y="274" width="28" height="24" rx="3"/><text class="c-txt" x="644" y="290">1</text><rect class="c-one" x="665" y="274" width="28" height="24" rx="3"/><text class="c-txt" x="675" y="290">1</text><rect class="c-zero" x="696" y="274" width="28" height="24" rx="3"/><text class="c-txt" x="706" y="290">0</text>
+<path class="pool-q" d="M396 303 L396 308 L548 308 L548 303"/>
+<path class="pool" d="M220 303 L220 308 L372 308 L372 303"/>
+<path class="pool" d="M572 303 L572 308 L724 308 L724 303"/>
+<text class="pool-t" x="296" y="324" text-anchor="middle">pool of 5</text>
+<text class="pool-t" x="648" y="324" text-anchor="middle">pool of 5</text>
+<path class="cut-shard" d="M564 264 L564 314"/>
+<text class="cut-shard-t" x="560" y="261" text-anchor="end">actor split (this PR)</text>
+<text class="val" x="748" y="291">1.0 · 0.5</text>
+<path class="pool" d="M16 360 L16 355 L50 355 L50 360" transform="translate(0,10)"/>
+<text class="note" x="60" y="370">rows that share one baseline</text>
+<path class="cut-chunk" d="M250 356 L250 374"/>
+<text class="note" x="258" y="370">streaming chunk, already on main</text>
+<path class="cut-shard" d="M470 356 L470 374"/>
+<text class="note" x="478" y="370">where this PR splits a chunk across actors</text>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/93c8818cad25e3b9d6b5240f4c03607b0c9deb25/nemo_rl/algorithms/utils.py#L146" target="_blank" rel="noopener"><text x="16" y="400">grouping by prompt tokens: utils.py:146</text></a>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/93c8818cad25e3b9d6b5240f4c03607b0c9deb25/nemo_rl/algorithms/single_controller.py#L2787" target="_blank" rel="noopener"><text x="330" y="400">chunk: single_controller.py:2787</text></a>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/93c8818cad25e3b9d6b5240f4c03607b0c9deb25/nemo_rl/algorithms/single_controller_utils/advantage_stage.py#L170" target="_blank" rel="noopener"><text x="600" y="400">split: advantage_stage.py:170</text></a>
+</svg>
+
+<h2>The arithmetic for one row</h2>
+<p>Real output of the repo's baseline code on the batch above (leave-one-out and reward
+normalization on, as in the exemplar config). Take the first response of each P group — both scored 1:</p>
+<div class="mono">                          other P responses it is compared to       baseline   advantage
+P, 1st group, row 1
+  pooled (one call)       9 others: 0 0 0 0 | 1 1 1 1 0                  4/9 = 0.444    1.054
+  not pooled              4 others: 0 0 0 0                              0/4 = 0        1.0
+P, 2nd group, row 1
+  pooled (one call)       9 others: 1 0 0 0 0 | 1 1 1 0                  4/9 = 0.444    1.054
+  not pooled              4 others: 1 1 1 0                              3/4 = 0.75     0.5
+Q (only one group)        same in every row of the figure                               1.5</div>
+<p>Pooling or not are both valid GRPO. The problem is only that the answer now also depends on
+<code>num_advantage_workers</code>. This needs a dataset whose prompts repeat, such as
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/93c8818cad25e3b9d6b5240f4c03607b0c9deb25/nemo_rl/data/datasets/response_datasets/dapo_math.py#L29">DAPO-Math-17k</a>
+(17,917 prompts, each stored 100 times, so about 7 same-prompt pairs per 512-prompt chunk).
+No single-controller recipe in the repo uses it today.</p>
+<p class="cref">🔴 <a href="https://github.com/NVIDIA-NeMo/RL/pull/4326#discussion_r4137611363">review comment — advantage_stage.py:63</a></p>
+
+<h2>What the review asks — proposed, not in the PR</h2>
+<p class="where"><b>Where the fix lands: RL only, one comment and one new test.</b> Nothing below is
+implemented. The splitter cannot keep same-prompt groups together, because it sees only metadata:
+the group id is random and carries no prompt text. So the ask is to state the exception, and to add a test
+that the split matches the whole batch when every prompt is different.</p>
+<pre class="diff"><span class="hunk">@@ advantage_stage.py L63-L69 · comment above SHARD_INVARIANT_ESTIMATORS</span>
+ # Estimators whose advantages for a row depend only on that row and the rest
+<span class="del">-# of its prompt group, so a whole-group shard produces the same numbers as the
+-# whole batch. Everything else reachable from _build_advantage_estimator also
+-# reduces over the entire batch -- gdpo and reinforce_plus_plus always, gae and
+-# raw_reward whenever normalize_advantages is set -- and a shard is not that
+-# batch. Membership is opt-in for exactly that reason: a new estimator counts
+-# as unshardable until someone checks it.
+</span><span class="add">+# of its prompt group, so a whole-group shard matches the whole batch -- with
++# one exception: grpo groups rows by identical prompt tokens, not by generation
++# group, so two groups with the same prompt text in one batch share a baseline
++# only when they land in the same shard. Everything else reachable from
++# _build_advantage_estimator also reduces over the entire batch -- gdpo and
++# reinforce_plus_plus always, gae and raw_reward whenever normalize_advantages
++# is set -- and a shard is not that batch. Membership is opt-in for exactly
++# that reason: a new estimator counts as unshardable until someone checks it.</span></pre>
+
+<div class="warn">
+<strong>So what.</strong> Nothing breaks, and on data where prompts do not repeat, 0 actors and 8
+actors give the same advantages. On repeated-prompt data they do not, and before this review the
+code said they always do. Making GRPO group by generation group instead of by prompt text would
+remove the whole effect, but it changes sync GRPO numbers too, so it is a separate question — not
+part of this PR.
+</div>
+
+</div>
+</body>
+</html>
