@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NVIDIA-NeMo/RL #4287 — why ~30 shipped configs crash at setup</title>
+<style>
+:root{
+  --bg:#0d1117; --surface:#161b22; --surface2:#1c2128; --border:#30363d;
+  --text:#e6edf3; --dim:#8b949e; --accent:#58a6ff; --green:#3fb950;
+  --orange:#d29922; --red:#f85149;
+}
+:root[data-theme="light"]{
+  --bg:#ffffff; --surface:#f6f8fa; --surface2:#eaeef2; --border:#d0d7de;
+  --text:#1f2328; --dim:#59636e; --accent:#0969da; --green:#1a7f37;
+  --orange:#9a6700; --red:#cf222e;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:28px 20px 70px}
+h1{font-size:22px;margin:0 0 8px;line-height:1.3}
+h2{font-size:18px;margin:30px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;
+  font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
+.sub{color:var(--dim);font-size:13.5px;margin:0 0 14px}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);
+  border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;
+  font:13px/1 ui-monospace,Menlo,monospace;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.18)}
+.status{border:1px solid var(--border);border-radius:10px;background:var(--surface);padding:2px 16px 10px;margin:0 0 16px}
+.status dl{display:grid;grid-template-columns:max-content 1fr;gap:4px 14px;margin:12px 0 0}
+.status dt{color:var(--dim);font-size:12px;text-transform:uppercase;letter-spacing:.04em;white-space:nowrap;padding-top:2px}
+.status dd{margin:0;font-size:14px}
+.verdict{font-weight:700}.verdict.open{color:var(--red)}
+nav.chain{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 6px;padding:0}
+nav.chain a,nav.chain span{display:inline-block;padding:5px 11px;border:1px solid var(--border);
+  border-radius:20px;background:var(--surface);text-decoration:none;color:var(--accent);
+  font-size:12.5px;line-height:1.3;white-space:nowrap}
+nav.chain a:hover{background:var(--surface2)}
+nav.chain span.here{background:var(--accent);color:var(--bg);border-color:var(--accent);font-weight:600}
+p.chainnote{color:var(--dim);font-size:12px;margin:0 0 18px}
+.warn{border-left:3px solid var(--red);background:var(--surface);padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0}
+.where{border-left:4px solid var(--accent);background:var(--surface);padding:6px 12px;margin:6px 0 10px}
+.cref{margin:6px 0 0;font-size:13px}
+.cref a{display:inline-block;padding:4px 10px;border:1px solid var(--border);border-radius:16px;background:var(--surface);font:12.5px ui-monospace,Menlo,monospace}
+.diff{font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--surface);
+  border:1px solid var(--border);border-radius:8px;padding:12px;overflow-x:auto;white-space:pre;margin:10px 0}
+.diff .add{color:var(--green)}.diff .del{color:var(--red)}.diff .hunk{color:var(--accent)}
+svg{max-width:100%;height:auto;display:block;margin:14px 0}
+svg .box{fill:var(--surface);stroke:var(--border);stroke-width:1.4}
+svg .ok{fill:var(--surface);stroke:var(--green);stroke-width:2}
+svg .bad{fill:var(--surface);stroke:var(--red);stroke-width:2}
+svg .lbl{fill:var(--text);font:12.5px ui-monospace,Menlo,monospace}
+svg .lbl-b{fill:var(--text);font:bold 13px -apple-system,sans-serif}
+svg .note{fill:var(--dim);font:11.5px -apple-system,sans-serif}
+svg .good{fill:var(--green);font:bold 12px -apple-system,sans-serif}
+svg .err{fill:var(--red);font:bold 12.5px ui-monospace,Menlo,monospace}
+svg .arr{stroke:var(--dim);stroke-width:1.5;fill:none}
+svg a text{text-decoration:underline;fill:var(--accent);font:11.5px ui-monospace,Menlo,monospace}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+  document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head>
+<body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+  function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+  function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
+    b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
+      else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+  document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+<div class="wrap">
+
+<h1>Why about 30 shipped configs stop at setup with <code>KeyError: 'calculate_per_token_loss'</code></h1>
+<p class="sub"><a href="https://github.com/NVIDIA-NeMo/RL/pull/4287">NVIDIA-NeMo/RL #4287</a>
+· all permalinks pin the PR head <code>438b6b6</code>.</p>
+
+<div class="status">
+<dl>
+  <dt>Before</dt>
+  <dd>Setup set Megatron's loss flag to <code>True</code> in code. No config had to mention it.</dd>
+  <dt>This PR</dt>
+  <dd>Setup reads the flag from the YAML with no default, and the PR adds it to 6 example configs.</dd>
+  <dt>Status</dt>
+  <dd><span class="verdict open">Open — not fixed in this PR.</span> The PR missed the PPO critic block, the distillation block, and several stand-alone configs. Raised in the review.</dd>
+</dl>
+</div>
+
+<nav class="chain">
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4287-two-loss-means.html">1 · the two modes</a>
+  <span class="here">2 · configs that crash</span>
+</nav>
+<p class="chainnote">Two pages on this PR, one question each. This one covers the setup crash.</p>
+
+<p>Every Megatron worker (policy, distillation teacher, and the PPO critic, which trains the value model) passes through
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/438b6b66cc31bac75df71e2ee0959c153666ef77/nemo_rl/models/megatron/setup.py#L1942-L1944"><code>_validate_training_config</code></a>,
+which now reads <code>config["megatron_cfg"]["calculate_per_token_loss"]</code> with no default.
+Recipes pick up keys from a parent file through <code>defaults:</code>, so a key the root file lacks is missing from every child too.
+The PPO critic builds its config by copying <code>value.megatron_cfg</code>
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/438b6b66cc31bac75df71e2ee0959c153666ef77/nemo_rl/models/megatron/setup.py#L3116">setup.py#L3116</a>),
+and that block never got the key.</p>
+
+<svg viewBox="0 0 940 414" role="img" aria-label="ppo_math_1B.yaml got the key in its policy block but not its value block, so every Megatron PPO recipe crashes when the critic starts">
+  <text class="lbl-b" x="16" y="22">One root file, two blocks, one got the key</text>
+  <rect class="ok" x="560" y="10" width="14" height="14"/><text class="note" x="580" y="22">has the key</text>
+  <rect class="bad" x="670" y="10" width="14" height="14"/><text class="note" x="690" y="22">missing → KeyError</text>
+
+  <rect class="box" x="16" y="40" width="330" height="150" rx="8"/>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/438b6b66cc31bac75df71e2ee0959c153666ef77/examples/configs/ppo_math_1B.yaml#L107" target="_blank" rel="noopener"><text x="30" y="62">examples/configs/ppo_math_1B.yaml</text></a>
+  <rect class="ok" x="30" y="76" width="302" height="46" rx="6"/>
+  <text class="lbl" x="42" y="96">policy.megatron_cfg</text>
+  <text class="good" x="42" y="113">calculate_per_token_loss: true ✓ (L153)</text>
+  <rect class="bad" x="30" y="130" width="302" height="46" rx="6"/>
+  <text class="lbl" x="42" y="150">value.megatron_cfg  (the critic)</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/438b6b66cc31bac75df71e2ee0959c153666ef77/examples/configs/ppo_math_1B.yaml#L374" target="_blank" rel="noopener"><text x="42" y="167">no key (L374)</text></a>
+
+  <path class="arr" d="M346 150 L400 150"/><path class="arr" d="M392 144 L400 150 L392 156"/>
+  <text class="note" x="352" y="140">defaults:</text>
+
+  <rect class="box" x="404" y="40" width="250" height="150" rx="8"/>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/438b6b66cc31bac75df71e2ee0959c153666ef77/examples/configs/ppo_math_1B_megatron.yaml#L27-L28" target="_blank" rel="noopener"><text x="418" y="62">ppo_math_1B_megatron.yaml</text></a>
+  <text class="note" x="418" y="84">turns the critic's Megatron on:</text>
+  <text class="lbl" x="418" y="104">value.megatron_cfg</text>
+  <text class="lbl" x="418" y="120">  enabled: true</text>
+  <text class="note" x="418" y="146">+ 6 PPO recipes that inherit it,</text>
+  <text class="note" x="418" y="162">and the L1 test ppo_megatron.sh</text>
+
+  <path class="arr" d="M654 115 L706 115"/><path class="arr" d="M698 109 L706 115 L698 121"/>
+
+  <rect class="bad" x="710" y="40" width="214" height="150" rx="8"/>
+  <text class="lbl-b" x="724" y="62">critic worker starts</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/438b6b66cc31bac75df71e2ee0959c153666ef77/nemo_rl/models/value/workers/megatron_value_worker.py#L394" target="_blank" rel="noopener"><text x="724" y="84">validate_and_set_config</text></a>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/438b6b66cc31bac75df71e2ee0959c153666ef77/nemo_rl/models/megatron/setup.py#L1078" target="_blank" rel="noopener"><text x="724" y="104">→ setup.py#L1078</text></a>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/438b6b66cc31bac75df71e2ee0959c153666ef77/nemo_rl/models/megatron/setup.py#L1942" target="_blank" rel="noopener"><text x="724" y="124">→ setup.py#L1942</text></a>
+  <text class="err" x="724" y="154">KeyError:</text>
+  <text class="err" x="724" y="172">'calculate_per_token_…'</text>
+
+  <text class="lbl-b" x="16" y="232">The same gap, in other root files (each breaks everything that inherits it)</text>
+  <rect class="bad" x="16" y="246" width="908" height="120" rx="8"/>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/438b6b66cc31bac75df71e2ee0959c153666ef77/examples/configs/distillation_math.yaml#L93" target="_blank" rel="noopener"><text x="30" y="270">distillation_math.yaml#L93</text></a>
+  <text class="note" x="260" y="270">shared Megatron block for student + teacher → distillation-*-megatron recipes</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/438b6b66cc31bac75df71e2ee0959c153666ef77/examples/nemo_gym/grpo_nanov3.yaml#L91" target="_blank" rel="noopener"><text x="30" y="294">nemo_gym/grpo_nanov3.yaml#L91</text></a>
+  <text class="note" x="260" y="294">stand-alone Nemo-Gym config (no parent) → grpo-nanov3-* recipes</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/438b6b66cc31bac75df71e2ee0959c153666ef77/examples/nemo_gym/nemotron-3-super/stage1_rlvr.yaml#L110" target="_blank" rel="noopener"><text x="30" y="318">nemotron-3-super/stage*.yaml</text></a>
+  <text class="note" x="260" y="318">4 stand-alone stage configs → super-* recipes</text>
+  <text class="lbl" x="30" y="344">+ workplace_assistant, nemotron-3.5-lightning, modelopt qa_*, 2 reference configs</text>
+
+  <text class="note" x="16" y="386">The repo's own test_config_validation.py passes on the base commit and fails ~30 configs at this head,</text>
+  <text class="note" x="16" y="402">each with "calculate_per_token_loss: Field required".</text>
+</svg>
+
+<h2>The fix — proposed, not in the PR</h2>
+<p class="where"><b>Where the fix lands: RL YAML files only, no code change.</b>
+Add the key to each root file, and every child inherits it. The bare read at
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/438b6b66cc31bac75df71e2ee0959c153666ef77/nemo_rl/models/megatron/setup.py#L1942-L1944">setup.py#L1942</a>
+stays as it is: in this repo, defaults live in YAML, and a missing key should fail loudly.</p>
+<p>Nothing below is implemented. It shows the change for the PPO root; the other roots get the same line.</p>
+
+<pre class="diff"><span class="hunk">@@ examples/configs/ppo_math_1B.yaml L374-L376 · value:</span>
+   megatron_cfg:
+     enabled: false
+<span class="add">+    # The value loss reads logits, so only true is supported here.
++    calculate_per_token_loss: true</span>
+     empty_unused_memory_level: 1</pre>
+
+<p>For the critic, <code>true</code> is the only value that works anyway. Its loss, <code>MseValueLossFn</code>, reads logits, and the new check at
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/438b6b66cc31bac75df71e2ee0959c153666ef77/nemo_rl/models/megatron/train.py#L698-L708">train.py#L698</a>
+rejects logit losses when the flag is <code>false</code>.</p>
+
+<div class="warn"><strong>So what.</strong> As written, this PR stops every Megatron PPO run at critic startup,
+along with every Megatron distillation run and the Nemo-Gym Nano / Super recipes. That covers L1 tests
+(<code>ppo_megatron.sh</code>, <code>distillation_megatron.sh</code>) and several nightly and release jobs.
+GPU CI has not run on this head yet, so nothing has shown it. The unit test <code>test_config_validation.py</code> will fail first.
+The fix is one line per root file.</div>
+
+</div>
+</body>
+</html>
