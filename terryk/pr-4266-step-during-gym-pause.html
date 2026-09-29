@@ -79,6 +79,11 @@ svg .markok{stroke:var(--green);stroke-width:2.2}
 svg .cross{fill:var(--red);font:bold 13px -apple-system,sans-serif}
 svg .tickok{fill:var(--green);font:bold 13px -apple-system,sans-serif}
 svg a text{text-decoration:underline;fill:var(--accent);font:11px ui-monospace,Menlo,monospace}
+.diff{font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--surface);
+  border:1px solid var(--border);border-radius:8px;padding:12px;overflow-x:auto;white-space:pre;margin:10px 0}
+.diff .add{color:var(--green);display:inline}
+.diff .del{color:var(--red);display:inline}
+.diff .hunk{color:var(--accent)}
 </style>
 <script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
   document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
@@ -138,6 +143,13 @@ The training loop is not paused, so it keeps going. Only after Gym is done does 
 If step 11 finished in between, the attempt deletes the folder, aborts Gym, and logs <code>skipped</code>
 (<a href="https://github.com/NVIDIA-NeMo/RL/blob/4db8f66406eb8ffdbabaa133824b9aa3f65645c7/nemo_rl/algorithms/single_controller.py#L4911-L4915">:4911</a>). A skipped attempt never counts as a failure.</p>
 
+<p><b>Which snapshot.</b> This is the <b>periodic</b> snapshot, started every
+<code>snapshot_attempt_interval_s</code> by its own loop, which runs beside training
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/4db8f66406eb8ffdbabaa133824b9aa3f65645c7/nemo_rl/algorithms/single_controller.py#L801-L811">:801-811</a>).
+The snapshot taken at each trainer checkpoint runs inside the training loop, so training can't move during it, and it can't hit this race.
+A periodic attempt only gets as far as pausing Gym while the step right after a trainer checkpoint is training; at other times it stops early, before touching Gym
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/4db8f66406eb8ffdbabaa133824b9aa3f65645c7/nemo_rl/algorithms/single_controller.py#L4598-L4610">:4598</a>).</p>
+
 <h2>One attempt, second by second</h2>
 
 <svg viewBox="0 0 940 330" role="img" aria-label="Timeline: step 11 finishes at 40 s, 15 s into a Gym pause that runs from 25 s to 95 s. At 95 s the step check fails and the snapshot is thrown away; rollouts were stopped for 70 s for nothing.">
@@ -183,40 +195,104 @@ If step 11 finished in between, the attempt deletes the folder, aborts Gym, and 
 A <code>step_10</code> snapshot taken after that is missing those groups. But the <code>step_10</code> weights never learned from them, so a restart from it would silently drop them.
 So the check is right to throw the attempt away. The problem is that the throw-away now happens after a 70 s Gym pause, not before one.</p>
 
-<p><b>How often.</b> An attempt is wasted whenever a step finishes during the pause. In this example the pause (70 s) is longer than a step (40 s), so every attempt overlaps the end of some step, as long as the buffer holds enough finished rollouts to keep training going while new rollouts are stopped. The check before the pause only looks at whether a trainer checkpoint exists for the current step
+<p><b>How often.</b> An attempt that paused Gym is wasted whenever a step finishes during the pause. In this example the pause (70 s) is longer than a step (40 s), so every attempt overlaps the end of some step, as long as the buffer holds enough finished rollouts to keep training going while new rollouts are stopped. The check before the pause only looks at whether a trainer checkpoint exists for the current step
 (<a href="https://github.com/NVIDIA-NeMo/RL/blob/4db8f66406eb8ffdbabaa133824b9aa3f65645c7/nemo_rl/algorithms/single_controller.py#L4598-L4610">:4598</a>), not at whether a step is about to finish.</p>
 
 <h2>What would fix it — proposed, not in the PR</h2>
 
-<p>Nothing below is implemented.</p>
+<p>Nothing below is implemented or run. It is one way to do it, written against the PR head.</p>
 <p class="where"><b>Where the fix lands: RL only, one file.</b>
-<a href="https://github.com/NVIDIA-NeMo/RL/blob/4db8f66406eb8ffdbabaa133824b9aa3f65645c7/nemo_rl/algorithms/single_controller.py"><code>single_controller.py</code></a>:
-the snapshot attempt opens a hold before Gym prepare and releases it after its cut; the training loop waits on that hold just before its optimizer step.
-<b>No Gym change:</b> Gym only sees a normal prepare, commit and resume.</p>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/4db8f66406eb8ffdbabaa133824b9aa3f65645c7/nemo_rl/algorithms/single_controller.py"><code>single_controller.py</code></a>, about 30 added lines and 7 changed.
+<b>No Gym change:</b> when Gym's prepare call is cancelled, it already resumes every agent it paused
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/4db8f66406eb8ffdbabaa133824b9aa3f65645c7/nemo_rl/environments/nemo_gym.py#L1261-L1287">nemo_gym.py:1261</a>),
+and Ray delivers that cancel to an async actor as a normal <code>asyncio</code> cancel
+(<a href="https://github.com/ray-project/ray/blob/ray-2.56.1/python/ray/_private/worker.py#L3321-L3322">Ray 2.56.1 worker.py:3321</a>).</p>
 
-<div class="mono"># snapshot attempt (_save_rollout_checkpoint_locked)
-self._snapshot_cut_pending.clear()          # t = 25 s: "don't commit a step yet"
-try:
-    await prepare_and_commit_gym(...)         # 25 s → 95 s, step count still 10
-    async with barrier.checkpoint() as cut:   # 95 s: step 10 == 10 ✓ → cut saved
-        ...
-finally:
-    self._snapshot_cut_pending.set()          # 95 s: training may commit again
+<p><b>The idea:</b> the snapshot can't land once a step commits, so stop waiting for Gym the moment that happens. Training tells the snapshot "a step is committing". The snapshot cancels the Gym prepare right away, and Gym resumes its agents. In the example, rollouts restart at 40 s instead of 95 s. The snapshot is still lost, but training never waits.</p>
 
-# training loop, just before the optimizer step
-await self._snapshot_cut_pending.wait()       # step 11 ready at 40 s, waits 55 s
-policy_result = finish_train_step()           # 95 s: step 11 commits, count → 11</div>
-<p class="cref">The two places the loop starts an optimizer step:
-<a href="https://github.com/NVIDIA-NeMo/RL/blob/4db8f66406eb8ffdbabaa133824b9aa3f65645c7/nemo_rl/algorithms/single_controller.py#L3399-L3404">GRPO <code>finish_train_step</code> :3399</a>
-<a href="https://github.com/NVIDIA-NeMo/RL/blob/4db8f66406eb8ffdbabaa133824b9aa3f65645c7/nemo_rl/algorithms/single_controller.py#L3272-L3281">PPO critic epochs :3272</a></p>
+<pre class="diff"><span class="hunk">@@ single_controller.py L668 · SingleControllerActor.__init__</span>
+         self._gym_checkpoint_rollout_permitted: asyncio.Event = asyncio.Event()
+         self._gym_checkpoint_rollout_permitted.set()
+<span class="add">+        # Set when a training step starts its optimizer commit. A Gym snapshot
++        # that began before that commit can no longer land.
++        self._optimizer_commit_started = asyncio.Event()</span>
+<span class="hunk">@@ single_controller.py L1966-L1977 · _prepare_and_commit_gym_checkpoint</span>
+             prepare_attempted = True
+             prepare = GymCheckpointPrepareResult.model_validate(
+<span class="del">-                await gym_actor.prepare_checkpoint.remote(
+-                    checkpoint_id,
+-                    time.time() + timeout_s,
+-                )
+</span><span class="add">+                await self._await_unless_step_commits(
++                    gym_actor.prepare_checkpoint.remote(
++                        checkpoint_id,
++                        time.time() + timeout_s,
++                    )
++                )
+</span>             )
+             if not prepare.ready:
+                 raise RuntimeError(...)
+<span class="add">+            if self._optimizer_commit_started.is_set():
++                raise _TrainerAdvancedDuringGymSnapshot()  # skip the commit, abort below</span>
+             checkpoint = GymCheckpointCommitResult.model_validate(
+<span class="hunk">@@ new method, next to _prepare_and_commit_gym_checkpoint (L1949)</span>
+<span class="add">+    async def _await_unless_step_commits(self, ref: ray.ObjectRef) -&gt; Any:
++        """Wait for a Gym control call, or cancel it once a training step commits."""
++        call = asyncio.ensure_future(ref)
++        step = asyncio.ensure_future(self._optimizer_commit_started.wait())
++        await asyncio.wait({call, step}, return_when=asyncio.FIRST_COMPLETED)
++        step.cancel()
++        if call.done():
++            return call.result()
++        ray.cancel(ref)  # Gym's prepare resumes the agents it paused
++        await asyncio.gather(call, return_exceptions=True)  # wait for that resume
++        raise _TrainerAdvancedDuringGymSnapshot()</span>
+<span class="hunk">@@ single_controller.py L3276 (PPO) and L3404 (GRPO) · both places a step starts its commit</span>
+                         self._optimizer_commit_in_progress = True
+<span class="add">+                        self._optimizer_commit_started.set()</span>
+<span class="hunk">@@ single_controller.py L4626 · _save_rollout_checkpoint_locked</span>
+<span class="add">+        self._optimizer_commit_started.clear()  # watch for commits from here on</span>
+         expected_train_step = self._train_steps
+         expected_trainer_version = self._trainer_version
+<span class="hunk">@@ single_controller.py L4649-L4655 · _save_rollout_checkpoint_locked</span>
+             if self._gym_participant_checkpointing_enabled:
+<span class="del">-                publication.gym_checkpoint = (
+-                    await self._prepare_and_commit_gym_checkpoint(
+-                        checkpoint_id,
+-                        tmp_path,
+-                    )
+-                )
+</span><span class="add">+                try:
++                    publication.gym_checkpoint = (
++                        await self._prepare_and_commit_gym_checkpoint(
++                            checkpoint_id,
++                            tmp_path,
++                        )
++                    )
++                except _TrainerAdvancedDuringGymSnapshot:
++                    return _RolloutCheckpointSaveResult(
++                        saved=False, reason="trainer_state_changed"
++                    )</span>
+<span class="hunk">@@ new exception class, next to _GymCheckpointAbortPendingError (L257)</span>
+<span class="add">+class _TrainerAdvancedDuringGymSnapshot(Exception):
++    """A training step committed while Gym was preparing its snapshot."""</span></pre>
 
-<p>Holding before the optimizer step keeps the model and the data plane at step 10 until the cut is taken. The code already treats that point as safe: rows picked for the running step are kept in the snapshot and offered again after a restart
-(<a href="https://github.com/NVIDIA-NeMo/RL/blob/4db8f66406eb8ffdbabaa133824b9aa3f65645c7/nemo_rl/algorithms/single_controller.py#L656-L660">comment at :656</a>).
-The cost moves from rollouts to training: step 11 waits 55 s, but only when a step happens to finish during a pause. Rollouts are stopped for the same 70 s either way, and now the snapshot lands. The hold must be released on every exit path, including a Gym abort, or training stops for good.</p>
+<p>What each piece does, in order: training sets the event where it starts a commit
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/4db8f66406eb8ffdbabaa133824b9aa3f65645c7/nemo_rl/algorithms/single_controller.py#L3272-L3276">PPO :3276</a>,
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/4db8f66406eb8ffdbabaa133824b9aa3f65645c7/nemo_rl/algorithms/single_controller.py#L3399-L3404">GRPO :3404</a>).
+The waiting prepare sees it, cancels, and waits for Gym to finish resuming. The existing error path in
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/4db8f66406eb8ffdbabaa133824b9aa3f65645c7/nemo_rl/algorithms/single_controller.py#L2005-L2023"><code>_prepare_and_commit_gym_checkpoint</code></a>
+then sends the same-ID abort. That abort does nothing, because Gym already cleared the checkpoint, and it reopens rollout admission. The attempt ends as <code>skipped</code>, exactly as today, just 55 s sooner.</p>
+
+<p><b>With <code>save_period: 1</code>.</b> Every step is a trainer checkpoint, and each one takes the same save lock as the periodic snapshot
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/4db8f66406eb8ffdbabaa133824b9aa3f65645c7/nemo_rl/algorithms/single_controller.py#L5101">:5101</a>).
+Today, step 11's checkpoint waits for the doomed periodic attempt to finish its whole Gym pause, then runs its own Gym pause, so training sits through both.
+With the change above, the periodic attempt gives up as soon as step 11 commits. Step 11's checkpoint then takes the Gym snapshot itself, at the newer step, so nothing is lost.</p>
 
 <div class="warn">
-<strong>So what.</strong> Nothing is lost or corrupted: throwing the attempt away is the correct response. But when a training step is shorter than Gym's drain plus write, the periodic Gym snapshots between trainer checkpoints can nearly all be wasted. Each one stops new rollouts for the full pause, and each is logged only as <code>skipped</code> with reason <code>trainer_state_changed</code>. The review asks the author to measure that rate first; the hold above is the fix if it is high.
+<strong>So what.</strong> Nothing is lost or corrupted: throwing the attempt away is the correct response. But while a step is shorter than Gym's drain plus write, periodic Gym snapshots between trainer checkpoints can nearly all be wasted. Each one stops new rollouts for the full pause, and each is logged only as <code>skipped</code> with reason <code>trainer_state_changed</code>. With <code>save_period: 1</code>, the wasted pause also holds up the next trainer checkpoint, so training waits too.
 </div>
+
 <p class="cref">🔴 <a href="https://github.com/NVIDIA-NeMo/RL/pull/4266#discussion_r4129034924">review comment — single_controller.py:4626</a></p>
 
 </div>
