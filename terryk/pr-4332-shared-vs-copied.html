@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NVIDIA-NeMo/RL #4332 — which media-capture code vLLM and Megatron share, and which is written twice</title>
+<style>
+:root{
+  --bg:#0d1117; --surface:#161b22; --surface2:#1c2128; --border:#30363d;
+  --text:#e6edf3; --dim:#8b949e; --accent:#58a6ff; --green:#3fb950;
+  --orange:#d29922; --red:#f85149; --purple:#bc8cff;
+}
+:root[data-theme="light"]{
+  --bg:#ffffff; --surface:#f6f8fa; --surface2:#eaeef2; --border:#d0d7de;
+  --text:#1f2328; --dim:#59636e; --accent:#0969da; --green:#1a7f37;
+  --orange:#9a6700; --red:#cf222e; --purple:#8250df;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:28px 20px 70px}
+h1{font-size:22px;margin:0 0 8px;line-height:1.3}
+h2{font-size:18px;margin:30px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;
+  font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
+.sub{color:var(--dim);font-size:13.5px;margin:0 0 14px}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);
+  border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;
+  font:13px/1 ui-monospace,Menlo,monospace;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.18)}
+.hl{border-left:3px solid var(--accent);background:var(--surface);
+  padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0}
+.status{border:1px solid var(--border);border-radius:10px;background:var(--surface);
+  padding:2px 16px 10px;margin:0 0 16px}
+.status dl{display:grid;grid-template-columns:max-content 1fr;gap:4px 14px;margin:12px 0 0}
+.status dt{color:var(--dim);font-size:12px;text-transform:uppercase;letter-spacing:.04em;
+  white-space:nowrap;padding-top:2px}
+.status dd{margin:0;font-size:14px}
+.verdict{font-weight:700}
+.verdict.open{color:var(--red)}
+nav.chain{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 6px;padding:0}
+nav.chain a,nav.chain span{display:inline-block;padding:5px 11px;border:1px solid var(--border);
+  border-radius:20px;background:var(--surface);text-decoration:none;color:var(--accent);
+  font-size:12.5px;line-height:1.3;white-space:nowrap}
+nav.chain a:hover{background:var(--surface2)}
+nav.chain span.here{background:var(--accent);color:var(--bg);border-color:var(--accent);font-weight:600}
+p.chainnote{color:var(--dim);font-size:12px;margin:0 0 18px}
+.where{border-left:4px solid var(--accent);background:var(--surface);padding:6px 12px;margin:6px 0 10px}
+.diff{font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--surface);
+  border:1px solid var(--border);border-radius:8px;padding:12px;overflow-x:auto;white-space:pre;margin:10px 0}
+.diff .add{color:var(--green)}
+.diff .del{color:var(--red)}
+.diff .hunk{color:var(--accent)}
+.cref{margin:6px 0 0;font-size:13px}
+.cref a{display:inline-block;padding:4px 10px;border:1px solid var(--border);
+  border-radius:16px;background:var(--surface);font:12.5px ui-monospace,Menlo,monospace}
+.cref a:hover{background:var(--surface2);text-decoration:none}
+svg{max-width:100%;height:auto;display:block;margin:16px 0}
+svg .col{fill:var(--surface);stroke:var(--border);stroke-width:1.2}
+svg .hdr{fill:var(--text);font:bold 13px -apple-system,sans-serif}
+svg .hsub{fill:var(--dim);font:11px -apple-system,sans-serif}
+svg .b-same{fill:var(--surface2);stroke:var(--green);stroke-width:1.6}
+svg .b-twin{fill:var(--surface2);stroke:var(--orange);stroke-width:1.8}
+svg .b-own{fill:var(--surface2);stroke:var(--purple);stroke-width:1.4}
+svg .m{fill:var(--text);font:11.5px ui-monospace,Menlo,monospace}
+svg .note{fill:var(--dim);font:10.5px -apple-system,sans-serif}
+svg .link{stroke:var(--orange);stroke-width:1.6;fill:none;stroke-dasharray:4 3}
+svg a text{text-decoration:underline;fill:var(--accent);font:11px ui-monospace,Menlo,monospace}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+  document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head>
+<body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+  function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+  function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
+    b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
+      else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+  document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+<div class="wrap">
+
+<h1>Which media-capture code vLLM and Megatron share, and which the PR writes a second time</h1>
+<p class="sub"><a href="https://github.com/NVIDIA-NeMo/RL/pull/4332">NVIDIA-NeMo/RL #4332</a>, compared with <a href="https://github.com/NVIDIA-NeMo/RL/pull/4191">#4191</a>. RL permalinks pin <code>6e8a59a</code>.</p>
+
+<div class="status">
+<dl>
+  <dt>Before</dt>
+  <dd>Only the vLLM path captured media. Its helpers lived in the shared data-plane module and in <code>captured_media.py</code>.</dd>
+  <dt>This PR</dt>
+  <dd>Reuses the storage, checks and finalizer as they are. It adds four small helpers that repeat logic already written elsewhere.</dd>
+  <dt>Status</dt>
+  <dd><span class="verdict open">Open — not fixed in this PR.</span> Each copy is a review comment. None of them breaks anything today; they are places where two copies can drift apart.</dd>
+</dl>
+</div>
+
+<nav class="chain">
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4332-vllm-vs-megatron-flow.html">1 · how pixels move</a>
+  <span class="here">2 · shared vs copied code</span>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4332-pin-import-break.html">3 · the pin that breaks capture</a>
+</nav>
+<p class="chainnote">Three pages on this PR. This one: every struct and helper on the media path, sorted into shared, copied, and backend-only.</p>
+
+<p>The answer is mostly good news. Everything that stores, checks, reads back or joins pixels is one shared set of code
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/6e8a59aa7e01fc4b93992da92401ed562ff720d0/nemo_rl/data_plane/tq_token_sink.py#L90-L103">the 5 media columns</a>,
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/6e8a59aa7e01fc4b93992da92401ed562ff720d0/nemo_rl/data_plane/tq_token_sink.py#L195"><code>validate_media_tensors</code></a>,
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/6e8a59aa7e01fc4b93992da92401ed562ff720d0/nemo_rl/experience/rollout_reassembler.py#L436"><code>_resolve_media</code></a>).
+The prompt splice was widened to accept a set of end-of-sequence tokens instead of being forked.
+The copies are all in the step that works out "which images did earlier turns already save", which is new code in this PR.</p>
+
+<svg viewBox="0 0 940 470" role="img" aria-label="Three columns: shared code in green, pairs of code doing the same job in orange joined by dashed lines, and backend-only code in purple.">
+  <rect class="col" x="10" y="10" width="300" height="450" rx="8"/>
+  <rect class="col" x="320" y="10" width="300" height="450" rx="8"/>
+  <rect class="col" x="630" y="10" width="300" height="450" rx="8"/>
+  <text class="hdr" x="22" y="32">Shared by both backends</text><text class="hsub" x="22" y="48">one copy; keep as is</text>
+  <text class="hdr" x="332" y="32">Same job, written twice</text><text class="hsub" x="332" y="48">new in this PR; merge each pair</text>
+  <text class="hdr" x="642" y="32">Backend-only, and needed</text><text class="hsub" x="642" y="48">the engines differ; keep separate</text>
+
+  <!-- shared -->
+  <rect class="b-same" x="22" y="62" width="276" height="40" rx="5"/>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/6e8a59aa7e01fc4b93992da92401ed562ff720d0/nemo_rl/data_plane/tq_token_sink.py#L90-L103" target="_blank" rel="noopener"><text x="32" y="80">MEDIA_STAGING_FIELDS</text></a><text class="note" x="32" y="95">the 5 TQ media columns</text>
+  <rect class="b-same" x="22" y="110" width="276" height="40" rx="5"/>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/6e8a59aa7e01fc4b93992da92401ed562ff720d0/nemo_rl/data_plane/tq_token_sink.py#L162-L176" target="_blank" rel="noopener"><text x="32" y="128">StagedMediaTensors</text></a><text class="note" x="32" y="143">imgs, imgs_sizes, num_frames, patch_size</text>
+  <rect class="b-same" x="22" y="158" width="276" height="40" rx="5"/>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/6e8a59aa7e01fc4b93992da92401ed562ff720d0/nemo_rl/data_plane/tq_token_sink.py#L195" target="_blank" rel="noopener"><text x="32" y="176">validate_media_tensors</text></a><text class="note" x="32" y="191">layout check before write, after read</text>
+  <rect class="b-same" x="22" y="206" width="276" height="40" rx="5"/>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/6e8a59aa7e01fc4b93992da92401ed562ff720d0/nemo_rl/data_plane/tq_token_sink.py#L403" target="_blank" rel="noopener"><text x="32" y="224">TQTokenSink.stage(attachments=)</text></a><text class="note" x="32" y="239">tokens + pixels in one TQ write</text>
+  <rect class="b-same" x="22" y="254" width="276" height="40" rx="5"/>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/6e8a59aa7e01fc4b93992da92401ed562ff720d0/nemo_rl/data_plane/tq_token_sink.py#L829" target="_blank" rel="noopener"><text x="32" y="272">TQTokenSource.fetch_media</text></a><text class="note" x="32" y="287">one batched pixel read</text>
+  <rect class="b-same" x="22" y="302" width="276" height="40" rx="5"/>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/6e8a59aa7e01fc4b93992da92401ed562ff720d0/nemo_rl/experience/rollout_reassembler.py#L436" target="_blank" rel="noopener"><text x="32" y="320">_resolve_media → _concat_media</text></a><text class="note" x="32" y="335">finalizer: join rows in turn order</text>
+  <rect class="b-same" x="22" y="350" width="276" height="40" rx="5"/>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/6e8a59aa7e01fc4b93992da92401ed562ff720d0/nemo_rl/models/generation/openai_server_utils.py#L61" target="_blank" rel="noopener"><text x="32" y="368">splice_prefix_tokens</text></a><text class="note" x="32" y="383">now takes an int or a set of EOS ids</text>
+  <rect class="b-same" x="22" y="398" width="276" height="40" rx="5"/>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/6e8a59aa7e01fc4b93992da92401ed562ff720d0/nemo_rl/data_plane/tq_token_sink.py#L611" target="_blank" rel="noopener"><text x="32" y="416">PrefixChains</text></a><text class="note" x="32" y="431">new: staged tokens + media count</text>
+
+  <!-- twins -->
+  <rect class="b-twin" x="332" y="62" width="276" height="40" rx="5"/>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/6e8a59aa7e01fc4b93992da92401ed562ff720d0/nemo_rl/data_plane/tq_token_sink.py#L689-L697" target="_blank" rel="noopener"><text x="342" y="80">resolve_admission_prefix</text></a><text class="note" x="342" y="95">old: 3 branches</text>
+  <rect class="b-twin" x="332" y="112" width="276" height="40" rx="5"/>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/6e8a59aa7e01fc4b93992da92401ed562ff720d0/nemo_rl/data_plane/tq_token_sink.py#L700-L712" target="_blank" rel="noopener"><text x="342" y="130">resolve_admission_prefix_chains</text></a><text class="note" x="342" y="145">new: the same 3 branches again</text>
+  <path class="link" d="M608 82 Q622 107 608 132"/>
+
+  <rect class="b-twin" x="332" y="170" width="276" height="40" rx="5"/>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/6e8a59aa7e01fc4b93992da92401ed562ff720d0/nemo_rl/data_plane/tq_token_sink.py#L1162-L1172" target="_blank" rel="noopener"><text x="342" y="188">_row_media_item_count</text></a><text class="note" x="342" y="203">"Mirrors slice_media_tensors"</text>
+  <rect class="b-twin" x="332" y="220" width="276" height="40" rx="5"/>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/6e8a59aa7e01fc4b93992da92401ed562ff720d0/nemo_rl/models/generation/megatron/token_capture.py#L252-L286" target="_blank" rel="noopener"><text x="342" y="238">slice_media_tensors</text></a><text class="note" x="342" y="253">counts items again; re-derives patch size</text>
+  <path class="link" d="M608 190 Q622 215 608 240"/>
+
+  <rect class="b-twin" x="332" y="278" width="276" height="40" rx="5"/>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/6e8a59aa7e01fc4b93992da92401ed562ff720d0/nemo_rl/models/generation/megatron/token_capture.py#L298-L362" target="_blank" rel="noopener"><text x="342" y="296">_MegatronCapturePayload</text></a><text class="note" x="342" y="311">copies 3 fields of the engine payload</text>
+  <rect class="b-twin" x="332" y="328" width="276" height="40" rx="5"/>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/6e8a59aa7e01fc4b93992da92401ed562ff720d0/nemo_rl/models/generation/vllm/vllm_worker_async.py#L866-L870" target="_blank" rel="noopener"><text x="342" y="346">vLLM: payload + attachments=</text></a><text class="note" x="342" y="361">passes the original, no copy</text>
+  <path class="link" d="M608 298 Q622 323 608 348"/>
+
+  <rect class="b-twin" x="332" y="386" width="276" height="52" rx="5"/>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/6e8a59aa7e01fc4b93992da92401ed562ff720d0/nemo_rl/data_plane/tq_token_sink.py#L108-L110" target="_blank" rel="noopener"><text x="342" y="404">MINF_CAPTURE_PARAMS_FIELD</text></a>
+  <text class="note" x="342" y="419">Megatron-only keys defined in the shared</text><text class="note" x="342" y="432">module; only token_capture.py uses them</text>
+
+  <!-- backend-only -->
+  <rect class="b-own" x="642" y="62" width="276" height="52" rx="5"/>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/6e8a59aa7e01fc4b93992da92401ed562ff720d0/nemo_rl/data/captured_media.py#L56-L65" target="_blank" rel="noopener"><text x="652" y="80">vLLM: CapturedMediaItem</text></a>
+  <text class="note" x="652" y="95">slot offsets + token hash per image; vLLM</text><text class="note" x="652" y="108">expands placeholders, so RL must track them</text>
+  <rect class="b-own" x="642" y="124" width="276" height="52" rx="5"/>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/6e8a59aa7e01fc4b93992da92401ed562ff720d0/nemo_rl/data/captured_media.py#L155" target="_blank" rel="noopener"><text x="652" y="142">vLLM: pack_images</text></a>
+  <text class="note" x="652" y="157">RL packs patches itself; the Megatron</text><text class="note" x="652" y="170">engine already hands them over packed</text>
+  <rect class="b-own" x="642" y="186" width="276" height="52" rx="5"/>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/6e8a59aa7e01fc4b93992da92401ed562ff720d0/nemo_rl/models/generation/megatron/token_capture.py#L205-L215" target="_blank" rel="noopener"><text x="652" y="204">Megatron: count check</text></a>
+  <text class="note" x="652" y="219">endpoint count == staged count, then tell</text><text class="note" x="652" y="232">the engine where the expanded prefix ends</text>
+  <rect class="b-own" x="642" y="248" width="276" height="52" rx="5"/>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/6e8a59aa7e01fc4b93992da92401ed562ff720d0/nemo_rl/models/generation/megatron/megatron_worker.py#L115" target="_blank" rel="noopener"><text x="652" y="266">Megatron: MINF_MEDIA_PIXEL_DTYPE</text></a>
+  <text class="note" x="652" y="281">float32; vLLM uses the model dtype.</text><text class="note" x="652" y="294">Needed, but should match vLLM (page 1)</text>
+  <text class="note" x="652" y="330">Why the two "what did earlier turns</text>
+  <text class="note" x="652" y="344">save" checks stay separate: vLLM needs</text>
+  <text class="note" x="652" y="358">exact slot positions, Megatron only a</text>
+  <text class="note" x="652" y="372">count. They change for different reasons,</text>
+  <text class="note" x="652" y="386">so one merged function would fill up with</text>
+  <text class="note" x="652" y="400">backend checks.</text>
+</svg>
+
+<h2>What would merge the copies — proposed, not in the PR</h2>
+
+<p>Nothing below is implemented. It is what the review comments ask for.</p>
+
+<p class="where"><b>Where the fix lands: RL only.</b>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/6e8a59aa7e01fc4b93992da92401ed562ff720d0/nemo_rl/data_plane/tq_token_sink.py"><code>tq_token_sink.py</code></a> and
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/6e8a59aa7e01fc4b93992da92401ed562ff720d0/nemo_rl/models/generation/megatron/token_capture.py"><code>megatron/token_capture.py</code></a>.
+<b>No Gym or Megatron-LM change</b>: all four copies are RL code.</p>
+
+<pre class="diff"><span class="hunk">@@ tq_token_sink.py L689-L697 · resolve_admission_prefix</span>
+ def resolve_admission_prefix(
+     admission: Any, chain_prefix: ChainPrefixCache
+ ) -> list[int]:
+     """Resolve a ``CaptureAdmission`` to the flat prefix the engine prompt starts with."""
+<span class="del">-    if admission.mode == "text":
+-        return []
+-    if admission.staging_chain:
+-        return chain_prefix.fetch(list(admission.staging_chain))
+-    return list(admission.required_prefix_token_ids)
+</span><span class="add">+    # vLLM needs only the tokens; the Megatron path also reads media_count.
++    return resolve_admission_prefix_chains(admission, chain_prefix).expanded</span>
+<span class="hunk">@@ tq_token_sink.py L1162-L1172 · one item-count rule, used by both callers</span>
+<span class="del">-def _row_media_item_count(row: Any) -> int:
+-    """Items (images or videos) one media-enabled row staged, from its small columns.
+-
+-    Mirrors ``slice_media_tensors``: ...
+-    """
+</span><span class="add">+def media_item_count(imgs_sizes: torch.Tensor, num_frames: torch.Tensor | None) -> int:
++    """One image = one imgs_sizes row; one video = one num_frames entry."""
++    if num_frames is not None:
++        return int(num_frames.reshape(-1).numel())
++    return int(imgs_sizes.reshape(-1, 2).shape[0])</span></pre>
+
+<p>The first hunk makes the old function a one-line wrapper, so the three cases live in one place
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/6e8a59aa7e01fc4b93992da92401ed562ff720d0/nemo_rl/data_plane/tq_token_sink.py#L700-L712"><code>resolve_admission_prefix_chains</code></a>).
+The second gives the row counter and <a href="https://github.com/NVIDIA-NeMo/RL/blob/6e8a59aa7e01fc4b93992da92401ed562ff720d0/nemo_rl/models/generation/megatron/token_capture.py#L252-L256"><code>slice_media_tensors</code></a> one rule to call. The slicer can then take the patch size from
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/6e8a59aa7e01fc4b93992da92401ed562ff720d0/nemo_rl/data_plane/tq_token_sink.py#L174-L176"><code>StagedMediaTensors.patch_size</code></a> instead of dividing areas.
+The other two copies need no new code: pass the engine payload itself plus <code>attachments=</code> the way vLLM does (but only after the Gym re-pin, since the fork's adapter still reads a field the copy hides), and move the two <code>MINF_*</code> keys into <code>token_capture.py</code>.</p>
+
+<div class="hl"><b>What to take away.</b> The PR is not inventing a parallel pipeline. It reuses every piece that stores and joins pixels.
+It does add four small copies, all in new code and all cheap to fold back now, before a third backend copies them again.
+The two ways of answering "which images did earlier turns save" look alike but are different jobs, and should stay two.</div>
+
+</div>
+</body>
+</html>
