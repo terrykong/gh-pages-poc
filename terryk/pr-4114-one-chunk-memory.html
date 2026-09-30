@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NVIDIA-NeMo/RL #4114 — why a one-slice microbatch uses more loss memory, not less</title>
+<style>
+:root{
+  --bg:#0d1117; --surface:#161b22; --surface2:#1c2128; --border:#30363d;
+  --text:#e6edf3; --dim:#8b949e; --accent:#58a6ff; --green:#3fb950;
+  --orange:#d29922; --red:#f85149;
+}
+:root[data-theme="light"]{
+  --bg:#ffffff; --surface:#f6f8fa; --surface2:#eaeef2; --border:#d0d7de;
+  --text:#1f2328; --dim:#59636e; --accent:#0969da; --green:#1a7f37;
+  --orange:#9a6700; --red:#cf222e;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:28px 20px 70px}
+h1{font-size:22px;margin:0 0 8px;line-height:1.3}
+h2{font-size:18px;margin:30px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;
+  font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
+.sub{color:var(--dim);font-size:13.5px;margin:0 0 14px}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);
+  border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;
+  font:13px/1 ui-monospace,Menlo,monospace;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.18)}
+.status{border:1px solid var(--border);border-radius:10px;background:var(--surface);
+  padding:2px 16px 10px;margin:0 0 16px}
+.status dl{display:grid;grid-template-columns:max-content 1fr;gap:4px 14px;margin:12px 0 0}
+.status dt{color:var(--dim);font-size:12px;text-transform:uppercase;letter-spacing:.04em;
+  white-space:nowrap;padding-top:2px}
+.status dd{margin:0;font-size:14px}
+.verdict{font-weight:700}
+.verdict.good{color:var(--green)}
+.verdict.open{color:var(--red)}
+nav.chain{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 6px;padding:0}
+nav.chain a,nav.chain span{display:inline-block;padding:5px 11px;border:1px solid var(--border);
+  border-radius:20px;background:var(--surface);text-decoration:none;color:var(--accent);
+  font-size:12.5px;line-height:1.3;white-space:nowrap}
+nav.chain a:hover{background:var(--surface2)}
+nav.chain span.here{background:var(--accent);color:var(--bg);border-color:var(--accent);font-weight:600}
+p.chainnote{color:var(--dim);font-size:12px;margin:0 0 18px}
+.tip{border-bottom:1px dotted var(--dim);cursor:help;position:relative;outline:none}
+.tip:hover::after,.tip:focus::after{content:attr(data-tip);position:absolute;left:0;top:1.7em;z-index:60;
+  width:max-content;max-width:min(340px,80vw);white-space:normal;background:var(--surface2);color:var(--text);
+  border:1px solid var(--border);border-radius:6px;padding:7px 10px;font:13px/1.45 -apple-system,sans-serif;
+  font-weight:400;box-shadow:0 4px 14px rgba(0,0,0,.3)}
+.mono{font:12.5px/1.55 ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--surface);
+  border:1px solid var(--border);border-radius:8px;padding:12px;overflow-x:auto;white-space:pre}
+.diff{font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--surface);
+  border:1px solid var(--border);border-radius:8px;padding:12px;overflow-x:auto;white-space:pre;margin:10px 0}
+.diff .add{color:var(--green)}
+.diff .del{color:var(--red)}
+.diff .hunk{color:var(--accent)}
+.where{border-left:4px solid var(--accent);background:var(--surface);padding:6px 12px;margin:6px 0 10px}
+.warn{border-left:3px solid var(--red);background:var(--surface);padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0}
+.bad{color:var(--red);font-weight:700}
+.ok{color:var(--green);font-weight:700}
+.cref{margin:6px 0 0;font-size:13px}
+.cref a{display:inline-block;padding:4px 10px;border:1px solid var(--border);
+  border-radius:16px;background:var(--surface);font:12.5px ui-monospace,Menlo,monospace}
+.cref a:hover{background:var(--surface2);text-decoration:none}
+svg{max-width:100%;height:auto;display:block;margin:14px 0}
+svg .lbl{fill:var(--text);font:12.5px ui-monospace,Menlo,monospace}
+svg .lbl-b{fill:var(--text);font:bold 13px -apple-system,sans-serif}
+svg .note{fill:var(--dim);font:11.5px -apple-system,sans-serif}
+svg .hdr{fill:var(--accent);font:bold 12.5px -apple-system,sans-serif}
+svg .axis{stroke:var(--border);stroke-width:1.2}
+svg .old{stroke:var(--orange);stroke-width:2.2;stroke-dasharray:7 5}
+svg .old-t{fill:var(--orange);font:bold 12px -apple-system,sans-serif}
+svg .b-red{fill:var(--red);opacity:.55;stroke:var(--red)}
+svg .b-grn{fill:var(--green);opacity:.55;stroke:var(--green)}
+svg .s1{fill:var(--red);opacity:.85}
+svg .s2{fill:var(--red);opacity:.6}
+svg .s3{fill:var(--red);opacity:.42}
+svg .s4{fill:var(--red);opacity:.28}
+svg .s5{fill:var(--dim);opacity:.45}
+svg .v{fill:var(--text);font:bold 12px ui-monospace,Menlo,monospace}
+svg a text{text-decoration:underline;fill:var(--accent);font:11.5px ui-monospace,Menlo,monospace}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+  document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head>
+<body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+  function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+  function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
+    b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
+      else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+  document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+<div class="wrap">
+
+<h1>Why a microbatch that fits in one slice uses more loss memory, not less</h1>
+<p class="sub">Review finding on <a href="https://github.com/NVIDIA-NeMo/RL/pull/4114">NVIDIA-NeMo/RL #4114</a>
+· all permalinks pin the PR head <code>617d989</code>.</p>
+
+<div class="status">
+<dl>
+  <dt>Before</dt>
+  <dd>The AutoModel training loss peaked at about <b>12 bytes per logit</b>, whatever <code>logprob_chunk_size</code> said.</dd>
+  <dt>This PR</dt>
+  <dd>Uses the chunked kernel. Its backward pass costs about 24 bytes per logit <em>per slice</em>, so the saving only appears once a microbatch splits into 3 or more slices.</dd>
+  <dt>Status</dt>
+  <dd><span class="verdict open">Open — not fixed in this PR.</span> A one-line gate is proposed in the review. Numbers come from the author's GB300 figures plus a CPU replay of both kernels. They were not re-measured on a GPU.</dd>
+</dl>
+</div>
+
+<nav class="chain">
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4114-chunked-loss.html">1 · how the PR saves memory</a>
+  <span class="here">2 · when it uses more</span>
+</nav>
+<p class="chainnote">Two pages on this PR — this one: the 1–2 slice case and the proposed fix.</p>
+
+<p>The chunked kernel's backward loop builds five buffers for the slice it is working on
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/617d98983cad18f1126ebc825a32d25be108dc54/nemo_rl/distributed/model_utils.py#L399-L422">model_utils.py L399-L422</a>):
+a zeroed gradient for the whole sequence, an fp32 copy of the slice, its softmax, and two
+<b>int64</b> tensors that mark the chosen token. The last two come from
+<span class="tip" tabindex="0" data-tip="torch.nn.functional.one_hot returns int64: 8 bytes per vocabulary entry per position, just to hold a single 1.">one_hot</span>.
+Only the zeroed gradient spans the whole sequence; the other four are rebuilt per slice. With many slices the per-slice part is small.
+With <b>one</b> slice, it covers every position at once and is twice the old path's total.</p>
+
+<svg viewBox="0 0 900 400" role="img" aria-label="Bar chart of peak loss memory per logit against slices per microbatch: 26 at one slice, 14 at two, 10 at three, 8 at four, 5 at eight, against 12 before the PR">
+  <text class="hdr" x="16" y="22">Peak loss memory, bytes per logit (forward + backward), by slices per microbatch</text>
+
+  <!-- axes: y from 330 (0 B) up, 10 px per byte -->
+  <line class="axis" x1="70" y1="330" x2="880" y2="330"/>
+  <line class="axis" x1="70" y1="50" x2="70" y2="330"/>
+  <text class="note" x="40" y="334">0</text>
+  <text class="note" x="34" y="214">12</text>
+  <text class="note" x="34" y="74">26</text>
+
+  <!-- old line at 12 -->
+  <line class="old" x1="70" y1="210" x2="880" y2="210"/>
+  <text class="old-t" x="706" y="202">before this PR: 12</text>
+
+  <!-- 1 slice, stacked: grad 2, fp32 4, softmax 4, one_hot 8, is_chosen 8 = 26 -->
+  <rect class="s5" x="100" y="310" width="90" height="20"/>
+  <rect class="s4" x="100" y="270" width="90" height="40"/>
+  <rect class="s3" x="100" y="230" width="90" height="40"/>
+  <rect class="s2" x="100" y="150" width="90" height="80"/>
+  <rect class="s1" x="100" y="70" width="90" height="80"/>
+  <text class="v" x="131" y="62">26</text>
+  <text class="lbl" x="136" y="350">1</text>
+
+  <!-- stack labels -->
+  <text class="note" x="198" y="114">int64 is_chosen · 8</text>
+  <text class="note" x="198" y="194">int64 one_hot · 8</text>
+  <text class="note" x="198" y="254">fp32 softmax · 4</text>
+  <text class="note" x="198" y="294">fp32 copy · 4</text>
+  <text class="note" x="198" y="324">gradient · 2</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/617d98983cad18f1126ebc825a32d25be108dc54/nemo_rl/distributed/model_utils.py#L415-L420" target="_blank" rel="noopener"><text x="198" y="132">L415-L420</text></a>
+
+  <!-- 2 slices: 14 -->
+  <rect class="b-red" x="370" y="190" width="70" height="140"/>
+  <text class="v" x="394" y="182">14</text>
+  <text class="lbl" x="401" y="350">2</text>
+  <!-- 3 slices: 10 -->
+  <rect class="b-grn" x="480" y="230" width="70" height="100"/>
+  <text class="v" x="504" y="222">10</text>
+  <text class="lbl" x="511" y="350">3</text>
+  <!-- 4 slices: 8 -->
+  <rect class="b-grn" x="590" y="250" width="70" height="80"/>
+  <text class="v" x="618" y="242">8</text>
+  <text class="lbl" x="621" y="350">4</text>
+  <!-- 8 slices: 5 -->
+  <rect class="b-grn" x="700" y="280" width="70" height="50"/>
+  <text class="v" x="728" y="272">5</text>
+  <text class="lbl" x="731" y="350">8</text>
+  <text class="note" x="682" y="366">(author's GB300 case)</text>
+
+  <text class="note" x="300" y="386">slices per microbatch = padded sequence length ÷ logprob_chunk_size, rounded up</text>
+  <rect class="b-red" x="16" y="376" width="14" height="12"/>
+  <text class="note" x="36" y="386">worse than before</text>
+  <rect class="b-grn" x="160" y="376" width="14" height="12"/>
+  <text class="note" x="180" y="386">better</text>
+</svg>
+
+<h2>Who hits the one-slice case</h2>
+
+<p>Four shipped AutoModel recipes set <code>logprob_chunk_size</code> equal to <code>max_total_sequence_length</code> (both 4096) and use
+<span class="tip" tabindex="0" data-tip="Groups samples into microbatches of at most train_mb_tokens tokens. Here that budget is max_total_sequence_length × 1 = 4096.">dynamic batching</span>
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/617d98983cad18f1126ebc825a32d25be108dc54/examples/configs/recipes/llm/dapo-gemma4-e2b-it-1n8g-fsdp2-automodel.yaml#L31-L32">gemma4-e2b</a>,
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/617d98983cad18f1126ebc825a32d25be108dc54/examples/configs/recipes/llm/dapo-gemma4-12b-it-2n8g-fsdp2-automodel.yaml#L33">gemma4-12b</a>,
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/617d98983cad18f1126ebc825a32d25be108dc54/examples/configs/recipes/llm/dapo-gemma4-31b-it-4n8g-fsdp2-automodel.yaml#L33">gemma4-31b</a>,
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/617d98983cad18f1126ebc825a32d25be108dc54/examples/configs/recipes/llm/dapo-mistral-medium-3.5-128b-16n8g-fsdp2-automodel.yaml#L34">mistral-medium-3.5</a>).
+No microbatch is longer than 4096 positions, so every microbatch is exactly one slice. For Gemma 4 E2B:</p>
+
+<div class="mono">one full microbatch = 4096 positions × 262,144 vocab = 2<sup>30</sup> logits
+
+before this PR   2<sup>30</sup> × 12 B  =  <span class="ok">12 GiB</span>
+this PR          2<sup>30</sup> × 26 B  =  <span class="bad">26 GiB</span>   ← more memory, plus the backward recompute
+with the gate    2<sup>30</sup> × 12 B  =  <span class="ok">12 GiB</span>   ← back to the old path</div>
+
+<h2>What would fix it — proposed, not in the PR</h2>
+
+<p class="where"><b>Where the fix lands: RL only, one condition in <a href="https://github.com/NVIDIA-NeMo/RL/blob/617d98983cad18f1126ebc825a32d25be108dc54/nemo_rl/models/automodel/train.py#L653-L659"><code>LossPostProcessor.__call__</code></a>.</b>
+No kernel change is needed.</p>
+
+<pre class="diff"><span class="hunk">@@ train.py L653-L659 · LossPostProcessor.__call__ (proposed)</span>
+         if (
+             chunk_size is not None
+             and token_layout is None
+             and self.loss_fn.input_type == LossInputType.LOGPROB
+             and not need_top_k_or_top_p_filtering(self.sampling_params)
+             and not isinstance(logits, DTensor)
+<span class="add">+            # Backward keeps ~24 B/logit per chunk (vs ~12 B/logit unchunked),
++            # so chunking only lowers peak memory from 3 chunks up.
++            and logits.shape[1] > 2 * chunk_size</span>
+         ):</pre>
+
+<p>Nothing above is implemented. When the gate says no, the group stays <code>None</code>, which is exactly the path from before the PR. So the gate cannot move any run onto a new kernel. For gemma4-e2b (4096 ≤ 2 × 4096) it restores the old 12 GiB. For the author's GB300 case (4096 &gt; 2 × 512) it keeps the 2.45 GiB win.
+A cheaper backward that avoids <code>one_hot</code> would still leave one slice at about 16 bytes per logit, above 12, so the gate is needed either way.</p>
+
+<div class="warn"><b>So what.</b> As written, the PR makes loss memory <em>worse</em> for the AutoModel recipes that already set
+<code>logprob_chunk_size = max_total_sequence_length</code>. For Gemma-sized vocabularies that is about 14 GiB more per microbatch, enough to push a run that fits today into running out of memory.
+The review asks for the gate above before merge, then step time and peak memory on one of these recipes.</div>
+
+</div>
+</body>
+</html>
