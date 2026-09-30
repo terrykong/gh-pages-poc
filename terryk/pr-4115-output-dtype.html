@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NVIDIA-NeMo/RL #4115 — what fsdp_output_dtype changes between layers</title>
+<style>
+:root{
+  --bg:#0d1117; --surface:#161b22; --surface2:#1c2128; --border:#30363d;
+  --text:#e6edf3; --dim:#8b949e; --accent:#58a6ff; --green:#3fb950;
+  --orange:#d29922; --red:#f85149;
+}
+:root[data-theme="light"]{
+  --bg:#ffffff; --surface:#f6f8fa; --surface2:#eaeef2; --border:#d0d7de;
+  --text:#1f2328; --dim:#59636e; --accent:#0969da; --green:#1a7f37;
+  --orange:#9a6700; --red:#cf222e;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:28px 20px 70px}
+h1{font-size:22px;margin:0 0 8px;line-height:1.3}
+h2{font-size:18px;margin:30px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;
+  font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
+.sub{color:var(--dim);font-size:13.5px;margin:0 0 14px}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);
+  border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;
+  font:13px/1 ui-monospace,Menlo,monospace;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.18)}
+.status{border:1px solid var(--border);border-radius:10px;background:var(--surface);
+  padding:2px 16px 10px;margin:0 0 16px}
+.status dl{display:grid;grid-template-columns:max-content 1fr;gap:4px 14px;margin:12px 0 0}
+.status dt{color:var(--dim);font-size:12px;text-transform:uppercase;letter-spacing:.04em;
+  white-space:nowrap;padding-top:2px}
+.status dd{margin:0;font-size:14px}
+.verdict{font-weight:700}
+.verdict.good{color:var(--green)}
+.verdict.open{color:var(--red)}
+nav.chain{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 6px;padding:0}
+nav.chain a,nav.chain span{display:inline-block;padding:5px 11px;border:1px solid var(--border);
+  border-radius:20px;background:var(--surface);text-decoration:none;color:var(--accent);
+  font-size:12.5px;line-height:1.3;white-space:nowrap}
+nav.chain a:hover{background:var(--surface2)}
+nav.chain span.here{background:var(--accent);color:var(--bg);border-color:var(--accent);font-weight:600}
+p.chainnote{color:var(--dim);font-size:12px;margin:0 0 18px}
+.bg{border-left:4px solid var(--dim);background:var(--surface);padding:8px 14px;margin:0 0 14px;font-size:14px}
+.tip{border-bottom:1px dotted var(--dim);cursor:help;position:relative;outline:none}
+.tip:hover::after,.tip:focus::after{content:attr(data-tip);position:absolute;left:0;top:1.7em;z-index:60;
+  width:max-content;max-width:min(340px,80vw);white-space:normal;background:var(--surface2);color:var(--text);
+  border:1px solid var(--border);border-radius:6px;padding:7px 10px;font:13px/1.45 -apple-system,sans-serif;
+  font-weight:400;box-shadow:0 4px 14px rgba(0,0,0,.3)}
+table{border-collapse:collapse;margin:10px 0;font-size:14px}
+th,td{border:1px solid var(--border);padding:5px 10px;text-align:left}
+th{background:var(--surface2)}
+td.num{text-align:right;font-family:ui-monospace,Menlo,monospace}
+.good{color:var(--green)} .bad{color:var(--red)}
+.hl{border-left:3px solid var(--accent);background:var(--surface);
+  padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0}
+svg{max-width:100%;height:auto;display:block;margin:14px 0}
+svg .box{fill:var(--surface);stroke:var(--border);stroke-width:1.4}
+svg .merge{fill:var(--surface2);stroke:var(--accent);stroke-width:1.6}
+svg .lbl{fill:var(--text);font:12.5px ui-monospace,Menlo,monospace}
+svg .lbl-b{fill:var(--text);font:bold 13px -apple-system,sans-serif}
+svg .note{fill:var(--dim);font:11.5px -apple-system,sans-serif}
+svg .hdr{fill:var(--accent);font:bold 12.5px -apple-system,sans-serif}
+svg .p32{fill:var(--orange);opacity:.22;stroke:var(--orange)}
+svg .p16{fill:var(--green);opacity:.22;stroke:var(--green)}
+svg .t32{fill:var(--orange);font:bold 11.5px ui-monospace,Menlo,monospace}
+svg .t16{fill:var(--green);font:bold 11.5px ui-monospace,Menlo,monospace}
+svg .arr{stroke:var(--dim);stroke-width:1.4;fill:none}
+svg .arrh{fill:var(--dim)}
+svg a text{text-decoration:underline;fill:var(--accent);font:11.5px ui-monospace,Menlo,monospace}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+  document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head>
+<body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+  function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+  function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
+    b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
+      else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+  document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+<div class="wrap">
+
+<h1>What <code>fsdp_output_dtype: bfloat16</code> changes: the tensors between layers stop being float32</h1>
+<p class="sub"><a href="https://github.com/NVIDIA-NeMo/RL/pull/4115">NVIDIA-NeMo/RL #4115</a>
+(feat(automodel): expose FSDP output precision). Permalinks pin the PR head <code>5a9638c</code>;
+upstream links pin Automodel <code>72dacef</code> and torch <code>v2.13.0</code>.</p>
+
+<div class="status">
+<dl>
+  <dt>Before</dt>
+  <dd>The DTensor (Automodel) backend always told FSDP to cast every layer's output, and the final logits, to float32.</dd>
+  <dt>This PR</dt>
+  <dd>Adds <code>policy.dtensor_cfg.fsdp_output_dtype</code>. Leaving it out keeps float32. Setting <code>bfloat16</code> keeps those tensors in bf16.</dd>
+  <dt>Status</dt>
+  <dd><span class="verdict good">Proposed in this PR — opt-in, default unchanged.</span>
+  The branch needs a rebase, and the memory saving has not been measured yet.</dd>
+</dl>
+</div>
+
+<nav class="chain">
+  <span class="here">1 · what the setting changes</span>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4115-fp16-grads.html">2 · float16 outputs lose gradients</a>
+</nav>
+<p class="chainnote">Two pages on this PR, one question each — this one: what bf16 outputs change, and where both paths meet.</p>
+
+<div class="bg"><b>Background.</b> Automodel wraps each decoder layer, and the whole model, in its own
+<span class="tip" tabindex="0" data-tip="PyTorch FSDP2's fully_shard. It shards the weights across GPUs and runs hooks before and after the wrapped module's forward.">FSDP unit</span>.
+A <span class="tip" tabindex="0" data-tip="torch.distributed.fsdp.MixedPrecisionPolicy: param_dtype (the dtype the math runs in), reduce_dtype (the dtype gradients are summed in across GPUs), output_dtype (the dtype each unit's output is cast to).">mixed-precision policy</span>
+tells each unit which dtype to do the math in and which dtype to hand its output to the next unit.
+This PR only changes the second one. Dotted words have a short explanation: hover or tap them.</div>
+
+<p>NeMo-RL builds one policy for the whole model in
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/5a9638cfdd573a4e2e917a46ab814a7d92bf357a/nemo_rl/models/automodel/setup.py#L495-L499"><code>setup_distributed</code></a>:
+math in bf16, gradients summed in float32, and outputs in whatever <code>fsdp_output_dtype</code> says
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/5a9638cfdd573a4e2e917a46ab814a7d92bf357a/nemo_rl/models/automodel/setup.py#L469">read here</a>,
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/5a9638cfdd573a4e2e917a46ab814a7d92bf357a/nemo_rl/models/automodel/setup.py#L297-L299">checked here</a>).
+Automodel gives every decoder layer that same policy
+(<a href="https://github.com/NVIDIA-NeMo/Automodel/blob/72daceffa54d77783e1f73a5ac165eb39b6b5ea1/nemo_automodel/components/distributed/parallelizer.py#L1266-L1270">parallelizer.py</a>),
+and torch casts each unit's output on the way out
+(<a href="https://github.com/pytorch/pytorch/blob/v2.13.0/torch/distributed/fsdp/_fully_shard/_fsdp_state.py#L324-L344"><code>_post_forward</code></a>).
+The next layer casts its input straight back to bf16
+(<a href="https://github.com/pytorch/pytorch/blob/v2.13.0/torch/distributed/fsdp/_fully_shard/_fsdp_state.py#L346-L353"><code>_cast_forward_inputs</code></a>),
+so the float32 copy between layers holds no extra digits.</p>
+
+<h2>Same model, two settings — one example: 8,000 tokens, hidden size 4,096, vocab 128,256</h2>
+
+<svg viewBox="0 0 900 400" role="img" aria-label="Two rows of the same model. With float32 outputs, every layer output and the logits are float32 and twice as large. With bfloat16 outputs they stay bf16. Both rows meet at the logprob step, which casts logits to float32.">
+  <defs><marker id="ah" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path class="arrh" d="M0 0 L8 4 L0 8 z"/></marker></defs>
+
+  <text class="hdr" x="16" y="22">Every box does its math in bf16. What changes is the dtype of the arrow leaving it.</text>
+
+  <!-- row labels -->
+  <text class="lbl-b" x="16" y="72">before / default</text>
+  <text class="note" x="16" y="88">output = float32</text>
+  <text class="lbl-b" x="16" y="202">this PR, opt-in</text>
+  <text class="note" x="16" y="218">output = bfloat16</text>
+
+  <!-- row 1 boxes -->
+  <rect class="box" x="140" y="56" width="92" height="40" rx="6"/><text class="lbl" x="152" y="81">layer 0</text>
+  <rect class="p32" x="240" y="62" width="112" height="28" rx="14"/><text class="t32" x="250" y="81">fp32 · 131 MB</text>
+  <rect class="box" x="360" y="56" width="92" height="40" rx="6"/><text class="lbl" x="372" y="81">layer 1…</text>
+  <rect class="p32" x="460" y="62" width="112" height="28" rx="14"/><text class="t32" x="470" y="81">fp32 · 131 MB</text>
+  <rect class="box" x="580" y="56" width="84" height="40" rx="6"/><text class="lbl" x="590" y="81">lm_head</text>
+  <path class="arr" d="M664 76 L708 76" marker-end="url(#ah)"/>
+  <rect class="p32" x="590" y="104" width="118" height="26" rx="13"/><text class="t32" x="600" y="122">logits 4.10 GB</text>
+
+  <!-- row 2 boxes -->
+  <rect class="box" x="140" y="186" width="92" height="40" rx="6"/><text class="lbl" x="152" y="211">layer 0</text>
+  <rect class="p16" x="240" y="192" width="112" height="28" rx="14"/><text class="t16" x="248" y="211">bf16 · 65.5 MB</text>
+  <rect class="box" x="360" y="186" width="92" height="40" rx="6"/><text class="lbl" x="372" y="211">layer 1…</text>
+  <rect class="p16" x="460" y="192" width="112" height="28" rx="14"/><text class="t16" x="468" y="211">bf16 · 65.5 MB</text>
+  <rect class="box" x="580" y="186" width="84" height="40" rx="6"/><text class="lbl" x="590" y="211">lm_head</text>
+  <path class="arr" d="M664 206 L708 206" marker-end="url(#ah)"/>
+  <rect class="p16" x="590" y="234" width="118" height="26" rx="13"/><text class="t16" x="600" y="252">logits 2.05 GB</text>
+
+  <!-- casts note -->
+  <text class="note" x="140" y="150">each pill is the tensor FSDP hands to the next layer;</text>
+  <text class="note" x="140" y="165">the next layer casts it back to bf16 on the way in</text>
+
+  <!-- merge box -->
+  <rect class="merge" x="712" y="48" width="176" height="220" rx="8"/>
+  <text class="lbl-b" x="724" y="72">both paths meet here</text>
+  <text class="note" x="724" y="92">the logprob step</text>
+  <text class="note" x="724" y="107">casts logits to float32</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/5a9638cfdd573a4e2e917a46ab814a7d92bf357a/nemo_rl/models/automodel/train.py#L833" target="_blank" rel="noopener"><text x="724" y="130">train.py:833 no chunks</text></a>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/5a9638cfdd573a4e2e917a46ab814a7d92bf357a/nemo_rl/models/automodel/train.py#L847" target="_blank" rel="noopener"><text x="724" y="150">train.py:847 chunked</text></a>
+  <text class="note" x="724" y="178">after this point both</text>
+  <text class="note" x="724" y="193">settings run the same</text>
+  <text class="note" x="724" y="208">float32 math, except the</text>
+  <text class="note" x="724" y="223">3 places listed below</text>
+
+  <!-- legend -->
+  <rect class="p32" x="140" y="300" width="22" height="14" rx="7"/><text class="note" x="170" y="312">float32: 4 bytes per number</text>
+  <rect class="p16" x="360" y="300" width="22" height="14" rx="7"/><text class="note" x="390" y="312">bf16: 2 bytes per number, same digits the layer computed</text>
+  <text class="note" x="140" y="342">Layer output = 8,000 × 4,096 numbers. Logits = 8,000 × 128,256 numbers.</text>
+  <text class="note" x="140" y="360">Sizes are per tensor, for one micro-batch. Whether backward keeps each layer output is not measured.</text>
+  <a href="https://github.com/NVIDIA-NeMo/Automodel/blob/72daceffa54d77783e1f73a5ac165eb39b6b5ea1/nemo_automodel/components/distributed/fsdp2.py#L126" target="_blank" rel="noopener"><text x="140" y="384">On 1 GPU, Automodel skips FSDP, so neither row applies (fsdp2.py:126)</text></a>
+</svg>
+
+<h2>Where the saving shows up, and where it does not</h2>
+
+<p>The logprob step makes a float32 copy of the logits. With no chunking it copies all of them at once. With
+<span class="tip" tabindex="0" data-tip="policy.logprob_chunk_size: how many tokens of logits the logprob step casts to float32 at a time. null means all tokens at once.">chunking</span>
+it copies 1,000 tokens at a time (0.51 GB here). So the logit memory in the logprob step is:</p>
+
+<table>
+<tr><th>logit tensors alive</th><th>float32 outputs (before)</th><th>bf16 outputs (this PR)</th></tr>
+<tr><td>no chunking</td><td class="num">4.10 GB <span style="color:var(--dim)">(cast is a no-op)</span></td><td class="num bad">2.05 + 4.10 = 6.15 GB</td></tr>
+<tr><td>chunks of 1,000 tokens</td><td class="num">4.10 GB</td><td class="num good">2.05 + 0.51 = 2.56 GB</td></tr>
+</table>
+
+<p>Layer outputs halve in both cases. After the two paths meet, three places still see bf16 instead of
+float32, and the PR's field comment names them
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/5a9638cfdd573a4e2e917a46ab814a7d92bf357a/nemo_rl/models/policy/__init__.py#L204-L209">__init__.py:204</a>):
+value and reward-model losses, which read the logits without a float32 cast; the in-place
+temperature divide
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/5a9638cfdd573a4e2e917a46ab814a7d92bf357a/nemo_rl/models/automodel/train.py#L245">train.py:245</a>);
+and <code>moe_parallelizer.lm_head_precision</code>, whose float32 logits the outer unit casts back to bf16.</p>
+
+<div class="hl">
+<strong>So what.</strong> bf16 outputs hold the same digits the layers computed, and in a small CPU test
+the gradients matched float32 outputs exactly. The memory win is real when logits are chunked. With
+no chunking, the logit step uses <em>more</em> memory. Measure on 2 or more GPUs: on one GPU the setting
+does nothing. <code>float16</code> outputs are a different story — see
+<a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4115-fp16-grads.html">page 2</a>.
+</div>
+
+</div>
+</body>
+</html>
