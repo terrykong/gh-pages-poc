@@ -84,7 +84,7 @@ svg a text{text-decoration:underline;fill:var(--accent);font:11.5px ui-monospace
 
 <h1>Two ways to average the training loss on Megatron — and what this PR adds</h1>
 <p class="sub"><a href="https://github.com/NVIDIA-NeMo/RL/pull/4287">NVIDIA-NeMo/RL #4287</a>
-· all permalinks pin the PR head <code>438b6b6</code>.</p>
+· all permalinks pin the PR head <code>bf55419</code>.</p>
 
 <div class="status">
 <dl>
@@ -93,24 +93,25 @@ svg a text{text-decoration:underline;fill:var(--accent);font:11.5px ui-monospace
   <dt>This PR</dt>
   <dd>Adds a config switch. <code>true</code> keeps the old mode. <code>false</code> adds Megatron-LM's default mode: average inside each microbatch first, then average those averages.</dd>
   <dt>Status</dt>
-  <dd><span class="verdict prop">Proposed, in review.</span> <code>true</code> is unchanged as far as the review can tell. <code>false</code> works for SFT only. The PR also crashes about 30 shipped configs at setup, which is covered on the next page.</dd>
+  <dd><span class="verdict prop">Proposed, in review.</span> <code>true</code> is unchanged as far as the review can tell. <code>false</code> works for SFT only. Configs that never set the key fall back to <code>false</code>, which breaks about 30 shipped configs; see the next page.</dd>
 </dl>
 </div>
 
 <nav class="chain">
   <span class="here">1 · the two modes</span>
-  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4287-missing-key-crash.html">2 · configs that crash</a>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4287-missing-key-crash.html">2 · configs without the key</a>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4287-grad-accum-bug.html">3 · the old accumulation bug</a>
 </nav>
-<p class="chainnote">Two pages on this PR, one question each. This one covers what the new switch does.</p>
+<p class="chainnote">Three pages on this PR, one question each. This one covers what the new switch does.</p>
 
 <div class="bg">A training step is split into <b>microbatches</b>: small slices that run forward and backward one after another. Their gradients add up, and the optimizer steps once. Different microbatches hold different numbers of real (unpadded) tokens. So "the average loss" can mean two different things. Dotted words have a short explanation: hover or tap them.</div>
 
 <p>The new key is <span class="tip" tabindex="0" data-tip="New required key in MegatronConfig. NeMo-RL copies it straight into Megatron-Core's own flag of the same name.">
-<a href="https://github.com/NVIDIA-NeMo/RL/blob/438b6b66cc31bac75df71e2ee0959c153666ef77/nemo_rl/models/policy/__init__.py#L378-L380"><code>policy.megatron_cfg.calculate_per_token_loss</code></a></span>.
-Setup used to hard-code it to <code>True</code>. Now setup copies the YAML value into Megatron
-(<a href="https://github.com/NVIDIA-NeMo/RL/blob/438b6b66cc31bac75df71e2ee0959c153666ef77/nemo_rl/models/megatron/setup.py#L1942-L1944">setup.py#L1942</a>).
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/bf55419fa6db93ed56f3cdae1becc67b4cd99a5b/nemo_rl/models/policy/__init__.py#L378-L380"><code>policy.megatron_cfg.calculate_per_token_loss</code></a></span>.
+Setup used to hard-code it to <code>True</code>. Now setup copies the YAML value into Megatron, falling back to <code>False</code> when the key is missing
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/bf55419fa6db93ed56f3cdae1becc67b4cd99a5b/nemo_rl/models/megatron/setup.py#L1942-L1944">setup.py#L1942</a>).
 Both modes build the loss the same way until
-<a href="https://github.com/NVIDIA-NeMo/RL/blob/438b6b66cc31bac75df71e2ee0959c153666ef77/nemo_rl/models/megatron/train.py#L899">train.py#L899</a>, where they split.
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/bf55419fa6db93ed56f3cdae1becc67b4cd99a5b/nemo_rl/models/megatron/train.py#L894">train.py#L894</a>, where they split.
 In <code>false</code> mode the loss hands Megatron a <em>local</em> sum and a <em>local</em> token count, and Megatron does the dividing
 (<a href="https://github.com/NVIDIA/Megatron-LM/blob/6a3660905a2736b5670baed1ca5954372937918b/megatron/core/pipeline_parallel/schedules.py#L335-L341">schedules.py#L335-L341</a>).</p>
 
@@ -138,7 +139,7 @@ In <code>false</code> mode the loss hands Megatron a <em>local</em> sum and a <e
 
   <!-- TRUE column -->
   <rect class="box" x="16" y="160" width="440" height="290" rx="10" style="stroke:var(--green);stroke-width:2"/>
-  <text class="hdr-t" x="32" y="186">calculate_per_token_loss: true  (default, unchanged)</text>
+  <text class="hdr-t" x="32" y="186">calculate_per_token_loss: true  (the example YAMLs)</text>
   <text class="lbl" x="32" y="216">1. each microbatch returns its token SUM</text>
   <text class="note" x="52" y="233">A → 18,  B → 15   (no division yet)</text>
   <text class="lbl" x="32" y="260">2. NeMo-RL divides by the step's token count</text>
@@ -147,8 +148,8 @@ In <code>false</code> mode the loss hands Megatron a <em>local</em> sum and a <e
   <text class="res-t" x="52" y="336">= 33 / 7 ≈ 4.71</text>
   <text class="note" x="32" y="366">Every token counts the same. Changing the micro-batch</text>
   <text class="note" x="32" y="382">size or GPU layout does not change the answer.</text>
-  <a href="https://github.com/NVIDIA-NeMo/RL/blob/438b6b66cc31bac75df71e2ee0959c153666ef77/nemo_rl/models/megatron/train.py#L962-L966" target="_blank" rel="noopener"><text x="32" y="410">legacy wrappers, train.py#L962</text></a>
-  <a href="https://github.com/NVIDIA-NeMo/RL/blob/438b6b66cc31bac75df71e2ee0959c153666ef77/nemo_rl/models/policy/workers/megatron_policy_worker.py#L2014-L2015" target="_blank" rel="noopener"><text x="32" y="430">split API: scale 1/7, worker#L2015</text></a>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/bf55419fa6db93ed56f3cdae1becc67b4cd99a5b/nemo_rl/models/megatron/train.py#L957-L961" target="_blank" rel="noopener"><text x="32" y="410">legacy wrappers, train.py#L957</text></a>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/bf55419fa6db93ed56f3cdae1becc67b4cd99a5b/nemo_rl/models/policy/workers/megatron_policy_worker.py#L2036-L2037" target="_blank" rel="noopener"><text x="32" y="430">split API: scale 1/7, worker#L2037</text></a>
 
   <!-- FALSE column -->
   <rect class="box" x="484" y="160" width="440" height="290" rx="10" style="stroke:var(--purple);stroke-width:2"/>
@@ -162,7 +163,7 @@ In <code>false</code> mode the loss hands Megatron a <em>local</em> sum and a <e
   <text class="res-f" x="520" y="350">= 6</text>
   <text class="note" x="500" y="380">A's 2 tokens weigh as much as B's 5. The answer moves</text>
   <text class="note" x="500" y="396">when micro-batch size or DP / CP layout changes.</text>
-  <a href="https://github.com/NVIDIA-NeMo/RL/blob/438b6b66cc31bac75df71e2ee0959c153666ef77/nemo_rl/models/megatron/train.py#L899-L960" target="_blank" rel="noopener"><text x="500" y="420">_return_local_sum_and_count, train.py#L899</text></a>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/bf55419fa6db93ed56f3cdae1becc67b4cd99a5b/nemo_rl/models/megatron/train.py#L894-L955" target="_blank" rel="noopener"><text x="500" y="420">_return_local_sum_and_count, train.py#L894</text></a>
   <a href="https://github.com/NVIDIA/Megatron-LM/blob/6a3660905a2736b5670baed1ca5954372937918b/megatron/core/pipeline_parallel/schedules.py#L335-L341" target="_blank" rel="noopener"><text x="500" y="440">Megatron divides: schedules.py#L335</text></a>
 </svg>
 
@@ -171,17 +172,17 @@ In <code>false</code> mode the loss hands Megatron a <em>local</em> sum and a <e
 <tr><th></th><th><code>true</code></th><th><code>false</code></th></tr>
 <tr><td>Loss the model learns from</td><td>global token mean (4.71 above)</td><td>mean of microbatch means (6 above)</td></tr>
 <tr><td>Loss written to the logs</td><td colspan="2">Token-weighted in both modes (4.71), so the two runs' curves are directly comparable
-(<a href="https://github.com/NVIDIA-NeMo/RL/blob/438b6b66cc31bac75df71e2ee0959c153666ef77/nemo_rl/models/megatron/train.py#L916-L934">train.py#L916</a>)</td></tr>
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/bf55419fa6db93ed56f3cdae1becc67b4cd99a5b/nemo_rl/models/megatron/train.py#L911-L929">train.py#L911</a>)</td></tr>
 <tr><td>Context parallel (CP)</td><td>loss uses the full, gathered sequence</td><td>each CP rank keeps only its own tokens, so the count is local
-(<a href="https://github.com/NVIDIA-NeMo/RL/blob/438b6b66cc31bac75df71e2ee0959c153666ef77/nemo_rl/models/megatron/train.py#L91-L160"><code>_shard_next_token_loss_inputs_for_cp_local_mean</code></a>)</td></tr>
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/bf55419fa6db93ed56f3cdae1becc67b4cd99a5b/nemo_rl/models/megatron/train.py#L91-L160"><code>_shard_next_token_loss_inputs_for_cp_local_mean</code></a>)</td></tr>
 <tr><td><span class="tip" tabindex="0" data-tip="Extra losses added inside the model: the MoE router's load-balancing loss and the multi-token-prediction head's loss.">MoE / MTP extra losses</span></td><td>scaled by 1 / global token count, the same as before</td><td>left to Megatron's own per-microbatch scaling
-(<a href="https://github.com/NVIDIA-NeMo/RL/blob/438b6b66cc31bac75df71e2ee0959c153666ef77/nemo_rl/models/policy/workers/megatron_policy_worker.py#L1203-L1218">worker#L1203</a>)</td></tr>
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/bf55419fa6db93ed56f3cdae1becc67b4cd99a5b/nemo_rl/models/policy/workers/megatron_policy_worker.py#L1203-L1213">worker#L1203</a>)</td></tr>
 <tr><td>Which losses work</td><td>all</td><td>SFT only (<code>NLLLossFn</code>) today. GRPO/PPO pass the setup check but fail on the first train step.</td></tr>
 </table>
-<p class="cref"><a href="https://github.com/NVIDIA-NeMo/RL/pull/4287#discussion_r4136804041">review comment — train.py:698 · reject GRPO/PPO at setup</a> <a href="https://github.com/NVIDIA-NeMo/RL/pull/4287#discussion_r4136803978">review comment — test_train.py:91 · CP=2 test</a></p>
+<p class="cref"><a href="https://github.com/NVIDIA-NeMo/RL/pull/4287#discussion_r4141535157">review comment — train.py:698 · loss check</a> <a href="https://github.com/NVIDIA-NeMo/RL/pull/4287#discussion_r4141535299">review comment — train.py:91 · CP slicing belongs in loss_input.py</a> <a href="https://github.com/NVIDIA-NeMo/RL/pull/4287#discussion_r4136803978">review comment — test_train.py:91 · CP=2 test</a></p>
 
 <div class="hl"><strong>Why keep both?</strong> <code>true</code> is what NeMo-RL has always used and what
-<a href="https://github.com/NVIDIA-NeMo/RL/blob/438b6b66cc31bac75df71e2ee0959c153666ef77/docs/design-docs/loss-functions.md#L4-L20">loss-functions.md</a>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/bf55419fa6db93ed56f3cdae1becc67b4cd99a5b/docs/design-docs/loss-functions.md#L4-L20">loss-functions.md</a>
 recommends: every token counts equally. <code>false</code> matches Megatron-LM's default, so an SFT run can be compared directly with a Megatron-LM run.
 The cost is that the gradient then depends on micro-batch size and GPU layout. The review asks for a docs note saying so,
 plus <code>true</code>-vs-<code>false</code> loss curves on a MoE model with CP = 2, since no training run backs the new mode yet.</div>

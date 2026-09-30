@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NVIDIA-NeMo/RL #4287 — is the new false mode the gradient-accumulation bug NeMo-RL fixed?</title>
+<style>
+:root{
+  --bg:#0d1117; --surface:#161b22; --surface2:#1c2128; --border:#30363d;
+  --text:#e6edf3; --dim:#8b949e; --accent:#58a6ff; --green:#3fb950;
+  --orange:#d29922; --red:#f85149; --purple:#bc8cff;
+}
+:root[data-theme="light"]{
+  --bg:#ffffff; --surface:#f6f8fa; --surface2:#eaeef2; --border:#d0d7de;
+  --text:#1f2328; --dim:#59636e; --accent:#0969da; --green:#1a7f37;
+  --orange:#9a6700; --red:#cf222e; --purple:#8250df;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:28px 20px 70px}
+h1{font-size:22px;margin:0 0 8px;line-height:1.3}
+h2{font-size:18px;margin:30px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;
+  font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
+.sub{color:var(--dim);font-size:13.5px;margin:0 0 14px}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);
+  border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;
+  font:13px/1 ui-monospace,Menlo,monospace;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.18)}
+.status{border:1px solid var(--border);border-radius:10px;background:var(--surface);padding:2px 16px 10px;margin:0 0 16px}
+.status dl{display:grid;grid-template-columns:max-content 1fr;gap:4px 14px;margin:12px 0 0}
+.status dt{color:var(--dim);font-size:12px;text-transform:uppercase;letter-spacing:.04em;white-space:nowrap;padding-top:2px}
+.status dd{margin:0;font-size:14px}
+.verdict{font-weight:700}.verdict.open{color:var(--red)}
+nav.chain{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 6px;padding:0}
+nav.chain a,nav.chain span{display:inline-block;padding:5px 11px;border:1px solid var(--border);
+  border-radius:20px;background:var(--surface);text-decoration:none;color:var(--accent);
+  font-size:12.5px;line-height:1.3;white-space:nowrap}
+nav.chain a:hover{background:var(--surface2)}
+nav.chain span.here{background:var(--accent);color:var(--bg);border-color:var(--accent);font-weight:600}
+p.chainnote{color:var(--dim);font-size:12px;margin:0 0 18px}
+.bg{border-left:3px solid var(--dim);background:var(--surface);padding:8px 14px;margin:0 0 14px;font-size:14px;border-radius:0 8px 8px 0}
+.warn{border-left:3px solid var(--red);background:var(--surface);padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0}
+.where{border-left:4px solid var(--accent);background:var(--surface);padding:6px 12px;margin:6px 0 10px}
+.cref{margin:6px 0 0;font-size:13px}
+.cref a{display:inline-block;padding:4px 10px;border:1px solid var(--border);border-radius:16px;background:var(--surface);font:12.5px ui-monospace,Menlo,monospace}
+table{border-collapse:collapse;font-size:14px;margin:10px 0}
+th,td{border:1px solid var(--border);padding:5px 10px;text-align:left;vertical-align:top}
+th{background:var(--surface2)}
+svg{max-width:100%;height:auto;display:block;margin:14px 0}
+svg .box{fill:var(--surface);stroke:var(--border);stroke-width:1.4}
+svg .tokA{fill:var(--orange);opacity:.55;stroke:var(--orange)}
+svg .tokB{fill:var(--accent);opacity:.45;stroke:var(--accent)}
+svg .mb{fill:none;stroke:var(--dim);stroke-width:1.5;stroke-dasharray:5 4}
+svg .lbl{fill:var(--text);font:12.5px ui-monospace,Menlo,monospace}
+svg .lbl-b{fill:var(--text);font:bold 13.5px -apple-system,sans-serif}
+svg .note{fill:var(--dim);font:11.5px -apple-system,sans-serif}
+svg .hdr-t{fill:var(--green);font:bold 13.5px -apple-system,sans-serif}
+svg .hdr-f{fill:var(--purple);font:bold 13.5px -apple-system,sans-serif}
+svg .same{fill:var(--green);font:bold 15px ui-monospace,Menlo,monospace}
+svg .diffv{fill:var(--red);font:bold 15px ui-monospace,Menlo,monospace}
+svg .okv{fill:var(--purple);font:bold 15px ui-monospace,Menlo,monospace}
+svg .sep{stroke:var(--border);stroke-width:1.2}
+svg a text{text-decoration:underline;fill:var(--accent);font:11.5px ui-monospace,Menlo,monospace}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+  document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head>
+<body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+  function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+  function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
+    b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
+      else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+  document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+<div class="wrap">
+
+<h1>Is the PR's <code>false</code> mode the gradient-accumulation bug NeMo-RL already fixed?</h1>
+<p class="sub"><a href="https://github.com/NVIDIA-NeMo/RL/pull/4287">NVIDIA-NeMo/RL #4287</a>
+· background: <a href="https://unsloth.ai/blog/gradient">"Bugs in LLM Training — Gradient Accumulation Fix"</a>
+· all permalinks pin the PR head <code>bf55419</code>.</p>
+
+<div class="status">
+<dl>
+  <dt>Before</dt>
+  <dd>NeMo-RL always divided the summed loss by the token count of the whole step, so splitting a batch into microbatches never changed the answer.</dd>
+  <dt>This PR</dt>
+  <dd>Adds <code>false</code> mode, which averages each microbatch's own average: the exact math of the gradient-accumulation bug. After the latest push, it is also what a config gets when it leaves the key out.</dd>
+  <dt>Status</dt>
+  <dd><span class="verdict open">Open — raised in the review.</span> Yes, it is the same math, so it is not correct gradient accumulation. The review asks to keep it opt-in only and to document the cost.</dd>
+</dl>
+</div>
+
+<nav class="chain">
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4287-two-loss-means.html">1 · the two modes</a>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4287-missing-key-crash.html">2 · configs without the key</a>
+  <span class="here">3 · the old accumulation bug</span>
+</nav>
+<p class="chainnote">Three pages on this PR, one question each. This one covers whether <code>false</code> brings back a bug NeMo-RL fixed.</p>
+
+<div class="bg"><b>Gradient accumulation</b> runs one training step as several small <b>microbatches</b>, adding their gradients before the optimizer steps.
+It is supposed to give the same answer as running the whole batch at once. It only does if every microbatch divides its loss by the token count
+of the <em>whole step</em>. If each one divides by its <em>own</em> token count instead, the answer depends on how the batch was split.
+That is the bug the linked post describes, and the reason
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/bf55419fa6db93ed56f3cdae1becc67b4cd99a5b/docs/design-docs/loss-functions.md#L1-L20">NeMo-RL's loss-functions.md</a> exists.</div>
+
+<p>The PR's <code>false</code> mode hands Megatron each microbatch's local loss sum and local token count
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/bf55419fa6db93ed56f3cdae1becc67b4cd99a5b/nemo_rl/models/megatron/train.py#L894-L955">train.py#L894</a>).
+Megatron then divides by that local count and by the number of microbatches
+(<a href="https://github.com/NVIDIA/Megatron-LM/blob/6a3660905a2736b5670baed1ca5954372937918b/megatron/core/pipeline_parallel/schedules.py#L335-L341">schedules.py#L335-L341</a>).
+That is "average of averages". The figure runs the same 7 tokens through both modes, split two different ways.</p>
+
+<svg viewBox="0 0 940 440" role="img" aria-label="The same 7 tokens split two ways: true mode gives 4.71 both times, false mode gives 6 or 4.71 depending on the split">
+  <text class="lbl-b" x="16" y="24">Same 7 tokens, same model, same data. Only the microbatch split changes.</text>
+  <rect class="tokA" x="620" y="10" width="14" height="14"/><text class="note" x="640" y="22">2 tokens, loss sum 18</text>
+  <rect class="tokB" x="780" y="10" width="14" height="14"/><text class="note" x="800" y="22">5 tokens, sum 15</text>
+
+  <!-- split 1 -->
+  <text class="lbl-b" x="16" y="66">Split 1: two microbatches</text>
+  <rect class="mb" x="190" y="46" width="104" height="38" rx="6"/>
+  <rect class="tokA" x="198" y="52" width="40" height="26" rx="4"/>
+  <rect class="tokA" x="246" y="52" width="40" height="26" rx="4"/>
+  <rect class="mb" x="306" y="46" width="248" height="38" rx="6"/>
+  <rect class="tokB" x="314" y="52" width="40" height="26" rx="4"/>
+  <rect class="tokB" x="361" y="52" width="40" height="26" rx="4"/>
+  <rect class="tokB" x="408" y="52" width="40" height="26" rx="4"/>
+  <rect class="tokB" x="455" y="52" width="40" height="26" rx="4"/>
+  <rect class="tokB" x="502" y="52" width="40" height="26" rx="4"/>
+
+  <!-- split 2 -->
+  <text class="lbl-b" x="16" y="126">Split 2: one microbatch</text>
+  <rect class="mb" x="190" y="106" width="364" height="38" rx="6"/>
+  <rect class="tokA" x="198" y="112" width="40" height="26" rx="4"/>
+  <rect class="tokA" x="246" y="112" width="40" height="26" rx="4"/>
+  <rect class="tokB" x="314" y="112" width="40" height="26" rx="4"/>
+  <rect class="tokB" x="361" y="112" width="40" height="26" rx="4"/>
+  <rect class="tokB" x="408" y="112" width="40" height="26" rx="4"/>
+  <rect class="tokB" x="455" y="112" width="40" height="26" rx="4"/>
+  <rect class="tokB" x="502" y="112" width="40" height="26" rx="4"/>
+  <text class="note" x="572" y="72">e.g. micro-batch size 1</text>
+  <text class="note" x="572" y="132">e.g. micro-batch size 2</text>
+
+  <line class="sep" x1="16" y1="166" x2="924" y2="166"/>
+
+  <!-- true -->
+  <rect class="box" x="16" y="180" width="440" height="200" rx="10" style="stroke:var(--green);stroke-width:2"/>
+  <text class="hdr-t" x="32" y="206">true — divide by the step's token count (the fix)</text>
+  <text class="lbl" x="32" y="240">split 1: (18 + 15) / 7</text>
+  <text class="same" x="300" y="240">= 4.71</text>
+  <text class="lbl" x="32" y="272">split 2: 33 / 7</text>
+  <text class="same" x="300" y="272">= 4.71</text>
+  <text class="note" x="32" y="306">Same answer however the batch is split.</text>
+  <text class="note" x="32" y="322">Every token counts the same.</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/bf55419fa6db93ed56f3cdae1becc67b4cd99a5b/docs/design-docs/loss-functions.md#L1-L20" target="_blank" rel="noopener"><text x="32" y="356">why NeMo-RL does this: loss-functions.md</text></a>
+
+  <!-- false -->
+  <rect class="box" x="484" y="180" width="440" height="200" rx="10" style="stroke:var(--purple);stroke-width:2"/>
+  <text class="hdr-f" x="500" y="206">false — average each microbatch's average</text>
+  <text class="lbl" x="500" y="240">split 1: (18/2 + 15/5) / 2</text>
+  <text class="diffv" x="800" y="240">= 6</text>
+  <text class="lbl" x="500" y="272">split 2: 33 / 7</text>
+  <text class="okv" x="800" y="272">= 4.71</text>
+  <text class="note" x="500" y="306">The answer moves with the split. In split 1,</text>
+  <text class="note" x="500" y="322">A's 2 tokens weigh as much as B's 5.</text>
+  <a href="https://github.com/NVIDIA/Megatron-LM/blob/6a3660905a2736b5670baed1ca5954372937918b/megatron/core/pipeline_parallel/schedules.py#L335-L341" target="_blank" rel="noopener"><text x="500" y="356">Megatron divides locally: schedules.py#L335</text></a>
+
+  <text class="note" x="16" y="406">The same thing happens across GPUs: data-parallel and context-parallel ranks each average their own tokens, then those averages are averaged.</text>
+  <text class="note" x="16" y="424">So the answer also moves when you change the number of GPUs, not just the micro-batch size.</text>
+</svg>
+
+<h2>The blog, fact by fact, against <code>false</code> mode</h2>
+<table>
+<tr><th>What the blog says</th><th><code>false</code> mode in this PR</th></tr>
+<tr><td>Cross-entropy for a batch is the summed token loss divided by the number of trained tokens.</td>
+<td>Same loss per token (<code>NLLLossFn</code>), but each microbatch returns its own sum and its own token count
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/bf55419fa6db93ed56f3cdae1becc67b4cd99a5b/nemo_rl/models/megatron/train.py#L894-L955">train.py#L894</a>).</td></tr>
+<tr><td>The bug: take each microbatch's own mean, then scale by 1/G (G = accumulation steps). That is <b>not</b> the full-batch loss when microbatches hold different token counts.</td>
+<td>Megatron divides by the microbatch's own count, then by the number of microbatches
+(<a href="https://github.com/NVIDIA/Megatron-LM/blob/6a3660905a2736b5670baed1ca5954372937918b/megatron/core/pipeline_parallel/schedules.py#L335-L341">schedules.py#L335-L341</a>). <b>Same math as the bug.</b></td></tr>
+<tr><td>Symptom: the loss changes with the accumulation setting; more accumulation steps gave a higher loss than full-batch training.</td>
+<td>The gradient changes with micro-batch size, and also with data-parallel and context-parallel size, because each rank's average is averaged again (the figure: 6 vs 4.71 for the same data).</td></tr>
+<tr><td>The fix: compute the denominator for the whole step first, and divide every microbatch by it.</td>
+<td>That is <code>true</code> mode: every loss gets the step's token count, <code>global_valid_toks</code>
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/bf55419fa6db93ed56f3cdae1becc67b4cd99a5b/docs/design-docs/loss-functions.md#L1-L20">loss-functions.md</a>). <code>false</code> turns it off.</td></tr>
+</table>
+
+<h2>So is the PR bringing the bug back?</h2>
+<table>
+<tr><th></th><th>Answer</th></tr>
+<tr><td>Is <code>false</code> the same math as the bug?</td><td><b>Yes.</b> It is the "average of averages" the linked post shows, and the example
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/bf55419fa6db93ed56f3cdae1becc67b4cd99a5b/docs/design-docs/loss-functions.md#L1-L20">loss-functions.md</a> calls
+"in general, not equivalent to the full-batch loss".</td></tr>
+<tr><td>Does the PR remove the fix?</td><td><b>No.</b> <code>true</code> still divides by the step's token count, unchanged.</td></tr>
+<tr><td>Why add <code>false</code> at all?</td><td>It is Megatron-LM's default. The author wants an SFT run that can be compared directly with a Megatron-LM run. That is a real use, but only as an opt-in.</td></tr>
+<tr><td>Who gets <code>false</code> today?</td><td>Anyone who sets it, <b>and</b> any config that leaves the key out: the latest push falls back to <code>False</code>
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/bf55419fa6db93ed56f3cdae1becc67b4cd99a5b/nemo_rl/models/megatron/setup.py#L1942-L1944">setup.py#L1942</a>).
+An SFT config written before this PR would quietly go back to the old averaging. That is the part that turns an opt-in into a regression.</td></tr>
+</table>
+
+<h2>What the review asks — proposed, not in the PR</h2>
+<p class="where"><b>Where the fix lands: RL only.</b> Make the key required again and set it to <code>true</code> in the example YAMLs,
+so nobody gets <code>false</code> without asking for it (the diff is on
+<a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4287-missing-key-crash.html">page 2</a>).
+Then document what <code>false</code> costs next to the existing explanation in
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/bf55419fa6db93ed56f3cdae1becc67b4cd99a5b/docs/design-docs/loss-functions.md#L1-L20">loss-functions.md</a>.</p>
+<p class="cref">🔴 <a href="https://github.com/NVIDIA-NeMo/RL/pull/4287#discussion_r4141535028">review comment — setup.py:1942 · hidden False default</a>
+<a href="https://github.com/NVIDIA-NeMo/RL/pull/4287#discussion_r4136804051">review comment — sft.yaml:119 · docs note</a></p>
+
+<div class="warn"><strong>So what.</strong> <code>false</code> mode does not compute the full-batch loss: it is the
+average-of-averages the blog calls a bug, and its gradient moves with micro-batch size and GPU count. It is Megatron-LM's default, so it is useful
+only as an explicit choice for a run that must match Megatron-LM. It must not be the default, and with the fallback in the latest push it is:
+a config that says nothing gets it.</div>
+
+</div>
+</body>
+</html>
