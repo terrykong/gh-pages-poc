@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NVIDIA-NeMo/RL #4326 — where async DAPO and Never Give Up would decide</title>
+<style>
+:root{--bg:#0d1117;--surface:#161b22;--surface2:#1c2128;--border:#30363d;--text:#e6edf3;--dim:#8b949e;--accent:#58a6ff;--green:#3fb950;--orange:#d29922;--red:#f85149;--purple:#bc8cff}
+:root[data-theme="light"]{--bg:#ffffff;--surface:#f6f8fa;--surface2:#eaeef2;--border:#d0d7de;--text:#1f2328;--dim:#59636e;--accent:#0969da;--green:#1a7f37;--orange:#9a6700;--red:#cf222e;--purple:#8250df}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:28px 20px 70px}
+h1{font-size:22px;margin:0 0 8px;line-height:1.3}
+h2{font-size:18px;margin:32px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+a{color:var(--accent);text-decoration:none} a:hover{text-decoration:underline}
+code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
+.sub{color:var(--dim);font-size:13.5px;margin:0 0 16px}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;font:13px/1 ui-monospace,Menlo,monospace;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.18)}
+.mono{font:12.5px ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:13px;overflow-x:auto;white-space:pre}
+.warn{border-left:3px solid var(--orange);background:var(--surface);padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0}
+.bg{border:1px dashed var(--border);border-radius:8px;padding:10px 14px;margin:0 0 16px;font-size:14px}
+.status{border:1px solid var(--border);border-radius:10px;background:var(--surface);padding:2px 16px 10px;margin:0 0 20px}
+.status dl{display:grid;grid-template-columns:max-content 1fr;gap:4px 14px;margin:12px 0 0}
+.status dt{color:var(--dim);font-size:12px;text-transform:uppercase;letter-spacing:.04em;white-space:nowrap;padding-top:2px}
+.status dd{margin:0;font-size:14px}
+.verdict{font-weight:700} .verdict.prop{color:var(--accent)}
+nav.chain{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 6px;padding:0}
+nav.chain a,nav.chain span{display:inline-block;padding:5px 11px;border:1px solid var(--border);border-radius:20px;background:var(--surface);text-decoration:none;color:var(--accent);font-size:12.5px;line-height:1.3;white-space:nowrap}
+nav.chain a:hover{background:var(--surface2)}
+nav.chain span.here{background:var(--accent);color:var(--bg);border-color:var(--accent);font-weight:600}
+p.chainnote{color:var(--dim);font-size:12px;margin:0 0 18px}
+.where{border-left:4px solid var(--accent);background:var(--surface);padding:6px 12px;margin:6px 0 10px}
+.diff{font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:12px;overflow-x:auto;white-space:pre;margin:10px 0}
+.diff .add{color:var(--green)} .diff .del{color:var(--red)} .diff .hunk{color:var(--accent)}
+.tip{border-bottom:1px dotted var(--dim);cursor:help;position:relative;outline:none}
+.tip:hover::after,.tip:focus::after{content:attr(data-tip);position:absolute;left:0;top:1.7em;z-index:60;width:max-content;max-width:min(340px,80vw);white-space:normal;background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:7px 10px;font:13px/1.45 -apple-system,sans-serif;font-weight:400;box-shadow:0 4px 14px rgba(0,0,0,.3)}
+svg{max-width:100%;height:auto;display:block;margin:16px 0}
+svg .frame{fill:none;stroke:var(--accent);stroke-width:1.3;stroke-dasharray:6 4}
+svg .frame2{fill:none;stroke:var(--border);stroke-width:1.3;stroke-dasharray:6 4}
+svg .fr{fill:var(--accent);font:bold 12px -apple-system,sans-serif}
+svg .hdr{fill:var(--text);font:bold 12.5px -apple-system,sans-serif}
+svg .lane{fill:var(--dim);font:italic 11.5px -apple-system,sans-serif}
+svg .box{fill:var(--surface);stroke:var(--border);stroke-width:1.3}
+svg .star{stroke:var(--red);stroke-width:2.2}
+svg .dapo{stroke:var(--green);stroke-width:1.8}
+svg .ngu{stroke:var(--purple);stroke-width:1.8}
+svg .warnb{stroke:var(--orange);stroke-width:2.2}
+svg .gray{opacity:.55}
+svg .lbl{fill:var(--text);font:12px -apple-system,sans-serif}
+svg .lblr{fill:var(--red);font:bold 12px -apple-system,sans-serif}
+svg .code{fill:var(--dim);font:10.5px ui-monospace,Menlo,monospace}
+svg a .code{fill:var(--accent);text-decoration:underline}
+svg .note{fill:var(--dim);font:11.5px -apple-system,sans-serif}
+svg .arr{stroke:var(--dim);stroke-width:1.4;fill:none}
+svg .thin{stroke-dasharray:3 3}
+svg .dapo-a{stroke:var(--green)} svg .ngu-a{stroke:var(--purple)}
+svg .ahead{fill:var(--dim)}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+  document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head>
+<body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+  function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+  function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
+    b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
+      else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+  document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+<div class="wrap">
+
+<h1>Where async DAPO and "Never Give Up" would make their per-group decision — and whether moving advantages into actors gets in the way</h1>
+<p class="sub">Design note for <a href="https://github.com/NVIDIA-NeMo/RL/pull/4326">NVIDIA-NeMo/RL #4326</a> (advantage stage in sharded Ray actors).
+All permalinks pin the PR head <code>93c8818</code>.</p>
+
+<div class="status">
+<dl>
+  <dt>Before</dt>
+  <dd>The single controller refuses <code>use_dynamic_sampling</code> at startup
+  (<a href="https://github.com/NVIDIA-NeMo/RL/blob/93c8818cad25e3b9d6b5240f4c03607b0c9deb25/nemo_rl/algorithms/single_controller_utils/config.py#L1108-L1122">config.py:1108</a>). Never Give Up does not exist in the repo.</dd>
+  <dt>This PR</dt>
+  <dd>Moves the advantage math into CPU actors and splits each chunk across them, assuming every group has
+  <code>num_generations_per_prompt</code> rows.</dd>
+  <dt>Status</dt>
+  <dd><span class="verdict prop">Proposed — not implemented.</span> The PR does not block DAPO. It gets in
+  Never Give Up's way in exactly one place: the splitter's fixed group size (last section).</dd>
+</dl>
+</div>
+
+<nav class="chain">
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4326-duplicate-prompts.html">same-prompt baselines</a>
+  <span class="here">DAPO &amp; NGU design</span>
+</nav>
+<p class="chainnote">Two pages on this PR, one question each — this one: where a whole-group decision would go.</p>
+
+<div class="bg"><b>The two features.</b>
+<b>DAPO dynamic sampling</b>: if every response to a prompt gets the same reward, GRPO gives them all
+advantage 0, so the group teaches nothing. Drop it and train on another prompt instead
+(sync version: <a href="https://github.com/NVIDIA-NeMo/RL/blob/93c8818cad25e3b9d6b5240f4c03607b0c9deb25/nemo_rl/algorithms/grpo.py#L2061"><code>grpo.py:2061</code></a>).
+<b><a href="https://mnoukhov.github.io/posts/ngu/">Never Give Up (NGU)</a></b>: if every response is wrong, do not drop the prompt. With
+probability <i>p</i>, sample <i>k</i> more responses for it, keep the old ones, and train on the whole
+grown group once one is right. All-correct groups are dropped, as in DAPO.
+Both need one decision per group, made from its rewards. Dotted words have a short explanation: hover or tap them.</div>
+
+<p>In the single controller, each prompt is handled by its own task,
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/93c8818cad25e3b9d6b5240f4c03607b0c9deb25/nemo_rl/algorithms/single_controller.py#L1993"><code>_dispatch_one_prompt</code></a>. It calls
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/93c8818cad25e3b9d6b5240f4c03607b0c9deb25/nemo_rl/experience/rollout_manager.py#L1831"><code>RolloutManager.generate_and_push</code></a>, which runs in the same process: it
+generates the group (<a href="https://github.com/NVIDIA-NeMo/RL/blob/93c8818cad25e3b9d6b5240f4c03607b0c9deb25/nemo_rl/experience/rollout_manager.py#L1950"><code>run_rollout</code></a>), gets back each response's reward as a
+plain float (<a href="https://github.com/NVIDIA-NeMo/RL/blob/93c8818cad25e3b9d6b5240f4c03607b0c9deb25/nemo_rl/experience/interfaces.py#L51"><code>Completion.reward</code></a>), and only then writes the rows to the
+data plane (<a href="https://github.com/NVIDIA-NeMo/RL/blob/93c8818cad25e3b9d6b5240f4c03607b0c9deb25/nemo_rl/experience/rollout_manager.py#L1955"><code>_tq_buffer.commit</code></a>). The gap between those two lines is where both
+rules belong: the rewards are known, and no GPU time has been spent on the group yet. The code already has the
+"give up on this group, use a spare" path there
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/93c8818cad25e3b9d6b5240f4c03607b0c9deb25/nemo_rl/algorithms/single_controller.py#L2534"><code>_take_replacement</code></a> draws from
+<span class="tip" tabindex="0" data-tip="_replacement_reserve: a small pool of dataloader prompts kept aside so a dropped group can be replaced without breaking the loader order. Enabled with async_rl.rollout_failure.on_dropped_prompt: replace.">the spare-prompt pool</span>).</p>
+
+<h2>Where the decision runs</h2>
+<svg viewBox="0 0 940 500" role="img" aria-label="Where DAPO and Never Give Up decide in the single controller"><defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" class="ahead"/></marker></defs>
+<text class="hdr" x="16" y="22" text-anchor="start">Where a whole-group decision runs — every box below is a real function</text>
+<rect class="frame" x="10" y="34" width="648" height="390" rx="10"/>
+<text class="fr" x="22" y="52" text-anchor="start">SingleControllerActor — one Ray actor, one event loop</text>
+<rect class="frame2" x="672" y="34" width="258" height="390" rx="10"/>
+<text class="fr" x="684" y="52" text-anchor="start">other processes</text>
+<text class="lane" x="22" y="76" text-anchor="start">rollout pump: one task per prompt</text>
+<rect class="box" x="20" y="86" width="142" height="50" rx="7"/>
+<text class="lbl" x="28" y="104" text-anchor="start">dispatch task</text>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/93c8818cad25e3b9d6b5240f4c03607b0c9deb25/nemo_rl/algorithms/single_controller.py#L1993" target="_blank" rel="noopener"><text class="code" x="28" y="120" text-anchor="start">_dispatch_one_prompt</text></a>
+<rect class="box" x="172" y="86" width="150" height="50" rx="7"/>
+<text class="lbl" x="180" y="104" text-anchor="start">RolloutManager</text>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/93c8818cad25e3b9d6b5240f4c03607b0c9deb25/nemo_rl/experience/rollout_manager.py#L1831" target="_blank" rel="noopener"><text class="code" x="180" y="120" text-anchor="start">generate_and_push</text></a>
+<rect class="box star" x="342" y="86" width="150" height="50" rx="7"/>
+<text class="lblr" x="350" y="104" text-anchor="start">★ decide per group</text>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/93c8818cad25e3b9d6b5240f4c03607b0c9deb25/nemo_rl/experience/interfaces.py#L51" target="_blank" rel="noopener"><text class="code" x="350" y="120" text-anchor="start">reads c.reward floats</text></a>
+<rect class="box" x="512" y="86" width="136" height="50" rx="7"/>
+<text class="lbl" x="520" y="104" text-anchor="start">keep: commit rows</text>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/93c8818cad25e3b9d6b5240f4c03607b0c9deb25/nemo_rl/experience/rollout_manager.py#L1955" target="_blank" rel="noopener"><text class="code" x="520" y="120" text-anchor="start">_tq_buffer.commit</text></a>
+<path class="arr" d="M162 111 L170 111" marker-end="url(#ah)"/>
+<path class="arr" d="M322 111 L340 111" marker-end="url(#ah)"/>
+<path class="arr" d="M492 111 L510 111" marker-end="url(#ah)"/>
+<rect class="box dapo" x="172" y="160" width="196" height="46" rx="7"/>
+<text class="lbl" x="180" y="178" text-anchor="start">DAPO: all rewards equal</text>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/93c8818cad25e3b9d6b5240f4c03607b0c9deb25/nemo_rl/algorithms/single_controller.py#L2534" target="_blank" rel="noopener"><text class="code" x="180" y="194" text-anchor="start">_take_replacement → spare</text></a>
+<rect class="box ngu" x="382" y="160" width="266" height="46" rx="7"/>
+<text class="lbl" x="390" y="178" text-anchor="start">NGU: all wrong and coin < p</text>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/93c8818cad25e3b9d6b5240f4c03607b0c9deb25/nemo_rl/experience/rollout_manager.py#L1950" target="_blank" rel="noopener"><text class="code" x="390" y="194" text-anchor="start">keep old rows, call run_rollout again</text></a>
+<path class="arr dapo-a" d="M400 136 L300 158" marker-end="url(#ah)"/>
+<path class="arr ngu-a" d="M440 136 L500 158" marker-end="url(#ah)"/>
+<path class="arr dapo-a" d="M190 160 L190 138" marker-end="url(#ah)"/>
+<path class="arr ngu-a" d="M470 206 C 470 226 250 226 250 138" marker-end="url(#ah)"/>
+<text class="lane" x="22" y="246" text-anchor="start">token-capture mode: same decision, after the finalizer</text>
+<rect class="box" x="20" y="256" width="302" height="46" rx="7"/>
+<text class="lbl" x="28" y="274" text-anchor="start">finalizer rebuilds rows, marks valid ones</text>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/93c8818cad25e3b9d6b5240f4c03607b0c9deb25/nemo_rl/algorithms/single_controller.py#L2064" target="_blank" rel="noopener"><text class="code" x="28" y="290" text-anchor="start">_finalize_with_actor → FinalizedGroup</text></a>
+<rect class="box star" x="342" y="256" width="306" height="46" rx="7"/>
+<text class="lblr" x="350" y="274" text-anchor="start">★ same check, on valid rows only</text>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/93c8818cad25e3b9d6b5240f4c03607b0c9deb25/nemo_rl/algorithms/single_controller.py#L2075" target="_blank" rel="noopener"><text class="code" x="350" y="290" text-anchor="start">next to min_valid_fraction (L2075)</text></a>
+<path class="arr" d="M322 279 L340 279" marker-end="url(#ah)"/>
+<text class="lane" x="22" y="332" text-anchor="start">train pump: takes whole groups, later</text>
+<rect class="box" x="20" y="342" width="120" height="50" rx="7"/>
+<text class="lbl" x="28" y="360" text-anchor="start">pick groups</text>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/93c8818cad25e3b9d6b5240f4c03607b0c9deb25/nemo_rl/algorithms/single_controller.py#L2787" target="_blank" rel="noopener"><text class="code" x="28" y="376" text-anchor="start">sampler.select</text></a>
+<rect class="box" x="154" y="342" width="112" height="50" rx="7"/>
+<text class="lbl" x="162" y="360" text-anchor="start">logprobs</text>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/93c8818cad25e3b9d6b5240f4c03607b0c9deb25/nemo_rl/algorithms/single_controller.py#L2937" target="_blank" rel="noopener"><text class="code" x="162" y="376" text-anchor="start">trainer GPUs</text></a>
+<rect class="box warnb" x="280" y="342" width="216" height="50" rx="7"/>
+<text class="lbl" x="288" y="360" text-anchor="start">_advantage_stage splits</text>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/93c8818cad25e3b9d6b5240f4c03607b0c9deb25/nemo_rl/algorithms/single_controller_utils/advantage_stage.py#L194-L211" target="_blank" rel="noopener"><text class="code" x="288" y="376" text-anchor="start">by fixed group size (L194)</text></a>
+<rect class="box" x="510" y="342" width="138" height="50" rx="7"/>
+<text class="lbl" x="518" y="360" text-anchor="start">train on chunk</text>
+<text class="code" x="518" y="376" text-anchor="start">gradients</text>
+<path class="arr" d="M140 367 L152 367" marker-end="url(#ah)"/>
+<path class="arr" d="M266 367 L278 367" marker-end="url(#ah)"/>
+<path class="arr" d="M496 367 L508 367" marker-end="url(#ah)"/>
+<rect class="box" x="684" y="86" width="234" height="50" rx="7"/>
+<text class="lbl" x="692" y="104" text-anchor="start">generation + reward</text>
+<text class="code" x="692" y="120" text-anchor="start">vLLM workers, environment</text>
+<rect class="box" x="684" y="160" width="234" height="46" rx="7"/>
+<text class="lbl" x="692" y="178" text-anchor="start">data plane</text>
+<text class="code" x="692" y="194" text-anchor="start">TransferQueue rows</text>
+<rect class="box" x="684" y="256" width="234" height="46" rx="7"/>
+<text class="lbl" x="692" y="274" text-anchor="start">token-capture finalizer</text>
+<text class="code" x="692" y="290" text-anchor="start">RolloutReassemblerActor</text>
+<rect class="box gray" x="684" y="342" width="234" height="50" rx="7"/>
+<text class="lbl" x="692" y="360" text-anchor="start">AdvantageActor ×N (this PR)</text>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/93c8818cad25e3b9d6b5240f4c03607b0c9deb25/nemo_rl/algorithms/advantage_actor.py#L63" target="_blank" rel="noopener"><text class="code" x="692" y="376" text-anchor="start">not part of either decision</text></a>
+<path class="arr" d="M247 86 C 247 66 682 62 700 84" marker-end="url(#ah)"/>
+<path class="arr" d="M648 111 C 665 125 665 170 682 180" marker-end="url(#ah)"/>
+<path class="arr" d="M648 279 L682 279" marker-end="url(#ah)"/>
+<path class="arr thin" d="M388 392 C 388 416 800 416 800 394" marker-end="url(#ah)"/>
+<rect class="box star" x="20" y="436" width="16" height="12" rx="3"/>
+<text class="note" x="42" y="446" text-anchor="start">new decision point</text>
+<rect class="box warnb" x="190" y="436" width="16" height="12" rx="3"/>
+<text class="note" x="212" y="446" text-anchor="start">assumes every group has num_generations_per_prompt rows</text>
+<rect class="box gray" x="560" y="436" width="16" height="12" rx="3"/>
+<text class="note" x="582" y="446" text-anchor="start">not involved</text>
+<text class="note" x="16" y="474" text-anchor="start">Both rules read only rewards the controller already holds, before any row reaches the data plane.</text>
+<text class="note" x="16" y="490" text-anchor="start">The advantage actors run much later, on groups that were already kept.</text></svg>
+
+<h2>The design, step by step — proposed, not in the PR</h2>
+<p class="where"><b>Where it lands: RL only.</b> DAPO: <code>rollout_manager.py</code> (one check before commit, one new
+outcome), <code>single_controller.py</code> (treat the new outcome like a skipped prompt), <code>config.py</code>
+(allow the flag). NGU: the same spot, plus variable-size groups (next section). <b>No advantage-actor change</b> for
+either. Nothing below is implemented or run.</p>
+<p>One prompt through each rule, with <i>k</i> = 4 responses and NGU's <i>p</i> = 0.9:</p>
+<div class="mono">DAPO  prompt a   rewards 1 1 1 1          all equal         → drop; take spare b from the pool
+      spare  b   rewards 1 0 1 0          mixed             → commit 4 rows
+NGU   prompt c   round 1: 0 0 0 0         all wrong, coin 0.42 &lt; 0.9 → keep 4 rows, generate again
+                 round 2: 0 0 0 0         all wrong, coin 0.17 &lt; 0.9 → keep 8 rows, generate again
+                 round 3: 0 1 0 0         solved            → commit all 12 rows as one group</div>
+<pre class="diff"><span class="hunk">@@ rollout_manager.py L134-L144 · RolloutOutcome</span>
+     SKIPPED = "skipped"
+<span class="add">+    # DAPO: every reward in the group was equal, so it carries no signal. Like
++    # SKIPPED the caller replaces it, but it does not use up a failure budget.
++    ZERO_SIGNAL = "zero_signal"</span>
+<span class="hunk">@@ rollout_manager.py L1950-L1955 · generate_and_push</span>
+                     record = await self.run_rollout(attempt_input_sample)
+                 finally:
+                     if inflight_registry is not None:
+                         inflight_registry.pop(tq_group_id, None)
+<span class="add">+                if self._dynamic_sampling and len({c.reward for c in record.completions}) == 1:
++                    await self._tq_buffer.remove_group(tq_group_id)  # nothing was written yet
++                    self.stats.zero_signal += 1
++                    return RolloutOutcome.ZERO_SIGNAL</span>
+                 end_version = self._weight_version
+                 await self._tq_buffer.commit(
+<span class="hunk">@@ single_controller.py L2185 · _dispatch_one_prompt</span>
+<span class="del">-                        if outcome is not RolloutOutcome.SKIPPED:
+</span><span class="add">+                        if outcome is RolloutOutcome.COMMITTED:</span>
+                             break
+<span class="hunk">@@ config.py L1112 · the startup check that refuses unsupported flags</span>
+<span class="del">-            ("use_dynamic_sampling", algo_cfg.use_dynamic_sampling),
+</span></pre>
+<p>What each piece does. The check uses exact reward equality, like the sync path's
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/93c8818cad25e3b9d6b5240f4c03607b0c9deb25/nemo_rl/algorithms/utils.py#L229"><code>calculate_trivial_reward_distributions</code></a>. The dropped
+group then goes down the existing skipped-prompt branch: a spare replaces it, or the step closes one group short
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/93c8818cad25e3b9d6b5240f4c03607b0c9deb25/nemo_rl/algorithms/single_controller.py#L2597"><code>_credit_shortfall</code></a>). In token-capture mode,
+the same check goes after the finalizer, next to
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/93c8818cad25e3b9d6b5240f4c03607b0c9deb25/nemo_rl/algorithms/single_controller.py#L2075"><code>min_valid_fraction_per_group</code></a>. It needs one new field on
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/93c8818cad25e3b9d6b5240f4c03607b0c9deb25/nemo_rl/experience/rollout_reassembler.py#L88-L108"><code>FinalizedGroup</code></a>, "the valid rows'
+rewards are all equal", computed from
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/93c8818cad25e3b9d6b5240f4c03607b0c9deb25/nemo_rl/experience/rollout_reassembler.py#L404"><code>valid_rows</code></a>. The real work is sizing:
+DAPO often drops 30–70% of groups, but the spare pool defaults to 1 prompt and 1 retry per group
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/93c8818cad25e3b9d6b5240f4c03607b0c9deb25/nemo_rl/algorithms/single_controller_utils/config.py#L208-L227"><code>rollout_failure</code></a>),
+so it needs a larger pool and a cap like the sync path's <code>dynamic_sampling_max_gen_batches</code>.</p>
+<p><b>NGU</b> uses the same spot but loops instead of returning. The task keeps the earlier rounds'
+<code>Completion</code> objects in memory, calls <code>run_rollout</code> again, and commits one grown group
+(4, then 8, then 12 rows). Two more things change, both outside the advantage actors. First, each round needs its
+weight version, because NGU drops stale responses from training but keeps them in the baseline. Second, the
+advantage estimator must then use a separate "counts for the baseline" mask; today it uses the training mask
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/93c8818cad25e3b9d6b5240f4c03607b0c9deb25/nemo_rl/algorithms/single_controller_utils/advantage_stage.py#L376"><code>valid_mask=final_sample_mask</code></a>).
+That estimator change runs the same code in-process or in an actor.</p>
+
+<h2>The one place this PR gets in the way: fixed group size</h2>
+<p>The sampler builds a chunk by joining whole groups, so it knows where each group starts
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/93c8818cad25e3b9d6b5240f4c03607b0c9deb25/nemo_rl/algorithms/async_utils/staleness_sampler.py#L302"><code>selected_metas[0].concat(...)</code></a>). That list is lost. The PR's splitter then
+guesses the boundaries from <code>num_generations_per_prompt</code>
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/93c8818cad25e3b9d6b5240f4c03607b0c9deb25/nemo_rl/algorithms/single_controller_utils/advantage_stage.py#L194-L211"><code>split_meta_by_prompt_group</code></a>). With NGU's grown group, the guess can cut the
+group in two, and nothing fails. Real output of the repo's baseline code, 2 actors, <i>k</i> = 4:</p>
+<div class="mono">chunk:   b (4 rows) | c (12 rows, NGU after 3 rounds) | d (4 rows)   = 20 rows
+splitter: 20 / 4 = "5 groups" → 3 per actor → cut at row 12, inside c
+
+c's rows          round 1 (4)        round 2 (4)          round 3 (4)
+one call          −0.302 × 4         −0.302 × 4           −0.302  1.0  −0.302  −0.302
+split at row 12      0   × 4            0   × 4           −0.577  1.0  −0.577  −0.577
+                  └──── actor 1: 8 all-wrong rows look like an all-equal group ────┘</div>
+<p>c's 8 older wrong answers stop being pushed down. The fix is small: have the sampler also return each group's
+row count, and split on those counts instead of on a fixed size. The other fixed-size assumptions already in the
+code fail loudly, not silently: the checkpoint restore check
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/93c8818cad25e3b9d6b5240f4c03607b0c9deb25/nemo_rl/algorithms/async_utils/replay_buffer.py#L1783"><code>expected_group_size</code></a>) and the
+token-capture assert (<a href="https://github.com/NVIDIA-NeMo/RL/blob/93c8818cad25e3b9d6b5240f4c03607b0c9deb25/nemo_rl/experience/rollout_manager.py#L1093"><code>rollout_manager.py:1093</code></a>).</p>
+
+<div class="warn"><strong>So what.</strong> Moving advantages into actors does not make DAPO or Never Give Up harder.
+Both decide from rewards the controller already holds, before commit, and the advantage actors never see a dropped
+group. The only thing to change for NGU is the splitter's fixed group size. Today every group has exactly
+<code>num_generations_per_prompt</code> rows, so it is correct now. It is a future trap, not a bug in this PR.</div>
+
+</div>
+</body>
+</html>
