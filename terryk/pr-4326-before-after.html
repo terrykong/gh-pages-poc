@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NVIDIA-NeMo/RL #4326 — where the advantage math runs, before and after</title>
+<style>
+:root{--bg:#0d1117;--surface:#161b22;--surface2:#1c2128;--border:#30363d;--text:#e6edf3;--dim:#8b949e;--accent:#58a6ff;--green:#3fb950;--orange:#d29922;--red:#f85149}
+:root[data-theme="light"]{--bg:#ffffff;--surface:#f6f8fa;--surface2:#eaeef2;--border:#d0d7de;--text:#1f2328;--dim:#59636e;--accent:#0969da;--green:#1a7f37;--orange:#9a6700;--red:#cf222e}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:28px 20px 70px}
+h1{font-size:22px;margin:0 0 8px;line-height:1.3}
+h2{font-size:18px;margin:32px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+a{color:var(--accent);text-decoration:none} a:hover{text-decoration:underline}
+code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
+.sub{color:var(--dim);font-size:13.5px;margin:0 0 16px}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;font:13px/1 ui-monospace,Menlo,monospace;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.18)}
+.diff{font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:12px;overflow-x:auto;white-space:pre;margin:10px 0}
+.diff .hunk{color:var(--accent)}
+.hl{border-left:3px solid var(--green);background:var(--surface);padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0}
+.bg{border:1px dashed var(--border);border-radius:8px;padding:10px 14px;margin:0 0 16px;font-size:14px}
+.status{border:1px solid var(--border);border-radius:10px;background:var(--surface);padding:2px 16px 10px;margin:0 0 20px}
+.status dl{display:grid;grid-template-columns:max-content 1fr;gap:4px 14px;margin:12px 0 0}
+.status dt{color:var(--dim);font-size:12px;text-transform:uppercase;letter-spacing:.04em;white-space:nowrap;padding-top:2px}
+.status dd{margin:0;font-size:14px}
+.verdict{font-weight:700} .verdict.good{color:var(--green)}
+nav.chain{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 6px;padding:0}
+nav.chain a,nav.chain span{display:inline-block;padding:5px 11px;border:1px solid var(--border);border-radius:20px;background:var(--surface);text-decoration:none;color:var(--accent);font-size:12.5px;line-height:1.3;white-space:nowrap}
+nav.chain a:hover{background:var(--surface2)}
+nav.chain span.here{background:var(--accent);color:var(--bg);border-color:var(--accent);font-weight:600}
+p.chainnote{color:var(--dim);font-size:12px;margin:0 0 18px}
+table{border-collapse:collapse;width:100%;font-size:13.5px;margin:10px 0}
+th,td{border:1px solid var(--border);padding:6px 9px;text-align:left;vertical-align:top}
+th{background:var(--surface);font-weight:600}
+td.b{color:var(--red)} td.g{color:var(--green)}
+.tablewrap{overflow-x:auto}
+.tip{border-bottom:1px dotted var(--dim);cursor:help;position:relative;outline:none}
+.tip:hover::after,.tip:focus::after{content:attr(data-tip);position:absolute;left:0;top:1.7em;z-index:60;width:max-content;max-width:min(340px,80vw);white-space:normal;background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:7px 10px;font:13px/1.45 -apple-system,sans-serif;font-weight:400;box-shadow:0 4px 14px rgba(0,0,0,.3)}
+svg{max-width:100%;height:auto;display:block;margin:16px 0}
+svg .node{fill:none;stroke:var(--border);stroke-width:1.4;stroke-dasharray:6 4}
+svg .proc{fill:var(--surface);stroke:var(--border);stroke-width:1.3}
+svg .dim{opacity:.6}
+svg .act{stroke:var(--green);stroke-width:1.8}
+svg .phdr{fill:var(--text);font:bold 13px -apple-system,sans-serif}
+svg .nlab{fill:var(--dim);font:italic 12px -apple-system,sans-serif}
+svg .plab{fill:var(--text);font:bold 12.5px -apple-system,sans-serif}
+svg .code{fill:var(--accent);font:11px ui-monospace,Menlo,monospace}
+svg a .code{text-decoration:underline}
+svg .code0{fill:var(--dim);font:11px ui-monospace,Menlo,monospace}
+svg .loopbad{fill:var(--red);opacity:.22;stroke:var(--red)}
+svg .loopgood{fill:var(--green);opacity:.18;stroke:var(--green)}
+svg .loopt{fill:var(--red);font:bold 12px -apple-system,sans-serif}
+svg .loopt2{fill:var(--green);font:bold 12px -apple-system,sans-serif}
+svg .alab{fill:var(--dim);font:11px -apple-system,sans-serif}
+svg .note{fill:var(--dim);font:11.5px -apple-system,sans-serif}
+svg .arr{stroke:var(--dim);stroke-width:1.5;fill:none}
+svg .good{stroke:var(--green)}
+svg .ahead{fill:var(--dim)}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+  document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head>
+<body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+  function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+  function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
+    b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
+      else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+  document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+<div class="wrap">
+
+<h1>Where the advantage math runs, before and after this PR</h1>
+<p class="sub"><a href="https://github.com/NVIDIA-NeMo/RL/pull/4326">NVIDIA-NeMo/RL #4326</a> — compute advantages in dedicated, sharded Ray actors.
+Links for the new code pin the PR head <code>93c8818</code>; links for the old code pin the base <code>7d4db00</code>.</p>
+
+<div class="status">
+<dl>
+  <dt>Before</dt>
+  <dd>The controller, one Ray actor (on the head node when the cluster has a dedicated Ray head), pulled every advantage input for a batch into its own
+  memory and did the math on its own event loop. Nothing else in the controller could run meanwhile.</dd>
+  <dt>This PR</dt>
+  <dd>Adds an optional pool of CPU actors on the GPU nodes. The controller sends each one a list of row ids.
+  Each actor reads its rows, computes, writes the advantages back, and returns a few summary numbers.</dd>
+  <dt>Status</dt>
+  <dd><span class="verdict good">In this PR, off by default.</span> <code>num_advantage_workers: 0</code> keeps the
+  math in the controller. The review's open items are on the other two pages and in the (pending) review.</dd>
+</dl>
+</div>
+
+<nav class="chain">
+  <span class="here">before and after</span>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4326-duplicate-prompts.html">same-prompt baselines</a>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4326-dapo-ngu-design.html">DAPO &amp; NGU design</a>
+</nav>
+<p class="chainnote">Three pages on this PR, one question each — this one: where the advantage math runs, before and after.</p>
+
+<div class="bg"><b>Background.</b> The single controller is one CPU-only Ray actor. On one event loop it runs the
+<span class="tip" tabindex="0" data-tip="The task that sends prompts to generation and commits finished groups.">rollout pump</span>
+and the <span class="tip" tabindex="0" data-tip="The task that takes finished groups, computes logprobs and advantages, and trains.">train pump</span>.
+Training data does not pass through it: rows live in the
+<span class="tip" tabindex="0" data-tip="TransferQueue: row storage spread over the cluster. Processes read and write rows by id; only the ids travel over Ray.">data plane</span>,
+and processes pass row ids around. The advantage stage was the exception: it pulled the actual numbers into the
+controller. Dotted words have a short explanation: hover or tap them.</div>
+
+<h2>Before and after, on the cluster</h2>
+<p>Same example in both: one chunk of 6 prompt groups with 5 responses each, so 30 rows; after the PR, 3 actors
+take 2 groups (10 rows) each.</p>
+<svg viewBox="0 0 940 574" role="img" aria-label="Before: the controller on the head node fetches every advantage input and computes on its own event loop. After: three CPU actors on GPU nodes each fetch, compute and write their share; the controller sends row ids and gets back a few numbers."><defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" class="ahead"/></marker></defs>
+<text class="phdr" x="16" y="22" text-anchor="start">main — the controller does the advantage math itself</text>
+<rect class="node" x="10" y="32" width="430" height="206" rx="7"/>
+<text class="nlab" x="22" y="50" text-anchor="start">head node</text>
+<rect class="proc" x="24" y="60" width="402" height="164" rx="7"/>
+<text class="plab" x="36" y="80" text-anchor="start">SingleControllerActor</text>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/7d4db003497a6171fb4d9a8e51da0fbd4bdd489b/nemo_rl/algorithms/single_controller.py#L5175" target="_blank" rel="noopener"><text class="code" x="36" y="104" text-anchor="start">1  get_samples: 30 rows, every input column</text></a>
+<text class="code0" x="36" y="124" text-anchor="start">2  torch: masks, baseline, advantages</text>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/7d4db003497a6171fb4d9a8e51da0fbd4bdd489b/nemo_rl/algorithms/single_controller.py#L5355" target="_blank" rel="noopener"><text class="code" x="36" y="144" text-anchor="start">3  put_samples(advantages), under the lock</text></a>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/7d4db003497a6171fb4d9a8e51da0fbd4bdd489b/nemo_rl/algorithms/single_controller.py#L5325" target="_blank" rel="noopener"><text class="code" x="36" y="164" text-anchor="start">4  keep reward + advantage tensors to step end</text></a>
+<rect class="loopbad" x="36" y="180" width="378" height="30" rx="7"/>
+<text class="loopt" x="48" y="200" text-anchor="start">event loop blocked through steps 1–2</text>
+<rect class="node" x="480" y="32" width="450" height="206" rx="7"/>
+<text class="nlab" x="492" y="50" text-anchor="start">rest of the cluster</text>
+<rect class="proc" x="494" y="60" width="422" height="64" rx="7"/>
+<text class="plab" x="506" y="82" text-anchor="start">data plane (TransferQueue rows)</text>
+<text class="code0" x="506" y="104" text-anchor="start">30 rows: 6 groups × 5 responses, by row id</text>
+<rect class="proc dim" x="494" y="140" width="422" height="84" rx="7"/>
+<text class="plab" x="506" y="162" text-anchor="start">trainer GPU workers</text>
+<text class="code0" x="506" y="184" text-anchor="start">wait for advantages before training</text>
+<path class="arr" d="M492 84 L430 104" marker-end="url(#ah)"/>
+<path class="arr good" d="M430 144 L492 110" marker-end="url(#ah)"/>
+<text class="phdr" x="16" y="272" text-anchor="start">this PR, num_advantage_workers: 3 — the controller only hands out row ids</text>
+<rect class="node" x="10" y="282" width="430" height="226" rx="7"/>
+<text class="nlab" x="22" y="300" text-anchor="start">head node</text>
+<rect class="proc" x="24" y="310" width="402" height="184" rx="7"/>
+<text class="plab" x="36" y="330" text-anchor="start">SingleControllerActor</text>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/93c8818cad25e3b9d6b5240f4c03607b0c9deb25/nemo_rl/algorithms/single_controller.py#L5198" target="_blank" rel="noopener"><text class="code" x="36" y="354" text-anchor="start">1  split 6 groups into 3 shards of 2</text></a>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/93c8818cad25e3b9d6b5240f4c03607b0c9deb25/nemo_rl/algorithms/single_controller.py#L5260" target="_blank" rel="noopener"><text class="code" x="36" y="374" text-anchor="start">2  actor.run.remote(10 row ids) × 3</text></a>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/93c8818cad25e3b9d6b5240f4c03607b0c9deb25/nemo_rl/algorithms/single_controller.py#L5278" target="_blank" rel="noopener"><text class="code" x="36" y="394" text-anchor="start">3  add up the ~10 numbers each returns</text></a>
+<text class="code0" x="36" y="414" text-anchor="start">no advantage tensors in this process</text>
+<rect class="loopgood" x="36" y="440" width="378" height="30" rx="7"/>
+<text class="loopt2" x="48" y="460" text-anchor="start">event loop free while the actors work</text>
+<rect class="node" x="480" y="282" width="450" height="226" rx="7"/>
+<text class="nlab" x="492" y="300" text-anchor="start">GPU nodes (actors avoid the head)</text>
+<rect class="proc act" x="494" y="312" width="138" height="76" rx="7"/>
+<text class="plab" x="504" y="332" text-anchor="start">AdvantageActor 1</text>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/93c8818cad25e3b9d6b5240f4c03607b0c9deb25/nemo_rl/algorithms/advantage_actor.py#L43-L53" target="_blank" rel="noopener"><text class="code" x="504" y="352" text-anchor="start">own TQ client</text></a>
+<text class="code0" x="504" y="372" text-anchor="start">rows 0–9</text>
+<path class="arr good" d="M544 390 L544 428" marker-end="url(#ah)"/>
+<path class="arr" d="M582 428 L582 390" marker-end="url(#ah)"/>
+<rect class="proc act" x="636" y="312" width="138" height="76" rx="7"/>
+<text class="plab" x="646" y="332" text-anchor="start">AdvantageActor 2</text>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/93c8818cad25e3b9d6b5240f4c03607b0c9deb25/nemo_rl/algorithms/advantage_actor.py#L43-L53" target="_blank" rel="noopener"><text class="code" x="646" y="352" text-anchor="start">own TQ client</text></a>
+<text class="code0" x="646" y="372" text-anchor="start">rows 10–19</text>
+<path class="arr good" d="M686 390 L686 428" marker-end="url(#ah)"/>
+<path class="arr" d="M724 428 L724 390" marker-end="url(#ah)"/>
+<rect class="proc act" x="778" y="312" width="138" height="76" rx="7"/>
+<text class="plab" x="788" y="332" text-anchor="start">AdvantageActor 3</text>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/93c8818cad25e3b9d6b5240f4c03607b0c9deb25/nemo_rl/algorithms/advantage_actor.py#L43-L53" target="_blank" rel="noopener"><text class="code" x="788" y="352" text-anchor="start">own TQ client</text></a>
+<text class="code0" x="788" y="372" text-anchor="start">rows 20–29</text>
+<path class="arr good" d="M828 390 L828 428" marker-end="url(#ah)"/>
+<path class="arr" d="M866 428 L866 390" marker-end="url(#ah)"/>
+<rect class="proc" x="494" y="430" width="422" height="64" rx="7"/>
+<text class="plab" x="506" y="452" text-anchor="start">data plane (TransferQueue rows)</text>
+<text class="code0" x="506" y="474" text-anchor="start">each actor reads its 10 rows, writes advantages</text>
+<path class="arr" d="M428 370 L492 352" marker-end="url(#ah)"/>
+<path class="arr good" d="M492 376 L428 398" marker-end="url(#ah)"/>
+<rect class="loopbad" x="20" y="524" width="16" height="12" rx="7"/>
+<text class="note" x="42" y="534" text-anchor="start">controller loop blocked</text>
+<rect class="loopgood" x="210" y="524" width="16" height="12" rx="7"/>
+<text class="note" x="232" y="534" text-anchor="start">controller loop free</text>
+<path class="arr good" d="M380 530 L410 530" marker-end="url(#ah)"/>
+<text class="note" x="418" y="534" text-anchor="start">advantages or their sums</text>
+<path class="arr" d="M600 530 L630 530" marker-end="url(#ah)"/>
+<text class="note" x="638" y="534" text-anchor="start">inputs or row ids</text>
+<text class="note" x="16" y="562" text-anchor="start">Linked lines: steps 1–4 above are at the base commit (main); the lower panel is at the PR head.</text></svg>
+
+<h2>Same code, different place</h2>
+<p>The two paths meet in one function. On main the math lived inside the controller's
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/7d4db003497a6171fb4d9a8e51da0fbd4bdd489b/nemo_rl/algorithms/single_controller.py#L5154"><code>_advantage_stage</code></a>. The PR moves it
+unchanged into <a href="https://github.com/NVIDIA-NeMo/RL/blob/93c8818cad25e3b9d6b5240f4c03607b0c9deb25/nemo_rl/algorithms/single_controller_utils/advantage_stage.py#L256"><code>AdvantageComputer.run</code></a> and calls it from one of two places. With no actors it runs in the controller; otherwise the next free actor runs it:</p>
+<pre class="diff"><span class="hunk">@@ single_controller.py L5254-L5260 · _run_advantage_stage (PR head)</span>
+    async def _run_advantage_stage(self, request: AdvantageRequest) -> AdvantageOutcome:
+        """Run one advantage stage on the pool, or in-process without one."""
+        if not self._advantage_actors:
+            return await self._advantage_computer.run(request)
+        actor = await self._available_advantage_actors.get()
+        try:
+            outcome = await actor.run.remote(request)</pre>
+<p>The actor side is a thin wrapper
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/93c8818cad25e3b9d6b5240f4c03607b0c9deb25/nemo_rl/algorithms/advantage_actor.py#L63-L68"><code>AdvantageActor.run</code></a>): it checks that the request
+and the answer hold only small metadata, and calls the same <code>AdvantageComputer.run</code> with its own data-plane
+client. So both paths produce the same advantages; what differs is the process, what sits in memory, and what comes back.
+The one exception, same-prompt groups split across actors, is on the
+<a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4326-duplicate-prompts.html">same-prompt page</a>.</p>
+
+<h2>What changes, side by side</h2>
+<div class="tablewrap"><table>
+<tr><th></th><th>main</th><th>this PR, 0 workers (default)</th><th>this PR, 3 workers</th></tr>
+<tr><td>Who runs the math</td><td>controller</td><td>controller</td><td class="g">3 CPU actors on GPU nodes
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/93c8818cad25e3b9d6b5240f4c03607b0c9deb25/nemo_rl/algorithms/advantage_actor.py#L71-L90">placement</a>)</td></tr>
+<tr><td>Controller event loop during the stage</td><td class="b">blocked: fetch + math</td><td class="b">blocked: same</td><td class="g">free</td></tr>
+<tr><td>Advantage inputs in controller memory</td><td class="b">all 30 rows</td><td class="b">all 30 rows</td><td class="g">none</td></tr>
+<tr><td>Kept for step metrics</td><td class="b">reward and advantage tensors, until the step ends</td>
+<td class="g">a few sums per call (<a href="https://github.com/NVIDIA-NeMo/RL/blob/93c8818cad25e3b9d6b5240f4c03607b0c9deb25/nemo_rl/algorithms/single_controller_utils/utils.py#L115">RewardPartial</a>, <a href="https://github.com/NVIDIA-NeMo/RL/blob/93c8818cad25e3b9d6b5240f4c03607b0c9deb25/nemo_rl/algorithms/single_controller_utils/utils.py#L152">AdvantagePartial</a>)</td><td class="g">same sums, sent back by each actor</td></tr>
+<tr><td>Checkpoint lock held for</td><td>the write only</td><td>the whole call</td><td>the whole remote call</td></tr>
+<tr><td>Chunk split across actors</td><td>no</td><td>no</td><td>grpo and opd only, whole groups</td></tr>
+<tr><td>Extra cost</td><td>—</td><td>—</td><td>1 CPU per actor, plus its own data-plane client (and memory segment under <code>mooncake_cpu</code>)</td></tr>
+</table></div>
+
+<div class="hl"><strong>So what.</strong> The PR takes the biggest memory spike and the longest blocking stretch off
+the controller, which is what made it look hung at large scale. The PR reports about 10% faster steps and about 97%
+less advantage time on a 344-GPU run with 8 actors. With the default of 0 workers nothing moves: the controller still
+blocks, but it no longer keeps whole reward and advantage tensors until the step ends.</div>
+
+</div>
+</body>
+</html>
