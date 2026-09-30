@@ -83,7 +83,8 @@ All permalinks pin the PR head <code>93c8818</code>.</p>
   <code>num_generations_per_prompt</code> rows.</dd>
   <dt>Status</dt>
   <dd><span class="verdict prop">Proposed — not implemented.</span> The PR does not block DAPO. It gets in
-  Never Give Up's way in exactly one place: the splitter's fixed group size (last section).</dd>
+  Never Give Up's way in one place, the splitter's fixed group size. <a href="https://github.com/NVIDIA-NeMo/RL/issues/4371">#4371</a> (key and split by group
+  id) removes that too (last section).</dd>
 </dl>
 </div>
 
@@ -112,7 +113,10 @@ data plane (<a href="https://github.com/NVIDIA-NeMo/RL/blob/93c8818cad25e3b9d6b5
 rules belong: the rewards are known, and no GPU time has been spent on the group yet. The code already has the
 "give up on this group, use a spare" path there
 (<a href="https://github.com/NVIDIA-NeMo/RL/blob/93c8818cad25e3b9d6b5240f4c03607b0c9deb25/nemo_rl/algorithms/single_controller.py#L2534"><code>_take_replacement</code></a> draws from
-<span class="tip" tabindex="0" data-tip="_replacement_reserve: a small pool of dataloader prompts kept aside so a dropped group can be replaced without breaking the loader order. Enabled with async_rl.rollout_failure.on_dropped_prompt: replace.">the spare-prompt pool</span>).</p>
+<span class="tip" tabindex="0" data-tip="_replacement_reserve: a small pool of dataloader prompts kept aside so a dropped group can be replaced without breaking the loader order. Enabled with async_rl.rollout_failure.on_dropped_prompt: replace.">the spare-prompt pool</span>).
+Each group also gets an id from the controller when it starts, and every row is named after it,
+<code>{group_id}_g0</code>, <code>_g1</code>, … (<a href="https://github.com/NVIDIA-NeMo/RL/blob/93c8818cad25e3b9d6b5240f4c03607b0c9deb25/nemo_rl/experience/payload.py#L227"><code>payload.py:227</code></a>).
+That id is what "one group" should mean everywhere below.</p>
 
 <h2>Where the decision runs</h2>
 <svg viewBox="0 0 940 500" role="img" aria-label="Where DAPO and Never Give Up decide in the single controller"><defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" class="ahead"/></marker></defs>
@@ -164,7 +168,7 @@ rules belong: the rewards are known, and no GPU time has been spent on the group
 <a href="https://github.com/NVIDIA-NeMo/RL/blob/93c8818cad25e3b9d6b5240f4c03607b0c9deb25/nemo_rl/algorithms/single_controller.py#L2937" target="_blank" rel="noopener"><text class="code" x="162" y="376" text-anchor="start">trainer GPUs</text></a>
 <rect class="box warnb" x="280" y="342" width="216" height="50" rx="7"/>
 <text class="lbl" x="288" y="360" text-anchor="start">_advantage_stage splits</text>
-<a href="https://github.com/NVIDIA-NeMo/RL/blob/93c8818cad25e3b9d6b5240f4c03607b0c9deb25/nemo_rl/algorithms/single_controller_utils/advantage_stage.py#L194-L211" target="_blank" rel="noopener"><text class="code" x="288" y="376" text-anchor="start">by fixed group size (L194)</text></a>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/93c8818cad25e3b9d6b5240f4c03607b0c9deb25/nemo_rl/algorithms/single_controller_utils/advantage_stage.py#L194-L211" target="_blank" rel="noopener"><text class="code" x="288" y="376" text-anchor="start">fixed size today → #4371</text></a>
 <rect class="box" x="510" y="342" width="138" height="50" rx="7"/>
 <text class="lbl" x="518" y="360" text-anchor="start">train on chunk</text>
 <text class="code" x="518" y="376" text-anchor="start">gradients</text>
@@ -244,13 +248,16 @@ DAPO often drops 30–70% of groups, but the spare pool defaults to 1 prompt and
 so it needs a larger pool and a cap like the sync path's <code>dynamic_sampling_max_gen_batches</code>.</p>
 <p><b>NGU</b> uses the same spot but loops instead of returning. The task keeps the earlier rounds'
 <code>Completion</code> objects in memory, calls <code>run_rollout</code> again, and commits one grown group
-(4, then 8, then 12 rows). Two more things change, both outside the advantage actors. First, each round needs its
+(4, then 8, then 12 rows) under <b>one group id</b>, so its rows are <code>c_g0</code> … <code>c_g11</code>. The native
+path already names rows by how many completions there are; token capture caps the row index at
+<code>num_generations_per_prompt</code> (<a href="https://github.com/NVIDIA-NeMo/RL/blob/93c8818cad25e3b9d6b5240f4c03607b0c9deb25/nemo_rl/experience/rollout_manager.py#L1110-L1115">rollout_manager.py:1110</a>)
+and would need to allow more. Two more things change, both outside the advantage actors. First, each round needs its
 weight version, because NGU drops stale responses from training but keeps them in the baseline. Second, the
-advantage estimator must then use a separate "counts for the baseline" mask; today it uses the training mask
+advantage estimator must then use a separate "counts for the baseline" mask, still one baseline per group id; today it uses the training mask
 (<a href="https://github.com/NVIDIA-NeMo/RL/blob/93c8818cad25e3b9d6b5240f4c03607b0c9deb25/nemo_rl/algorithms/single_controller_utils/advantage_stage.py#L376"><code>valid_mask=final_sample_mask</code></a>).
 That estimator change runs the same code in-process or in an actor.</p>
 
-<h2>The one place this PR gets in the way: fixed group size</h2>
+<h2>The one place this PR gets in the way — and how the group id removes it</h2>
 <p>The sampler builds a chunk by joining whole groups, so it knows where each group starts
 (<a href="https://github.com/NVIDIA-NeMo/RL/blob/93c8818cad25e3b9d6b5240f4c03607b0c9deb25/nemo_rl/algorithms/async_utils/staleness_sampler.py#L302"><code>selected_metas[0].concat(...)</code></a>). That list is lost. The PR's splitter then
 guesses the boundaries from <code>num_generations_per_prompt</code>
@@ -262,17 +269,24 @@ splitter: 20 / 4 = "5 groups" → 3 per actor → cut at row 12, inside c
 c's rows          round 1 (4)        round 2 (4)          round 3 (4)
 one call          −0.302 × 4         −0.302 × 4           −0.302  1.0  −0.302  −0.302
 split at row 12      0   × 4            0   × 4           −0.577  1.0  −0.577  −0.577
-                  └──── actor 1: 8 all-wrong rows look like an all-equal group ────┘</div>
-<p>c's 8 older wrong answers stop being pushed down. The fix is small: have the sampler also return each group's
-row count, and split on those counts instead of on a fixed size. The other fixed-size assumptions already in the
-code fail loudly, not silently: the checkpoint restore check
+                  └──── actor 1: 8 all-wrong rows look like an all-equal group ────┘
+by group id       −0.302 × 4         −0.302 × 4           −0.302  1.0  −0.302  −0.302
+(#4371)           split [b c] | [d]: c stays whole; all 20 rows equal the one-call result</div>
+<p>With a fixed size, c's 8 older wrong answers stop being pushed down. The fix is
+<a href="https://github.com/NVIDIA-NeMo/RL/issues/4371">#4371</a>, proposed and not implemented: tag every row with its group id, split the chunk where the
+id changes, and key the baseline on the id instead of on the prompt text. Then a group is one group whatever its size
+and wherever it lands. The last row above is the repo's own baseline code run that way; it matches the one-call result
+exactly. The same key also fixes <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4326-duplicate-prompts.html">two groups with the same prompt
+text</a>, and it lets the one DAPO case only the advantage stage can see, a group whose rewards become all-equal only
+after masking, be reported back as a list of group ids. The other fixed-size assumptions in the code fail loudly, not silently: the checkpoint restore check
 (<a href="https://github.com/NVIDIA-NeMo/RL/blob/93c8818cad25e3b9d6b5240f4c03607b0c9deb25/nemo_rl/algorithms/async_utils/replay_buffer.py#L1783"><code>expected_group_size</code></a>) and the
 token-capture assert (<a href="https://github.com/NVIDIA-NeMo/RL/blob/93c8818cad25e3b9d6b5240f4c03607b0c9deb25/nemo_rl/experience/rollout_manager.py#L1093"><code>rollout_manager.py:1093</code></a>).</p>
 
 <div class="warn"><strong>So what.</strong> Moving advantages into actors does not make DAPO or Never Give Up harder.
 Both decide from rewards the controller already holds, before commit, and the advantage actors never see a dropped
-group. The only thing to change for NGU is the splitter's fixed group size. Today every group has exactly
-<code>num_generations_per_prompt</code> rows, so it is correct now. It is a future trap, not a bug in this PR.</div>
+group. The one thing NGU needs from this PR's code is a splitter that follows group ids instead of a fixed size,
+which <a href="https://github.com/NVIDIA-NeMo/RL/issues/4371">#4371</a> proposes. Today every group has exactly <code>num_generations_per_prompt</code>
+rows, so the current splitter is correct now.</div>
 
 </div>
 </body>
