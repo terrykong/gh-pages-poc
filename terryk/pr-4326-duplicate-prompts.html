@@ -256,10 +256,12 @@ No single-controller recipe in the repo uses it today.</p>
 <p class="cref">🔴 <a href="https://github.com/NVIDIA-NeMo/RL/pull/4326#discussion_r4137611363">review comment — advantage_stage.py:63</a></p>
 
 <h2>What the review asks — proposed, not in the PR</h2>
-<p class="where"><b>Where the fix lands: RL only, one comment and one new test.</b> Nothing below is
-implemented. The splitter cannot keep same-prompt groups together, because it sees only metadata:
-the group id is random and carries no prompt text. So the ask is to state the exception, and to add a test
-that the split matches the whole batch when every prompt is different.</p>
+<p class="where"><b>Where the fix lands: RL only.</b> Nothing below is implemented. The review points to
+<a href="https://github.com/NVIDIA-NeMo/RL/issues/4371">#4371</a>, in this PR or right after it. Every row is
+already named after the id the controller gives its group (<code>{group_id}_g0</code>, <code>_g1</code>, …).
+Keying the baseline on that id instead of on the prompt text means two groups never share a baseline by
+accident, so the split no longer changes any number. If #4371 comes later, the comment edit below keeps the code
+honest in the meantime, and the review asks for a same-seed A/B of 0 vs 8 actors on repeated-prompt data.</p>
 <pre class="diff"><span class="hunk">@@ advantage_stage.py L63-L69 · comment above SHARD_INVARIANT_ESTIMATORS</span>
  # Estimators whose advantages for a row depend only on that row and the rest
 <span class="del">-# of its prompt group, so a whole-group shard produces the same numbers as the
@@ -278,11 +280,14 @@ that the split matches the whole batch when every prompt is different.</p>
 +# that reason: a new estimator counts as unshardable until someone checks it.</span></pre>
 
 <div class="warn">
-<strong>So what.</strong> Nothing breaks, and on data where prompts do not repeat, 0 actors and 8
-actors give the same advantages. On repeated-prompt data they do not, and before this review the
-code said they always do. Making GRPO group by generation group instead of by prompt text would
-remove the whole effect, but it changes sync GRPO numbers too, so it is a separate question — not
-part of this PR.
+<strong>So what: this is a convergence risk.</strong> Nothing crashes. On data where prompts do not
+repeat, 0 actors and 8 actors give the same advantages. On data that repeats prompts they do not, so two
+runs that differ only in <code>num_advantage_workers</code> train on different numbers and can converge
+differently, and the code comment says that cannot happen. <b>Pre-existing:</b> the baseline matches rows
+by prompt text, so on main the result already depended on chunk boundaries. <b>New in this PR:</b> the pool
+size also decides it. The fix, keying the baseline on the controller's group id, is
+<a href="https://github.com/NVIDIA-NeMo/RL/issues/4371">#4371</a>. It makes the sharded and unsharded
+results equal, and it changes numbers on repeated-prompt data, so it needs its own A/B run.
 </div>
 
 </div>
