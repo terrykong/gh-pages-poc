@@ -57,6 +57,10 @@ table{border-collapse:collapse;width:100%;font-size:13.5px;margin:10px 0}
 th,td{border:1px solid var(--border);padding:6px 9px;text-align:left;vertical-align:top}
 th{background:var(--surface2);font-weight:600}
 td.diff{color:var(--orange)}
+.cref{margin:6px 0 0;font-size:13px}
+.cref a{display:inline-block;padding:4px 10px;margin:2px 0;border:1px solid var(--border);
+  border-radius:16px;background:var(--surface);font:12.5px ui-monospace,Menlo,monospace}
+.cref a:hover{background:var(--surface2);text-decoration:none}
 svg{max-width:100%;height:auto;display:block;margin:16px 0}
 svg .col{fill:var(--surface);stroke:var(--border);stroke-width:1.2}
 svg .hdr{fill:var(--text);font:bold 13px -apple-system,sans-serif}
@@ -223,6 +227,10 @@ So RL only needs a count. Rows 2–4 are different jobs, and merging them would 
 <tr><td>Pixel type in TQ</td><td>model dtype (bf16)</td><td class="diff">float32</td><td>No. The trainer casts to the vision weights' dtype first (<a href="https://github.com/NVIDIA-NeMo/Megatron-Bridge/blob/1f8873bb00a8ddf3af811649f0a7efdb2363570c/src/megatron/bridge/models/nemotron_omni/modeling_nemotron_omni.py#L463-L464">Bridge :463</a>), so float32 only doubles the bytes.</td></tr>
 <tr><td>Wasted work on old images each turn</td><td>re-process + re-pack on CPU</td><td class="diff">re-encode + copy GPU→host</td><td>Both come from resending the whole chat. Megatron's copy could go upstream: the engine already knows which images are new.</td></tr>
 </table>
+<p class="cref"><a href="https://github.com/NVIDIA-NeMo/RL/pull/4332#discussion_r4152142294">review comment — size check, token_capture.py:206</a>
+<a href="https://github.com/NVIDIA-NeMo/RL/pull/4332#discussion_r4152142332">review comment — float32, megatron_worker.py:115</a>
+<a href="https://github.com/NVIDIA-NeMo/RL/pull/4332#discussion_r4152142339">review comment — write blocks the engine, token_capture.py:505</a>
+<a href="https://github.com/NVIDIA-NeMo/RL/pull/4332#discussion_r4152142343">review comment — GPU→host copy, token_capture.py:221</a></p>
 
 <div class="hl"><b>What to take away.</b> The PR does not build a second pipeline. From the TQ write onward, vLLM and Megatron share every line of code, and the trainer gets the same <code>[8, 12]</code> tensor.
 The front halves really are different jobs, because the two engines expand images at different times.
