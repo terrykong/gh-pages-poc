@@ -73,6 +73,9 @@ svg .m{fill:var(--text);font:11.5px ui-monospace,Menlo,monospace}
 svg .note{fill:var(--dim);font:11px -apple-system,sans-serif}
 svg .arr{stroke:var(--dim);stroke-width:1.6;fill:none}
 svg .ah{fill:var(--dim)}
+svg .box{fill:var(--surface);stroke:var(--border);stroke-width:1.2}
+svg .okk{fill:var(--green);font:bold 12px -apple-system,sans-serif}
+svg .dif{fill:var(--orange);font:bold 12px -apple-system,sans-serif}
 svg a text{text-decoration:underline;fill:var(--accent);font:10.5px ui-monospace,Menlo,monospace}
 </style>
 <script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
@@ -118,100 +121,140 @@ When a rollout ends, the <span class="tip" tabindex="0" data-tip="RolloutReassem
 Each chat turn resends the whole conversation, images included, so each backend must work out which images are new.
 Dotted words have a short explanation: hover or tap them.</div>
 
-<p>The example is the one in the PR description. Turn 1 sends text and image 1. Turn 2 resends the history plus image 2.
-Each image becomes 3 placeholder tokens in the prompt and 4 packed patches of 12 numbers. Turn 1 staged 7 tokens.
-Both backends end with one training row holding 14 tokens and <code>pixel_values</code> of shape <code>[8, 12]</code>.
-The difference is who does the work before the TQ write, and the figure shows each step in the same row for both.</p>
+<p>The example is the one in the PR description. Turn 1 sent text and image 1; RL saved its 7 tokens <code>[80,99,99,99,81,12,2]</code>.
+Turn 2 resends the history plus image 2. Token <code>99</code> is an image placeholder, and each image fills 3 of them once expanded.
+Each image is 4 patches of 12 numbers. The figure follows turn 2 through both backends, in the order the code really runs, with what goes <b>in</b> and comes <b>out</b> of each step.
+The middle column says whether the two backends match at that step.</p>
 
-<svg viewBox="0 0 940 700" role="img" aria-label="Two columns, vLLM and Megatron Inference, with five rows of steps for turn 2. Orange boxes differ, red dashed boxes are extra cost, and a green bar at the bottom shows the shared path from the TQ write on.">
+<svg viewBox="0 0 940 900" role="img" aria-label="Turn 2 through five steps on each backend, with the input and output of every step. The middle column marks whether inputs and outputs match.">
   <!-- legend -->
-  <rect class="b-same" x="16" y="8" width="14" height="12" rx="2"/><text class="note" x="36" y="18">same code on both</text>
-  <rect class="b-diff" x="160" y="8" width="14" height="12" rx="2"/><text class="note" x="180" y="18">same job, done differently</text>
-  <rect class="b-cost" x="350" y="8" width="14" height="12" rx="2"/><text class="note" x="370" y="18">extra cost worth knowing</text>
-  <text class="note" x="560" y="18">Turn 2 of the example: history + image 1 + image 2</text>
+  <text class="okk" x="16" y="18">same</text><text class="note" x="52" y="18">= both backends hand on the same thing</text>
+  <text class="dif" x="330" y="18">different</text><text class="note" x="394" y="18">= same step, different data handed on</text>
 
-  <!-- column headers -->
-  <rect class="col" x="150" y="30" width="385" height="530" rx="8"/>
-  <rect class="col" x="545" y="30" width="385" height="530" rx="8"/>
-  <text class="hdr" x="162" y="52">vLLM (#4191, on main)</text>
-  <text class="hdr" x="557" y="52">Megatron Inference (this PR)</text>
+  <text class="hdr" x="20" y="50">vLLM (#4191, on main)</text>
+  <text class="hdr" x="470" y="50" text-anchor="middle">match?</text>
+  <text class="hdr" x="560" y="50">Megatron Inference (this PR)</text>
 
-  <!-- row 1: who makes pixels -->
-  <text class="rowlbl" x="10" y="84">1. BYTES →</text><text class="rowlbl" x="10" y="98">PIXELS</text>
-  <rect class="b-diff" x="160" y="66" width="365" height="84" rx="6"/>
-  <text class="t" x="170" y="84">vLLM's processor, CPU, before the engine</text>
-  <text class="m" x="170" y="102">decodes image 1 and image 2 again;</text>
-  <text class="m" x="170" y="118">RL packs them into patches itself</text>
-  <a href="https://github.com/NVIDIA-NeMo/RL/blob/6e8a59aa7e01fc4b93992da92401ed562ff720d0/nemo_rl/data/captured_media.py#L223" target="_blank" rel="noopener"><text x="170" y="140">captured_media.py:223 capture_processed_media</text></a>
-  <rect class="b-diff" x="555" y="66" width="365" height="84" rx="6"/>
-  <text class="t" x="565" y="84">Megatron engine, from raw image bytes</text>
-  <text class="m" x="565" y="102">bytes ride the HTTP endpoint and DP</text>
-  <text class="m" x="565" y="118">coordinator; engine packs patches</text>
-  <a href="https://github.com/NVIDIA/Megatron-LM/blob/568afcaea0d436d4df83e509c2f16bd1ed804c1d/megatron/core/inference/engines/dynamic_engine.py#L2368" target="_blank" rel="noopener"><text x="565" y="140">MLM dynamic_engine.py:2368</text></a>
+  <!-- ROW 1 -->
+  <rect class="box" x="10" y="64" width="380" height="140" rx="6"/>
+  <text class="t" x="20" y="82">1. Render the chat</text>
+  <text class="note" x="20" y="98">vLLM front end, CPU, inside RL's vLLM worker</text>
+  <text class="m" x="20" y="118">in:  chat JSON = history + image 1 + image 2</text>
+  <text class="m" x="20" y="140">out: [80,99,99,99,81,13,2,20,99,99,99,21]</text>
+  <text class="m" x="20" y="156">     + pixels of both images, slot positions</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/6e8a59aa7e01fc4b93992da92401ed562ff720d0/nemo_rl/models/generation/vllm/vllm_worker_async.py#L1052" target="_blank" rel="noopener"><text x="20" y="190">vllm_worker_async.py:1052 preprocess_chat</text></a>
+  <text class="okk" x="470" y="110" text-anchor="middle">in: same</text>
+  <text class="dif" x="470" y="134" text-anchor="middle">out: different</text>
+  <text class="note" x="470" y="152" text-anchor="middle">vLLM: 3 slots per image,</text>
+  <text class="note" x="470" y="166" text-anchor="middle">pixels ready</text>
+  <text class="note" x="470" y="182" text-anchor="middle">Megatron: 1 slot, bytes</text>
+  <rect class="box" x="550" y="64" width="380" height="140" rx="6"/>
+  <text class="t" x="560" y="82">1. Render the chat</text>
+  <text class="note" x="560" y="98">Megatron HTTP endpoint, inside RL's Megatron worker</text>
+  <text class="m" x="560" y="118">in:  chat JSON = history + image 1 + image 2</text>
+  <text class="m" x="560" y="140">out: [80,99,81,13,2,20,99,21]  one 99 per image</text>
+  <text class="m" x="560" y="156">     + raw bytes of both images (not decoded)</text>
+  <text class="m" x="560" y="172">     + "history has 1 image"</text>
+  <a href="https://github.com/NVIDIA/Megatron-LM/blob/568afcaea0d436d4df83e509c2f16bd1ed804c1d/megatron/core/inference/text_generation_server/dynamic_text_gen_server/endpoints/chat_completions.py#L1096" target="_blank" rel="noopener"><text x="560" y="190">MLM chat_completions.py:1096</text></a>
 
-  <!-- row 2: placeholder expansion -->
-  <text class="rowlbl" x="10" y="184">2. WHO EXPANDS</text><text class="rowlbl" x="10" y="198">PLACEHOLDERS</text>
-  <rect class="b-diff" x="160" y="166" width="365" height="84" rx="6"/>
-  <text class="t" x="170" y="184">vLLM, before generation</text>
-  <text class="m" x="170" y="202">RL splices the 7 staged tokens in and</text>
-  <text class="m" x="170" y="218">moves every image's slot offsets to match</text>
-  <a href="https://github.com/NVIDIA-NeMo/RL/blob/6e8a59aa7e01fc4b93992da92401ed562ff720d0/nemo_rl/models/generation/openai_server_utils.py#L61" target="_blank" rel="noopener"><text x="170" y="240">openai_server_utils.py:61 splice_prefix_tokens</text></a>
-  <rect class="b-diff" x="555" y="166" width="365" height="84" rx="6"/>
-  <text class="t" x="565" y="184">the Megatron engine, inside</text>
-  <text class="m" x="565" y="202">RL splices the 7 staged tokens in and says</text>
-  <text class="m" x="565" y="218">"first 7 are already expanded"</text>
-  <a href="https://github.com/NVIDIA-NeMo/RL/blob/6e8a59aa7e01fc4b93992da92401ed562ff720d0/nemo_rl/models/generation/megatron/token_capture.py#L205-L215" target="_blank" rel="noopener"><text x="565" y="240">token_capture.py:205 _prefix_expanded_token_count=7</text></a>
+  <!-- ROW 2 -->
+  <rect class="box" x="10" y="214" width="380" height="140" rx="6"/>
+  <text class="t" x="20" y="232">2. Put back turn 1's exact tokens</text>
+  <text class="note" x="20" y="248">RL, splice_prefix_tokens, before generation</text>
+  <text class="m" x="20" y="268">in:  step-1 prompt + turn 1's saved tokens</text>
+  <text class="m" x="20" y="284">     [80,99,99,99,81,12,2] (cached TQ read)</text>
+  <text class="m" x="20" y="306">out: [80,99,99,99,81,12,2,20,99,99,99,21]</text>
+  <text class="note" x="20" y="322">13 (template) becomes 12 (what the model said)</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/6e8a59aa7e01fc4b93992da92401ed562ff720d0/nemo_rl/models/generation/vllm/vllm_worker_async.py#L1154" target="_blank" rel="noopener"><text x="20" y="340">vllm_worker_async.py:1154 splice_prefix_tokens</text></a>
+  <text class="dif" x="470" y="260" text-anchor="middle">in: different</text>
+  <text class="dif" x="470" y="284" text-anchor="middle">out: different</text>
+  <text class="note" x="470" y="302" text-anchor="middle">Megatron's new part</text>
+  <text class="note" x="470" y="316" text-anchor="middle">[20,99,21] is still</text>
+  <text class="note" x="470" y="330" text-anchor="middle">not expanded</text>
+  <rect class="box" x="550" y="214" width="380" height="140" rx="6"/>
+  <text class="t" x="560" y="232">2. Put back turn 1's exact tokens</text>
+  <text class="note" x="560" y="248">RL prompt hook, engine rank 0, before the engine starts</text>
+  <text class="m" x="560" y="268">in:  step-1 prompt + turn 1's saved tokens</text>
+  <text class="m" x="560" y="284">     [80,99,99,99,81,12,2] + its image count 1</text>
+  <text class="m" x="560" y="306">out: [80,99,99,99,81,12,2,20,99,21]</text>
+  <text class="m" x="560" y="322">     + "first 7 are expanded", media_prev_count 1</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/6e8a59aa7e01fc4b93992da92401ed562ff720d0/nemo_rl/models/generation/megatron/token_capture.py#L71" target="_blank" rel="noopener"><text x="560" y="340">token_capture.py:71 prepare_prompt</text></a>
 
-  <!-- row 3: what did the parent stage -->
-  <text class="rowlbl" x="10" y="284">3. WHAT DID</text><text class="rowlbl" x="10" y="298">TURN 1 STAGE?</text>
-  <rect class="b-diff" x="160" y="266" width="365" height="84" rx="6"/>
-  <text class="t" x="170" y="284">a second TQ read of turn 1's image list</text>
-  <text class="m" x="170" y="302">each kept image: size + slot tokens must</text>
-  <text class="m" x="170" y="318">match, else retained_media_changed</text>
-  <a href="https://github.com/NVIDIA-NeMo/RL/blob/6e8a59aa7e01fc4b93992da92401ed562ff720d0/nemo_rl/models/generation/vllm/vllm_worker_async.py#L693-L746" target="_blank" rel="noopener"><text x="170" y="340">vllm_worker_async.py:693 _capture_request_media</text></a>
-  <rect class="b-diff" x="555" y="266" width="365" height="84" rx="6"/>
-  <text class="t" x="565" y="284">a count, from the cached prefix read</text>
-  <text class="m" x="565" y="302">media_prev_count = 1; only checked</text>
-  <text class="m" x="565" y="318">against the endpoint's count, not sizes</text>
-  <a href="https://github.com/NVIDIA-NeMo/RL/blob/6e8a59aa7e01fc4b93992da92401ed562ff720d0/nemo_rl/data_plane/tq_token_sink.py#L786-L827" target="_blank" rel="noopener"><text x="565" y="340">tq_token_sink.py:786 fetch_prefix_chains</text></a>
+  <!-- ROW 3 -->
+  <rect class="box" x="10" y="364" width="380" height="140" rx="6"/>
+  <text class="t" x="20" y="382">3. Check and cut the images</text>
+  <text class="note" x="20" y="398">RL, _capture_request_media, before generation</text>
+  <text class="m" x="20" y="418">in:  pixels + slot positions from step 1,</text>
+  <text class="m" x="20" y="434">     turn 1's image list (2nd TQ read)</text>
+  <text class="m" x="20" y="456">out: image 1 checked: same size, same slots</text>
+  <text class="m" x="20" y="472">     image 2 only: [4,12] bf16, size [[4,4]]</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/6e8a59aa7e01fc4b93992da92401ed562ff720d0/nemo_rl/models/generation/vllm/vllm_worker_async.py#L664" target="_blank" rel="noopener"><text x="20" y="490">vllm_worker_async.py:664 _capture_request_media</text></a>
+  <text class="dif" x="470" y="410" text-anchor="middle">different job</text>
+  <text class="note" x="470" y="430" text-anchor="middle">vLLM picks out image 2</text>
+  <text class="note" x="470" y="444" text-anchor="middle">here; Megatron only</text>
+  <text class="note" x="470" y="458" text-anchor="middle">does it in step 5</text>
+  <rect class="box" x="550" y="364" width="380" height="140" rx="6"/>
+  <text class="t" x="560" y="382">3. Decode the images, expand the new part</text>
+  <text class="note" x="560" y="398">Megatron engine, every rank</text>
+  <text class="m" x="560" y="418">in:  step-2 prompt + raw bytes of both images</text>
+  <text class="m" x="560" y="440">out: [80,99,99,99,81,12,2,20,99,99,99,21]</text>
+  <text class="m" x="560" y="456">     + pixels of both images, [8,12] float32</text>
+  <text class="note" x="560" y="472">keeps tokens 0..6 as given; expands only the 99 after</text>
+  <a href="https://github.com/NVIDIA/Megatron-LM/blob/568afcaea0d436d4df83e509c2f16bd1ed804c1d/megatron/core/inference/engines/dynamic_engine.py#L142" target="_blank" rel="noopener"><text x="560" y="490">MLM dynamic_engine.py:142</text></a>
 
-  <!-- row 4: cut to new media -->
-  <text class="rowlbl" x="10" y="384">4. KEEP ONLY</text><text class="rowlbl" x="10" y="398">IMAGE 2</text>
-  <rect class="b-diff" x="160" y="366" width="365" height="84" rx="6"/>
-  <text class="t" x="170" y="384">cut a list, before joining</text>
-  <text class="m" x="170" y="402">packed[1:] → image 2 only, 4 patches;</text>
-  <text class="m" x="170" y="418">image 1 packed, then thrown away</text>
-  <a href="https://github.com/NVIDIA-NeMo/RL/blob/6e8a59aa7e01fc4b93992da92401ed562ff720d0/nemo_rl/data/captured_media.py#L364-L377" target="_blank" rel="noopener"><text x="170" y="440">captured_media.py:368 slice(len(retained))</text></a>
-  <rect class="b-cost" x="555" y="366" width="365" height="84" rx="6"/>
-  <text class="t" x="565" y="384">cut a joined tensor, after generation</text>
-  <text class="m" x="565" y="402">engine copies 8 patches GPU→host;</text>
-  <text class="m" x="565" y="418">RL keeps patches 4..7 (image 2)</text>
-  <a href="https://github.com/NVIDIA-NeMo/RL/blob/6e8a59aa7e01fc4b93992da92401ed562ff720d0/nemo_rl/models/generation/megatron/token_capture.py#L221-L290" target="_blank" rel="noopener"><text x="565" y="440">token_capture.py:221 slice_media_tensors</text></a>
+  <!-- ROW 4 -->
+  <rect class="box" x="10" y="514" width="380" height="140" rx="6"/>
+  <text class="t" x="20" y="532">4. Generate</text>
+  <text class="note" x="20" y="548">vLLM engine, GPU</text>
+  <text class="m" x="20" y="568">in:  the 12-token prompt + pixels of both</text>
+  <text class="m" x="20" y="584">     images (image 1 is encoded again)</text>
+  <text class="m" x="20" y="606">out: [30,2] + logprobs</text>
+  <text class="okk" x="470" y="560" text-anchor="middle">in: same</text>
+  <text class="okk" x="470" y="584" text-anchor="middle">out: same tokens</text>
+  <text class="note" x="470" y="602" text-anchor="middle">Megatron also copies</text>
+  <text class="note" x="470" y="616" text-anchor="middle">both images GPU→host</text>
+  <rect class="box" x="550" y="514" width="380" height="140" rx="6"/>
+  <text class="t" x="560" y="532">4. Generate</text>
+  <text class="note" x="560" y="548">Megatron engine, GPU</text>
+  <text class="m" x="560" y="568">in:  the 12-token prompt + pixels of both</text>
+  <text class="m" x="560" y="584">     images (image 1 is encoded again)</text>
+  <text class="m" x="560" y="606">out: [30,2] + logprobs, and a host copy of</text>
+  <text class="m" x="560" y="622">     both images' pixels [8,12]</text>
+  <a href="https://github.com/NVIDIA/Megatron-LM/blob/568afcaea0d436d4df83e509c2f16bd1ed804c1d/megatron/core/inference/inference_request.py#L1402" target="_blank" rel="noopener"><text x="560" y="640">MLM inference_request.py:1402</text></a>
 
-  <!-- row 5: TQ write -->
-  <text class="rowlbl" x="10" y="484">5. WRITE TO</text><text class="rowlbl" x="10" y="498">TQ</text>
-  <rect class="b-same" x="160" y="466" width="365" height="84" rx="6"/>
-  <text class="t" x="170" y="484">bf16 pixels, in a worker thread</text>
-  <text class="m" x="170" y="502">model dtype; generation keeps running</text>
-  <text class="m" x="170" y="518">while the write happens</text>
-  <a href="https://github.com/NVIDIA-NeMo/RL/blob/6e8a59aa7e01fc4b93992da92401ed562ff720d0/nemo_rl/models/generation/vllm/vllm_worker_async.py#L1453" target="_blank" rel="noopener"><text x="170" y="540">vllm_worker_async.py:1453 asyncio.to_thread</text></a>
-  <rect class="b-cost" x="555" y="466" width="365" height="84" rx="6"/>
-  <text class="t" x="565" y="484">float32 pixels, inside the engine step</text>
-  <text class="m" x="565" y="502">2× the bytes; the engine waits for the</text>
-  <text class="m" x="565" y="518">write before it sends replies</text>
-  <a href="https://github.com/NVIDIA-NeMo/RL/blob/6e8a59aa7e01fc4b93992da92401ed562ff720d0/nemo_rl/models/generation/megatron/megatron_worker.py#L115" target="_blank" rel="noopener"><text x="565" y="540">megatron_worker.py:115 MINF_MEDIA_PIXEL_DTYPE</text></a>
+  <!-- ROW 5 -->
+  <rect class="box" x="10" y="664" width="380" height="140" rx="6"/>
+  <text class="t" x="20" y="682">5. Write the TQ row</text>
+  <text class="note" x="20" y="698">RL, after the reply, in a separate thread</text>
+  <text class="m" x="20" y="718">in:  prompt, [30,2], image 2 from step 3</text>
+  <text class="m" x="20" y="740">out: row r0/c2: [20,99,99,99,21,30,2]</text>
+  <text class="m" x="20" y="756">     + image 2 [4,12] bf16</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/6e8a59aa7e01fc4b93992da92401ed562ff720d0/nemo_rl/models/generation/vllm/vllm_worker_async.py#L829" target="_blank" rel="noopener"><text x="20" y="790">vllm_worker_async.py:829 _finish_request_capture</text></a>
+  <text class="dif" x="470" y="710" text-anchor="middle">in: different</text>
+  <text class="okk" x="470" y="734" text-anchor="middle">out: same row</text>
+  <text class="note" x="470" y="752" text-anchor="middle">except the pixel type:</text>
+  <text class="note" x="470" y="766" text-anchor="middle">bf16 vs float32</text>
+  <rect class="box" x="550" y="664" width="380" height="140" rx="6"/>
+  <text class="t" x="560" y="682">5. Cut to image 2, then write the TQ row</text>
+  <text class="note" x="560" y="698">RL, inside the engine step, before replies go out</text>
+  <text class="m" x="560" y="718">in:  step-4 output + media_prev_count 1</text>
+  <text class="m" x="560" y="740">out: row r0/c2: [20,99,99,99,21,30,2]</text>
+  <text class="m" x="560" y="756">     + image 2 [4,12] float32 (patches 4..7)</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/6e8a59aa7e01fc4b93992da92401ed562ff720d0/nemo_rl/models/generation/megatron/token_capture.py#L221" target="_blank" rel="noopener"><text x="560" y="774">token_capture.py:221 slice_media_tensors</text></a>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/6e8a59aa7e01fc4b93992da92401ed562ff720d0/nemo_rl/models/generation/megatron/token_capture.py#L464" target="_blank" rel="noopener"><text x="560" y="790">token_capture.py:464 _stage_admitted</text></a>
 
-  <!-- merge -->
-  <path class="arr" d="M342 550 L342 596"/><path class="ah" d="M337 590 L342 598 L347 590 Z"/>
-  <path class="arr" d="M737 550 L737 596"/><path class="ah" d="M732 590 L737 598 L742 590 Z"/>
-  <text class="note" x="350" y="580">attachments=</text><text class="note" x="745" y="580">attachments=</text>
-  <rect class="b-same" x="150" y="600" width="780" height="88" rx="8"/>
-  <text class="t" x="164" y="620">From here on: one shared path</text>
-  <text class="m" x="164" y="640">same TQTokenSink.stage · same 5 media columns · same fetch_media · same finalizer</text>
-  <text class="m" x="164" y="658">turn 1 row: image 1 [4,12] + turn 2 row: image 2 [4,12] → pixel_values [8,12]</text>
-  <a href="https://github.com/NVIDIA-NeMo/RL/blob/6e8a59aa7e01fc4b93992da92401ed562ff720d0/nemo_rl/data_plane/tq_token_sink.py#L403" target="_blank" rel="noopener"><text x="164" y="678">tq_token_sink.py:403 stage</text></a>
-  <a href="https://github.com/NVIDIA-NeMo/RL/blob/6e8a59aa7e01fc4b93992da92401ed562ff720d0/nemo_rl/experience/rollout_reassembler.py#L436" target="_blank" rel="noopener"><text x="370" y="678">rollout_reassembler.py:436 _resolve_media</text></a>
+  <!-- shared tail -->
+  <path class="arr" d="M200 804 L200 828"/><path class="ah" d="M195 822 L200 830 L205 822 Z"/>
+  <path class="arr" d="M740 804 L740 828"/><path class="ah" d="M735 822 L740 830 L745 822 Z"/>
+  <rect class="b-same" x="10" y="832" width="920" height="60" rx="8"/>
+  <text class="t" x="24" y="852">From here on, one shared path: same TQ columns, same sink, same finalizer</text>
+  <text class="m" x="24" y="870">turn 1 row: image 1 [4,12] + turn 2 row: image 2 [4,12] → pixel_values [8,12], 14 tokens</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/6e8a59aa7e01fc4b93992da92401ed562ff720d0/nemo_rl/experience/rollout_reassembler.py#L436" target="_blank" rel="noopener"><text x="24" y="886">rollout_reassembler.py:436 _resolve_media</text></a>
 </svg>
+
+<p><b>Short answer: no, the steps do not take the same inputs.</b> Both backends start from the same chat request, run the same 12-token prompt through the model, and end with the same TQ row.
+In between they hand on different things. vLLM expands every image in step 1 and has pixels from the start, so it checks and cuts images <b>before</b> generation (step 3).
+Megatron keeps one placeholder per image and raw bytes until the engine itself decodes and expands them (step 3), so RL can only cut to image 2 <b>after</b> generation (step 5), from a host copy of every image.</p>
 
 <h2>Why the two front halves differ, and whether they should</h2>
 
