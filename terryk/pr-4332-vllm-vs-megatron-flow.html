@@ -256,6 +256,24 @@ The middle column says whether the two backends match at that step.</p>
 In between they hand on different things. vLLM expands every image in step 1 and has pixels from the start, so it checks and cuts images <b>before</b> generation (step 3).
 Megatron keeps one placeholder per image and raw bytes until the engine itself decodes and expands them (step 3), so RL can only cut to image 2 <b>after</b> generation (step 5), from a host copy of every image.</p>
 
+<h2>What is stored, and which code made it</h2>
+
+<p>Both paths store the pixels their own engine was fed, and the trainer reads only those: no other copy of the image reaches the training forward pass. Neither stores the dataset's HF processor output.</p>
+<table>
+<tr><th></th><th>vLLM</th><th>Megatron Inference</th></tr>
+<tr><td>Turns image bytes into pixels</td><td>vLLM's own Nemotron VL processor (resize + normalize), CPU</td><td class="diff">Megatron-LM's own <a href="https://github.com/NVIDIA/Megatron-LM/blob/69e39f62a54b31c318f9498a4401fda63970b644/megatron/core/inference/text_generation_server/dynamic_text_gen_server/image_preprocessing.py#L225-L283"><code>preprocess_image</code></a> (resize + torchvision normalize)</td></tr>
+<tr><td>Cuts into patches</td><td>RL (<a href="https://github.com/NVIDIA-NeMo/RL/blob/6e8a59aa7e01fc4b93992da92401ed562ff720d0/nemo_rl/data/captured_media.py#L155"><code>pack_images</code></a>)</td><td>Megatron-LM, already packed</td></tr>
+<tr><td>Pixel type in TQ</td><td>bf16 (the model dtype)</td><td class="diff">float32</td></tr>
+</table>
+<p>RL never converts pixels on either path: the TQ writer rejects any type other than the one its column is set to
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/6e8a59aa7e01fc4b93992da92401ed562ff720d0/nemo_rl/data_plane/tq_token_sink.py#L430-L435"><code>tq_token_sink.py:430</code></a>).
+The type difference is not a bug. The vision encoder converts pixels to its own weight type as its first step
+(<a href="https://github.com/NVIDIA-NeMo/Megatron-Bridge/blob/1f8873bb00a8ddf3af811649f0a7efdb2363570c/src/megatron/bridge/models/nemotron_omni/modeling_nemotron_omni.py#L463-L464"><code>_encode_images</code></a>),
+and Megatron's generation path calls that same method
+(<a href="https://github.com/NVIDIA/Megatron-LM/blob/69e39f62a54b31c318f9498a4401fda63970b644/megatron/core/inference/model_inference_wrappers/multimodal/nemotron_omni_inference_wrapper.py#L319-L323">wrapper :321</a>).
+So generation and training see the same values, and storing float32 only doubles the bytes. The type to store in is the vision encoder's weight type, since that is what the pixels become anyway.
+The two backends use different preprocessing code, so the same image can give slightly different pixels on each: rows from a vLLM run and a Megatron run are not byte-for-byte comparable.</p>
+
 <h2>Why the two front halves differ, and whether they should</h2>
 
 <p>The split comes from one fact. vLLM expands image placeholders <b>before</b> it runs, so RL has to know exactly where every earlier image's slot tokens sit, and it re-checks them each turn
@@ -267,7 +285,6 @@ So RL only needs a count. Rows 2–4 are different jobs, and merging them would 
 <table>
 <tr><th>Step</th><th>vLLM</th><th>Megatron Inference</th><th>Keep both?</th></tr>
 <tr><td>Kept images checked</td><td>size + slot tokens, per image</td><td class="diff">count only</td><td>Yes, but Megatron should also compare sizes (review comment). The guide already claims it does (<a href="https://github.com/NVIDIA-NeMo/RL/blob/6e8a59aa7e01fc4b93992da92401ed562ff720d0/docs/guides/single-controller.md#L445">single-controller.md:445</a>).</td></tr>
-<tr><td>Pixel type in TQ</td><td>model dtype (bf16)</td><td class="diff">float32</td><td>No. The trainer casts to the vision weights' dtype first (<a href="https://github.com/NVIDIA-NeMo/Megatron-Bridge/blob/1f8873bb00a8ddf3af811649f0a7efdb2363570c/src/megatron/bridge/models/nemotron_omni/modeling_nemotron_omni.py#L463-L464">Bridge :463</a>), so float32 only doubles the bytes.</td></tr>
 <tr><td>Wasted work on old images each turn</td><td>re-process + re-pack on CPU</td><td class="diff">re-encode + copy GPU→host</td><td>Both come from resending the whole chat. Megatron's copy could go upstream: the engine already knows which images are new.</td></tr>
 </table>
 <p class="cref"><a href="https://github.com/NVIDIA-NeMo/RL/pull/4332#discussion_r4152142294">review comment — size check, token_capture.py:206</a>
@@ -275,7 +292,7 @@ So RL only needs a count. Rows 2–4 are different jobs, and merging them would 
 <a href="https://github.com/NVIDIA-NeMo/RL/pull/4332#discussion_r4152142339">review comment — write blocks the engine, token_capture.py:505</a>
 <a href="https://github.com/NVIDIA-NeMo/RL/pull/4332#discussion_r4152142343">review comment — GPU→host copy, token_capture.py:221</a></p>
 
-<div class="hl"><b>What to take away.</b> The PR does not build a second pipeline. From the TQ write onward, vLLM and Megatron share every line of code, and the trainer gets the same <code>[8, 12]</code> tensor.
+<div class="hl"><b>What to take away.</b> The PR does not build a second pipeline. From the TQ write onward, vLLM and Megatron share every line of code, and the trainer gets a <code>[8, 12]</code> tensor of the pixels the generator actually used.
 The front halves really are different jobs, because the two engines expand images at different times.
 The costs to watch are all on the Megatron side: float32 doubles the stored bytes, the write blocks the engine step, and every later turn copies all earlier images off the GPU.
 Page 2 lists the helpers that are copied rather than shared. Nothing here was run on a GPU.</div>
