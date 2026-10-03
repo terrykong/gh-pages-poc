@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NVIDIA-NeMo/RL #4295 — two ways to turn a chat into tokens</title>
+<style>
+:root{
+  --bg:#0d1117; --surface:#161b22; --surface2:#1c2128; --border:#30363d;
+  --text:#e6edf3; --dim:#8b949e; --accent:#58a6ff; --green:#3fb950;
+  --orange:#d29922; --red:#f85149;
+}
+:root[data-theme="light"]{
+  --bg:#ffffff; --surface:#f6f8fa; --surface2:#eaeef2; --border:#d0d7de;
+  --text:#1f2328; --dim:#59636e; --accent:#0969da; --green:#1a7f37;
+  --orange:#9a6700; --red:#cf222e;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:28px 20px 70px}
+h1{font-size:22px;margin:0 0 8px;line-height:1.3}
+h2{font-size:18px;margin:32px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;
+  font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
+.sub{color:var(--dim);font-size:13.5px;margin:0 0 16px}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);
+  border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;
+  font:13px/1 ui-monospace,Menlo,monospace;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.18)}
+.mono{font:12.5px ui-monospace,SFMono-Regular,Menlo,monospace;
+  background:var(--surface);border:1px solid var(--border);border-radius:8px;
+  padding:13px;overflow-x:auto;white-space:pre}
+.warn{border-left:3px solid var(--red);background:var(--surface);
+  padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0}
+.bg{border-left:3px solid var(--accent);background:var(--surface);padding:10px 16px;margin:0 0 16px;
+  border-radius:0 8px 8px 0;font-size:14px}
+.status{border:1px solid var(--border);border-radius:10px;background:var(--surface);
+  padding:2px 16px 10px;margin:0 0 20px}
+.status dl{display:grid;grid-template-columns:max-content 1fr;gap:4px 14px;margin:12px 0 0}
+.status dt{color:var(--dim);font-size:12px;text-transform:uppercase;letter-spacing:.04em;
+  white-space:nowrap;padding-top:2px}
+.status dd{margin:0;font-size:14px}
+.verdict{font-weight:700}
+.verdict.open{color:var(--red)}
+nav.chain{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 6px;padding:0}
+nav.chain a,nav.chain span{display:inline-block;padding:5px 11px;border:1px solid var(--border);
+  border-radius:20px;background:var(--surface);text-decoration:none;color:var(--accent);
+  font-size:12.5px;line-height:1.3;white-space:nowrap}
+nav.chain a:hover{background:var(--surface2)}
+nav.chain span.here{background:var(--accent);color:var(--bg);border-color:var(--accent);font-weight:600}
+p.chainnote{color:var(--dim);font-size:12px;margin:0 0 18px}
+.cref{margin:6px 0 0;font-size:13px}
+.cref a{display:inline-block;padding:4px 10px;border:1px solid var(--border);
+  border-radius:16px;background:var(--surface);font:12.5px ui-monospace,Menlo,monospace}
+.cref a:hover{background:var(--surface2);text-decoration:none}
+.tip{border-bottom:1px dotted var(--dim);cursor:help;position:relative;outline:none}
+.tip:hover::after,.tip:focus::after{content:attr(data-tip);position:absolute;left:0;top:1.7em;z-index:60;
+  width:max-content;max-width:min(340px,80vw);white-space:normal;background:var(--surface2);color:var(--text);
+  border:1px solid var(--border);border-radius:6px;padding:7px 10px;font:13px/1.45 -apple-system,sans-serif;
+  font-weight:400;box-shadow:0 4px 14px rgba(0,0,0,.3)}
+table{border-collapse:collapse;font-size:14px;margin:10px 0}
+td,th{border:1px solid var(--border);padding:5px 10px;text-align:left;vertical-align:top}
+th{background:var(--surface)}
+svg{max-width:100%;height:auto;display:block;margin:16px 0}
+svg .box{fill:var(--surface);stroke:var(--border);stroke-width:1.4}
+svg .box-new{fill:var(--surface);stroke:var(--orange);stroke-width:1.8}
+svg .box-ok{fill:var(--surface);stroke:var(--green);stroke-width:1.8}
+svg .box-skip{fill:none;stroke:var(--dim);stroke-width:1.2;stroke-dasharray:5 4}
+svg .lbl{fill:var(--text);font:12px ui-monospace,Menlo,monospace}
+svg .lbl-b{fill:var(--text);font:bold 13px -apple-system,sans-serif}
+svg .note{fill:var(--dim);font:11.5px -apple-system,sans-serif}
+svg .skip{fill:var(--dim);font:11.5px -apple-system,sans-serif;text-decoration:line-through}
+svg .hdr{fill:var(--accent);font:bold 13px -apple-system,sans-serif}
+svg .hdr-new{fill:var(--orange);font:bold 13px -apple-system,sans-serif}
+svg .arr{stroke:var(--dim);stroke-width:1.5;fill:none}
+svg .arrh{fill:var(--dim)}
+svg a text{text-decoration:underline;fill:var(--accent);font:11px ui-monospace,Menlo,monospace}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+  document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head>
+<body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+  function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+  function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
+    b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
+      else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+  document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+<div class="wrap">
+
+<h1>Two ways to turn a chat into tokens: the chat-template path and the new "preformatted" path</h1>
+<p class="sub"><a href="https://github.com/NVIDIA-NeMo/RL/pull/4295">NVIDIA-NeMo/RL #4295</a>
+(split out of <a href="https://github.com/NVIDIA-NeMo/RL/pull/4108">#4108</a>).
+All permalinks pin the PR head <code>4fcc987</code>.</p>
+
+<div class="status">
+<dl>
+  <dt>Before</dt>
+  <dd>There was one way: <code>get_formatted_message_log</code> renders each turn with the tokenizer's chat template, then tokenizes it.</dd>
+  <dt>This PR</dt>
+  <dd>Adds a <code>skip_chat_template=True</code> flag. With it, the caller passes text that is already rendered, and the function only tokenizes it and cuts it into turns.</dd>
+  <dt>Status</dt>
+  <dd><span class="verdict open">Open — no caller yet, and one bug.</span> Nothing in the repo or the PRs stacked on it uses the flag. The cutting step can leave an answer with zero tokens (next page). Both are raised in the review.</dd>
+</dl>
+</div>
+
+<nav class="chain">
+  <span class="here">two ways to tokenize</span>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4295-empty-assistant-turn.html">the empty answer bug</a>
+</nav>
+<p class="chainnote">Two pages on this PR, one question each. This one: what the new path is and how it compares to the old one.</p>
+
+<div class="bg"><b>Background.</b> SFT data is a list of chat turns (user, assistant, …). Training needs each turn as
+token ids, kept per turn, because only the assistant turns get a loss: the
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/4fcc9876cd6f316c1d0ccc744decbea5381323d8/nemo_rl/data/llm_message_utils.py#L165"><code>add_loss_mask_to_message_log</code></a>
+step marks a turn's tokens for training by its role. So both paths must answer one question: <i>which tokens belong to which turn?</i>
+Dotted words have a short explanation: hover or tap them.</div>
+
+<p>The old path builds the text itself. For turn <i>i</i> it renders turns 0..<i>i</i> with the
+<span class="tip" tabindex="0" data-tip="A small template that ships with each model's tokenizer. It wraps every turn in that model's markers, for example <|im_start|>user ... <|im_end|> for Qwen.">chat template</span>,
+keeps only the new text, and tokenizes that piece alone
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/4fcc9876cd6f316c1d0ccc744decbea5381323d8/nemo_rl/data/llm_message_utils.py#L750-L752">L750-L752</a>).
+The new path is for data where each turn's text is already written out in full. It returns early
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/4fcc9876cd6f316c1d0ccc744decbea5381323d8/nemo_rl/data/llm_message_utils.py#L595-L600">L595-L600</a>),
+joins all turns into one string, tokenizes it once, and cuts the tokens back into turns using each token's
+<span class="tip" tabindex="0" data-tip="For every token, the fast HF tokenizer can report the (start, end) character range of the text it came from. The new code uses these ranges to find which tokens fall before each turn's last character.">character range</span>.</p>
+
+<h2>Where each path does the work</h2>
+
+<svg viewBox="0 0 900 470" role="img" aria-label="Two pipelines side by side. Old: prompt, chat template, keep new text, add BOS/EOS, tokenize each piece. New: join turns, tokenize once, cut by character ranges, fall back to re-tokenizing prefixes. Both return per-turn token ids to the loss-mask step.">
+  <text class="hdr" x="16" y="22">Old: chat-template path (default)</text>
+  <text class="hdr-new" x="470" y="22">New: skip_chat_template=True</text>
+
+  <!-- old lane -->
+  <rect class="box" x="16" y="36" width="420" height="44" rx="7"/>
+  <text class="lbl" x="28" y="55">1. add the dataset's task prompt to turn 1</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/4fcc9876cd6f316c1d0ccc744decbea5381323d8/nemo_rl/data/llm_message_utils.py#L650"><text x="28" y="72">llm_message_utils.py L650</text></a>
+
+  <rect class="box" x="16" y="90" width="420" height="44" rx="7"/>
+  <text class="lbl" x="28" y="109">2. render turns 0..i with the chat template</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/4fcc9876cd6f316c1d0ccc744decbea5381323d8/nemo_rl/data/llm_message_utils.py#L677"><text x="28" y="126">apply_chat_template, L677</text></a>
+
+  <rect class="box" x="16" y="144" width="420" height="44" rx="7"/>
+  <text class="lbl" x="28" y="163">3. keep only the text turn i added</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/4fcc9876cd6f316c1d0ccc744decbea5381323d8/nemo_rl/data/llm_message_utils.py#L682"><text x="28" y="180">get_first_index_that_differs, L682</text></a>
+
+  <rect class="box" x="16" y="198" width="420" height="44" rx="7"/>
+  <text class="lbl" x="28" y="217">4. add BOS to the first turn, EOS to the last</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/4fcc9876cd6f316c1d0ccc744decbea5381323d8/nemo_rl/data/llm_message_utils.py#L714-L740"><text x="28" y="234">L714-L740</text></a>
+
+  <rect class="box-ok" x="16" y="252" width="420" height="44" rx="7"/>
+  <text class="lbl" x="28" y="271">5. tokenize each turn's text on its own</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/4fcc9876cd6f316c1d0ccc744decbea5381323d8/nemo_rl/data/llm_message_utils.py#L750-L752"><text x="28" y="288">tokenizer(text=message_chunk), L750</text></a>
+  <text class="note" x="28" y="314">A token can never cross two turns: each turn is its own call.</text>
+
+  <!-- new lane -->
+  <rect class="box-skip" x="470" y="36" width="414" height="44" rx="7"/>
+  <text class="skip" x="482" y="55">prompt, tools, BOS/EOS: not applied</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/4fcc9876cd6f316c1d0ccc744decbea5381323d8/nemo_rl/data/llm_message_utils.py#L595"><text x="482" y="72">early return, L595</text></a>
+
+  <rect class="box-new" x="470" y="90" width="414" height="44" rx="7"/>
+  <text class="lbl" x="482" y="109">1. join all turns into one string</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/4fcc9876cd6f316c1d0ccc744decbea5381323d8/nemo_rl/data/llm_message_utils.py#L509"><text x="482" y="126">L509</text></a>
+
+  <rect class="box-new" x="470" y="144" width="414" height="44" rx="7"/>
+  <text class="lbl" x="482" y="163">2. tokenize it once, with character ranges</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/4fcc9876cd6f316c1d0ccc744decbea5381323d8/nemo_rl/data/llm_message_utils.py#L519-L523"><text x="482" y="180">return_offsets_mapping=True, L519</text></a>
+
+  <rect class="box-new" x="470" y="198" width="414" height="44" rx="7"/>
+  <text class="lbl" x="482" y="217">3. cut the tokens at each turn's last char</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/4fcc9876cd6f316c1d0ccc744decbea5381323d8/nemo_rl/data/llm_message_utils.py#L530-L536"><text x="482" y="234">L530-L536</text></a>
+
+  <rect class="box-new" x="470" y="252" width="414" height="44" rx="7" style="stroke:var(--red)"/>
+  <text class="lbl" x="482" y="271">4. a token crosses a cut? re-tokenize prefixes</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/4fcc9876cd6f316c1d0ccc744decbea5381323d8/nemo_rl/data/llm_message_utils.py#L544-L550"><text x="482" y="288">fallback, L544-L550</text></a>
+  <text class="note" x="482" y="314">Step 4 is where the bug is (see the next page).</text>
+
+  <!-- converge -->
+  <path class="arr" d="M226 322 L226 360 L440 360"/>
+  <path class="arr" d="M677 322 L677 360 L460 360"/>
+  <polygon class="arrh" points="450,366 444,356 456,356"/>
+  <rect class="box" x="230" y="372" width="440" height="44" rx="7"/>
+  <text class="lbl" x="242" y="391">both return [{role, content, token_ids}, …]</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/4fcc9876cd6f316c1d0ccc744decbea5381323d8/nemo_rl/data/llm_message_utils.py#L165"><text x="242" y="408">→ add_loss_mask_to_message_log, L165</text></a>
+
+  <text class="note" x="16" y="442">Callers today — old path: 6 (processors.py, generic_sft.py, reward_model_environment.py).</text>
+  <text class="note" x="16" y="460">New path: 1, the PR's own unit test. The PR stacked on top (#4296) does not call it either.</text>
+</svg>
+
+<h2>The same chat through both paths</h2>
+
+<p>Take one chat, <code>user: "Hi"</code> and <code>assistant: "Hello"</code>, with the Qwen2.5 tokenizer.
+The old path renders it. To use the new path, a caller would pass the two rendered pieces directly:</p>
+
+<div class="mono">                 turn 1 (user)                                   turn 2 (assistant)
+old path text    "&lt;|im_start|&gt;system\n…&lt;|im_end|&gt;\n&lt;|im_start|&gt;user\nHi&lt;|im_end|&gt;\n"   "&lt;|im_start|&gt;assistant\nHello&lt;|im_end|&gt;\n"
+old path tokens  27                                              6
+new path tokens  27                                              6      ← same ids, token for token</div>
+
+<p>When every turn ends on a chat-template marker like <code>&lt;|im_end|&gt;\n</code>, no token can cross the cut,
+so the two paths agree. They come apart on plain text, where a turn can end in the middle of what the tokenizer
+treats as one token, for example <code>"A: "</code> followed by <code>"Paris"</code>. That case is the
+<a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4295-empty-assistant-turn.html">next page</a>.</p>
+
+<table>
+<tr><th></th><th>Old path</th><th>New path</th></tr>
+<tr><td>Who writes the turn markers</td><td>the tokenizer's chat template</td><td>the caller, already in the text</td></tr>
+<tr><td>Task prompt, <code>tools</code>, BOS/EOS</td><td>applied</td><td>silently skipped (only <code>add_generation_prompt</code> raises)</td></tr>
+<tr><td>Images / audio in a turn</td><td>supported</td><td>rejected with an error</td></tr>
+<tr><td>Tokenized</td><td>one call per turn</td><td>one call for the whole chat, then cut</td></tr>
+</table>
+<p class="cref">🟡 <a href="https://github.com/NVIDIA-NeMo/RL/pull/4295">review comment — llm_message_utils.py:465 (no caller)</a></p>
+
+<div class="warn"><strong>So what.</strong> The new path only makes sense once some data loader uses it, and none does yet.
+The same question went unanswered on <a href="https://github.com/NVIDIA-NeMo/RL/pull/4108#discussion_r3998845009">#4108</a>.
+If the path stays, the simplest way to make it safe is to do what the old path does in step 5: tokenize each turn on its own.</div>
+
+</div>
+</body>
+</html>
