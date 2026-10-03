@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NVIDIA-NeMo/RL #4295 — reuse the pass-through template instead of a second tokenizer</title>
+<style>
+:root{
+  --bg:#0d1117; --surface:#161b22; --surface2:#1c2128; --border:#30363d;
+  --text:#e6edf3; --dim:#8b949e; --accent:#58a6ff; --green:#3fb950;
+  --orange:#d29922; --red:#f85149;
+}
+:root[data-theme="light"]{
+  --bg:#ffffff; --surface:#f6f8fa; --surface2:#eaeef2; --border:#d0d7de;
+  --text:#1f2328; --dim:#59636e; --accent:#0969da; --green:#1a7f37;
+  --orange:#9a6700; --red:#cf222e;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:28px 20px 70px}
+h1{font-size:22px;margin:0 0 8px;line-height:1.3}
+h2{font-size:18px;margin:32px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;
+  font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
+.sub{color:var(--dim);font-size:13.5px;margin:0 0 16px}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);
+  border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;
+  font:13px/1 ui-monospace,Menlo,monospace;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.18)}
+.hl{border-left:3px solid var(--green);background:var(--surface);
+  padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0}
+.where{border-left:4px solid var(--accent);background:var(--surface);padding:6px 12px;margin:6px 0 10px}
+.status{border:1px solid var(--border);border-radius:10px;background:var(--surface);
+  padding:2px 16px 10px;margin:0 0 20px}
+.status dl{display:grid;grid-template-columns:max-content 1fr;gap:4px 14px;margin:12px 0 0}
+.status dt{color:var(--dim);font-size:12px;text-transform:uppercase;letter-spacing:.04em;
+  white-space:nowrap;padding-top:2px}
+.status dd{margin:0;font-size:14px}
+.verdict{font-weight:700}
+.verdict.prop{color:var(--orange)}
+nav.chain{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 6px;padding:0}
+nav.chain a,nav.chain span{display:inline-block;padding:5px 11px;border:1px solid var(--border);
+  border-radius:20px;background:var(--surface);text-decoration:none;color:var(--accent);
+  font-size:12.5px;line-height:1.3;white-space:nowrap}
+nav.chain a:hover{background:var(--surface2)}
+nav.chain span.here{background:var(--accent);color:var(--bg);border-color:var(--accent);font-weight:600}
+p.chainnote{color:var(--dim);font-size:12px;margin:0 0 18px}
+.cref{margin:6px 0 0;font-size:13px}
+.cref a{display:inline-block;padding:4px 10px;border:1px solid var(--border);
+  border-radius:16px;background:var(--surface);font:12.5px ui-monospace,Menlo,monospace}
+.cref a:hover{background:var(--surface2);text-decoration:none}
+.tip{border-bottom:1px dotted var(--dim);cursor:help;position:relative;outline:none}
+.tip:hover::after,.tip:focus::after{content:attr(data-tip);position:absolute;left:0;top:1.7em;z-index:60;
+  width:max-content;max-width:min(340px,80vw);white-space:normal;background:var(--surface2);color:var(--text);
+  border:1px solid var(--border);border-radius:6px;padding:7px 10px;font:13px/1.45 -apple-system,sans-serif;
+  font-weight:400;box-shadow:0 4px 14px rgba(0,0,0,.3)}
+.diff{font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--surface);
+  border:1px solid var(--border);border-radius:8px;padding:12px;overflow-x:auto;white-space:pre;margin:10px 0}
+.diff .add{color:var(--green)}
+.diff .del{color:var(--red)}
+.diff .hunk{color:var(--accent)}
+.diff .ctx{color:var(--dim)}
+ul.chg li{margin:4px 0}
+svg{max-width:100%;height:auto;display:block;margin:16px 0}
+svg .box{fill:var(--surface);stroke:var(--border);stroke-width:1.4}
+svg .box-ok{fill:var(--surface);stroke:var(--green);stroke-width:1.8}
+svg .box-bad{fill:var(--surface);stroke:var(--red);stroke-width:1.8}
+svg .ttl{fill:var(--text);font:bold 12.5px -apple-system,sans-serif}
+svg .hdr{fill:var(--accent);font:bold 13px -apple-system,sans-serif}
+svg .note{fill:var(--dim);font:11.5px -apple-system,sans-serif}
+svg .lbl{fill:var(--text);font:11.5px ui-monospace,Menlo,monospace}
+svg .d-ok{fill:var(--green);font:12px ui-monospace,Menlo,monospace}
+svg .d-bad{fill:var(--red);font:12px ui-monospace,Menlo,monospace}
+svg .d-in{fill:var(--text);font:12px ui-monospace,Menlo,monospace}
+svg .arr{stroke:var(--dim);stroke-width:1.5;fill:none}
+svg .arrh{fill:var(--dim)}
+svg a text{text-decoration:underline;fill:var(--accent);font:11px ui-monospace,Menlo,monospace}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+  document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head>
+<body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+  function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+  function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
+    b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
+      else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+  document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+<div class="wrap">
+
+<h1>Tokenizing text as-is already works in NeMo-RL. Reuse it instead of adding a second tokenizer.</h1>
+<p class="sub"><a href="https://github.com/NVIDIA-NeMo/RL/pull/4295">NVIDIA-NeMo/RL #4295</a>
+(split out of <a href="https://github.com/NVIDIA-NeMo/RL/pull/4108">#4108</a>).
+Permalinks pin the PR head <code>4fcc987</code>. Token ids come from the Qwen2.5-0.5B-Instruct tokenizer.</p>
+
+<div class="status">
+<dl>
+  <dt>Before</dt>
+  <dd>Setting <code>policy.tokenizer.chat_template: null</code> swaps in a
+  <span class="tip" tabindex="0" data-tip="A chat template that just glues the turns' text together, with no role markers and no special tokens: {% for message in messages %}{{ message['content'] }}{% endfor %}">pass-through template</span>,
+  and the normal loop then tokenizes each turn's text as-is. That setting covers the whole run.</dd>
+  <dt>This PR</dt>
+  <dd>Adds a per-call <code>skip_chat_template=True</code> flag backed by a new 100-line tokenizer that joins the turns, tokenizes once, and cuts the result back into turns.</dd>
+  <dt>Status</dt>
+  <dd><span class="verdict prop">Proposed — not implemented.</span> Keep the per-call flag, but have it use the existing loop with the pass-through template. It was run against the real module, but it is not in the PR yet.</dd>
+</dl>
+</div>
+
+<nav class="chain">
+  <span class="here">1 · reuse the existing path</span>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4295-two-tokenize-paths.html">2 · two ways to tokenize</a>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4295-empty-assistant-turn.html">3 · the empty answer bug</a>
+</nav>
+<p class="chainnote">Three pages on this PR. Start here. Pages 2 and 3 matter only if the author keeps the PR's own tokenizer.</p>
+
+<p>There are three copies of "tokenize this text without a chat template" today. The existing one
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/4fcc9876cd6f316c1d0ccc744decbea5381323d8/nemo_rl/algorithms/utils.py#L471-L474"><code>get_tokenizer</code>, L471-L474</a>)
+sets the pass-through template and lets
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/4fcc9876cd6f316c1d0ccc744decbea5381323d8/nemo_rl/data/llm_message_utils.py#L568"><code>get_formatted_message_log</code></a>
+do the rest. That loop tokenizes each turn on its own
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/4fcc9876cd6f316c1d0ccc744decbea5381323d8/nemo_rl/data/llm_message_utils.py#L750-L752">L750-L752</a>),
+so a token can never land in the wrong turn. The PR's copy and the one still in #4108 tokenize the joined text once and cut it,
+and both lose the answer when one token crosses into the next turn.</p>
+
+<h2>Three copies today, one after</h2>
+
+<svg viewBox="0 0 900 410"role="img" aria-label="Three implementations given the same two turns. The existing path returns the right tokens for both turns. The PR's helper and the #4108 helper give the assistant turn no tokens. The proposed single path returns the right tokens and a mask that trains on Paris.">
+  <text class="hdr" x="16" y="20">Today: three copies</text>
+  <text class="hdr" x="606" y="20">Proposed: one</text>
+  <text class="note" x="16" y="42">same input to all:</text>
+  <text class="d-in" x="122" y="42">[{role:"user", content:"A: "}, {role:"assistant", content:"Paris"}]</text>
+
+  <!-- A -->
+  <rect class="box-ok" x="16" y="56" width="548" height="80" rx="7"/>
+  <text class="ttl" x="28" y="76">A · existing: chat_template: null → the normal loop</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/4fcc9876cd6f316c1d0ccc744decbea5381323d8/nemo_rl/algorithms/utils.py#L471-L474"><text x="28" y="93">get_tokenizer L471-L474</text></a>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/4fcc9876cd6f316c1d0ccc744decbea5381323d8/nemo_rl/data/llm_message_utils.py#L677-L752"><text x="210" y="93">get_formatted_message_log L677-L752</text></a>
+  <text class="d-ok" x="28" y="114">→ token_ids  [32, 25, 220] | [59604]</text>
+  <text class="d-ok" x="28" y="129">  decodes to "A: "        | "Paris"</text>
+  <text class="note" x="390" y="129">one setting for the whole run</text>
+
+  <!-- B -->
+  <rect class="box-bad" x="16" y="146" width="548" height="80" rx="7"/>
+  <text class="ttl" x="28" y="166">B · this PR: skip_chat_template=True → its own helper</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/4fcc9876cd6f316c1d0ccc744decbea5381323d8/nemo_rl/data/llm_message_utils.py#L465-L565"><text x="28" y="183">_tokenize_preformatted_message_log L465-L565</text></a>
+  <text class="d-bad" x="28" y="204">→ token_ids  [32, 25, 12095] | []</text>
+  <text class="d-bad" x="28" y="219">  decodes to "A: Paris"     | ""     ← answer lost</text>
+
+  <!-- C -->
+  <rect class="box-bad" x="16" y="236" width="548" height="80" rx="7"/>
+  <text class="ttl" x="28" y="256">C · #4108 (still open): Nemotron's own copy</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/15d258cd64f0968a2f31e48c990541de5f569410/nemo_rl/data/energon/multimodal/task_encoders/nemotron_tokenization.py#L223"><text x="28" y="273">_raw_tokens_and_mask, nemotron_tokenization.py L223 (#4108 head)</text></a>
+  <text class="d-bad" x="28" y="294">→ tokens [32, 25, 12095]   mask [0, 0, 0]</text>
+  <text class="note" x="28" y="309">same algorithm as B; the mask trains on nothing</text>
+
+  <!-- arrows -->
+  <path class="arr" d="M564 96 L598 160"/>
+  <path class="arr" d="M564 186 L598 186"/>
+  <path class="arr" d="M564 276 L598 212"/>
+  <polygon class="arrh" points="604,186 596,181 596,191"/>
+
+  <!-- proposed -->
+  <rect class="box-ok" x="606" y="56" width="280" height="260" rx="7"/>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/4fcc9876cd6f316c1d0ccc744decbea5381323d8/nemo_rl/data/llm_message_utils.py#L568"><text x="618" y="76">get_formatted_message_log</text></a>
+  <text class="lbl" x="618" y="100">A: chat_template: null</text>
+  <text class="note" x="618" y="116">   unchanged</text>
+  <text class="lbl" x="618" y="140">B: skip_chat_template=True</text>
+  <text class="note" x="618" y="156">   = pass-through template for</text>
+  <text class="note" x="618" y="170">   this one call; helper deleted</text>
+  <text class="lbl" x="618" y="194">C: 4-line wrapper over B</text>
+  <text class="note" x="618" y="210">   + add_loss_mask_to_message_log</text>
+  <text class="d-ok" x="618" y="240">→ [32, 25, 220] | [59604]</text>
+  <text class="d-ok" x="618" y="258">→ mask [0, 0, 0, 1]</text>
+  <text class="note" x="618" y="282">ran against the real module,</text>
+  <text class="note" x="618" y="298">with the Qwen2.5 tokenizer</text>
+
+  <!-- legend -->
+  <rect class="box-ok" x="16" y="340" width="18" height="14" rx="3"/><text class="note" x="40" y="352">each turn keeps its own tokens</text>
+  <rect class="box-bad" x="230" y="340" width="18" height="14" rx="3"/><text class="note" x="254" y="352">" Paris" lands in the user turn, the answer gets no loss</text>
+  <text class="note" x="16" y="380">Why B and C fail: they tokenize the joined text "A: Paris" as [A][:][ Paris]. That last token crosses into turn 2,</text>
+  <text class="note" x="16" y="396">so cutting the list can only give it to turn 1. A tokenizes "A: " and "Paris" separately, so this cannot happen.</text>
+</svg>
+
+<h2>The change in this PR — proposed, not in the PR</h2>
+
+<p class="where"><b>Where the fix lands: RL only, one function, plus the PR's test.</b>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/4fcc9876cd6f316c1d0ccc744decbea5381323d8/nemo_rl/data/llm_message_utils.py#L465-L600"><code>llm_message_utils.py</code></a>:
++28 / −106 lines. No change to <code>get_tokenizer</code> or the chat templates: the same pass-through template is passed for one call via
+<code>apply_chat_template(..., chat_template=...)</code>, so the tokenizer's own template stays as it was (checked).</p>
+
+<div class="diff"><span class="hunk">@@ llm_message_utils.py L22 · imports</span>
+<span class="add">+from nemo_rl.data.chat_templates import COMMON_CHAT_TEMPLATES
+</span><span class="ctx"> from nemo_rl.data.interfaces import (
+</span>
+<span class="hunk">@@ llm_message_utils.py L465-L565 · the PR's helper, replaced by a small one</span>
+<span class="del">-def _tokenize_preformatted_message_log(message_log, tokenizer, *, add_generation_prompt):
+-    ... join turns, tokenize once with character ranges, cut, fall back ...   # 101 lines
+</span><span class="add">+def _join_text_parts(message: dict[str, Any]) -> dict[str, Any]:
++    """Return the message with its text-only content joined into one string."""
++    content = message.get("content")
++    if isinstance(content, str):
++        return message
++    if not isinstance(content, list) or any(
++        not isinstance(part, dict) or part.get("type") != "text" for part in content
++    ):
++        raise ValueError(
++            "skip_chat_template=True requires pre-rendered text-only turns."
++        )
++    return {
++        **message,
++        "content": "".join(str(part.get("text", "")) for part in content),
++    }
+</span>
+<span class="hunk">@@ llm_message_utils.py L588-L589 · docstring</span>
+<span class="del">-        skip_chat_template: Tokenize already-formatted turns directly. BOS and EOS
+-            insertion are also skipped because those tokens must already be present.
+</span><span class="add">+        skip_chat_template: Render each turn's text as-is with the pass-through
++            template instead of the tokenizer's chat template. BOS/EOS still follow
++            add_bos_token/add_eos_token and are only added when missing. Default: False
+</span>
+<span class="hunk">@@ llm_message_utils.py L595-L600 · get_formatted_message_log, before the loop</span>
+<span class="ctx">     if skip_chat_template:
+</span><span class="del">-        return _tokenize_preformatted_message_log(
+-            message_log,
+-            tokenizer,
+-            add_generation_prompt=add_generation_prompt,
+-        )
+</span><span class="add">+        # Reuse the loop below with the pass-through template: it renders each
++        # turn's text as-is, and each turn is still tokenized on its own.
++        if add_generation_prompt or tools is not None:
++            raise ValueError(
++                "add_generation_prompt and tools are not supported when skip_chat_template=True"
++            )
++        message_log = [_join_text_parts(message) for message in message_log]
+</span>
+<span class="hunk">@@ llm_message_utils.py L674-L675 · inside the loop</span>
+<span class="ctx">         if tools is not None:
+             template_kwargs["tools"] = tools
+</span><span class="add">+        if skip_chat_template:
++            template_kwargs["chat_template"] = (
++                COMMON_CHAT_TEMPLATES.passthrough_prompt_response
++            )
+</span></div>
+
+<p>In order: <code>_join_text_parts</code> keeps the PR's support for content written as a list of text parts.
+The pass-through template alone would print that list as <code>"[{'type': 'text', …}]"</code>.
+The check before the loop keeps the PR's error for <code>add_generation_prompt</code>, and also rejects <code>tools</code>, which the pass-through template would quietly ignore.
+The two lines in the loop are the whole feature: one call renders with the pass-through template, and everything after it
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/4fcc9876cd6f316c1d0ccc744decbea5381323d8/nemo_rl/data/llm_message_utils.py#L682-L752">cut out the turn's text, BOS/EOS, tokenize the turn alone</a>)
+is the code every SFT dataset already runs. The result passes ruff format and ruff check.</p>
+
+<h2>What else changes</h2>
+
+<ul class="chg">
+<li><b>BOS/EOS follow the normal flags.</b> They are added only when missing
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/4fcc9876cd6f316c1d0ccc744decbea5381323d8/nemo_rl/data/llm_message_utils.py#L719">L719</a>,
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/4fcc9876cd6f316c1d0ccc744decbea5381323d8/nemo_rl/data/llm_message_utils.py#L739">L739</a>).
+With the defaults, Qwen gives <code>"Paris"</code> → <code>"Paris&lt;|im_end|&gt;"</code>. To keep text exactly as written, pass
+<code>add_bos_token=False, add_eos_token=False</code>.</li>
+<li><b>The dataset's task prompt is applied</b>, as on every other path
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/4fcc9876cd6f316c1d0ccc744decbea5381323d8/nemo_rl/data/llm_message_utils.py#L650">L650</a>).
+The PR's helper silently dropped it.</li>
+<li><b>Empty turns no longer raise.</b> They give an empty tensor, the same as the normal path
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/4fcc9876cd6f316c1d0ccc744decbea5381323d8/nemo_rl/data/llm_message_utils.py#L775-L779">L775-L779</a>).
+Keep the PR's empty-turn check in <code>_join_text_parts</code> if that error matters.</li>
+<li><b>The PR's unit test needs a real tokenizer.</b> Its
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/4fcc9876cd6f316c1d0ccc744decbea5381323d8/tests/unit/data/test_llm_message_utils.py#L644"><code>RawTokenizer</code></a>
+has only <code>.encode</code>, and the loop calls <code>apply_chat_template</code> and the tokenizer itself. The file already loads
+Qwen2.5 in other tests
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/4fcc9876cd6f316c1d0ccc744decbea5381323d8/tests/unit/data/test_llm_message_utils.py#L998">L998</a>).</li>
+<li><b>#4108's copy becomes a wrapper.</b> When the Nemotron encoder comes back, its
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/15d258cd64f0968a2f31e48c990541de5f569410/nemo_rl/data/energon/multimodal/task_encoders/nemotron_tokenization.py#L223"><code>_raw_tokens_and_mask</code></a>
+(about 50 lines) can be this. It was run on the same input and gives tokens <code>[32, 25, 220, 59604]</code>, mask <code>[0, 0, 0, 1]</code>:</li>
+</ul>
+
+<div class="diff"><span class="add">def _raw_tokens_and_mask(messages, tokenizer):
+    message_log = get_formatted_message_log(
+        messages, tokenizer, TaskDataSpec(task_name="nemotron"),
+        add_bos_token=False, add_eos_token=False, skip_chat_template=True,
+    )
+    add_loss_mask_to_message_log([message_log], roles_to_train_on=["assistant"])
+    tokens = torch.cat([m["token_ids"] for m in message_log])
+    mask = torch.cat([m["token_loss_mask"] for m in message_log])
+    return tokens, mask</span></div>
+
+<p class="cref">🟢 <a href="https://github.com/NVIDIA-NeMo/RL/pull/4295">review comment — reuse the pass-through template</a></p>
+
+<div class="hl"><strong>So what.</strong> One small change deletes the PR's 100-line helper, fixes the lost-answer bug by removing the code that caused it,
+and gives #4108 a 4-line replacement for its own copy. Preformatted text then goes through the same code as every other SFT dataset.
+If the author takes this route, the review comments about the helper's bug, its ignored arguments, and its tests
+(pages <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4295-two-tokenize-paths.html">2</a> and
+<a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4295-empty-assistant-turn.html">3</a>) no longer apply.</div>
+
+</div>
+</body>
+</html>
