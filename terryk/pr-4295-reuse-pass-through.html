@@ -105,7 +105,7 @@ Permalinks pin the PR head <code>4fcc987</code>. Token ids come from the Qwen2.5
   <dt>This PR</dt>
   <dd>Adds a per-call <code>skip_chat_template=True</code> flag backed by a new 100-line tokenizer that joins the turns, tokenizes once, and cuts the result back into turns.</dd>
   <dt>Status</dt>
-  <dd><span class="verdict prop">Proposed — not implemented.</span> Keep the per-call flag, but have it use the existing loop with the pass-through template. It was run against the real module, but it is not in the PR yet.</dd>
+  <dd><span class="verdict prop">Proposed — not implemented.</span> Keep the per-call flag, but have it run the existing loop with pass-through text. It was run against the real module, but it is not in the PR yet.</dd>
 </dl>
 </div>
 
@@ -168,8 +168,8 @@ and both lose the answer when one token crosses into the next turn.</p>
   <text class="lbl" x="618" y="100">A: chat_template: null</text>
   <text class="note" x="618" y="116">   unchanged</text>
   <text class="lbl" x="618" y="140">B: skip_chat_template=True</text>
-  <text class="note" x="618" y="156">   = pass-through template for</text>
-  <text class="note" x="618" y="170">   this one call; helper deleted</text>
+  <text class="note" x="618" y="156">   = same joined text, built in</text>
+  <text class="note" x="618" y="170">   the loop; helper deleted</text>
   <text class="lbl" x="618" y="194">C: 4-line wrapper over B</text>
   <text class="note" x="618" y="210">   + add_loss_mask_to_message_log</text>
   <text class="d-ok" x="618" y="240">→ [32, 25, 220] | [59604]</text>
@@ -188,14 +188,11 @@ and both lose the answer when one token crosses into the next turn.</p>
 
 <p class="where"><b>Where the fix lands: RL only, one function, plus the PR's test.</b>
 <a href="https://github.com/NVIDIA-NeMo/RL/blob/4fcc9876cd6f316c1d0ccc744decbea5381323d8/nemo_rl/data/llm_message_utils.py#L465-L600"><code>llm_message_utils.py</code></a>:
-+28 / −106 lines. No change to <code>get_tokenizer</code> or the chat templates: the same pass-through template is passed for one call via
-<code>apply_chat_template(..., chat_template=...)</code>, so the tokenizer's own template stays as it was (checked).</p>
++31 / −110 lines. No change to <code>get_tokenizer</code> or the chat templates. When the flag is set, the loop builds the
+pass-through text itself (the turns joined, exactly what the pass-through template renders) instead of calling
+<code>apply_chat_template</code>. That way the tokenizer's own template is never used or changed.</p>
 
-<div class="diff"><span class="hunk">@@ llm_message_utils.py L22 · imports</span>
-<span class="add">+from nemo_rl.data.chat_templates import COMMON_CHAT_TEMPLATES
-</span><span class="ctx"> from nemo_rl.data.interfaces import (
-</span>
-<span class="hunk">@@ llm_message_utils.py L465-L565 · the PR's helper, replaced by a small one</span>
+<div class="diff"><span class="hunk">@@ llm_message_utils.py L465-L565 · the PR's helper, replaced by a small one</span>
 <span class="del">-def _tokenize_preformatted_message_log(message_log, tokenizer, *, add_generation_prompt):
 -    ... join turns, tokenize once with character ranges, cut, fall back ...   # 101 lines
 </span><span class="add">+def _join_text_parts(message: dict[str, Any]) -> dict[str, Any]:
@@ -217,8 +214,8 @@ and both lose the answer when one token crosses into the next turn.</p>
 <span class="hunk">@@ llm_message_utils.py L588-L589 · docstring</span>
 <span class="del">-        skip_chat_template: Tokenize already-formatted turns directly. BOS and EOS
 -            insertion are also skipped because those tokens must already be present.
-</span><span class="add">+        skip_chat_template: Render each turn's text as-is with the pass-through
-+            template instead of the tokenizer's chat template. BOS/EOS still follow
+</span><span class="add">+        skip_chat_template: Use each turn's text as-is, like the pass-through
++            template, instead of the tokenizer's chat template. BOS/EOS still follow
 +            add_bos_token/add_eos_token and are only added when missing. Default: False
 </span>
 <span class="hunk">@@ llm_message_utils.py L595-L600 · get_formatted_message_log, before the loop</span>
@@ -228,29 +225,38 @@ and both lose the answer when one token crosses into the next turn.</p>
 -            tokenizer,
 -            add_generation_prompt=add_generation_prompt,
 -        )
-</span><span class="add">+        # Reuse the loop below with the pass-through template: it renders each
-+        # turn's text as-is, and each turn is still tokenized on its own.
+</span><span class="add">+        # Reuse the loop below with pass-through rendering: each turn's text is
++        # used as-is, and each turn is still tokenized on its own.
 +        if add_generation_prompt or tools is not None:
 +            raise ValueError(
 +                "add_generation_prompt and tools are not supported when skip_chat_template=True"
 +            )
 +        message_log = [_join_text_parts(message) for message in message_log]
 </span>
-<span class="hunk">@@ llm_message_utils.py L674-L675 · inside the loop</span>
-<span class="ctx">         if tools is not None:
-             template_kwargs["tools"] = tools
+<span class="hunk">@@ llm_message_utils.py L677-L679 · inside the loop</span>
+<span class="del">-        formatted_message: str = tokenizer.apply_chat_template(  # type: ignore
+-            message_log_strs[: i + 1], **template_kwargs
+-        )
 </span><span class="add">+        if skip_chat_template:
-+            template_kwargs["chat_template"] = (
-+                COMMON_CHAT_TEMPLATES.passthrough_prompt_response
++            # Same output as the pass-through template (chat_template: null), built
++            # here so a tokenizer that overrides apply_chat_template can't change it.
++            formatted_message = "".join(m["content"] for m in message_log_strs[: i + 1])
++        else:
++            formatted_message = tokenizer.apply_chat_template(  # type: ignore
++                message_log_strs[: i + 1], **template_kwargs
 +            )
 </span></div>
 
 <p>In order: <code>_join_text_parts</code> keeps the PR's support for content written as a list of text parts.
 The pass-through template alone would print that list as <code>"[{'type': 'text', …}]"</code>.
 The check before the loop keeps the PR's error for <code>add_generation_prompt</code>, and also rejects <code>tools</code>, which the pass-through template would quietly ignore.
-The two lines in the loop are the whole feature: one call renders with the pass-through template, and everything after it
+The join in the loop is the whole feature: it produces exactly what the pass-through template renders, and everything after it
 (<a href="https://github.com/NVIDIA-NeMo/RL/blob/4fcc9876cd6f316c1d0ccc744decbea5381323d8/nemo_rl/data/llm_message_utils.py#L682-L752">cut out the turn's text, BOS/EOS, tokenize the turn alone</a>)
-is the code every SFT dataset already runs. The result passes ruff format and ruff check.</p>
+is the code every SFT dataset already runs. The result passes ruff format and ruff check.
+Passing <code>chat_template=</code> to <code>apply_chat_template</code> instead looks simpler, but the DeepSeek-V4 tokenizer wrapper
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/4fcc9876cd6f316c1d0ccc744decbea5381323d8/nemo_rl/data/deepseek_v4_tokenizer.py#L40-L82">replaces that method and ignores the argument</a>.
+Through it, <code>["A: ", "Paris"]</code> rendered as <code>&lt;｜begin▁of▁sentence｜&gt;&lt;｜User｜&gt;A: &lt;｜Assistant｜&gt;&lt;/think&gt;Paris…</code>.
+The join gives <code>"A: "</code> | <code>"Paris"</code> with every tokenizer (checked through that same wrapper).</p>
 
 <h2>What else changes</h2>
 
@@ -271,6 +277,10 @@ Keep the PR's empty-turn check in <code>_join_text_parts</code> if that error ma
 has only <code>.encode</code>, and the loop calls <code>apply_chat_template</code> and the tokenizer itself. The file already loads
 Qwen2.5 in other tests
 (<a href="https://github.com/NVIDIA-NeMo/RL/blob/4fcc9876cd6f316c1d0ccc744decbea5381323d8/tests/unit/data/test_llm_message_utils.py#L998">L998</a>).</li>
+<li><b>Leading-space tokenizers.</b> On Mistral v0.3 and Llama-2, encoding each turn on its own adds a leading space to every turn after
+the first: <code>["Question: hi\n", "Answer"]</code> decodes back as <code>'Question: hi\n Answer'</code>, while one joint encode keeps it exact.
+The chat-template path already behaves this way (its assistant chunk <code>"Answer"</code> also encodes to <code>[27075]</code>, <code>▁Answer</code>).
+Qwen2.5, Llama-3.1, Gemma-2 and Nemotron-Nano-9B-v2 decode back exactly.</li>
 <li><b>#4108's copy becomes a wrapper.</b> When the Nemotron encoder comes back, its
 <a href="https://github.com/NVIDIA-NeMo/RL/blob/15d258cd64f0968a2f31e48c990541de5f569410/nemo_rl/data/energon/multimodal/task_encoders/nemotron_tokenization.py#L223"><code>_raw_tokens_and_mask</code></a>
 (about 50 lines) can be this. It was run on the same input and gives tokens <code>[32, 25, 220, 59604]</code>, mask <code>[0, 0, 0, 1]</code>:</li>
@@ -286,7 +296,7 @@ Qwen2.5 in other tests
     mask = torch.cat([m["token_loss_mask"] for m in message_log])
     return tokens, mask</span></div>
 
-<p class="cref">🟢 <a href="https://github.com/NVIDIA-NeMo/RL/pull/4295">review comment — reuse the pass-through template</a></p>
+<p class="cref">🟢 <a href="https://github.com/NVIDIA-NeMo/RL/pull/4295#discussion_r4179687666">review comment — llm_message_utils.py:577 (reuse the existing path)</a></p>
 
 <div class="hl"><strong>So what.</strong> One small change deletes the PR's 100-line helper, fixes the lost-answer bug by removing the code that caused it,
 and gives #4108 a 4-line replacement for its own copy. Preformatted text then goes through the same code as every other SFT dataset.
