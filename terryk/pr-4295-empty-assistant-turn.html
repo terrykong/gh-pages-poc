@@ -79,6 +79,12 @@ svg .cutl{fill:var(--orange);font:bold 12px -apple-system,sans-serif}
 svg a text{text-decoration:underline;fill:var(--accent);font:11px ui-monospace,Menlo,monospace}
 .moot{border:1px solid var(--orange);border-left:4px solid var(--orange);background:var(--surface);
   padding:10px 14px;margin:0 0 18px;border-radius:0 8px 8px 0;font-size:14px}
+svg .tid{fill:var(--dim);font:11px ui-monospace,Menlo,monospace}
+svg .train{fill:var(--surface);stroke:var(--border);stroke-width:1.4}
+svg .mono{fill:var(--text);font:12.5px ui-monospace,Menlo,monospace;white-space:pre}
+svg .monobad{fill:var(--red);font:12.5px ui-monospace,Menlo,monospace;white-space:pre}
+svg .monook{fill:var(--green);font:12.5px ui-monospace,Menlo,monospace;white-space:pre}
+svg text{white-space:pre}
 </style>
 <script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
   document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
@@ -116,76 +122,87 @@ Llama-3.1, Llama-2 and Nemotron-Nano-9B-v2 give the same split.</p>
 </nav>
 <p class="chainnote">Two pages on this PR. This one: why an answer can end up with no tokens.</p>
 
-<p>The new path joins all turns, tokenizes once, and asks each token which
-<span class="tip" tabindex="0" data-tip="The (start, end) character positions a token came from. Fast HF tokenizers return these when called with return_offsets_mapping=True.">characters</span> it came from.
-If a token starts in one turn and ends in the next, the code notices
-(<a href="https://github.com/NVIDIA-NeMo/RL/blob/4fcc9876cd6f316c1d0ccc744decbea5381323d8/nemo_rl/data/llm_message_utils.py#L533-L535">L533-L535</a>)
-but does not raise. It falls back to a second method
-(<a href="https://github.com/NVIDIA-NeMo/RL/blob/4fcc9876cd6f316c1d0ccc744decbea5381323d8/nemo_rl/data/llm_message_utils.py#L544-L550">L544-L550</a>):
-tokenize turn 1 alone, count its tokens, and cut the <i>full</i> token list at that count.
-Those are two different tokenizations, so the count lands one token too far.</p>
+<p>A <span class="tip" tabindex="0" data-tip="The tokenizer cuts text into pieces and gives each piece an id number. A piece can be a whole word, part of a word, or punctuation. Qwen's tokenizer glues a space onto the word after it, so ' Paris' (space included) is one piece.">tokenizer</span>
+cuts text into pieces called tokens, each with an id. SFT needs those ids split back into turns, because only the assistant's
+tokens are trained on. The PR's helper tokenizes all turns joined together, then has to work out where turn 1 ends in that token list.
+That breaks when one token covers the end of turn 1 <i>and</i> the start of turn 2. The figure walks one real example through each step.</p>
 
-<h2>"A: " then "Paris"</h2>
+<h2>"A: " then "Paris", step by step</h2>
 
-<svg viewBox="0 0 900 400" role="img" aria-label="The text A colon space Paris. The full tokenization has three tokens, the last being ' Paris', which crosses the turn boundary. Tokenizing turn 1 alone gives three tokens. Cutting the full list at three gives turn 1 all three tokens and the assistant turn none. The fix tokenizes each turn alone: turn 1 gets A, colon, space; turn 2 gets Paris.">
-  <!-- text row -->
-  <text class="row" x="16" y="42">the text</text>
-  <rect class="ch" x="230" y="22" width="40" height="30"/><text class="chl" x="245" y="42">A</text>
-  <rect class="ch" x="270" y="22" width="40" height="30"/><text class="chl" x="286" y="42">:</text>
-  <rect class="ch" x="310" y="22" width="40" height="30"/><text class="chl" x="324" y="42">␣</text>
-  <rect class="ch" x="350" y="22" width="40" height="30"/><text class="chl" x="365" y="42">P</text>
-  <rect class="ch" x="390" y="22" width="40" height="30"/><text class="chl" x="405" y="42">a</text>
-  <rect class="ch" x="430" y="22" width="40" height="30"/><text class="chl" x="446" y="42">r</text>
-  <rect class="ch" x="470" y="22" width="40" height="30"/><text class="chl" x="486" y="42">i</text>
-  <rect class="ch" x="510" y="22" width="40" height="30"/><text class="chl" x="525" y="42">s</text>
-  <text class="note" x="232" y="14">turn 1 (user): "A: "</text>
-  <text class="note" x="400" y="14">turn 2 (assistant): "Paris"</text>
-  <line class="cut" x1="350" y1="8" x2="350" y2="230"/>
-  <text class="cutl" x="560" y="42">turn boundary</text>
+<svg viewBox="0 0 900 600" role="img" aria-label="Step by step: the joined text A: Paris becomes three tokens, the last being space-Paris, which crosses into turn 2. The helper counts turn 1's tokens on its own (three) and cuts the joined list after three tokens, so the user turn gets all three and the assistant turn gets none. Training then has no assistant tokens to learn from. Tokenizing each turn alone gives the assistant the token Paris.">
+  <!-- step 0: the text -->
+  <text class="row" x="16" y="34">the two turns</text>
+  <text class="note" x="16" y="50">each box is one character</text>
+  <text class="note" x="252" y="16">user turn: "A: "</text>
+  <text class="note" x="420" y="16">assistant turn: "Paris"</text>
+  <rect class="ch" x="250" y="24" width="40" height="30"/><text class="chl" x="265" y="44">A</text>
+  <rect class="ch" x="290" y="24" width="40" height="30"/><text class="chl" x="306" y="44">:</text>
+  <rect class="ch" x="330" y="24" width="40" height="30"/><text class="chl" x="344" y="44">␣</text>
+  <rect class="ch" x="370" y="24" width="40" height="30"/><text class="chl" x="385" y="44">P</text>
+  <rect class="ch" x="410" y="24" width="40" height="30"/><text class="chl" x="425" y="44">a</text>
+  <rect class="ch" x="450" y="24" width="40" height="30"/><text class="chl" x="466" y="44">r</text>
+  <rect class="ch" x="490" y="24" width="40" height="30"/><text class="chl" x="506" y="44">i</text>
+  <rect class="ch" x="530" y="24" width="40" height="30"/><text class="chl" x="545" y="44">s</text>
+  <line class="cut" x1="370" y1="6" x2="370" y2="288"/>
+  <text class="cutl" x="584" y="44">where turn 1 ends</text>
 
-  <!-- full tokenize -->
-  <text class="row" x="16" y="90">① tokenize the whole text</text>
+  <!-- step 1 -->
+  <text class="row" x="16" y="90">① tokenize "A: Paris" once</text>
   <a href="https://github.com/NVIDIA-NeMo/RL/blob/4fcc9876cd6f316c1d0ccc744decbea5381323d8/nemo_rl/data/llm_message_utils.py#L519-L523"><text x="16" y="106">L519</text></a>
-  <rect class="tk" x="232" y="72" width="36" height="28" rx="5"/><text class="tkl" x="245" y="91">A</text>
-  <rect class="tk" x="272" y="72" width="36" height="28" rx="5"/><text class="tkl" x="286" y="91">:</text>
-  <rect class="tk-bad" x="312" y="72" width="236" height="28" rx="5"/><text class="tkl" x="400" y="91">␣Paris</text>
-  <text class="bad" x="560" y="91">one token, crosses the boundary</text>
+  <rect class="tk" x="251" y="74" width="38" height="40" rx="5"/><text class="tkl" x="264" y="91">A</text><text class="tid" x="262" y="107">32</text>
+  <rect class="tk" x="291" y="74" width="38" height="40" rx="5"/><text class="tkl" x="305" y="91">:</text><text class="tid" x="302" y="107">25</text>
+  <rect class="tk-bad" x="331" y="74" width="238" height="40" rx="5"/><text class="tkl" x="420" y="91">␣Paris</text><text class="tid" x="430" y="107">12095</text>
+  <text class="bad" x="584" y="91">one token, half in each turn</text>
+  <text class="note" x="584" y="107">3 tokens in total</text>
 
-  <!-- prefix tokenize -->
-  <text class="row" x="16" y="138">② turn 1 alone (fallback)</text>
-  <a href="https://github.com/NVIDIA-NeMo/RL/blob/4fcc9876cd6f316c1d0ccc744decbea5381323d8/nemo_rl/data/llm_message_utils.py#L547-L549"><text x="16" y="154">L547-L549</text></a>
-  <rect class="tk" x="232" y="120" width="36" height="28" rx="5"/><text class="tkl" x="245" y="139">A</text>
-  <rect class="tk" x="272" y="120" width="36" height="28" rx="5"/><text class="tkl" x="286" y="139">:</text>
-  <rect class="tk" x="312" y="120" width="36" height="28" rx="5"/><text class="tkl" x="325" y="139">␣</text>
-  <text class="note" x="560" y="139">3 tokens, so "turn 1 = the first 3 tokens of ①"</text>
+  <!-- step 2 -->
+  <text class="row" x="16" y="150">② can't cut inside a token,</text>
+  <text class="row" x="16" y="166">so count turn 1 on its own</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/4fcc9876cd6f316c1d0ccc744decbea5381323d8/nemo_rl/data/llm_message_utils.py#L544-L550"><text x="16" y="182">fallback, L544-L550</text></a>
+  <rect class="tk" x="251" y="140" width="38" height="40" rx="5"/><text class="tkl" x="264" y="157">A</text><text class="tid" x="262" y="173">32</text>
+  <rect class="tk" x="291" y="140" width="38" height="40" rx="5"/><text class="tkl" x="305" y="157">:</text><text class="tid" x="302" y="173">25</text>
+  <rect class="tk" x="331" y="140" width="38" height="40" rx="5"/><text class="tkl" x="344" y="157">␣</text><text class="tid" x="339" y="173">220</text>
+  <text class="note" x="584" y="157">tokenize "A: " alone: 3 tokens,</text>
+  <text class="note" x="584" y="173">so "turn 1 = the first 3 tokens of ①"</text>
 
-  <!-- PR result -->
-  <text class="row" x="16" y="186">③ PR result: cut ① after 3</text>
-  <a href="https://github.com/NVIDIA-NeMo/RL/blob/4fcc9876cd6f316c1d0ccc744decbea5381323d8/nemo_rl/data/llm_message_utils.py#L552-L564"><text x="16" y="202">L552-L564</text></a>
-  <rect class="tk" x="232" y="168" width="36" height="28" rx="5"/><text class="tkl" x="245" y="187">A</text>
-  <rect class="tk" x="272" y="168" width="36" height="28" rx="5"/><text class="tkl" x="286" y="187">:</text>
-  <rect class="tk-bad" x="312" y="168" width="100" height="28" rx="5"/><text class="tkl" x="332" y="187">␣Paris</text>
-  <rect class="empty" x="430" y="168" width="110" height="28" rx="5"/><text class="bad" x="446" y="187">[ ] empty</text>
-  <text class="bad" x="560" y="187">assistant turn: 0 tokens</text>
+  <!-- step 3 -->
+  <text class="row" x="16" y="216">③ cut ①'s list after 3</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/4fcc9876cd6f316c1d0ccc744decbea5381323d8/nemo_rl/data/llm_message_utils.py#L552-L564"><text x="16" y="232">L552-L564</text></a>
+  <rect class="tk" x="251" y="206" width="38" height="40" rx="5"/><text class="tkl" x="264" y="223">A</text><text class="tid" x="262" y="239">32</text>
+  <rect class="tk" x="291" y="206" width="38" height="40" rx="5"/><text class="tkl" x="305" y="223">:</text><text class="tid" x="302" y="239">25</text>
+  <rect class="tk-bad" x="331" y="206" width="238" height="40" rx="5"/><text class="tkl" x="420" y="223">␣Paris</text><text class="tid" x="430" y="239">12095</text>
+  <text class="note" x="252" y="262">user turn = tokens 1-3: all of them</text>
+  <rect class="empty" x="584" y="206" width="110" height="40" rx="5"/><text class="bad" x="604" y="231">[ ] empty</text>
+  <text class="note" x="584" y="262">assistant turn = token 4 onward:</text>
+  <text class="note" x="584" y="278">① has only 3, so nothing is left</text>
+
+  <!-- step 4: what training gets -->
+  <rect class="train" x="16" y="296" width="868" height="92" rx="7"/>
+  <text class="row" x="28" y="318">④ what reaches training</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/4fcc9876cd6f316c1d0ccc744decbea5381323d8/nemo_rl/data/llm_message_utils.py#L165"><text x="28" y="334">add_loss_mask_to_message_log, L165</text></a>
+  <text class="mono" x="300" y="318">message    token_ids          loss mask</text>
+  <text class="mono" x="300" y="338">user       [32, 25, 12095]    [0, 0, 0]</text>
+  <text class="monobad" x="300" y="356">assistant  []                 []</text>
+  <text class="bad" x="300" y="378">the model reads "A: Paris" but learns from no token of the answer</text>
 
   <!-- fix -->
-  <text class="row" x="16" y="254">④ fix: each turn alone</text>
-  <a href="https://github.com/NVIDIA-NeMo/RL/blob/4fcc9876cd6f316c1d0ccc744decbea5381323d8/nemo_rl/data/llm_message_utils.py#L750-L752"><text x="16" y="270">same as old path, L750</text></a>
-  <rect class="tk-ok" x="232" y="236" width="36" height="28" rx="5"/><text class="tkl" x="245" y="255">A</text>
-  <rect class="tk-ok" x="272" y="236" width="36" height="28" rx="5"/><text class="tkl" x="286" y="255">:</text>
-  <rect class="tk-ok" x="312" y="236" width="36" height="28" rx="5"/><text class="tkl" x="325" y="255">␣</text>
-  <rect class="tk-ok" x="356" y="236" width="80" height="28" rx="5"/><text class="tkl" x="375" y="255">Paris</text>
-  <text class="good" x="560" y="255">assistant turn: 1 token</text>
+  <text class="row" x="16" y="430">fix: tokenize each turn</text>
+  <text class="row" x="16" y="446">on its own (as the</text>
+  <text class="row" x="16" y="462">chat-template path does)</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/4fcc9876cd6f316c1d0ccc744decbea5381323d8/nemo_rl/data/llm_message_utils.py#L750-L752"><text x="16" y="478">L750</text></a>
+  <rect class="tk-ok" x="251" y="420" width="38" height="40" rx="5"/><text class="tkl" x="264" y="437">A</text><text class="tid" x="262" y="453">32</text>
+  <rect class="tk-ok" x="291" y="420" width="38" height="40" rx="5"/><text class="tkl" x="305" y="437">:</text><text class="tid" x="302" y="453">25</text>
+  <rect class="tk-ok" x="331" y="420" width="38" height="40" rx="5"/><text class="tkl" x="344" y="437">␣</text><text class="tid" x="339" y="453">220</text>
+  <rect class="tk-ok" x="377" y="420" width="90" height="40" rx="5"/><text class="tkl" x="401" y="437">Paris</text><text class="tid" x="404" y="453">59604</text>
+  <text class="mono" x="300" y="500">user       [32, 25, 220]      [0, 0, 0]</text>
+  <text class="monook" x="300" y="518">assistant  [59604]            [1]   trains on "Paris"</text>
 
   <!-- legend -->
-  <rect class="tk-bad" x="16" y="300" width="18" height="14" rx="3"/><text class="note" x="40" y="312">token in the wrong turn</text>
-  <rect class="empty" x="190" y="300" width="18" height="14" rx="3"/><text class="note" x="214" y="312">empty turn</text>
-  <rect class="tk-ok" x="310" y="300" width="18" height="14" rx="3"/><text class="note" x="334" y="312">each turn keeps its own text</text>
-  <line class="cut" x1="530" y1="300" x2="530" y2="316"/><text class="note" x="540" y="312">where turn 1 ends</text>
-
-  <text class="note" x="16" y="346">Ids: ① [32, 25, 12095]   ② [32, 25, 220]   ③ turn 1 [32, 25, 12095], turn 2 []   ④ [32, 25, 220] + [59604]</text>
-  <text class="note" x="16" y="366">The loss mask is built per turn, by role. An empty assistant turn means this sample trains on nothing for its answer,</text>
-  <text class="note" x="16" y="384">and no error or warning is raised. The two lists in ③ still join to exactly ①, so a length check would not catch it.</text>
+  <rect class="tk-bad" x="16" y="548" width="18" height="14" rx="3"/><text class="note" x="40" y="560">token in the wrong turn</text>
+  <rect class="empty" x="190" y="548" width="18" height="14" rx="3"/><text class="note" x="214" y="560">turn with no tokens</text>
+  <rect class="tk-ok" x="340" y="548" width="18" height="14" rx="3"/><text class="note" x="364" y="560">each turn keeps its own tokens</text>
+  <line class="cut" x1="560" y1="546" x2="560" y2="564"/><text class="note" x="570" y="560">where turn 1 ends</text>
+  <text class="note" x="16" y="588">The number under each piece is its token id (Qwen2.5 tokenizer). ␣ = a space. No error or warning is raised at any step.</text>
 </svg>
 
 <p>The same fallback can also <b>repeat</b> tokens. Token counts of growing prefixes do not always grow (Qwen2.5:
