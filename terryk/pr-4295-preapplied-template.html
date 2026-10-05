@@ -119,79 +119,94 @@ Permalinks pin the PR head <code>4fcc987</code>. Every value in the figure comes
 
 <p>Some Energon sources in an SFT blend hand over messages whose text already has the chat template in it.
 NeMo-RL must not apply the template again, but it still needs it for every other source in the blend.
-Only the cooker that reads such a source knows this, so it marks the sample, and the tokenizing loop skips just the one step that applies the template.
+The blend marks such a source with the subflavor <code>skip_chat_template: true</code>, the
+<a href="https://github.com/NVIDIA/Megatron-LM/blob/6a3660905a2736b5670baed1ca5954372937918b/examples/multimodal/data_loading/task_encoder.py#L674">same key Megatron-LM reads</a>.
+Subflavors are set per dataset entry in the blend, so one run can mix pre-templated and normal sources.
+The cooker turns the subflavor into a typed field on the sample, and the tokenizing loop skips just the one step that applies the template.
 <i>Why not <code>policy.tokenizer.chat_template: null</code>:</i> that turns the template off for the whole run, not for one source.</p>
 
 <h2>One blend, two sources, one loop</h2>
 
-<svg viewBox="0 0 900 616" role="img" aria-label="Two sources in one blend go through the same steps. The normal source has the chat template applied by NeMo-RL; the pre-templated source has its text joined as-is. Every other step is the same, and both produce per-turn token ids with the answer in the assistant turn.">
+<svg viewBox="0 0 900 688" role="img" aria-label="Two sources in one blend go through the same steps. The normal source has the chat template applied by NeMo-RL; the pre-templated source has its text joined as-is. Every other step is the same, and both produce per-turn token ids with the answer in the assistant turn.">
   <text class="hdr" x="16" y="20">Normal source</text>
   <text class="hdr-new" x="466" y="20">Pre-templated source</text>
 
+  <!-- row -1: raw Energon sample, subflavors from the blend YAML -->
+  <rect class="box" x="16" y="32" width="418" height="56" rx="7"/>
+  <text class="ttl" x="28" y="51">raw Energon sample (blend YAML, Megatron-LM's key)</text>
+  <text class="d-in" x="28" y="74">__subflavors__ = {}</text>
+  <rect class="box-new" x="466" y="32" width="418" height="56" rx="7"/>
+  <text class="ttl" x="478" y="51">raw Energon sample (blend YAML, Megatron-LM's key)</text>
+  <text class="d-in" x="478" y="74">__subflavors__ = {skip_chat_template: true}</text>
+  <path class="arr" d="M675 88 L675 96"/><polygon class="arrh" points="675,102 670,94 680,94"/>
+  <path class="arr" d="M225 88 L225 96"/><polygon class="arrh" points="225,102 220,94 230,94"/>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/4fcc9876cd6f316c1d0ccc744decbea5381323d8/nemo_rl/data/energon/multimodal/cookers/generic.py#L131-L136"><text x="686" y="99">cook_conversation (+1 line)</text></a>
+
   <!-- row 0: cooker output -->
-  <rect class="box" x="16" y="32" width="418" height="94" rx="7"/>
-  <text class="ttl" x="28" y="51">cooker returns a CanonicalSFTSample</text>
-  <text class="d-in" x="28" y="72">messages=[{user: "A: "},</text>
-  <text class="d-in" x="28" y="88">          {assistant: "Paris"}]</text>
-  <text class="d-in" x="28" y="104">chat_template_preapplied=False  (default)</text>
-  <rect class="box-new" x="466" y="32" width="418" height="94" rx="7"/>
-  <a href="https://github.com/NVIDIA-NeMo/RL/blob/4fcc9876cd6f316c1d0ccc744decbea5381323d8/nemo_rl/data/energon/multimodal/types.py#L54-L59"><text x="478" y="51">CanonicalSFTSample, types.py L54 (+1 field)</text></a>
-  <text class="d-in" x="478" y="72">messages=[{user: "&lt;|im_start|&gt;user\nA: &lt;|im_end|&gt;\n</text>
-  <text class="d-in" x="478" y="88">                  &lt;|im_start|&gt;assistant\n"},</text>
-  <text class="d-in" x="478" y="104">          {assistant: "Paris&lt;|im_end|&gt;\n"}]</text>
-  <text class="d-in" x="478" y="120">chat_template_preapplied=True</text>
+  <rect class="box" x="16" y="104" width="418" height="94" rx="7"/>
+  <text class="ttl" x="28" y="123">cooker returns a CanonicalSFTSample (NeMo-RL)</text>
+  <text class="d-in" x="28" y="144">messages=[{user: "A: "},</text>
+  <text class="d-in" x="28" y="160">          {assistant: "Paris"}]</text>
+  <text class="d-in" x="28" y="176">chat_template_preapplied=False  (default)</text>
+  <rect class="box-new" x="466" y="104" width="418" height="94" rx="7"/>
+  <text class="ttl" x="478" y="123">cooker returns a CanonicalSFTSample (NeMo-RL)</text>
+  <text class="d-in" x="478" y="144">messages=[{user: "&lt;|im_start|&gt;user\nA: &lt;|im_end|&gt;\n</text>
+  <text class="d-in" x="478" y="160">                  &lt;|im_start|&gt;assistant\n"},</text>
+  <text class="d-in" x="478" y="176">          {assistant: "Paris&lt;|im_end|&gt;\n"}]</text>
+  <text class="d-in" x="478" y="192">chat_template_preapplied=True</text>
 
   <!-- row 1: adapter -->
-  <rect class="box" x="16" y="138" width="868" height="50" rx="7"/>
-  <a href="https://github.com/NVIDIA-NeMo/RL/blob/4fcc9876cd6f316c1d0ccc744decbea5381323d8/nemo_rl/data/energon/multimodal/task_encoders/generic_sft.py#L211-L221"><text x="28" y="157">HFMultimodalSFTProcessorAdapter.encode, generic_sft.py L211 (+1 line), same for both</text></a>
-  <text class="d-in" x="28" y="178">get_formatted_message_log(messages, ..., chat_template_preapplied=sample.chat_template_preapplied)</text>
+  <rect class="box" x="16" y="210" width="868" height="50" rx="7"/>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/4fcc9876cd6f316c1d0ccc744decbea5381323d8/nemo_rl/data/energon/multimodal/task_encoders/generic_sft.py#L211-L221"><text x="28" y="229">HFMultimodalSFTProcessorAdapter.encode, generic_sft.py L211 (+1 line), same for both</text></a>
+  <text class="d-in" x="28" y="250">get_formatted_message_log(messages, ..., chat_template_preapplied=sample.chat_template_preapplied)</text>
 
   <!-- row 2: build turn text (the only difference) -->
-  <rect class="box" x="16" y="200" width="418" height="92" rx="7"/>
-  <text class="ttl" x="28" y="219">build turns 0..i: apply the chat template</text>
-  <a href="https://github.com/NVIDIA-NeMo/RL/blob/4fcc9876cd6f316c1d0ccc744decbea5381323d8/nemo_rl/data/llm_message_utils.py#L677-L679"><text x="28" y="235">apply_chat_template, L677</text></a>
-  <text class="d-ok" x="28" y="256">i=0 → "…system…&lt;|im_start|&gt;user\nA: &lt;|im_end|&gt;\n"</text>
-  <text class="d-ok" x="28" y="272">i=1 → (same) + "…assistant\nParis&lt;|im_end|&gt;\n"</text>
-  <rect class="box-diff" x="466" y="200" width="418" height="92" rx="7"/>
-  <text class="ttl" x="478" y="219">build turns 0..i: join the text as it is</text>
-  <text class="note" x="478" y="235">the one new branch in the loop</text>
-  <text class="d-ok" x="478" y="256">i=0 → "&lt;|im_start|&gt;user\nA: …&lt;|im_start|&gt;assistant\n"</text>
-  <text class="d-ok" x="478" y="272">i=1 → (same) + "Paris&lt;|im_end|&gt;\n"</text>
+  <rect class="box" x="16" y="272" width="418" height="92" rx="7"/>
+  <text class="ttl" x="28" y="291">build turns 0..i: apply the chat template</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/4fcc9876cd6f316c1d0ccc744decbea5381323d8/nemo_rl/data/llm_message_utils.py#L677-L679"><text x="28" y="307">apply_chat_template, L677</text></a>
+  <text class="d-ok" x="28" y="328">i=0 → "…system…&lt;|im_start|&gt;user\nA: &lt;|im_end|&gt;\n"</text>
+  <text class="d-ok" x="28" y="344">i=1 → (same) + "…assistant\nParis&lt;|im_end|&gt;\n"</text>
+  <rect class="box-diff" x="466" y="272" width="418" height="92" rx="7"/>
+  <text class="ttl" x="478" y="291">build turns 0..i: join the text as it is</text>
+  <text class="note" x="478" y="307">the one new branch in the loop</text>
+  <text class="d-ok" x="478" y="328">i=0 → "&lt;|im_start|&gt;user\nA: …&lt;|im_start|&gt;assistant\n"</text>
+  <text class="d-ok" x="478" y="344">i=1 → (same) + "Paris&lt;|im_end|&gt;\n"</text>
 
   <!-- row 3: cut -->
-  <rect class="box" x="16" y="304" width="868" height="50" rx="7"/>
-  <a href="https://github.com/NVIDIA-NeMo/RL/blob/4fcc9876cd6f316c1d0ccc744decbea5381323d8/nemo_rl/data/llm_message_utils.py#L682-L688"><text x="28" y="323">keep only the text turn i added, L682, same for both</text></a>
-  <text class="d-ok" x="28" y="344">assistant chunk → "&lt;|im_start|&gt;assistant\nParis&lt;|im_end|&gt;\n"</text>
-  <text class="d-ok" x="478" y="344">assistant chunk → "Paris&lt;|im_end|&gt;\n"</text>
+  <rect class="box" x="16" y="376" width="868" height="50" rx="7"/>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/4fcc9876cd6f316c1d0ccc744decbea5381323d8/nemo_rl/data/llm_message_utils.py#L682-L688"><text x="28" y="395">keep only the text turn i added, L682, same for both</text></a>
+  <text class="d-ok" x="28" y="416">assistant chunk → "&lt;|im_start|&gt;assistant\nParis&lt;|im_end|&gt;\n"</text>
+  <text class="d-ok" x="478" y="416">assistant chunk → "Paris&lt;|im_end|&gt;\n"</text>
 
   <!-- row 4: tokenize -->
-  <rect class="box" x="16" y="366" width="868" height="66" rx="7"/>
-  <a href="https://github.com/NVIDIA-NeMo/RL/blob/4fcc9876cd6f316c1d0ccc744decbea5381323d8/nemo_rl/data/llm_message_utils.py#L750-L752"><text x="28" y="385">tokenize each turn on its own, L750, same for both</text></a>
-  <text class="d-ok" x="28" y="406">user      29 ids  […, 25, 220, 151645, 198]</text>
-  <text class="d-ok" x="28" y="422">assistant  6 ids  […, 198, 59604, 151645, 198]</text>
-  <text class="d-ok" x="478" y="406">user      11 ids  [151644, 872, 198, 32, 25, 220, …]</text>
-  <text class="d-ok" x="478" y="422">assistant  3 ids  [59604, 151645, 198]</text>
+  <rect class="box" x="16" y="438" width="868" height="66" rx="7"/>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/4fcc9876cd6f316c1d0ccc744decbea5381323d8/nemo_rl/data/llm_message_utils.py#L750-L752"><text x="28" y="457">tokenize each turn on its own, L750, same for both</text></a>
+  <text class="d-ok" x="28" y="478">user      29 ids  […, 25, 220, 151645, 198]</text>
+  <text class="d-ok" x="28" y="494">assistant  6 ids  […, 198, 59604, 151645, 198]</text>
+  <text class="d-ok" x="478" y="478">user      11 ids  [151644, 872, 198, 32, 25, 220, …]</text>
+  <text class="d-ok" x="478" y="494">assistant  3 ids  [59604, 151645, 198]</text>
 
   <!-- row 5: loss -->
-  <rect class="box" x="16" y="444" width="868" height="50" rx="7"/>
-  <a href="https://github.com/NVIDIA-NeMo/RL/blob/4fcc9876cd6f316c1d0ccc744decbea5381323d8/nemo_rl/data/llm_message_utils.py#L165"><text x="28" y="463">add_loss_mask_to_message_log, L165: loss on the assistant turn</text></a>
-  <text class="d-ok" x="28" y="484">trains on "&lt;|im_start|&gt;assistant\nParis&lt;|im_end|&gt;\n"</text>
-  <text class="d-ok" x="478" y="484">trains on "Paris&lt;|im_end|&gt;\n"</text>
+  <rect class="box" x="16" y="516" width="868" height="50" rx="7"/>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/4fcc9876cd6f316c1d0ccc744decbea5381323d8/nemo_rl/data/llm_message_utils.py#L165"><text x="28" y="535">add_loss_mask_to_message_log, L165: loss on the assistant turn</text></a>
+  <text class="d-ok" x="28" y="556">trains on "&lt;|im_start|&gt;assistant\nParis&lt;|im_end|&gt;\n"</text>
+  <text class="d-ok" x="478" y="556">trains on "Paris&lt;|im_end|&gt;\n"</text>
 
   <!-- legend + notes -->
-  <rect class="box-diff" x="16" y="512" width="18" height="14" rx="3"/><text class="note" x="40" y="524">the only step that differs</text>
-  <rect class="box-new" x="230" y="512" width="18" height="14" rx="3"/><text class="note" x="254" y="524">set by the cooker for this source</text>
-  <text class="note" x="16" y="554">Which turn holds "&lt;|im_start|&gt;assistant\n" follows the cooker's messages: here the cooker put it in the user turn,</text>
-  <text class="note" x="16" y="570">so it is not trained on. The PR's helper, given these same messages, splits them the same way.</text>
-  <text class="note" x="16" y="596">The tokenizer's own chat template is still used for the normal source, and is not changed.</text>
+  <rect class="box-diff" x="16" y="584" width="18" height="14" rx="3"/><text class="note" x="40" y="596">the only step that differs</text>
+  <rect class="box-new" x="230" y="584" width="18" height="14" rx="3"/><text class="note" x="254" y="596">set by the cooker from the dataset's skip_chat_template subflavor</text>
+  <text class="note" x="16" y="626">Which turn holds "&lt;|im_start|&gt;assistant\n" follows the cooker's messages: here the cooker put it in the user turn,</text>
+  <text class="note" x="16" y="642">so it is not trained on. The PR's helper, given these same messages, splits them the same way.</text>
+  <text class="note" x="16" y="668">The tokenizer's own chat template is still used for the normal source, and is not changed.</text>
 </svg>
 
 <h2>The change — proposed, not in the PR</h2>
 
-<p class="where"><b>Where it lands: RL only, three files.</b>
-<a href="https://github.com/NVIDIA-NeMo/RL/blob/4fcc9876cd6f316c1d0ccc744decbea5381323d8/nemo_rl/data/llm_message_utils.py#L465-L600"><code>llm_message_utils.py</code></a> (+35 / −113, the helper deleted),
+<p class="where"><b>Where it lands: RL only, four files.</b>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/4fcc9876cd6f316c1d0ccc744decbea5381323d8/nemo_rl/data/llm_message_utils.py#L465-L600"><code>llm_message_utils.py</code></a> (+39 / −113, the helper deleted),
 plus one field in <a href="https://github.com/NVIDIA-NeMo/RL/blob/4fcc9876cd6f316c1d0ccc744decbea5381323d8/nemo_rl/data/energon/multimodal/types.py#L54-L59"><code>types.py</code></a>
-and one line in <a href="https://github.com/NVIDIA-NeMo/RL/blob/4fcc9876cd6f316c1d0ccc744decbea5381323d8/nemo_rl/data/energon/multimodal/task_encoders/generic_sft.py#L211-L221"><code>generic_sft.py</code></a>. Ruff format and ruff check pass.</p>
+one line in <a href="https://github.com/NVIDIA-NeMo/RL/blob/4fcc9876cd6f316c1d0ccc744decbea5381323d8/nemo_rl/data/energon/multimodal/task_encoders/generic_sft.py#L211-L221"><code>generic_sft.py</code></a>,
+and one line in the generic cooker, <a href="https://github.com/NVIDIA-NeMo/RL/blob/4fcc9876cd6f316c1d0ccc744decbea5381323d8/nemo_rl/data/energon/multimodal/cookers/generic.py#L131-L136"><code>generic.py</code></a>. Ruff format and ruff check pass.</p>
 
 <div class="diff"><span class="hunk">@@ llm_message_utils.py L465-L565 · the PR's helper, replaced by a small one</span>
 <span class="del">-def _tokenize_preformatted_message_log(message_log, tokenizer, *, add_generation_prompt):
@@ -210,8 +225,10 @@ and one line in <a href="https://github.com/NVIDIA-NeMo/RL/blob/4fcc9876cd6f316c
 -            insertion are also skipped because those tokens must already be present.
 </span><span class="add">+        chat_template_preapplied: Set when each message's content already has the chat
 +            template applied upstream (for example by an Energon cooker), so it must
-+            not be applied again. Turns are tokenized as-is, one at a time. BOS/EOS
-+            still follow add_bos_token/add_eos_token. Default: False
++            not be applied again. The text must use the same chat template the
++            tokenizer applies at generation time, and already contain any BOS/EOS:
++            add_bos_token and add_eos_token are ignored. Turns are tokenized as-is,
++            one at a time. Default: False
 </span>
 <span class="hunk">@@ llm_message_utils.py L595-L600 · before the loop</span>
 <span class="del">-    if skip_chat_template:
@@ -227,6 +244,8 @@ and one line in <a href="https://github.com/NVIDIA-NeMo/RL/blob/4fcc9876cd6f316c
 +                "chat_template_preapplied=True does not support add_generation_prompt, "
 +                "tools, or a task_data_spec prompt: the chat template was already applied"
 +            )
++        # The text is final, so BOS/EOS must already be in it too.
++        add_bos_token = add_eos_token = False
 +        message_log = [_join_text_parts(message) for message in message_log]
 </span>
 <span class="hunk">@@ llm_message_utils.py L677-L679 · inside the loop</span>
@@ -244,16 +263,26 @@ and one line in <a href="https://github.com/NVIDIA-NeMo/RL/blob/4fcc9876cd6f316c
 </span>
 <span class="hunk">@@ energon/multimodal/types.py L59 · CanonicalSFTSample</span>
 <span class="ctx">     tools: list[dict[str, Any]] | None
-</span><span class="add">+    # Set by cookers whose source text already has the chat template applied.
+</span><span class="add">+    # True when the source's text already has the chat template applied
++    # (the blend's skip_chat_template subflavor).
 +    chat_template_preapplied: bool = False
+</span>
+<span class="hunk">@@ energon/multimodal/cookers/generic.py L135 · cook_conversation</span>
+<span class="ctx">         tools=deepcopy(tools),
+</span><span class="add">+        # "skip_chat_template" is Megatron-LM's subflavor key for pre-templated
++        # sources; keep it so one blend YAML means the same in both frameworks.
++        chat_template_preapplied=bool(
++            (sample.get("__subflavors__") or {}).get("skip_chat_template", False)
++        ),
 </span>
 <span class="hunk">@@ task_encoders/generic_sft.py L220 · HFMultimodalSFTProcessorAdapter.encode</span>
 <span class="ctx">             tools=sample.tools,
 </span><span class="add">+            chat_template_preapplied=sample.chat_template_preapplied,
 </span><span class="ctx">         )</span></div>
 
-<p>A cooker for a pre-templated source (for example a file-backed cooker from #4296) returns
-<code>CanonicalSFTSample(..., chat_template_preapplied=True)</code>; nothing else in the blend changes.
+<p>A blend marks a pre-templated dataset with <code>subflavors: {skip_chat_template: true}</code>, exactly as it would for Megatron-LM;
+nothing else in the blend changes. Run through <code>cook_conversation</code> and the adapter, such a sample gives the right-hand column above, and a sample
+without the subflavor keeps the chat template.
 <code>_join_text_parts</code> keeps the PR's support for content given as a list of text parts, which the adapter's
 <code>_normalize_messages</code> can produce.</p>
 <p class="cref">🟢 <a href="https://github.com/NVIDIA-NeMo/RL/pull/4295#discussion_r4179687666">review comment — llm_message_utils.py:577 (rename + use the loop)</a>
@@ -261,13 +290,14 @@ and one line in <a href="https://github.com/NVIDIA-NeMo/RL/blob/4fcc9876cd6f316c
 
 <h2>Things that behave differently from the PR's helper</h2>
 <ul class="chg">
-<li><b>A task prompt, <code>tools</code> or a generation prompt now raise.</b> They would change text that is already final; the helper silently dropped the first two.</li>
-<li><b>BOS/EOS follow the normal flags</b> and are only added when missing
-(<a href="https://github.com/NVIDIA-NeMo/RL/blob/4fcc9876cd6f316c1d0ccc744decbea5381323d8/nemo_rl/data/llm_message_utils.py#L719">L719</a>,
-<a href="https://github.com/NVIDIA-NeMo/RL/blob/4fcc9876cd6f316c1d0ccc744decbea5381323d8/nemo_rl/data/llm_message_utils.py#L739">L739</a>), the same as for templated text today.</li>
+<li><b>A task prompt, <code>tools</code> or a generation prompt now raise.</b> They would change text that is already final; the helper silently dropped the first two. BOS/EOS are never added, the same as in the helper and in Megatron-LM.</li>
 <li><b>The text is joined in the loop, not rendered through <code>apply_chat_template</code></b>, because the DeepSeek-V4 tokenizer wrapper
 <a href="https://github.com/NVIDIA-NeMo/RL/blob/4fcc9876cd6f316c1d0ccc744decbea5381323d8/nemo_rl/data/deepseek_v4_tokenizer.py#L40-L82">replaces that method</a>
 and would add its own markers.</li>
+<li><b>Token parity with Megatron-LM.</b> The PR's helper follows Megatron-LM's
+<a href="https://github.com/NVIDIA/Megatron-LM/blob/6a3660905a2736b5670baed1ca5954372937918b/megatron/core/tokenizers/vision/libraries/multimodal_tokenizer.py#L670"><code>_tokenize_raw_conversation</code></a> step for step.
+On templated text whose turns end on special tokens (the Nemotron case) the tokens are the same; they differ only where Megatron-LM also loses the answer (page 2) and on the tokenizers below.</li>
+<li><b>Open question for the author:</b> how were the pre-templated sources rendered? NeMo-RL cannot check it; if the format differs from the tokenizer's template, the model trains on one format and generates with another.</li>
 <li><b>Tokenizers that add a leading-space marker</b> (Mistral v0.3, Llama-2) give each turn after the first a leading space, the same as the chat-template path does. Qwen2.5, Llama-3.1, Gemma-2 and Nemotron-Nano-9B-v2 decode back exactly.</li>
 </ul>
 
