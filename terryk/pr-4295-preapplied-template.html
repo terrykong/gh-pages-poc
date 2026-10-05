@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NVIDIA-NeMo/RL #4295 — chat_template_preapplied: tokenize pre-templated samples with the existing loop</title>
+<style>
+:root{
+  --bg:#0d1117; --surface:#161b22; --surface2:#1c2128; --border:#30363d;
+  --text:#e6edf3; --dim:#8b949e; --accent:#58a6ff; --green:#3fb950;
+  --orange:#d29922; --red:#f85149;
+}
+:root[data-theme="light"]{
+  --bg:#ffffff; --surface:#f6f8fa; --surface2:#eaeef2; --border:#d0d7de;
+  --text:#1f2328; --dim:#59636e; --accent:#0969da; --green:#1a7f37;
+  --orange:#9a6700; --red:#cf222e;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:28px 20px 70px}
+h1{font-size:22px;margin:0 0 8px;line-height:1.3}
+h2{font-size:18px;margin:32px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;
+  font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
+.sub{color:var(--dim);font-size:13.5px;margin:0 0 16px}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);
+  border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;
+  font:13px/1 ui-monospace,Menlo,monospace;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.18)}
+.hl{border-left:3px solid var(--green);background:var(--surface);
+  padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0}
+.where{border-left:4px solid var(--accent);background:var(--surface);padding:6px 12px;margin:6px 0 10px}
+.status{border:1px solid var(--border);border-radius:10px;background:var(--surface);
+  padding:2px 16px 10px;margin:0 0 20px}
+.status dl{display:grid;grid-template-columns:max-content 1fr;gap:4px 14px;margin:12px 0 0}
+.status dt{color:var(--dim);font-size:12px;text-transform:uppercase;letter-spacing:.04em;
+  white-space:nowrap;padding-top:2px}
+.status dd{margin:0;font-size:14px}
+.verdict{font-weight:700}
+.verdict.prop{color:var(--orange)}
+nav.chain{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 6px;padding:0}
+nav.chain a,nav.chain span{display:inline-block;padding:5px 11px;border:1px solid var(--border);
+  border-radius:20px;background:var(--surface);text-decoration:none;color:var(--accent);
+  font-size:12.5px;line-height:1.3;white-space:nowrap}
+nav.chain a:hover{background:var(--surface2)}
+nav.chain span.here{background:var(--accent);color:var(--bg);border-color:var(--accent);font-weight:600}
+p.chainnote{color:var(--dim);font-size:12px;margin:0 0 18px}
+.cref{margin:6px 0 0;font-size:13px}
+.cref a{display:inline-block;padding:4px 10px;border:1px solid var(--border);
+  border-radius:16px;background:var(--surface);font:12.5px ui-monospace,Menlo,monospace}
+.cref a:hover{background:var(--surface2);text-decoration:none}
+.tip{border-bottom:1px dotted var(--dim);cursor:help;position:relative;outline:none}
+.tip:hover::after,.tip:focus::after{content:attr(data-tip);position:absolute;left:0;top:1.7em;z-index:60;
+  width:max-content;max-width:min(340px,80vw);white-space:normal;background:var(--surface2);color:var(--text);
+  border:1px solid var(--border);border-radius:6px;padding:7px 10px;font:13px/1.45 -apple-system,sans-serif;
+  font-weight:400;box-shadow:0 4px 14px rgba(0,0,0,.3)}
+.diff{font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--surface);
+  border:1px solid var(--border);border-radius:8px;padding:12px;overflow-x:auto;white-space:pre;margin:10px 0}
+.diff .add{color:var(--green)}
+.diff .del{color:var(--red)}
+.diff .hunk{color:var(--accent)}
+.diff .ctx{color:var(--dim)}
+ul.chg li{margin:4px 0}
+svg{max-width:100%;height:auto;display:block;margin:16px 0}
+svg .box{fill:var(--surface);stroke:var(--border);stroke-width:1.4}
+svg .box-ok{fill:var(--surface);stroke:var(--green);stroke-width:1.8}
+svg .box-bad{fill:var(--surface);stroke:var(--red);stroke-width:1.8}
+svg .ttl{fill:var(--text);font:bold 12.5px -apple-system,sans-serif}
+svg .hdr{fill:var(--accent);font:bold 13px -apple-system,sans-serif}
+svg .note{fill:var(--dim);font:11.5px -apple-system,sans-serif}
+svg .lbl{fill:var(--text);font:11.5px ui-monospace,Menlo,monospace}
+svg .d-ok{fill:var(--green);font:12px ui-monospace,Menlo,monospace}
+svg .d-bad{fill:var(--red);font:12px ui-monospace,Menlo,monospace}
+svg .d-in{fill:var(--text);font:12px ui-monospace,Menlo,monospace}
+svg .arr{stroke:var(--dim);stroke-width:1.5;fill:none}
+svg .arrh{fill:var(--dim)}
+svg a text{text-decoration:underline;fill:var(--accent);font:11px ui-monospace,Menlo,monospace}
+svg .hdr-new{fill:var(--orange);font:bold 13px -apple-system,sans-serif}
+svg .box-new{fill:var(--surface);stroke:var(--orange);stroke-width:1.8}
+svg .box-diff{fill:var(--surface);stroke:var(--accent);stroke-width:2.2}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+  document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head>
+<body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+  function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+  function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
+    b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
+      else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+  document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+<div class="wrap">
+
+<h1>Mark pre-templated samples with <code>chat_template_preapplied</code>, and tokenize them with the loop NeMo-RL already has</h1>
+<p class="sub"><a href="https://github.com/NVIDIA-NeMo/RL/pull/4295">NVIDIA-NeMo/RL #4295</a>
+(split out of <a href="https://github.com/NVIDIA-NeMo/RL/pull/4108">#4108</a>).
+Permalinks pin the PR head <code>4fcc987</code>. Every value in the figure comes from running the proposed code with the Qwen2.5-0.5B-Instruct tokenizer.</p>
+
+<div class="status">
+<dl>
+  <dt>Before</dt>
+  <dd><code>get_formatted_message_log</code> always applies the tokenizer's chat template. Energon sources whose text is already templated would be templated twice.</dd>
+  <dt>This PR</dt>
+  <dd>Adds <code>skip_chat_template=True</code>, backed by a separate 100-line tokenizer. Nothing sets the flag yet.</dd>
+  <dt>Status</dt>
+  <dd><span class="verdict prop">Proposed — not implemented.</span> Keep the feature, name it for what it means, and run it through the existing loop.
+  The code below was run against the real module, but it is not in the PR yet.</dd>
+</dl>
+</div>
+
+<nav class="chain">
+  <span class="here">1 · the proposed design</span>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4295-empty-assistant-turn.html">2 · the empty answer bug in the PR as written</a>
+</nav>
+<p class="chainnote">Two pages on this PR. Page 2 shows the bug in the PR's own tokenizer, which this design deletes.</p>
+
+<p>Some Energon sources in an SFT blend hand over messages whose text already has the chat template in it.
+NeMo-RL must not apply the template again, but it still needs it for every other source in the blend.
+Only the cooker that reads such a source knows this, so it marks the sample, and the tokenizing loop skips just the one step that applies the template.
+<i>Why not <code>policy.tokenizer.chat_template: null</code>:</i> that turns the template off for the whole run, not for one source.</p>
+
+<h2>One blend, two sources, one loop</h2>
+
+<svg viewBox="0 0 900 616" role="img" aria-label="Two sources in one blend go through the same steps. The normal source has the chat template applied by NeMo-RL; the pre-templated source has its text joined as-is. Every other step is the same, and both produce per-turn token ids with the answer in the assistant turn.">
+  <text class="hdr" x="16" y"20">Normal source</text>
+  <text class="hdr-new" x="466" y"20">Pre-templated source</text>
+
+  <!-- row 0: cooker output -->
+  <rect class="box" x="16" y"32" width="418" height="94" rx="7"/>
+  <text class="ttl" x="28" y"51">cooker returns a CanonicalSFTSample</text>
+  <text class="d-in" x="28" y"72">messages=[{user: "A: "},</text>
+  <text class="d-in" x="28" y"88">          {assistant: "Paris"}]</text>
+  <text class="d-in" x="28" y"104">chat_template_preapplied=False  (default)</text>
+  <rect class="box-new" x="466" y"32" width="418" height="94" rx="7"/>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/4fcc9876cd6f316c1d0ccc744decbea5381323d8/nemo_rl/data/energon/multimodal/types.py#L54-L59"><text x="478" y"51">CanonicalSFTSample, types.py L54 (+1 field)</text></a>
+  <text class="d-in" x="478" y"72">messages=[{user: "&lt;|im_start|&gt;user\nA: &lt;|im_end|&gt;\n</text>
+  <text class="d-in" x="478" y"88">                  &lt;|im_start|&gt;assistant\n"},</text>
+  <text class="d-in" x="478" y"104">          {assistant: "Paris&lt;|im_end|&gt;\n"}]</text>
+  <text class="d-in" x="478" y"120">chat_template_preapplied=True</text>
+
+  <!-- row 1: adapter -->
+  <rect class="box" x="16" y"138" width="868" height="50" rx="7"/>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/4fcc9876cd6f316c1d0ccc744decbea5381323d8/nemo_rl/data/energon/multimodal/task_encoders/generic_sft.py#L211-L221"><text x="28" y"157">HFMultimodalSFTProcessorAdapter.encode, generic_sft.py L211 (+1 line), same for both</text></a>
+  <text class="d-in" x="28" y"178">get_formatted_message_log(messages, ..., chat_template_preapplied=sample.chat_template_preapplied)</text>
+
+  <!-- row 2: build turn text (the only difference) -->
+  <rect class="box" x="16" y"200" width="418" height="92" rx="7"/>
+  <text class="ttl" x="28" y"219">build turns 0..i: apply the chat template</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/4fcc9876cd6f316c1d0ccc744decbea5381323d8/nemo_rl/data/llm_message_utils.py#L677-L679"><text x="28" y"235">apply_chat_template, L677</text></a>
+  <text class="d-ok" x="28" y"256">i=0 → "…system…&lt;|im_start|&gt;user\nA: &lt;|im_end|&gt;\n"</text>
+  <text class="d-ok" x="28" y"272">i=1 → (same) + "…assistant\nParis&lt;|im_end|&gt;\n"</text>
+  <rect class="box-diff" x="466" y"200" width="418" height="92" rx="7"/>
+  <text class="ttl" x="478" y"219">build turns 0..i: join the text as it is</text>
+  <text class="note" x="478" y"235">the one new branch in the loop</text>
+  <text class="d-ok" x="478" y"256">i=0 → "&lt;|im_start|&gt;user\nA: …&lt;|im_start|&gt;assistant\n"</text>
+  <text class="d-ok" x="478" y"272">i=1 → (same) + "Paris&lt;|im_end|&gt;\n"</text>
+
+  <!-- row 3: cut -->
+  <rect class="box" x="16" y"304" width="868" height="50" rx="7"/>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/4fcc9876cd6f316c1d0ccc744decbea5381323d8/nemo_rl/data/llm_message_utils.py#L682-L688"><text x="28" y"323">keep only the text turn i added, L682, same for both</text></a>
+  <text class="d-ok" x="28" y"344">assistant chunk → "&lt;|im_start|&gt;assistant\nParis&lt;|im_end|&gt;\n"</text>
+  <text class="d-ok" x="478" y"344">assistant chunk → "Paris&lt;|im_end|&gt;\n"</text>
+
+  <!-- row 4: tokenize -->
+  <rect class="box" x="16" y"366" width="868" height="66" rx="7"/>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/4fcc9876cd6f316c1d0ccc744decbea5381323d8/nemo_rl/data/llm_message_utils.py#L750-L752"><text x="28" y"385">tokenize each turn on its own, L750, same for both</text></a>
+  <text class="d-ok" x="28" y"406">user      29 ids  […, 25, 220, 151645, 198]</text>
+  <text class="d-ok" x="28" y"422">assistant  6 ids  […, 198, 59604, 151645, 198]</text>
+  <text class="d-ok" x="478" y"406">user      11 ids  [151644, 872, 198, 32, 25, 220, …]</text>
+  <text class="d-ok" x="478" y"422">assistant  3 ids  [59604, 151645, 198]</text>
+
+  <!-- row 5: loss -->
+  <rect class="box" x="16" y"444" width="868" height="50" rx="7"/>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/4fcc9876cd6f316c1d0ccc744decbea5381323d8/nemo_rl/data/llm_message_utils.py#L165"><text x="28" y"463">add_loss_mask_to_message_log, L165: loss on the assistant turn</text></a>
+  <text class="d-ok" x="28" y"484">trains on "&lt;|im_start|&gt;assistant\nParis&lt;|im_end|&gt;\n"</text>
+  <text class="d-ok" x="478" y"484">trains on "Paris&lt;|im_end|&gt;\n"</text>
+
+  <!-- legend + notes -->
+  <rect class="box-diff" x="16" y"512" width="18" height="14" rx="3"/><text class="note" x="40" y"524">the only step that differs</text>
+  <rect class="box-new" x="230" y"512" width="18" height="14" rx="3"/><text class="note" x="254" y"524">set by the cooker for this source</text>
+  <text class="note" x="16" y"554">Which turn holds "&lt;|im_start|&gt;assistant\n" follows the cooker's messages: here the cooker put it in the user turn,</text>
+  <text class="note" x="16" y"570">so it is not trained on. The PR's helper, given these same messages, splits them the same way.</text>
+  <text class="note" x="16" y"596">The tokenizer's own chat template is still used for the normal source, and is not changed.</text>
+</svg>
+
+<h2>The change — proposed, not in the PR</h2>
+
+<p class="where"><b>Where it lands: RL only, three files.</b>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/4fcc9876cd6f316c1d0ccc744decbea5381323d8/nemo_rl/data/llm_message_utils.py#L465-L600"><code>llm_message_utils.py</code></a> (+35 / −113, the helper deleted),
+plus one field in <a href="https://github.com/NVIDIA-NeMo/RL/blob/4fcc9876cd6f316c1d0ccc744decbea5381323d8/nemo_rl/data/energon/multimodal/types.py#L54-L59"><code>types.py</code></a>
+and one line in <a href="https://github.com/NVIDIA-NeMo/RL/blob/4fcc9876cd6f316c1d0ccc744decbea5381323d8/nemo_rl/data/energon/multimodal/task_encoders/generic_sft.py#L211-L221"><code>generic_sft.py</code></a>. Ruff format and ruff check pass.</p>
+
+<div class="diff"><span class="hunk">@@ llm_message_utils.py L465-L565 · the PR's helper, replaced by a small one</span>
+<span class="del">-def _tokenize_preformatted_message_log(message_log, tokenizer, *, add_generation_prompt):
+-    ... join turns, tokenize once with character ranges, cut, fall back ...   # 101 lines
+</span><span class="add">+def _join_text_parts(message: dict[str, Any]) -> dict[str, Any]:
++    """Return the message with its text-only content joined into one string."""
++    ...  # str content passes through; a list of {"type": "text"} parts is joined;
++    ...  # anything else raises "chat_template_preapplied=True requires text-only turns."
+</span>
+<span class="hunk">@@ llm_message_utils.py L577 · the argument</span>
+<span class="del">-    skip_chat_template: bool = False,
+</span><span class="add">+    chat_template_preapplied: bool = False,
+</span>
+<span class="hunk">@@ llm_message_utils.py L588-L589 · docstring</span>
+<span class="del">-        skip_chat_template: Tokenize already-formatted turns directly. BOS and EOS
+-            insertion are also skipped because those tokens must already be present.
+</span><span class="add">+        chat_template_preapplied: Set when each message's content already has the chat
++            template applied upstream (for example by an Energon cooker), so it must
++            not be applied again. Turns are tokenized as-is, one at a time. BOS/EOS
++            still follow add_bos_token/add_eos_token. Default: False
+</span>
+<span class="hunk">@@ llm_message_utils.py L595-L600 · before the loop</span>
+<span class="del">-    if skip_chat_template:
+-        return _tokenize_preformatted_message_log(
+-            message_log, tokenizer, add_generation_prompt=add_generation_prompt,
+-        )
+</span><span class="add">+    if chat_template_preapplied:
++        # The template is already in the text, so anything that would change the
++        # text before templating (a task prompt, tools, a generation prompt) can't
++        # be applied any more.
++        if add_generation_prompt or tools is not None or task_data_spec.prompt:
++            raise ValueError(
++                "chat_template_preapplied=True does not support add_generation_prompt, "
++                "tools, or a task_data_spec prompt: the chat template was already applied"
++            )
++        message_log = [_join_text_parts(message) for message in message_log]
+</span>
+<span class="hunk">@@ llm_message_utils.py L677-L679 · inside the loop</span>
+<span class="del">-        formatted_message: str = tokenizer.apply_chat_template(  # type: ignore
+-            message_log_strs[: i + 1], **template_kwargs
+-        )
+</span><span class="add">+        if chat_template_preapplied:
++            # The turns already hold templated text, so join them as they are
++            # instead of applying the chat template again.
++            formatted_message = "".join(m["content"] for m in message_log_strs[: i + 1])
++        else:
++            formatted_message = tokenizer.apply_chat_template(  # type: ignore
++                message_log_strs[: i + 1], **template_kwargs
++            )
+</span>
+<span class="hunk">@@ energon/multimodal/types.py L59 · CanonicalSFTSample</span>
+<span class="ctx">     tools: list[dict[str, Any]] | None
+</span><span class="add">+    # Set by cookers whose source text already has the chat template applied.
++    chat_template_preapplied: bool = False
+</span>
+<span class="hunk">@@ task_encoders/generic_sft.py L220 · HFMultimodalSFTProcessorAdapter.encode</span>
+<span class="ctx">             tools=sample.tools,
+</span><span class="add">+            chat_template_preapplied=sample.chat_template_preapplied,
+</span><span class="ctx">         )</span></div>
+
+<p>A cooker for a pre-templated source (for example a file-backed cooker from #4296) returns
+<code>CanonicalSFTSample(..., chat_template_preapplied=True)</code>; nothing else in the blend changes.
+<code>_join_text_parts</code> keeps the PR's support for content given as a list of text parts, which the adapter's
+<code>_normalize_messages</code> can produce.</p>
+<p class="cref">🟢 <a href="https://github.com/NVIDIA-NeMo/RL/pull/4295#discussion_r4179687666">review comment — llm_message_utils.py:577 (rename + use the loop)</a>
+&nbsp; <a href="https://github.com/NVIDIA-NeMo/RL/pull/4295#discussion_r4171946460">review comment — llm_message_utils.py:465 (wiring)</a></p>
+
+<h2>Things that behave differently from the PR's helper</h2>
+<ul class="chg">
+<li><b>A task prompt, <code>tools</code> or a generation prompt now raise.</b> They would change text that is already final; the helper silently dropped the first two.</li>
+<li><b>BOS/EOS follow the normal flags</b> and are only added when missing
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/4fcc9876cd6f316c1d0ccc744decbea5381323d8/nemo_rl/data/llm_message_utils.py#L719">L719</a>,
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/4fcc9876cd6f316c1d0ccc744decbea5381323d8/nemo_rl/data/llm_message_utils.py#L739">L739</a>), the same as for templated text today.</li>
+<li><b>The text is joined in the loop, not rendered through <code>apply_chat_template</code></b>, because the DeepSeek-V4 tokenizer wrapper
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/4fcc9876cd6f316c1d0ccc744decbea5381323d8/nemo_rl/data/deepseek_v4_tokenizer.py#L40-L82">replaces that method</a>
+and would add its own markers.</li>
+<li><b>Tokenizers that add a leading-space marker</b> (Mistral v0.3, Llama-2) give each turn after the first a leading space, the same as the chat-template path does. Qwen2.5, Llama-3.1, Gemma-2 and Nemotron-Nano-9B-v2 decode back exactly.</li>
+</ul>
+
+<div class="hl"><strong>So what.</strong> The feature stays and gets a name that says what it means. The PR's separate tokenizer, and the bug in it
+(<a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4295-empty-assistant-turn.html">page 2</a>), go away: pre-templated text goes through the same per-turn
+tokenizing as every other source, and a cooker opts in with one field.</div>
+
+</div>
+</body>
+</html>
