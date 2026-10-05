@@ -86,7 +86,7 @@ svg a text{text-decoration:underline;fill:var(--accent);font:11.5px ui-monospace
 <h1>Context compaction, redesigned: the row cut moves from "after the rollout" to "inside the vLLM worker"</h1>
 <p class="sub">Explainer for <a href="https://github.com/NVIDIA-NeMo/RL/pull/4124">NVIDIA-NeMo/RL #4124</a>,
 paired with <a href="https://github.com/NVIDIA-NeMo/Gym/pull/3368">NVIDIA-NeMo/Gym #3368</a>.
-RL links pin <code>5ff98a4</code>; Gym links pin the Gym PR head <code>2b3d9fa</code>, or <code>17abf2d</code> (Gym main) for code the Gym PR deletes.</p>
+RL links pin <code>83783cb</code>; Gym links pin the Gym PR head <code>cbad301</code>, or <code>17abf2d</code> (Gym main) for code the Gym PR deletes.</p>
 
 <div class="status">
 <dl>
@@ -106,8 +106,8 @@ After a rewrite the new prompt no longer starts with the old one, so the two can
 Dotted words have a short explanation: hover or tap them.</div>
 
 <p>Both designs end with the same rows. The example below is one rollout of 5 turns, with a rewrite after every 2 actions that keeps only the newest image. It gives 3 rows: turns {1,2}, {3,4} and {5}. In each row, only the tokens the model sampled carry gradient. The whole difference is <b>who decides where a row ends, when, and from what evidence</b>.
-In the new design that decision is one 70-line function,
-<a href="https://github.com/NVIDIA-NeMo/RL/blob/5ff98a460f59e13793211b84e282f89edf4a24eb/nemo_rl/models/generation/capture_context.py#L22-L91"><code>decide_capture_input</code></a>. It runs inside the vLLM worker before generation starts.</p>
+In the new design that decision is one short function,
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/83783cb24a673dfd49c0ec174c34bd7a90c4f8eb/nemo_rl/models/generation/capture_context.py#L25-L114"><code>decide_capture_input</code></a>. It runs inside the vLLM worker before generation starts.</p>
 
 <h2>Same 5 turns, two ways to find the cut</h2>
 
@@ -151,17 +151,17 @@ In the new design that decision is one 70-line function,
   <text class="lbl" x="480" y="349">full prompt</text>
   <text class="lbl" x="620" y="349">only new part</text>
   <text class="lbl" x="760" y="349">full prompt</text>
-  <a href="https://github.com/NVIDIA-NeMo/RL/blob/5ff98a460f59e13793211b84e282f89edf4a24eb/nemo_rl/models/generation/capture_context.py#L51-L65"><text x="190" y="392">capture_context.py L51-65: no parent, or source changed → root</text></a>
-  <a href="https://github.com/NVIDIA-NeMo/RL/blob/5ff98a460f59e13793211b84e282f89edf4a24eb/nemo_rl/models/generation/capture_context.py#L66-L91"><text x="650" y="392">L66-91: else → continue</text></a>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/83783cb24a673dfd49c0ec174c34bd7a90c4f8eb/nemo_rl/models/generation/capture_context.py#L59-L103"><text x="190" y="392">capture_context.py L59-103: no parent, changed, or can't splice → root</text></a>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/83783cb24a673dfd49c0ec174c34bd7a90c4f8eb/nemo_rl/models/generation/capture_context.py#L104-L114"><text x="700" y="392">L104-114: else → continue</text></a>
 
   <!-- converge -->
   <text class="lbl-b" x="20" y="446">Both end</text><text class="lbl-b" x="20" y="462">here:</text>
   <rect class="row1" x="190" y="430" width="260" height="34" rx="6"/><text class="lbl" x="270" y="452">row 1 · turns 1–2</text>
   <rect class="row1" x="470" y="430" width="260" height="34" rx="6"/><text class="lbl" x="550" y="452">row 2 · turns 3–4</text>
   <rect class="row1" x="750" y="430" width="120" height="34" rx="6"/><text class="lbl" x="762" y="452">row 3 · turn 5</text>
-  <a href="https://github.com/NVIDIA-NeMo/RL/blob/5ff98a460f59e13793211b84e282f89edf4a24eb/nemo_rl/experience/rollout_reassembler.py#L1138-L1144"><text x="190" y="488">new: rollout_reassembler.py L1138-1144 starts a row at every root</text></a>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/83783cb24a673dfd49c0ec174c34bd7a90c4f8eb/nemo_rl/experience/rollout_reassembler.py#L1153-L1159"><text x="190" y="488">new: rollout_reassembler.py L1153-1159 starts a row at every root</text></a>
   <text class="note" x="190" y="512">one reward and one GRPO advantage per rollout, copied onto all 3 rows; token-level loss unchanged</text>
-  <a href="https://github.com/NVIDIA-NeMo/RL/blob/5ff98a460f59e13793211b84e282f89edf4a24eb/nemo_rl/algorithms/single_controller.py#L5378-L5395"><text x="190" y="532">single_controller.py L5378-5395 (advantage copied to rows)</text></a>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/83783cb24a673dfd49c0ec174c34bd7a90c4f8eb/nemo_rl/algorithms/single_controller.py#L5378-L5395"><text x="190" y="532">single_controller.py L5378-5395 (advantage copied to rows)</text></a>
 
   <rect class="root" x="190" y="556" width="16" height="12"/><text class="note" x="212" y="567">new root = no parent, stores full prompt</text>
   <rect class="cont" x="440" y="556" width="16" height="12"/><text class="note" x="462" y="567">continue = linked to parent, stores new part</text>
@@ -169,22 +169,22 @@ In the new design that decision is one 70-line function,
 </svg>
 
 <p>The new check runs <i>before</i> any tokens exist, so it cannot compare tokens. Instead it compares the harness's own messages. Gym hashes the messages of every call it served and stores that hash as a
-<a href="https://github.com/NVIDIA-NeMo/Gym/blob/2b3d9fa82c2fbebb55ac712e5551a01f3fb3f452/nemo_gym/token_id_capture/replay.py#L88"><code>ReplaySummary</code></a>.
-The worker hashes the start of the new request the same way. If the hashes match and the request only adds user or tool messages, it is a <b>continuation</b>: the worker reuses the parent's exact sampled tokens and stores only the new part. Otherwise it is a <b>new root</b>: the request is rendered from scratch and stored in full.
+<a href="https://github.com/NVIDIA-NeMo/Gym/blob/cbad301b5fb043205bcffb05e4b84ad321b42f5d/nemo_gym/token_id_capture/replay.py#L88"><code>ReplaySummary</code></a>.
+The worker hashes the start of the new request the same way. If the hashes match and the request only adds user or tool messages, it is a <b>continuation</b>: the worker reuses the parent's exact sampled tokens and stores only the new part. Otherwise, including a request shape the worker cannot splice, it is a <b>new root</b>: the request is rendered from scratch and stored in full.
 The harness says which response it last accepted in one header,
-<a href="https://github.com/NVIDIA-NeMo/Gym/blob/2b3d9fa82c2fbebb55ac712e5551a01f3fb3f452/nemo_gym/context_management/client.py#L148"><code>x-nemo-gym-capture-parent</code></a>. It sends no tokens and no segment IDs.</p>
+<a href="https://github.com/NVIDIA-NeMo/Gym/blob/cbad301b5fb043205bcffb05e4b84ad321b42f5d/nemo_gym/context_management/client.py#L148"><code>x-nemo-gym-capture-parent</code></a>. It sends no tokens and no segment IDs.</p>
 
 <h2>What changed, hop by hop</h2>
 <table>
 <tr><th></th><th>Earlier design</th><th>This PR</th></tr>
-<tr><td>Who cuts</td><td>RL, after the rollout, by scanning every call</td><td>RL's vLLM worker, per call, at request time (<a href="https://github.com/NVIDIA-NeMo/RL/blob/5ff98a460f59e13793211b84e282f89edf4a24eb/nemo_rl/models/generation/vllm/vllm_worker_async.py#L1112">vllm_worker_async.py</a>). The reassembler only follows the parent links.</td></tr>
+<tr><td>Who cuts</td><td>RL, after the rollout, by scanning every call</td><td>RL's vLLM worker, per call, at request time (<a href="https://github.com/NVIDIA-NeMo/RL/blob/83783cb24a673dfd49c0ec174c34bd7a90c4f8eb/nemo_rl/models/generation/vllm/vllm_worker_async.py#L1112">vllm_worker_async.py</a>). The reassembler only follows the parent links.</td></tr>
 <tr><td>Continuation test</td><td>"Is the old prompt a token prefix of the new one?" plus the same test on image IDs. It was also cross-checked against Gym's own list of rewrites.</td><td>"Do the source messages and render options hash the same as the parent's summary?" There is no second check against Gym's rewrite list.</td></tr>
-<tr><td>Gym → RL</td><td>One large object per rollout (<a href="https://github.com/NVIDIA-NeMo/Gym/blob/17abf2ddc76f74e40d0ba5a15b0401710a46db26/responses_api_agents/simple_agent_with_compaction/compaction/session.py#L130"><code>ContextCompactedResponse</code></a>, deleted by Gym #3368): every call's full prompt tokens, rewrite events, and images by ID</td><td>The ordinary rollout output plus a small call list with no tokens (<a href="https://github.com/NVIDIA-NeMo/RL/blob/5ff98a460f59e13793211b84e282f89edf4a24eb/nemo_rl/environments/nemo_gym.py#L1049">nemo_gym.py</a>). Tokens and pixels go straight from the worker to TransferQueue.</td></tr>
+<tr><td>Gym → RL</td><td>One large object per rollout (<a href="https://github.com/NVIDIA-NeMo/Gym/blob/17abf2ddc76f74e40d0ba5a15b0401710a46db26/responses_api_agents/simple_agent_with_compaction/compaction/session.py#L130"><code>ContextCompactedResponse</code></a>, deleted by Gym #3368): every call's full prompt tokens, rewrite events, and images by ID</td><td>The ordinary rollout output plus a small call list with no tokens (<a href="https://github.com/NVIDIA-NeMo/RL/blob/83783cb24a673dfd49c0ec174c34bd7a90c4f8eb/nemo_rl/environments/nemo_gym.py#L1006-L1011">nemo_gym.py</a>). Tokens and pixels go straight from the worker to TransferQueue.</td></tr>
 <tr><td>Storage</td><td>The full prompt again on every call</td><td>A continuation stores only the new part; only a root stores the full prompt</td></tr>
-<tr><td>Images</td><td>Stored once by ID in a <a href="https://github.com/NVIDIA-NeMo/Gym/blob/17abf2ddc76f74e40d0ba5a15b0401710a46db26/responses_api_agents/simple_agent_with_compaction/compaction/history.py#L172"><code>MediaArena</code></a>; RL processed them again for training</td><td>The harness re-sends the images it kept. The worker keeps vLLM's own processed pixels. A kept image whose pixels changed is an error, not a new row (<a href="https://github.com/NVIDIA-NeMo/RL/blob/5ff98a460f59e13793211b84e282f89edf4a24eb/nemo_rl/data/captured_media.py#L453">captured_media.py</a>).</td></tr>
-<tr><td>Harness</td><td>Had to return the special response object</td><td>Any harness whose normal output can be matched back to the calls it made (<a href="https://github.com/NVIDIA-NeMo/RL/blob/5ff98a460f59e13793211b84e282f89edf4a24eb/nemo_rl/environments/gym_selection.py#L80"><code>select_captured_calls</code></a>). It may also reject a response and resample.</td></tr>
-<tr><td>Training math</td><td>Advantage once per rollout, then copied to rows; one global token count as the loss denominator; a special scheduler step size</td><td>The same advantage and loss rules (<a href="https://github.com/NVIDIA-NeMo/RL/blob/5ff98a460f59e13793211b84e282f89edf4a24eb/nemo_rl/algorithms/single_controller_utils/logical_advantage.py#L54"><code>build_logical_owner_batch</code></a>). The scheduler trick is no longer needed: SingleController takes one optimizer step per training step whatever the row count (<a href="https://github.com/NVIDIA-NeMo/RL/blob/5ff98a460f59e13793211b84e282f89edf4a24eb/nemo_rl/models/policy/workers/megatron_policy_worker.py#L2179">megatron_policy_worker.py</a>).</td></tr>
-<tr><td>Scope</td><td>Classic GRPO loop, Megatron, no data store</td><td>SingleController GRPO with TransferQueue. Megatron fixed-batch only: no sequence packing, no dynamic batching, no interleaved pipeline (<a href="https://github.com/NVIDIA-NeMo/RL/blob/5ff98a460f59e13793211b84e282f89edf4a24eb/nemo_rl/algorithms/single_controller_utils/config.py#L891-L900">config.py</a>). No checkpoint or resume (<a href="https://github.com/NVIDIA-NeMo/RL/blob/5ff98a460f59e13793211b84e282f89edf4a24eb/nemo_rl/algorithms/single_controller_utils/config.py#L1440">config.py</a>). One model call at a time per rollout.</td></tr>
+<tr><td>Images</td><td>Stored once by ID in a <a href="https://github.com/NVIDIA-NeMo/Gym/blob/17abf2ddc76f74e40d0ba5a15b0401710a46db26/responses_api_agents/simple_agent_with_compaction/compaction/history.py#L172"><code>MediaArena</code></a>; RL processed them again for training</td><td>The harness re-sends the images it kept. The worker keeps vLLM's own processed pixels. A kept image whose pixels changed is an error, not a new row (<a href="https://github.com/NVIDIA-NeMo/RL/blob/83783cb24a673dfd49c0ec174c34bd7a90c4f8eb/nemo_rl/data/captured_media.py#L453">captured_media.py</a>).</td></tr>
+<tr><td>Harness</td><td>Had to return the special response object</td><td>Any harness whose normal output can be matched back to the calls it made (<a href="https://github.com/NVIDIA-NeMo/RL/blob/83783cb24a673dfd49c0ec174c34bd7a90c4f8eb/nemo_rl/environments/gym_selection.py#L91"><code>select_captured_calls</code></a>). It may also reject a response and resample.</td></tr>
+<tr><td>Training math</td><td>Advantage once per rollout, then copied to rows; one global token count as the loss denominator; a special scheduler step size</td><td>The same advantage and loss rules (<a href="https://github.com/NVIDIA-NeMo/RL/blob/83783cb24a673dfd49c0ec174c34bd7a90c4f8eb/nemo_rl/algorithms/single_controller_utils/logical_advantage.py#L54"><code>build_logical_owner_batch</code></a>). The scheduler trick is no longer needed: SingleController takes one optimizer step per training step whatever the row count (<a href="https://github.com/NVIDIA-NeMo/RL/blob/83783cb24a673dfd49c0ec174c34bd7a90c4f8eb/nemo_rl/models/policy/workers/megatron_policy_worker.py#L2179">megatron_policy_worker.py</a>).</td></tr>
+<tr><td>Scope</td><td>Classic GRPO loop, Megatron, no data store</td><td>SingleController GRPO with TransferQueue. Megatron fixed-batch only: no sequence packing, no dynamic batching, no interleaved pipeline (<a href="https://github.com/NVIDIA-NeMo/RL/blob/83783cb24a673dfd49c0ec174c34bd7a90c4f8eb/nemo_rl/algorithms/single_controller_utils/config.py#L891-L900">config.py</a>). No checkpoint or resume (<a href="https://github.com/NVIDIA-NeMo/RL/blob/83783cb24a673dfd49c0ec174c34bd7a90c4f8eb/nemo_rl/algorithms/single_controller_utils/config.py#L1440">config.py</a>). One model call at a time per rollout.</td></tr>
 </table>
 
 <h2>What you gain, and what you give up</h2>
@@ -193,14 +193,14 @@ The harness says which response it last accepted in one header,
 <li><b>Gain — much less data moves.</b> The earlier design repeated the full prompt on every call. Here only a rewrite repeats it.</li>
 <li><b>Gain — any harness.</b> Gym no longer needs a special response type, so a harness keeps its own compaction policy and its normal output.</li>
 <li><b>Give up — the second opinion.</b> The cut now depends on one hash comparison, not a token test checked against Gym's own rewrite list. Fields the hash ignores (item IDs, the JSON spacing of tool arguments) count as "unchanged". An edit to only those fields never reaches the model. Training is still exact, because it uses the tokens that were served.</li>
-<li><b>Give up — tolerance.</b> Cases the earlier design handled by opening a new row are now errors: an appended assistant message, or a changed image on a continuation. The harness must also return its full accepted history, or the earlier rows cannot be found.</li>
-<li><b>Open issue — one bad rollout ends the whole run.</b> If one tool output or image is too big for compaction to fit under the budget, the call fails before generation. Gym then lists it as "<span class="tip" tabindex="0" data-tip="Gym writes a record before each call. A call with no stored result stays in pending_call_ids. RL treats pending as 'the worker may still be writing' and refuses to go on.">pending</span>" forever, and RL stops training (<a href="https://github.com/NVIDIA-NeMo/RL/blob/5ff98a460f59e13793211b84e282f89edf4a24eb/nemo_rl/experience/rollout_recovery.py#L298-L301">rollout_recovery.py L298-301</a>). With the budget guard on, the harness raises an error that nothing catches. The fix mostly belongs in Gym #3368.<!--CREF_C1--></li>
+<li><b>Give up — tolerance.</b> A kept image whose processed pixels changed on a continuation is now an error, where the earlier design opened a new row. The harness must also return its full accepted history, or the earlier rows cannot be found.</li>
+<li><b>Open issue — a dropped prompt group ends the whole run.</b> A failed model call now masks only its own rollout, and its siblings still train. But when no agent result comes back (a timeout, a transport error, or an error raised inside the agent such as a context-guard rejection), or every rollout in the group fails, the whole group is dropped. Compaction requires every group in a step (<a href="https://github.com/NVIDIA-NeMo/RL/blob/83783cb24a673dfd49c0ec174c34bd7a90c4f8eb/nemo_rl/algorithms/single_controller_utils/config.py#L1437-L1438">config.py L1437-1438</a>) and never replaces a dropped one, so the run stops.<!--CREF_C1--></li>
 </ul>
 
 <div class="hl"><b>What to review.</b> The training math did not change. What changed is the evidence behind the cut and what data moves. Correctness now rests on three places:
-the worker's decision (<a href="https://github.com/NVIDIA-NeMo/RL/blob/5ff98a460f59e13793211b84e282f89edf4a24eb/nemo_rl/models/generation/capture_context.py#L22-L91"><code>decide_capture_input</code></a>),
-matching Gym output back to calls (<a href="https://github.com/NVIDIA-NeMo/RL/blob/5ff98a460f59e13793211b84e282f89edf4a24eb/nemo_rl/environments/gym_selection.py#L80"><code>select_captured_calls</code></a>), and
-the chain planning in the reassembler (<a href="https://github.com/NVIDIA-NeMo/RL/blob/5ff98a460f59e13793211b84e282f89edf4a24eb/nemo_rl/experience/rollout_reassembler.py#L1079"><code>_plan_selected_calls</code></a>).
+the worker's decision (<a href="https://github.com/NVIDIA-NeMo/RL/blob/83783cb24a673dfd49c0ec174c34bd7a90c4f8eb/nemo_rl/models/generation/capture_context.py#L25-L114"><code>decide_capture_input</code></a>),
+matching Gym output back to calls (<a href="https://github.com/NVIDIA-NeMo/RL/blob/83783cb24a673dfd49c0ec174c34bd7a90c4f8eb/nemo_rl/environments/gym_selection.py#L91"><code>select_captured_calls</code></a>), and
+the chain planning in the reassembler (<a href="https://github.com/NVIDIA-NeMo/RL/blob/83783cb24a673dfd49c0ec174c34bd7a90c4f8eb/nemo_rl/experience/rollout_reassembler.py#L1088"><code>_plan_selected_calls</code></a>).
 The PR cannot merge before Gym #3368 lands and the Gym pin is bumped.</div>
 
 </div>
