@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NVIDIA-NeMo/RL #4124 — how captured model calls become training rows, with and without context compaction</title>
+<style>
+:root{
+  --bg:#0d1117; --surface:#161b22; --surface2:#1c2128; --border:#30363d;
+  --text:#e6edf3; --dim:#8b949e; --accent:#58a6ff; --green:#3fb950;
+  --orange:#d29922; --red:#f85149; --purple:#bc8cff;
+}
+:root[data-theme="light"]{
+  --bg:#ffffff; --surface:#f6f8fa; --surface2:#eaeef2; --border:#d0d7de;
+  --text:#1f2328; --dim:#59636e; --accent:#0969da; --green:#1a7f37;
+  --orange:#9a6700; --red:#cf222e; --purple:#8250df;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:28px 20px 70px}
+h1{font-size:22px;margin:0 0 8px;line-height:1.3}
+h2{font-size:18px;margin:32px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;
+  font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
+.sub{color:var(--dim);font-size:13.5px;margin:0 0 16px}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);
+  border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;
+  font:13px/1 ui-monospace,Menlo,monospace;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.18)}
+.status{border:1px solid var(--border);border-radius:10px;background:var(--surface);
+  padding:2px 16px 10px;margin:0 0 20px}
+.status dl{display:grid;grid-template-columns:max-content 1fr;gap:4px 14px;margin:12px 0 0}
+.status dt{color:var(--dim);font-size:12px;text-transform:uppercase;letter-spacing:.04em;
+  white-space:nowrap;padding-top:2px}
+.status dd{margin:0;font-size:14px}
+.verdict{font-weight:700;color:var(--orange)}
+nav.chain{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 6px;padding:0}
+nav.chain a,nav.chain span{display:inline-block;padding:5px 11px;border:1px solid var(--border);
+  border-radius:20px;background:var(--surface);text-decoration:none;color:var(--accent);
+  font-size:12.5px;line-height:1.3;white-space:nowrap}
+nav.chain a:hover{background:var(--surface2)}
+nav.chain span.here{background:var(--accent);color:var(--bg);border-color:var(--accent);font-weight:600}
+p.chainnote{color:var(--dim);font-size:12px;margin:0 0 18px}
+.bg{border-left:3px solid var(--accent);background:var(--surface);padding:10px 14px;
+  margin:0 0 16px;border-radius:0 8px 8px 0;font-size:14px}
+.hl{border-left:3px solid var(--green);background:var(--surface);
+  padding:12px 16px;margin:18px 0;border-radius:0 8px 8px 0}
+.mono{font:12.5px/1.55 ui-monospace,SFMono-Regular,Menlo,monospace;
+  background:var(--surface);border:1px solid var(--border);border-radius:8px;
+  padding:12px;overflow-x:auto;white-space:pre;margin:10px 0}
+.tip{border-bottom:1px dotted var(--dim);cursor:help;position:relative;outline:none}
+.tip:hover::after,.tip:focus::after{content:attr(data-tip);position:absolute;left:0;top:1.7em;z-index:60;
+  width:max-content;max-width:min(340px,80vw);white-space:normal;background:var(--surface2);color:var(--text);
+  border:1px solid var(--border);border-radius:6px;padding:7px 10px;font:13px/1.45 -apple-system,sans-serif;
+  font-weight:400;box-shadow:0 4px 14px rgba(0,0,0,.3)}
+ol{padding-left:22px;margin:6px 0}
+li{margin:4px 0}
+svg{max-width:100%;height:auto;display:block;margin:16px 0}
+svg .call{fill:var(--surface);stroke:var(--accent);stroke-width:1.5}
+svg .root{fill:var(--accent);fill-opacity:.2;stroke:var(--accent);stroke-width:1.8}
+svg .dead{fill:var(--surface);stroke:var(--dim);stroke-width:1.3;stroke-dasharray:4 3}
+svg .row{fill:var(--purple);fill-opacity:.16;stroke:var(--purple);stroke-width:1.5}
+svg .lane{fill:none;stroke:var(--border);stroke-width:1;stroke-dasharray:2 3}
+svg .lbl{fill:var(--text);font:12px -apple-system,sans-serif}
+svg .lbl-b{fill:var(--text);font:bold 13.5px -apple-system,sans-serif}
+svg .cid{fill:var(--text);font:bold 12px ui-monospace,Menlo,monospace}
+svg .mono{fill:var(--text);font:10.5px ui-monospace,Menlo,monospace}
+svg .note{fill:var(--dim);font:11.5px -apple-system,sans-serif}
+svg .hdr{fill:var(--accent);font:bold 12.5px -apple-system,sans-serif}
+svg .edge{stroke:var(--accent);stroke-width:1.5;fill:none;marker-end:url(#ah)}
+svg .edge-dead{stroke:var(--dim);stroke-width:1.2;fill:none;stroke-dasharray:4 3}
+svg .walk{stroke:var(--orange);stroke-width:2;fill:none;marker-end:url(#aw)}
+svg .cut{stroke:var(--red);stroke-width:2;stroke-dasharray:5 4}
+svg .cut-lbl{fill:var(--red);font:bold 11px -apple-system,sans-serif}
+svg .walk-lbl{fill:var(--orange);font:bold 11px -apple-system,sans-serif}
+svg .ah{fill:var(--accent)}
+svg .aw{fill:var(--orange)}
+svg a text{text-decoration:underline;fill:var(--accent);font:10.5px ui-monospace,Menlo,monospace}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+  document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head>
+<body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+  function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+  function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
+    b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
+      else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+  document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+<div class="wrap">
+
+<h1>How captured model calls become training rows: one chain walked from the leaf, or a list cut at every root</h1>
+<p class="sub">Explainer for <a href="https://github.com/NVIDIA-NeMo/RL/pull/4124">NVIDIA-NeMo/RL #4124</a>
+(paired with <a href="https://github.com/NVIDIA-NeMo/Gym/pull/3368">NVIDIA-NeMo/Gym #3368</a>).
+RL links pin <code>c617a2c</code>; Gym links pin <code>b27e0db</code>.</p>
+
+<div class="status">
+<dl>
+  <dt>Before</dt>
+  <dd>Ordinary token capture builds one row per rollout by walking from the last call up to the first. If the harness rewrites its history, the whole rollout is masked.</dd>
+  <dt>This PR</dt>
+  <dd>With context compaction (CC), each rewrite starts a new root. RL picks the calls the agent accepted and cuts them into one row per chain.</dd>
+  <dt>Status</dt>
+  <dd><span class="verdict">Proposed — open PR, not merged.</span> The values below come from a real run of the PR's code, with a stand-in model.</dd>
+</dl>
+</div>
+
+<nav class="chain">
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4124-cc-old-vs-new.html">1 · old vs new</a>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4124-data-flow.html">2 · data flow</a>
+  <span class="here">3 · calls → rows</span>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4124-dropped-group.html">4 · dropped group</a>
+</nav>
+<p class="chainnote">Four pages on this PR, one question each. This one: how the reassembler turns a rollout's captured calls into training rows.</p>
+
+<div class="bg"><b>Background.</b> Every model call in a rollout leaves two things behind.
+Gym's <span class="tip" tabindex="0" data-tip="One small CallRecord per model call: its id, its parent call, three lengths (prev_len, delta_len, cum_len), hashes, and the response id. No tokens.">ledger</span> holds one small record per call, including its <b>parent</b> call.
+<span class="tip" tabindex="0" data-tip="NeMo-RL's data store between generation and training. The vLLM worker writes each call's tokens there directly.">TransferQueue</span> holds the call's new tokens only: the observation tokens since the parent (no gradient) plus the tokens the model generated (gradient).
+A call with no parent is a <b>root</b>; it stores its whole prompt.
+The <b>reassembler</b> joins the two stores to build training rows. Page 2 shows how the data gets there. Dotted words have a short explanation: hover or tap them.</div>
+
+<p>Without CC, every request is the previous one plus new observations, so the calls form one chain. RL takes the call the agent ended on (the <b>leaf</b>), follows parent links up to the root, and joins the stored tokens in order (<a href="https://github.com/NVIDIA-NeMo/Gym/blob/b27e0db8faefee7e4760b5b1bfbfed713f528360/nemo_gym/token_id_capture/staging/rebuild.py#L201-L216">Gym <code>_terminal_chain</code></a>). Your mental model is right for this case.
+With CC, a rewrite breaks the chain, so the ledger has several roots. RL no longer picks one leaf. It matches the agent's final output to the calls that produced it (<a href="https://github.com/NVIDIA-NeMo/RL/blob/c617a2c01fb4b848991b2cc245a861985045ed14/nemo_rl/environments/gym_selection.py#L91-L249"><code>select_captured_calls</code></a>) and cuts that list at every root (<a href="https://github.com/NVIDIA-NeMo/RL/blob/c617a2c01fb4b848991b2cc245a861985045ed14/nemo_rl/experience/rollout_reassembler.py#L1153-L1161"><code>_plan_selected_calls</code></a>). Each piece then goes through the same leaf-to-root walk.</p>
+
+<h2>The same 5 calls, without and with compaction</h2>
+
+<svg viewBox="0 0 960 560" role="img" aria-label="Left: compaction off; calls 1 to 3 form a chain, call 4 is a rejected dead branch, call 5 is the leaf; RL walks 5,3,2,1 and makes one row of 12 tokens. Right: compaction on; call 3 is a new root; the agent's output selects calls 1,2,3,5; RL cuts at call 3 and makes two rows of 6 tokens.">
+  <defs>
+    <marker id="ah" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path class="ah" d="M0,0 L8,4 L0,8 z"/></marker>
+    <marker id="aw" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path class="aw" d="M0,0 L8,4 L0,8 z"/></marker>
+  </defs>
+  <text class="note" x="16" y="18">one rollout · 5 model calls · the agent rejects call 4 and asks again (call 5) · each call here generates 1 token</text>
+
+  <!-- LEFT lane -->
+  <rect class="lane" x="8" y="30" width="460" height="420" rx="8"/>
+  <text class="lbl-b" x="20" y="52">Compaction off · Gym's ledger is one chain</text>
+  <!-- calls -->
+  <rect class="root" x="30" y="72" width="64" height="34" rx="6"/><text class="cid" x="47" y="94">c1</text>
+  <rect class="call" x="130" y="72" width="64" height="34" rx="6"/><text class="cid" x="147" y="94">c2</text>
+  <rect class="call" x="230" y="72" width="64" height="34" rx="6"/><text class="cid" x="247" y="94">c3</text>
+  <rect class="dead" x="340" y="60" width="64" height="30" rx="6"/><text class="cid" x="357" y="80">c4</text>
+  <text class="note" x="410" y="80">✗ rejected</text>
+  <rect class="call" x="340" y="100" width="64" height="34" rx="6"/><text class="cid" x="357" y="122">c5</text>
+  <text class="note" x="410" y="122">leaf</text>
+  <path class="edge" d="M94 89 L128 89"/><path class="edge" d="M194 89 L228 89"/>
+  <path class="edge-dead" d="M294 84 L338 76"/><path class="edge" d="M294 94 L338 114"/>
+  <text class="mono" x="30" y="150">cum_len 3 → 6 → 9 → 12 (c4 and c5 both 12)</text>
+  <!-- walk -->
+  <text class="walk-lbl" x="30" y="182">1. leaf = the response the agent ended on (c5)</text>
+  <text class="walk-lbl" x="30" y="200">2. follow parents up: c5 → c3 → c2 → c1, then reverse</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/c617a2c01fb4b848991b2cc245a861985045ed14/nemo_rl/environments/nemo_gym.py#L1257-L1300"><text x="30" y="218">nemo_gym.py L1257-1300 (pick leaf)</text></a>
+  <a href="https://github.com/NVIDIA-NeMo/Gym/blob/b27e0db8faefee7e4760b5b1bfbfed713f528360/nemo_gym/token_id_capture/staging/rebuild.py#L201-L216"><text x="250" y="218">rebuild.py L201-216 (walk)</text></a>
+  <text class="walk-lbl" x="30" y="244">3. join each call's stored tokens, root first</text>
+  <text class="mono" x="30" y="264">c1 [10,11,1001] + c2 [20,21,1002]</text>
+  <text class="mono" x="30" y="280">+ c3 [30,31,1003] + c5 [50,51,1005]</text>
+  <a href="https://github.com/NVIDIA-NeMo/Gym/blob/b27e0db8faefee7e4760b5b1bfbfed713f528360/nemo_gym/token_id_capture/staging/rebuild.py#L303-L331"><text x="30" y="298">rebuild.py L303-331</text></a>
+  <!-- one row -->
+  <rect class="row" x="30" y="318" width="420" height="58" rx="7"/>
+  <text class="lbl-b" x="42" y="338">1 row · group_g0 · 12 tokens · 4 with gradient</text>
+  <text class="mono" x="42" y="358">[10,11,1001,20,21,1002,30,31,1003,50,51,1005]</text>
+  <text class="note" x="30" y="400">c4 is read, checked and cleaned up, but trains nothing.</text>
+  <text class="note" x="30" y="418">If the agent had rewritten its history here, Gym could not find a</text>
+  <text class="note" x="30" y="434">parent, and the whole rollout would be masked (unresolved_parent).</text>
+
+  <!-- RIGHT lane -->
+  <rect class="lane" x="490" y="30" width="462" height="420" rx="8"/>
+  <text class="lbl-b" x="502" y="52">Compaction on · the ledger has two roots</text>
+  <rect class="root" x="510" y="72" width="64" height="34" rx="6"/><text class="cid" x="527" y="94">c1</text>
+  <rect class="call" x="600" y="72" width="64" height="34" rx="6"/><text class="cid" x="617" y="94">c2</text>
+  <path class="cut" d="M684 64 L684 140"/><text class="cut-lbl" x="660" y="154">rewrite</text>
+  <rect class="root" x="700" y="72" width="64" height="34" rx="6"/><text class="cid" x="717" y="94">c3</text>
+  <rect class="dead" x="800" y="60" width="64" height="30" rx="6"/><text class="cid" x="817" y="80">c4</text>
+  <text class="note" x="870" y="80">✗ rejected</text>
+  <rect class="call" x="800" y="100" width="64" height="34" rx="6"/><text class="cid" x="817" y="122">c5</text>
+  <path class="edge" d="M574 89 L598 89"/>
+  <path class="edge-dead" d="M764 84 L798 76"/><path class="edge" d="M764 94 L798 114"/>
+  <text class="mono" x="510" y="150">c3 has no parent: RL started a new root</text>
+  <!-- select + cut -->
+  <text class="walk-lbl" x="510" y="182">1. match the agent's 8 output items to calls</text>
+  <text class="mono" x="510" y="200">selected = [c1, c2, c3, c5]   (c4 not in output)</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/c617a2c01fb4b848991b2cc245a861985045ed14/nemo_rl/environments/gym_selection.py#L91-L249"><text x="510" y="218">gym_selection.py L91-249</text></a>
+  <text class="walk-lbl" x="510" y="244">2. cut the list at every call with no parent</text>
+  <text class="mono" x="510" y="264">chain 0 = [c1, c2]    chain 1 = [c3, c5]</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/c617a2c01fb4b848991b2cc245a861985045ed14/nemo_rl/experience/rollout_reassembler.py#L1153-L1161"><text x="510" y="282">rollout_reassembler.py L1153-1161</text></a>
+  <text class="walk-lbl" x="510" y="300">3. walk each chain leaf → root, as on the left</text>
+  <!-- two rows -->
+  <rect class="row" x="510" y="318" width="210" height="58" rx="7"/>
+  <text class="lbl-b" x="520" y="338">group_g0_s0 · 6 tok</text>
+  <text class="mono" x="520" y="358">[10,11,1001,20,21,1002]</text>
+  <rect class="row" x="732" y="318" width="210" height="58" rx="7"/>
+  <text class="lbl-b" x="742" y="338">group_g0_s1 · 6 tok</text>
+  <text class="mono" x="742" y="358">[10,11,1003,50,51,1005]</text>
+  <text class="note" x="510" y="400">Both rows get the rollout's one reward (1.0) and its one</text>
+  <text class="note" x="510" y="418">advantage (+0.5). Each generated token is in exactly one row.</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/c617a2c01fb4b848991b2cc245a861985045ed14/nemo_rl/experience/rollout_reassembler.py#L1350-L1376"><text x="510" y="436">rollout_reassembler.py L1350-1376 (rows _s0, _s1)</text></a>
+
+  <!-- legend -->
+  <rect class="root" x="16" y="472" width="18" height="12" rx="3"/><text class="note" x="40" y="483">root (no parent; stores its whole prompt)</text>
+  <rect class="call" x="300" y="472" width="18" height="12" rx="3"/><text class="note" x="324" y="483">continues its parent (stores new tokens only)</text>
+  <rect class="dead" x="616" y="472" width="18" height="12" rx="3"/><text class="note" x="640" y="483">rejected; never trained</text>
+  <rect class="row" x="16" y="496" width="18" height="12" rx="3"/><text class="note" x="40" y="507">training row</text>
+  <path class="walk" d="M140 502 L170 502"/><text class="note" x="176" y="507">what RL does, in order</text>
+  <text class="note" x="16" y="536">Token values come from the PR's test stand-in for vLLM: every root's prompt is [10, 11], call i adds [10·i, 10·i+1] and generates 1000+i.</text>
+  <text class="note" x="16" y="552">Real prompts and outputs are far longer; the shapes, parents and row split are what the real code produced.</text>
+</svg>
+
+<h2>What RL checks while it cuts</h2>
+<p>The cut is strict, so a wrong ledger fails loudly instead of training on the wrong tokens:</p>
+<ol>
+<li><b>A selected call must continue the call just before it,</b> unless it is a root. Otherwise the agent's output skipped a call, and RL raises (<a href="https://github.com/NVIDIA-NeMo/RL/blob/c617a2c01fb4b848991b2cc245a861985045ed14/nemo_rl/experience/rollout_reassembler.py#L1156-L1161">L1156-1161</a>).</li>
+<li><b>Each chain is rebuilt with the ordinary code</b> (<code>finalize_rollout</code>, the same hash and length checks), and the rebuilt call order must equal the selected order (<a href="https://github.com/NVIDIA-NeMo/RL/blob/c617a2c01fb4b848991b2cc245a861985045ed14/nemo_rl/experience/rollout_reassembler.py#L1250-L1273">L1250-1273</a>).</li>
+<li><b>All or nothing per rollout:</b> if any chain fails, every row of that rollout is masked (<a href="https://github.com/NVIDIA-NeMo/RL/blob/c617a2c01fb4b848991b2cc245a861985045ed14/nemo_rl/experience/rollout_reassembler.py#L1329-L1349">L1329-1349</a>).</li>
+<li><b>One advantage per rollout, not per row.</b> GRPO runs on one reward per rollout, then copies the result to all its rows (<a href="https://github.com/NVIDIA-NeMo/RL/blob/c617a2c01fb4b848991b2cc245a861985045ed14/nemo_rl/algorithms/single_controller.py#L5378-L5393">single_controller.py L5378-5393</a>). A rollout cut into 3 rows still counts once in its group.</li>
+</ol>
+
+<div class="mono">ledger, compaction on (real run; ids shortened)
+call      parent    mode      prev_len  delta_len  cum_len  response
+c1 a894…  -         text      0         3          3        chatcmpl-1
+c2 6e2c…  c1        token_in  3         3          6        chatcmpl-2
+c3 b483…  -         text      0         3          3        chatcmpl-3   ← compaction root
+c4 9577…  c3        token_in  3         3          6        chatcmpl-4   ← rejected, not in output
+c5 df66…  c3        token_in  3         3          6        chatcmpl-5   ← accepted retry</div>
+
+<div class="hl"><b>So what.</b> Your mental model holds inside each piece: every row is still built by walking one chain from its leaf up to its root.
+What CC adds is a step before that walk. The agent's own output decides which calls were accepted, and every root starts a new piece.
+That is why a rewrite now costs one extra row instead of the whole rollout. It is also why the harness must return its full accepted history: a chain missing from the output is a chain that never trains (<a href="https://github.com/NVIDIA-NeMo/RL/pull/4124#discussion_r4188764671">review comment on <code>gym_selection.py</code></a>).</div>
+
+</div>
+</body>
+</html>

@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NVIDIA-NeMo/RL #4124 — why one dropped prompt group stops a context-compaction run</title>
+<style>
+:root{
+  --bg:#0d1117; --surface:#161b22; --surface2:#1c2128; --border:#30363d;
+  --text:#e6edf3; --dim:#8b949e; --accent:#58a6ff; --green:#3fb950;
+  --orange:#d29922; --red:#f85149;
+}
+:root[data-theme="light"]{
+  --bg:#ffffff; --surface:#f6f8fa; --surface2:#eaeef2; --border:#d0d7de;
+  --text:#1f2328; --dim:#59636e; --accent:#0969da; --green:#1a7f37;
+  --orange:#9a6700; --red:#cf222e;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:28px 20px 70px}
+h1{font-size:22px;margin:0 0 8px;line-height:1.3}
+h2{font-size:18px;margin:32px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;
+  font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
+.sub{color:var(--dim);font-size:13.5px;margin:0 0 16px}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);
+  border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;
+  font:13px/1 ui-monospace,Menlo,monospace;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.18)}
+.status{border:1px solid var(--border);border-radius:10px;background:var(--surface);
+  padding:2px 16px 10px;margin:0 0 20px}
+.status dl{display:grid;grid-template-columns:max-content 1fr;gap:4px 14px;margin:12px 0 0}
+.status dt{color:var(--dim);font-size:12px;text-transform:uppercase;letter-spacing:.04em;
+  white-space:nowrap;padding-top:2px}
+.status dd{margin:0;font-size:14px}
+.verdict{font-weight:700}
+.verdict.open{color:var(--red)}
+nav.chain{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 6px;padding:0}
+nav.chain a,nav.chain span{display:inline-block;padding:5px 11px;border:1px solid var(--border);
+  border-radius:20px;background:var(--surface);text-decoration:none;color:var(--accent);
+  font-size:12.5px;line-height:1.3;white-space:nowrap}
+nav.chain a:hover{background:var(--surface2)}
+nav.chain span.here{background:var(--accent);color:var(--bg);border-color:var(--accent);font-weight:600}
+p.chainnote{color:var(--dim);font-size:12px;margin:0 0 18px}
+.bg{border-left:3px solid var(--accent);background:var(--surface);padding:10px 14px;
+  margin:0 0 16px;border-radius:0 8px 8px 0;font-size:14px}
+.warn{border-left:3px solid var(--red);background:var(--surface);
+  padding:12px 16px;margin:18px 0;border-radius:0 8px 8px 0}
+.where{border-left:4px solid var(--accent);background:var(--surface);padding:6px 12px;margin:6px 0 10px}
+.diff{font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--surface);
+  border:1px solid var(--border);border-radius:8px;padding:12px;overflow-x:auto;white-space:pre-wrap;margin:10px 0}
+.diff .add{color:var(--green)}
+.diff .del{color:var(--red)}
+.diff .hunk{color:var(--accent)}
+.cref{margin:6px 0 0;font-size:13px}
+.cref a{display:inline-block;padding:4px 10px;border:1px solid var(--border);
+  border-radius:16px;background:var(--surface);font:12.5px ui-monospace,Menlo,monospace}
+.cref a:hover{background:var(--surface2);text-decoration:none}
+.tip{border-bottom:1px dotted var(--dim);cursor:help;position:relative;outline:none}
+.tip:hover::after,.tip:focus::after{content:attr(data-tip);position:absolute;left:0;top:1.7em;z-index:60;
+  width:max-content;max-width:min(340px,80vw);white-space:normal;background:var(--surface2);color:var(--text);
+  border:1px solid var(--border);border-radius:6px;padding:7px 10px;font:13px/1.45 -apple-system,sans-serif;
+  font-weight:400;box-shadow:0 4px 14px rgba(0,0,0,.3)}
+ul{padding-left:20px;margin:6px 0}
+li{margin:3px 0}
+svg{max-width:100%;height:auto;display:block;margin:16px 0}
+svg .box{fill:var(--surface);stroke:var(--border);stroke-width:1.3}
+svg .ok{fill:var(--green);fill-opacity:.12;stroke:var(--green);stroke-width:1.5}
+svg .bad{fill:var(--red);fill-opacity:.12;stroke:var(--red);stroke-width:1.5}
+svg .lbl{fill:var(--text);font:12px -apple-system,sans-serif}
+svg .lbl-b{fill:var(--text);font:bold 13px -apple-system,sans-serif}
+svg .mono{fill:var(--text);font:11px ui-monospace,Menlo,monospace}
+svg .note{fill:var(--dim);font:11.5px -apple-system,sans-serif}
+svg .hdr-ok{fill:var(--green);font:bold 13.5px -apple-system,sans-serif}
+svg .hdr-bad{fill:var(--red);font:bold 13.5px -apple-system,sans-serif}
+svg .arrow{stroke:var(--dim);stroke-width:1.5;fill:none;marker-end:url(#ah)}
+svg .ahead{fill:var(--dim)}
+svg a text{text-decoration:underline;fill:var(--accent);font:11px ui-monospace,Menlo,monospace}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+  document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head>
+<body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+  function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+  function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
+    b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
+      else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+  document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+<div class="wrap">
+
+<h1>Why one dropped prompt group stops a whole context-compaction training run</h1>
+<p class="sub">Explainer for a review finding on <a href="https://github.com/NVIDIA-NeMo/RL/pull/4124">NVIDIA-NeMo/RL #4124</a>
+(paired with <a href="https://github.com/NVIDIA-NeMo/Gym/pull/3368">NVIDIA-NeMo/Gym #3368</a>).
+RL links pin <code>c617a2c</code>; Gym links pin <code>b27e0db</code>.</p>
+
+<div class="status">
+<dl>
+  <dt>Before</dt>
+  <dd>NeMo-RL main has no context compaction (CC). On the ordinary path, a dropped prompt group can be retried or skipped within a budget.</dd>
+  <dt>This PR</dt>
+  <dd>Under CC, a failed model call now masks only its own rollout. But a whole dropped group still ends the run, while the new guide says it stays within the drop budget.</dd>
+  <dt>Status</dt>
+  <dd><span class="verdict open">Open — not fixed in this PR.</span> Raised in the review (comment below); the Gym half belongs in Gym #3368.</dd>
+</dl>
+</div>
+
+<nav class="chain">
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4124-cc-old-vs-new.html">1 · old vs new</a>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4124-data-flow.html">2 · data flow</a>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4124-calls-to-rows.html">3 · calls → rows</a>
+  <span class="here">4 · dropped group</span>
+</nav>
+<p class="chainnote">Four pages on this PR, one question each. This one: what happens when one prompt group fails.</p>
+
+<div class="bg"><b>Background.</b> A GRPO training step needs a fixed number of <b>prompt groups</b>; each group is one prompt run several times (each run is a <b>rollout</b>).
+NeMo-RL normally tolerates a few lost groups: a <span class="tip" tabindex="0" data-tip="max_consecutive_dropped_prompts. How many groups in a row may be dropped as infrastructure failures before the run stops. Default 0.">drop budget</span> and a
+<span class="tip" tabindex="0" data-tip="min_step_batch_fraction. The smallest share of a step's groups that may still train. 0.9 means a step of 10 groups may close with 9.">minimum step size</span> decide how many.
+Context compaction forces that minimum to 100% (<a href="https://github.com/NVIDIA-NeMo/RL/blob/c617a2c01fb4b848991b2cc245a861985045ed14/nemo_rl/algorithms/single_controller_utils/config.py#L1437-L1438">config.py L1437-1438</a>), and it never replaces a dropped group.
+Dotted words have a short explanation: hover or tap them.</div>
+
+<p>The figure follows one step of 4 prompt groups with 2 rollouts each, and one bad rollout in group <code>g1</code>.
+Where the failure happens decides everything. If a <b>model call</b> fails, the agent still finishes and returns a result, and RL masks just that rollout (<a href="https://github.com/NVIDIA-NeMo/RL/blob/c617a2c01fb4b848991b2cc245a861985045ed14/nemo_rl/environments/nemo_gym.py#L1114-L1120">nemo_gym.py L1114-1120</a>).
+If the <b>agent itself raises</b>, Gym answers with an HTTP 500, RL files it as an infrastructure failure, and CC drops the whole group without a retry (<a href="https://github.com/NVIDIA-NeMo/RL/blob/c617a2c01fb4b848991b2cc245a861985045ed14/nemo_rl/experience/rollout_manager.py#L2210-L2214">rollout_manager.py L2210-2214</a>).
+Both ways of handling a dropped group then end the run.</p>
+
+<h2>Same bad rollout, two places it can fail</h2>
+
+<svg viewBox="0 0 975 590" role="img" aria-label="Left lane: a model call fails, the rollout is masked and the step trains with 4 of 4 groups. Right lane: the agent raises, Gym returns HTTP 500, RL drops group g1, and the run stops either at the drop budget or at the step floor.">
+  <defs><marker id="ah" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path class="ahead" d="M0,0 L8,4 L0,8 z"/></marker></defs>
+  <text class="note" x="16" y="20">one training step · 4 prompt groups (g0–g3) · 2 rollouts each · rollout g1_0 hits a context that does not fit</text>
+
+  <!-- LEFT: model call fails -->
+  <text class="hdr-ok" x="16" y="50">A · a model call fails (no context guard set)</text>
+  <rect class="box" x="10" y="62" width="455" height="82" rx="8"/>
+  <text class="lbl" x="22" y="82">vLLM rejects the call (400). Gym's model server answers with an</text>
+  <text class="lbl" x="22" y="99">empty response marked <tspan class="mono">finish_reason="length"</tspan>; the agent stops.</text>
+  <text class="mono" x="22" y="120">ledger: pending_call_ids=["c3"]   reward: from verifier</text>
+  <a href="https://github.com/NVIDIA-NeMo/Gym/blob/b27e0db8faefee7e4760b5b1bfbfed713f528360/responses_api_models/vllm_model/app.py#L1113-L1124"><text x="22" y="137">Gym vllm_model/app.py L1113-1124</text></a>
+  <path class="arrow" d="M237 146 L237 166"/>
+  <rect class="box" x="10" y="168" width="455" height="70" rx="8"/>
+  <text class="lbl" x="22" y="188">RL sees a capture that never finished and poisons only this rollout.</text>
+  <text class="mono" x="22" y="208">capture_failed=True → receipt.capture_poisoned=True</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/c617a2c01fb4b848991b2cc245a861985045ed14/nemo_rl/environments/nemo_gym.py#L1114-L1143"><text x="22" y="228">nemo_gym.py L1114-1143</text></a>
+  <path class="arrow" d="M237 240 L237 260"/>
+  <rect class="ok" x="10" y="262" width="455" height="62" rx="8"/>
+  <text class="lbl" x="22" y="283">Group g1 keeps its slot: g1_0 is masked (no gradient),</text>
+  <text class="lbl" x="22" y="301">g1_1 trains as usual.</text>
+  <text class="mono" x="22" y="318">g1_0: sample_mask=0   g1_1: sample_mask=1</text>
+  <path class="arrow" d="M237 326 L237 346"/>
+  <rect class="ok" x="10" y="348" width="455" height="52" rx="8"/>
+  <text class="lbl-b" x="22" y="370">Step trains with 4 of 4 groups.</text>
+  <text class="lbl" x="22" y="390">The run continues.</text>
+
+  <!-- RIGHT: agent raises -->
+  <text class="hdr-bad" x="495" y="50">B · the agent itself raises (guard on, timeout, …)</text>
+  <rect class="box" x="490" y="62" width="460" height="82" rx="8"/>
+  <text class="lbl" x="502" y="82">The context guard rejects the next request before it is sent.</text>
+  <text class="lbl" x="502" y="99">Nothing catches it; Gym's middleware turns it into an HTTP 500.</text>
+  <text class="mono" x="502" y="120">500 "ContextGuardRejected('Context guard …')"</text>
+  <a href="https://github.com/NVIDIA-NeMo/Gym/blob/b27e0db8faefee7e4760b5b1bfbfed713f528360/nemo_gym/context_management/client.py#L176"><text x="502" y="137">Gym client.py L176</text></a><a href="https://github.com/NVIDIA-NeMo/Gym/blob/b27e0db8faefee7e4760b5b1bfbfed713f528360/nemo_gym/server_utils.py#L1297-L1303"><text x="650" y="137">server_utils.py L1297-1303</text></a>
+  <path class="arrow" d="M720 146 L720 166"/>
+  <rect class="box" x="490" y="168" width="460" height="70" rx="8"/>
+  <text class="lbl" x="502" y="188">RL reads a 500 as an infrastructure failure. Under CC it does not</text>
+  <text class="lbl" x="502" y="205">retry; it drops all of group g1 (g1_1 too).</text>
+  <text class="mono" x="502" y="222">GymTransportError("NeMo-Gym /run failed with HTTP 500: …")</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/c617a2c01fb4b848991b2cc245a861985045ed14/nemo_rl/environments/nemo_gym.py#L287-L289"><text x="502" y="236">nemo_gym.py L287-289</text></a><a href="https://github.com/NVIDIA-NeMo/RL/blob/c617a2c01fb4b848991b2cc245a861985045ed14/nemo_rl/experience/rollout_manager.py#L2210-L2214"><text x="650" y="236">rollout_manager.py L2210-2214</text></a>
+  <path class="arrow" d="M610 240 L610 262"/>
+  <path class="arrow" d="M830 240 L830 262"/>
+  <text class="note" x="500" y="256">budget 0 (default)</text>
+  <text class="note" x="840" y="256">budget = 5</text>
+  <rect class="bad" x="490" y="264" width="222" height="136" rx="8"/>
+  <text class="lbl" x="500" y="284">Drop 1 is more than the</text>
+  <text class="lbl" x="500" y="301">budget of 0, so it raises:</text>
+  <text class="mono" x="500" y="322">RolloutRedispatchExhausted</text>
+  <text class="mono" x="500" y="338">"… exceeding</text>
+  <text class="mono" x="500" y="354"> max_consecutive_dropped_</text>
+  <text class="mono" x="500" y="370"> prompts=0 …"</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/c617a2c01fb4b848991b2cc245a861985045ed14/nemo_rl/experience/rollout_manager.py#L2240-L2248"><text x="500" y="390">rollout_manager.py L2240-2248</text></a>
+  <rect class="bad" x="728" y="264" width="222" height="136" rx="8"/>
+  <text class="lbl" x="738" y="284">The step keeps 3 of 4 groups;</text>
+  <text class="lbl" x="738" y="301">the floor is 4, so it raises:</text>
+  <text class="mono" x="738" y="322">RuntimeError</text>
+  <text class="mono" x="738" y="338">"training step … lost 1</text>
+  <text class="mono" x="738" y="354"> of 4 prompt group(s),</text>
+  <text class="mono" x="738" y="370"> leaving 3, below … 4"</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/c617a2c01fb4b848991b2cc245a861985045ed14/nemo_rl/algorithms/single_controller.py#L2638-L2647"><text x="738" y="390">single_controller.py L2638-2647</text></a>
+  <path class="arrow" d="M601 402 L700 446"/>
+  <path class="arrow" d="M839 402 L760 446"/>
+  <rect class="bad" x="560" y="448" width="320" height="40" rx="8"/>
+  <text class="lbl-b" x="620" y="473">The whole training run stops.</text>
+
+  <!-- footer notes -->
+  <text class="note" x="16" y="430">Also dropped the same way, so also run-ending:</text>
+  <text class="note" x="16" y="447">· a timeout or transport error before the agent returns</text>
+  <text class="note" x="16" y="464">· any other agent error (resample budget, call limit)</text>
+  <text class="note" x="16" y="481">· a group where every rollout failed:</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/c617a2c01fb4b848991b2cc245a861985045ed14/nemo_rl/algorithms/single_controller.py#L2062-L2071"><text x="30" y="498">single_controller.py L2062-2071</text></a>
+
+  <rect class="ok" x="16" y="530" width="16" height="12"/><text class="note" x="38" y="541">only one rollout masked; training continues</text>
+  <rect class="bad" x="330" y="530" width="16" height="12"/><text class="note" x="352" y="541">the run stops</text>
+  <rect class="box" x="480" y="530" width="16" height="12"/><text class="note" x="502" y="541">a step on the way</text>
+  <text class="note" x="16" y="572">Numbers in the error text are this example's: 4 groups, 1 lost, 3 left, floor 4 (= every group, because CC requires 100%).</text>
+</svg>
+
+<p class="cref">🔴 <a href="https://github.com/NVIDIA-NeMo/RL/pull/4124#discussion_r4188764556">review comment — context-compaction.md:47</a></p>
+
+<h2>What would fix it — proposed, not in the PR</h2>
+<p>Nothing below is implemented.</p>
+<p class="where"><b>Where the fix lands: RL (docs, in this PR) and Gym (agent, in Gym #3368).</b>
+<b>RL:</b> make <a href="https://github.com/NVIDIA-NeMo/RL/blob/c617a2c01fb4b848991b2cc245a861985045ed14/docs/guides/context-compaction.md#L47"><code>context-compaction.md</code> L47</a> say what the code does, so nobody raises a drop budget expecting it to help.
+<b>Gym:</b> <a href="https://github.com/NVIDIA-NeMo/Gym/blob/b27e0db8faefee7e4760b5b1bfbfed713f528360/responses_api_agents/simple_agent_with_compaction/app.py#L99-L105"><code>simple_agent_with_compaction</code></a> should end the episode on a guard rejection and return a result RL masks, the way lane A already works, instead of letting the error become an HTTP 500. That needs a small design choice (how the returned result marks the rollout as masked), so it is not shown as a diff here.</p>
+
+<pre class="diff"><span class="hunk">@@ docs/guides/context-compaction.md L47 · Measurement and lifecycle</span>
+<span class="del">- Set `async_rl.rollout_failure.nemo_gym.rollout_timeout_s` as a backstop for a hung prompt-group stream; it is not a per-model-call deadline or an acknowledgement that the remote engine stopped. A timeout or transport failure that prevents an agent result drops the group under the existing consecutive-drop budget. This baseline does not redispatch CC groups because selected-response metadata is request-local; checkpoint/retry support is a separate change. Data-integrity errors still raise, and operator cancellation still propagates.
+</span><span class="add">+ Set `async_rl.rollout_failure.nemo_gym.rollout_timeout_s` as a backstop for a hung prompt-group stream; it is not a per-model-call deadline or an acknowledgement that the remote engine stopped. A timeout, transport failure or agent exception that prevents an agent result drops the group, and so does a group with no valid owner. Because context compaction requires `min_step_batch_fraction: 1` and does not replace dropped groups, any dropped group currently stops the run. This baseline does not redispatch CC groups because selected-response metadata is request-local; checkpoint/retry support is a separate change. Data-integrity errors still raise, and operator cancellation still propagates.</span></pre>
+<p>The doc fix only makes the guide true; the run still stops. Lane B's guard case stops ending the run once the Gym agent change lands. Timeouts and transport errors stay run-ending until CC can re-send or replace a dropped group, which the author has left for later checkpoint/retry work.</p>
+
+<div class="warn"><b>So what.</b> Today a context guard makes a CC run <i>less</i> robust, not more: without a guard, an oversized request masks one rollout (lane A); with a guard, the same situation stops the run (lane B).
+Until the Gym change lands, any rollout error that keeps the agent from returning a result ends a context-compaction training run. Plan multi-day runs with that in mind.</div>
+
+</div>
+</body>
+</html>
