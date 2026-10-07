@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NVIDIA-NeMo/RL #4124 — one rollout, several rows: how the reward reaches each row</title>
+<style>
+:root{
+  --bg:#0d1117; --surface:#161b22; --surface2:#1c2128; --border:#30363d;
+  --text:#e6edf3; --dim:#8b949e; --accent:#58a6ff; --green:#3fb950;
+  --orange:#d29922; --red:#f85149; --purple:#bc8cff;
+}
+:root[data-theme="light"]{
+  --bg:#ffffff; --surface:#f6f8fa; --surface2:#eaeef2; --border:#d0d7de;
+  --text:#1f2328; --dim:#59636e; --accent:#0969da; --green:#1a7f37;
+  --orange:#9a6700; --red:#cf222e; --purple:#8250df;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:28px 20px 70px}
+h1{font-size:22px;margin:0 0 8px;line-height:1.3}
+h2{font-size:18px;margin:32px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;
+  font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
+.sub{color:var(--dim);font-size:13.5px;margin:0 0 16px}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);
+  border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;
+  font:13px/1 ui-monospace,Menlo,monospace;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.18)}
+.status{border:1px solid var(--border);border-radius:10px;background:var(--surface);
+  padding:2px 16px 10px;margin:0 0 20px}
+.status dl{display:grid;grid-template-columns:max-content 1fr;gap:4px 14px;margin:12px 0 0}
+.status dt{color:var(--dim);font-size:12px;text-transform:uppercase;letter-spacing:.04em;
+  white-space:nowrap;padding-top:2px}
+.status dd{margin:0;font-size:14px}
+.verdict{font-weight:700;color:var(--orange)}
+nav.chain{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 6px;padding:0}
+nav.chain a,nav.chain span{display:inline-block;padding:5px 11px;border:1px solid var(--border);
+  border-radius:20px;background:var(--surface);text-decoration:none;color:var(--accent);
+  font-size:12.5px;line-height:1.3;white-space:nowrap}
+nav.chain a:hover{background:var(--surface2)}
+nav.chain span.here{background:var(--accent);color:var(--bg);border-color:var(--accent);font-weight:600}
+p.chainnote{color:var(--dim);font-size:12px;margin:0 0 18px}
+.bg{border-left:3px solid var(--accent);background:var(--surface);padding:10px 14px;
+  margin:0 0 16px;border-radius:0 8px 8px 0;font-size:14px}
+.hl{border-left:3px solid var(--green);background:var(--surface);
+  padding:12px 16px;margin:18px 0;border-radius:0 8px 8px 0}
+table{border-collapse:collapse;width:100%;font-size:13.5px;margin:10px 0}
+th,td{border:1px solid var(--border);padding:7px 9px;vertical-align:top;text-align:left}
+th{background:var(--surface2);font-size:12.5px}
+td:first-child{color:var(--dim);white-space:nowrap}
+.tip{border-bottom:1px dotted var(--dim);cursor:help;position:relative;outline:none}
+.tip:hover::after,.tip:focus::after{content:attr(data-tip);position:absolute;left:0;top:1.7em;z-index:60;
+  width:max-content;max-width:min(340px,80vw);white-space:normal;background:var(--surface2);color:var(--text);
+  border:1px solid var(--border);border-radius:6px;padding:7px 10px;font:13px/1.45 -apple-system,sans-serif;
+  font-weight:400;box-shadow:0 4px 14px rgba(0,0,0,.3)}
+svg{max-width:100%;height:auto;display:block;margin:16px 0}
+svg .rollout{fill:var(--accent);fill-opacity:.16;stroke:var(--accent);stroke-width:1.6}
+svg .row{fill:var(--purple);fill-opacity:.14;stroke:var(--purple);stroke-width:1.3}
+svg .rep{fill:var(--purple);fill-opacity:.32;stroke:var(--purple);stroke-width:2}
+svg .step{fill:var(--surface);stroke:var(--border);stroke-width:1.3}
+svg .good{fill:var(--green);fill-opacity:.13;stroke:var(--green);stroke-width:1.5}
+svg .wrong{fill:none;stroke:var(--red);stroke-width:1.4;stroke-dasharray:5 4}
+svg .lbl{fill:var(--text);font:12px -apple-system,sans-serif}
+svg .lbl-b{fill:var(--text);font:bold 13px -apple-system,sans-serif}
+svg .mono{fill:var(--text);font:11px ui-monospace,Menlo,monospace}
+svg .note{fill:var(--dim);font:11.5px -apple-system,sans-serif}
+svg .hdr{fill:var(--accent);font:bold 12.5px -apple-system,sans-serif}
+svg .red{fill:var(--red);font:bold 11.5px -apple-system,sans-serif}
+svg .pos{fill:var(--green);font:bold 12px ui-monospace,Menlo,monospace}
+svg .neg{fill:var(--red);font:bold 12px ui-monospace,Menlo,monospace}
+svg .arrow{stroke:var(--dim);stroke-width:1.4;fill:none;marker-end:url(#ah)}
+svg .ah{fill:var(--dim)}
+svg a text{text-decoration:underline;fill:var(--accent);font:10.5px ui-monospace,Menlo,monospace}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+  document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head>
+<body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+  function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+  function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
+    b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
+      else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+  document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+<div class="wrap">
+
+<h1>One rollout, several rows: the reward is copied onto every row, but counted once</h1>
+<p class="sub">Explainer for <a href="https://github.com/NVIDIA-NeMo/RL/pull/4124">NVIDIA-NeMo/RL #4124</a>
+(paired with <a href="https://github.com/NVIDIA-NeMo/Gym/pull/3368">NVIDIA-NeMo/Gym #3368</a>).
+RL links pin <code>c617a2c</code>.</p>
+
+<div class="status">
+<dl>
+  <dt>Before</dt>
+  <dd>Without compaction, one rollout is one row, so its reward, its advantage and its row are the same thing.</dd>
+  <dt>This PR</dt>
+  <dd>With context compaction (CC), one rollout can become several rows. Every row carries the same reward, GRPO uses it once per rollout, and its one advantage is copied to every row.</dd>
+  <dt>Status</dt>
+  <dd><span class="verdict">Proposed — open PR, not merged.</span> The numbers below come from a real run of the PR's code, with a stand-in model.</dd>
+</dl>
+</div>
+
+<nav class="chain">
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4124-cc-old-vs-new.html">1 · old vs new</a>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4124-data-flow.html">2 · data flow</a>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4124-calls-to-rows.html">3 · calls → rows</a>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4124-tree-vs-forest.html">4 · tree vs forest</a>
+  <span class="here">5 · reward → rows</span>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4124-dropped-group.html">6 · dropped group</a>
+</nav>
+<p class="chainnote">Six pages on this PR, one question each. This one: how one reward maps onto several rows.</p>
+
+<div class="bg"><b>Background.</b> In GRPO each prompt is run several times; each run is a <b>rollout</b>, and the runs of one prompt form a <b>group</b>.
+A rollout's <b>advantage</b> is its reward minus the group's average reward (the <span class="tip" tabindex="0" data-tip="The number each reward is compared against. Here it is the plain mean of the group's rewards.">baseline</span>).
+Every token the model generated in that rollout is then pushed up or down by that advantage.
+Dotted words have a short explanation: hover or tap them.</div>
+
+<p>Here the two rollouts of one group split differently: <code>g0</code> was compacted 3 times and became 4 rows, while <code>g1</code> was not compacted and stayed 1 row.
+The reassembler writes the rollout's single reward onto each of its rows (<a href="https://github.com/NVIDIA-NeMo/RL/blob/c617a2c01fb4b848991b2cc245a861985045ed14/nemo_rl/experience/rollout_reassembler.py#L1350-L1376">rollout_reassembler.py L1350-1376</a>).
+Before GRPO runs, RL checks that all rows of a rollout agree, and keeps just one of them (<a href="https://github.com/NVIDIA-NeMo/RL/blob/c617a2c01fb4b848991b2cc245a861985045ed14/nemo_rl/algorithms/single_controller_utils/logical_advantage.py#L133-L148">logical_advantage.py L133-148</a>).
+GRPO therefore sees 2 rewards, not 5. The resulting advantage is copied back to every row (<a href="https://github.com/NVIDIA-NeMo/RL/blob/c617a2c01fb4b848991b2cc245a861985045ed14/nemo_rl/algorithms/single_controller.py#L5378-L5393">single_controller.py L5378-5393</a>).</p>
+
+<h2>Two rollouts, five rows, two rewards</h2>
+
+<svg viewBox="0 0 960 560" role="img" aria-label="Rollout g0 with reward 1.0 splits into 4 rows, rollout g1 with reward 0.0 stays 1 row. RL keeps one row per rollout, GRPO computes baseline 0.5 and advantages plus 0.5 and minus 0.5, and copies them to every row. Counting rows instead would give baseline 0.8 and advantages plus 0.2 and minus 0.8.">
+  <defs><marker id="ah" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path class="ah" d="M0,0 L8,4 L0,8 z"/></marker></defs>
+  <text class="hdr" x="16" y="22">① rows from the reassembler</text>
+  <text class="hdr" x="350" y="22">② GRPO, once per rollout</text>
+  <text class="hdr" x="650" y="22">③ advantage copied to every row</text>
+
+  <!-- g0 -->
+  <rect class="rollout" x="16" y="36" width="300" height="196" rx="9"/>
+  <text class="lbl-b" x="28" y="56">rollout g0 · reward 1.0 · 7 generated tokens</text>
+  <rect class="rep" x="28" y="68" width="276" height="32" rx="6"/><text class="mono" x="38" y="89">g0_s0  6 tok · reward 1.0  ← kept</text>
+  <rect class="row" x="28" y="106" width="276" height="32" rx="6"/><text class="mono" x="38" y="127">g0_s1  6 tok · reward 1.0</text>
+  <rect class="row" x="28" y="144" width="276" height="32" rx="6"/><text class="mono" x="38" y="165">g0_s2  6 tok · reward 1.0</text>
+  <rect class="row" x="28" y="182" width="276" height="32" rx="6"/><text class="mono" x="38" y="203">g0_s3  3 tok · reward 1.0</text>
+  <!-- g1 -->
+  <rect class="rollout" x="16" y="248" width="300" height="82" rx="9"/>
+  <text class="lbl-b" x="28" y="268">rollout g1 · reward 0.0 · 7 generated tokens</text>
+  <rect class="rep" x="28" y="280" width="276" height="32" rx="6"/><text class="mono" x="38" y="301">g1_s0  21 tok · reward 0.0  ← kept</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/c617a2c01fb4b848991b2cc245a861985045ed14/nemo_rl/experience/rollout_reassembler.py#L1350-L1376"><text x="16" y="350">same reward on each row: rollout_reassembler.py L1350-1376</text></a>
+
+  <!-- GRPO -->
+  <path class="arrow" d="M306 84 L348 150"/><path class="arrow" d="M306 296 L348 200"/>
+  <rect class="good" x="350" y="120" width="260" height="122" rx="9"/>
+  <text class="lbl" x="362" y="142">rewards per rollout: [1.0, 0.0]</text>
+  <text class="lbl" x="362" y="164">baseline = mean = 0.5</text>
+  <text class="pos" x="362" y="190">g0: 1.0 − 0.5 = +0.5</text>
+  <text class="neg" x="362" y="212">g1: 0.0 − 0.5 = −0.5</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/c617a2c01fb4b848991b2cc245a861985045ed14/nemo_rl/algorithms/single_controller_utils/logical_advantage.py#L133-L148"><text x="362" y="232">one row per rollout: L133-148</text></a>
+
+  <!-- fan-out -->
+  <path class="arrow" d="M610 170 L648 110"/><path class="arrow" d="M610 200 L648 296"/>
+  <rect class="row" x="650" y="68" width="294" height="32" rx="6"/><text class="mono" x="660" y="89">g0_s0  [+0.5, +0.5]</text>
+  <rect class="row" x="650" y="106" width="294" height="32" rx="6"/><text class="mono" x="660" y="127">g0_s1  [+0.5, +0.5]</text>
+  <rect class="row" x="650" y="144" width="294" height="32" rx="6"/><text class="mono" x="660" y="165">g0_s2  [+0.5, +0.5]</text>
+  <rect class="row" x="650" y="182" width="294" height="32" rx="6"/><text class="mono" x="660" y="203">g0_s3  [+0.5]</text>
+  <rect class="row" x="650" y="280" width="294" height="32" rx="6"/><text class="mono" x="660" y="301">g1_s0  [−0.5 × 7]</text>
+  <text class="note" x="650" y="234">values on each row's generated tokens,</text>
+  <text class="note" x="650" y="250">as the learner received them</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/c617a2c01fb4b848991b2cc245a861985045ed14/nemo_rl/algorithms/single_controller.py#L5378-L5393"><text x="650" y="334">copy to rows: single_controller.py L5378-5393</text></a>
+
+  <!-- loss weight -->
+  <rect class="step" x="16" y="372" width="928" height="60" rx="9"/>
+  <text class="lbl-b" x="28" y="394">④ loss weight: every generated token counts once, whatever row it is in</text>
+  <text class="lbl" x="28" y="416">The loss divides by the step's total number of generated tokens (here 7 + 7 = 14), not by the number of rows (5).</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/c617a2c01fb4b848991b2cc245a861985045ed14/nemo_rl/models/policy/workers/megatron_policy_worker.py#L2025-L2030"><text x="690" y="394">megatron_policy_worker.py L2025-2030</text></a>
+
+  <!-- wrong way -->
+  <rect class="wrong" x="16" y="448" width="928" height="62" rx="9"/>
+  <text class="red" x="28" y="470">Not what the code does — if GRPO counted rows instead of rollouts:</text>
+  <text class="mono" x="28" y="494">rewards [1.0, 1.0, 1.0, 1.0, 0.0] → baseline 0.8 → g0 +0.2, g1 −0.8   (g0 counted 4 times because it was compacted 3 times)</text>
+  <text class="note" x="16" y="530">Token values come from the PR test's stand-in for vLLM; the rewards, row counts and advantages are what the real code produced.</text><text class="note" x="16" y="548">The baseline in this test is the plain group mean.</text>
+</svg>
+
+<h2>Why it is built this way</h2>
+<table>
+<tr><th>Question</th><th>Answer</th></tr>
+<tr><td>Is the reward stored once or many times?</td><td>Many: each row carries a copy, because rows are trained one at a time. RL refuses to train if the copies disagree.</td></tr>
+<tr><td>Does a rollout with more rows get more say?</td><td>No. GRPO sees one reward per rollout, so compaction cannot change any rollout's advantage. Above, g0 and g1 get +0.5 and −0.5 even though g0 has 4 rows and g1 has 1.</td></tr>
+<tr><td>Does a rollout with more rows get more gradient?</td><td>No more than it would without compaction. Each generated token gets its rollout's advantage, and the loss divides by the total token count. This is why CC requires a token-level loss and rejects sequence-level ones, which would divide by rows (<a href="https://github.com/NVIDIA-NeMo/RL/blob/c617a2c01fb4b848991b2cc245a861985045ed14/nemo_rl/algorithms/single_controller_utils/config.py#L858-L879">config.py L858-879</a>).</td></tr>
+<tr><td>What if one row is bad?</td><td>All rows of that rollout are masked. A rollout's validity is the lowest validity of its rows (<a href="https://github.com/NVIDIA-NeMo/RL/blob/c617a2c01fb4b848991b2cc245a861985045ed14/nemo_rl/algorithms/single_controller_utils/logical_advantage.py#L148">logical_advantage.py L148</a>).</td></tr>
+<tr><td>What changes, then?</td><td>Only the context each token is scored against. A token in row g0_s2 is scored against the compacted prompt that row starts with, which is the prompt the model actually saw when it generated that token.</td></tr>
+</table>
+
+<div class="hl"><b>So what.</b> Compaction changes how many rows a rollout has, not how much it counts.
+The reward is one number per rollout. It is copied onto each row for storage, used once for the group baseline, and its advantage is spread over the rollout's generated tokens, wherever they landed.
+One metric does count rows: <code>num_mask_sample_filtered</code> counts each row and padding row (<a href="https://github.com/NVIDIA-NeMo/RL/pull/4124#discussion_r4188764723">review comment on <code>single_controller.py</code></a>).</div>
+
+</div>
+</body>
+</html>
