@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NVIDIA-NeMo/RL #4245 — why each Single Controller rollout attempt now gets its own Gym task number</title>
+<style>
+:root{
+  --bg:#0d1117; --surface:#161b22; --surface2:#1c2128; --border:#30363d;
+  --text:#e6edf3; --dim:#8b949e; --accent:#58a6ff; --green:#3fb950;
+  --orange:#d29922; --red:#f85149;
+}
+:root[data-theme="light"]{
+  --bg:#ffffff; --surface:#f6f8fa; --surface2:#eaeef2; --border:#d0d7de;
+  --text:#1f2328; --dim:#59636e; --accent:#0969da; --green:#1a7f37;
+  --orange:#9a6700; --red:#cf222e;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:28px 20px 70px}
+h1{font-size:22px;margin:0 0 8px;line-height:1.3}
+h2{font-size:18px;margin:32px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;
+  font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
+.sub{color:var(--dim);font-size:13.5px;margin:0 0 16px}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);
+  border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;
+  font:13px/1 ui-monospace,Menlo,monospace;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.18)}
+.status{border:1px solid var(--border);border-radius:10px;background:var(--surface);
+  padding:2px 16px 10px;margin:0 0 20px}
+.status dl{display:grid;grid-template-columns:max-content 1fr;gap:4px 14px;margin:12px 0 0}
+.status dt{color:var(--dim);font-size:12px;text-transform:uppercase;letter-spacing:.04em;
+  white-space:nowrap;padding-top:2px}
+.status dd{margin:0;font-size:14px}
+.verdict{font-weight:700}
+.verdict.good{color:var(--green)}
+.bg{border-left:3px solid var(--accent);background:var(--surface);padding:10px 14px;margin:0 0 16px;
+  border-radius:0 8px 8px 0;font-size:14px}
+.hl{border-left:3px solid var(--green);background:var(--surface);
+  padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0}
+.where{border-left:4px solid var(--accent);background:var(--surface);padding:6px 12px;margin:6px 0 10px}
+.cref{margin:6px 0 0;font-size:13px}
+.cref a{display:inline-block;padding:4px 10px;border:1px solid var(--border);
+  border-radius:16px;background:var(--surface);font:12.5px ui-monospace,Menlo,monospace}
+.cref a:hover{background:var(--surface2);text-decoration:none}
+.diff{font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--surface);
+  border:1px solid var(--border);border-radius:8px;padding:12px;overflow-x:auto;white-space:pre;margin:10px 0}
+.diff .add{color:var(--green)}
+.diff .del{color:var(--red)}
+.diff .hunk{color:var(--accent)}
+.tip{border-bottom:1px dotted var(--dim);cursor:help;position:relative;outline:none}
+.tip:hover::after,.tip:focus::after{content:attr(data-tip);position:absolute;left:0;top:1.7em;z-index:60;
+  width:max-content;max-width:min(340px,80vw);white-space:normal;background:var(--surface2);color:var(--text);
+  border:1px solid var(--border);border-radius:6px;padding:7px 10px;font:13px/1.45 -apple-system,sans-serif;
+  font-weight:400;box-shadow:0 4px 14px rgba(0,0,0,.3)}
+svg{max-width:100%;height:auto;display:block;margin:16px 0}
+svg .box{fill:var(--surface);stroke:var(--border);stroke-width:1.4}
+svg .bad{fill:var(--surface);stroke:var(--red);stroke-width:2}
+svg .ok{fill:var(--surface);stroke:var(--green);stroke-width:2}
+svg .lbl{fill:var(--text);font:12.5px ui-monospace,Menlo,monospace}
+svg .lbl-b{fill:var(--text);font:bold 13px -apple-system,sans-serif}
+svg .note{fill:var(--dim);font:11.5px -apple-system,sans-serif}
+svg .hdr{fill:var(--accent);font:bold 13px -apple-system,sans-serif}
+svg .red{fill:var(--red);font:bold 12px -apple-system,sans-serif}
+svg .grn{fill:var(--green);font:bold 12px -apple-system,sans-serif}
+svg .arrow{stroke:var(--dim);stroke-width:1.5;fill:none}
+svg .sw-bad{fill:var(--red);opacity:.6}
+svg .sw-ok{fill:var(--green);opacity:.6}
+svg a text{text-decoration:underline;fill:var(--accent);font:11.5px ui-monospace,Menlo,monospace}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+  document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head>
+<body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+  function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+  function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
+    b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
+      else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+  document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+<div class="wrap">
+
+<h1>Why each Single Controller rollout attempt now gets its own Gym task number</h1>
+<p class="sub"><a href="https://github.com/NVIDIA-NeMo/RL/pull/4245">NVIDIA-NeMo/RL #4245</a>
+· all RL links pin head <code>fc77827</code>, Gym links pin <code>267305e</code>.</p>
+
+<div class="status">
+<dl>
+  <dt>Before</dt>
+  <dd>Single Controller sent Gym whatever <code>_ng_task_index</code> the dataset row had, or none. The same prompt seen again (next epoch, or a re-run) sent the same number again.</dd>
+  <dt>This PR</dt>
+  <dd>A counter gives every rollout attempt a new number. The counter is saved in checkpoints and snapshots, so a resumed run carries on from the saved value.</dd>
+  <dt>Status</dt>
+  <dd><span class="verdict good">Fixed by this PR</span> within one run. No correctness bugs found in review. One small comment asks the code to say <em>why</em> the number must be fresh.</dd>
+</dl>
+</div>
+
+<div class="bg"><b>Background.</b> In Single Controller, RL turns each prompt into a few rows
+and sends them to a Gym agent. Every row carries a task number
+(<span class="tip" tabindex="0" data-tip="The row key RL and Gym use for the task's number. Gym's own collect tool fills it with the row's position in the dataset.">_ng_task_index</span>)
+and a rollout number, 0, 1, … inside the group. When RL sends no explicit rollout ID, Gym builds a
+key for the rollout from those two numbers: <code>"{task}-{rollout}"</code>. Dotted words have a short
+explanation: hover or tap them.</div>
+
+<p>Gym builds the key in
+<a href="https://github.com/NVIDIA-NeMo/Gym/blob/267305e2a7bf88153e8ebbca1029ecc1e0f67b25/nemo_gym/rollout_correlation.py#L76"><code>maybe_rollout_id_from_run_body</code></a>,
+and its docstring warns: “Reused task and rollout indices produce a repeated capture key”
+(<a href="https://github.com/NVIDIA-NeMo/Gym/blob/267305e2a7bf88153e8ebbca1029ecc1e0f67b25/nemo_gym/rollout_correlation.py#L48">L48</a>).
+With observability on, Gym files <code>/verify</code> calls under that key
+(<a href="https://github.com/NVIDIA-NeMo/Gym/blob/267305e2a7bf88153e8ebbca1029ecc1e0f67b25/nemo_gym/server_utils.py#L514">server_utils.py:514</a>).
+The Harbor agent names its job folder <code>t{task}-r{rollout}</code> and returns any finished trial
+already in it
+(<a href="https://github.com/NVIDIA-NeMo/Gym/blob/267305e2a7bf88153e8ebbca1029ecc1e0f67b25/responses_api_agents/harbor_agent_general/app.py#L139">app.py:139</a>,
+<a href="https://github.com/NVIDIA-NeMo/Gym/blob/267305e2a7bf88153e8ebbca1029ecc1e0f67b25/responses_api_agents/harbor_agent_general/app.py#L518-L540">L518-L540</a>).
+So a task number that repeats makes a new rollout look like an old one.</p>
+
+<h2>One prompt, seen twice, two rollouts each</h2>
+
+<svg viewBox="0 0 900 400" role="img" aria-label="Before: dataset prompt with task number 7 sent in epoch 1 and epoch 2 produces Gym keys 7-0 and 7-1 both times, so they collide. After: the counter gives attempt numbers 40 and 53, so keys are 40-0, 40-1 and 53-0, 53-1, all distinct. The counter value 54 is saved in the checkpoint.">
+  <text class="hdr" x="16" y="22">Dataset prompt P has its own _ng_task_index: 7. Two rollouts per prompt (rollout numbers 0, 1).</text>
+
+  <!-- BEFORE lane -->
+  <text class="lbl-b" x="16" y="62">Before (main)</text>
+  <rect class="box" x="16" y="74" width="190" height="52" rx="6"/>
+  <text class="lbl" x="28" y="95">epoch 1: send P</text>
+  <text class="lbl" x="28" y="115">{_ng_task_index: 7}</text>
+  <path class="arrow" d="M206 100 L246 100 M240 95 L246 100 L240 105"/>
+  <rect class="bad" x="250" y="74" width="170" height="52" rx="6"/>
+  <text class="lbl" x="262" y="95">Gym keys</text>
+  <text class="lbl" x="262" y="115">"7-0", "7-1"</text>
+
+  <rect class="box" x="16" y="138" width="190" height="52" rx="6"/>
+  <text class="lbl" x="28" y="159">epoch 2: send P</text>
+  <text class="lbl" x="28" y="179">{_ng_task_index: 7}</text>
+  <path class="arrow" d="M206 164 L246 164 M240 159 L246 164 L240 169"/>
+  <rect class="bad" x="250" y="138" width="170" height="52" rx="6"/>
+  <text class="lbl" x="262" y="159">Gym keys</text>
+  <text class="lbl" x="262" y="179">"7-0", "7-1"</text>
+
+  <text class="red" x="440" y="118">✗ same keys as epoch 1</text>
+  <text class="note" x="440" y="138">observability files both epochs under one key;</text>
+  <text class="note" x="440" y="154">Harbor finds the epoch-1 trial and returns it</text>
+  <text class="note" x="440" y="170">instead of running the new weights.</text>
+  <text class="note" x="440" y="186">No task number at all → no key; Harbor rejects the row.</text>
+
+  <!-- AFTER lane -->
+  <text class="lbl-b" x="16" y="232">After (this PR)</text>
+  <rect class="box" x="16" y="244" width="190" height="52" rx="6"/>
+  <text class="lbl" x="28" y="265">epoch 1: counter → 40</text>
+  <text class="lbl" x="28" y="285">{_ng_task_index: 40}</text>
+  <path class="arrow" d="M206 270 L246 270 M240 265 L246 270 L240 275"/>
+  <rect class="ok" x="250" y="244" width="170" height="52" rx="6"/>
+  <text class="lbl" x="262" y="265">Gym keys</text>
+  <text class="lbl" x="262" y="285">"40-0", "40-1"</text>
+
+  <rect class="box" x="16" y="308" width="190" height="52" rx="6"/>
+  <text class="lbl" x="28" y="329">epoch 2: counter → 53</text>
+  <text class="lbl" x="28" y="349">{_ng_task_index: 53}</text>
+  <path class="arrow" d="M206 334 L246 334 M240 329 L246 334 L240 339"/>
+  <rect class="ok" x="250" y="308" width="170" height="52" rx="6"/>
+  <text class="lbl" x="262" y="329">Gym keys</text>
+  <text class="lbl" x="262" y="349">"53-0", "53-1"</text>
+
+  <text class="grn" x="440" y="270">✓ every attempt has its own keys</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/fc778271db0667ae3a73458942c5f1dff5821c6b/nemo_rl/experience/rollout_manager.py#L1015"><text x="440" y="290">run_rollout takes a number: rollout_manager.py:1015</text></a>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/fc778271db0667ae3a73458942c5f1dff5821c6b/nemo_rl/experience/rollout_manager.py#L1094"><text x="440" y="308">stamped on every row: rollout_manager.py:1094</text></a>
+  <text class="note" x="440" y="330">Checkpoint after epoch 2 saves next = 54:</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/fc778271db0667ae3a73458942c5f1dff5821c6b/nemo_rl/algorithms/single_controller.py#L4539-L4541"><text x="440" y="348">trainer save: single_controller.py:4539</text></a>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/fc778271db0667ae3a73458942c5f1dff5821c6b/nemo_rl/algorithms/single_controller.py#L3892"><text x="440" y="366">snapshot save: single_controller.py:3892</text></a>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/fc778271db0667ae3a73458942c5f1dff5821c6b/nemo_rl/algorithms/single_controller.py#L426-L428"><text x="440" y="384">resume restores 54: single_controller.py:426</text></a>
+
+  <rect class="sw-bad" x="700" y="40" width="14" height="12"/><text class="note" x="720" y="51">key repeats</text>
+  <rect class="sw-ok" x="800" y="40" width="14" height="12"/><text class="note" x="820" y="51">unique</text>
+</svg>
+
+<h2>How the fix works</h2>
+
+<p class="where"><b>Where the fix lands: RL only.</b>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/fc778271db0667ae3a73458942c5f1dff5821c6b/nemo_rl/experience/rollout_manager.py#L983-L986"><code>rollout_manager.py</code></a> hands out the numbers;
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/fc778271db0667ae3a73458942c5f1dff5821c6b/nemo_rl/algorithms/single_controller.py#L4539-L4541"><code>single_controller.py</code></a>,
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/fc778271db0667ae3a73458942c5f1dff5821c6b/nemo_rl/algorithms/grpo.py#L410-L412"><code>grpo.py</code></a>,
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/fc778271db0667ae3a73458942c5f1dff5821c6b/nemo_rl/algorithms/single_controller_utils/rollout_checkpoint.py#L250-L251"><code>rollout_checkpoint.py</code></a> and
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/fc778271db0667ae3a73458942c5f1dff5821c6b/nemo_rl/algorithms/single_controller_utils/setup.py#L1387-L1390"><code>setup.py</code></a> save and restore the counter.
+<b>No Gym change:</b> Gym already uses whatever number RL sends.</p>
+
+<pre class="diff"><span class="hunk">@@ rollout_manager.py L983-L986 · new method on AsyncNemoGymRolloutImpl</span>
+<span class="add">+    def _take_nemo_gym_task_index(self) -&gt; int:
++        task_index = self._next_nemo_gym_task_index
++        self._next_nemo_gym_task_index += 1
++        return task_index</span>
+<span class="hunk">@@ rollout_manager.py L1013-L1016 · run_rollout — one number per attempt</span>
+         rollout_inputs = self._build_inputs(
+             input_sample,
+<span class="add">+            task_index=self._take_nemo_gym_task_index(),</span>
+             rollout_ids=rollout_ids,
+<span class="hunk">@@ rollout_manager.py L1090-L1094 · _build_inputs — every sibling row shares it</span>
+         template_row: dict = copy.deepcopy(input_sample["extra_env_info"])  # type: ignore
+<span class="add">+        # One fresh ID per run_rollout attempt, shared by all sibling rows.
++        template_row[NEMO_GYM_TASK_INDEX_KEY] = task_index</span>
+<span class="hunk">@@ single_controller.py L4538-L4541 · _save_checkpoint_impl — save next value</span>
+             save_state.sampler_dispatch_index = self._sampler.dispatch_index
+<span class="add">+            save_state.next_nemo_gym_task_index = (
++                self._rollout_manager.get_next_nemo_gym_task_index()
++            )</span>
+<span class="hunk">@@ single_controller.py L425-L428 · __init__ — restore it on resume</span>
+         self._rollout_manager = actor_args.rollout_manager
+<span class="add">+        self._rollout_manager.set_next_nemo_gym_task_index(
++            actor_args.save_state.next_nemo_gym_task_index
++        )</span></pre>
+
+<p>In order: each call to <code>run_rollout</code> takes the next number (40, then 53 in the
+example). <code>_build_inputs</code> writes it on a copy of the row, so the dataset sample keeps its
+own 7. A retry of failed rows <em>inside</em> one attempt reuses the built rows, so it keeps 40
+(tested at
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/fc778271db0667ae3a73458942c5f1dff5821c6b/tests/unit/experience/test_rollout_generation_failures.py#L626-L647">test_rollout_generation_failures.py</a>).
+The saved value, 54, also goes into rollout-only snapshots
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/fc778271db0667ae3a73458942c5f1dff5821c6b/nemo_rl/algorithms/single_controller.py#L4116">L4116</a>).
+Old checkpoints load as 0, and old snapshots keep the trainer's value.</p>
+
+<p>The older async path uses the same key with a different meaning: there,
+<code>_ng_task_index</code> is the prompt's place in the dataloader
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/fc778271db0667ae3a73458942c5f1dff5821c6b/nemo_rl/algorithms/async_utils/trajectory_collector.py#L617">trajectory_collector.py:617</a>).
+The two paths never share rows, so nothing breaks. The review asks for the comment in
+<code>_build_inputs</code> to say why Single Controller needs a fresh number, and that it is not a
+dataloader position.</p>
+<p class="cref">🟡 <a href="#">review comment — rollout_manager.py:1091</a></p>
+
+<div class="hl">
+<b>So what.</b> Within one run, Gym no longer sees two rollouts with the same key, so a Gym cache keyed on the
+task number (like Harbor's job folders) cannot hand back an old result for a repeated prompt. The counter is per checkpoint: numbers handed out
+after the last save are handed out again after a crash, and a fresh run starts at 0. That only
+matters to a Gym agent that caches results in a folder shared across runs (Harbor today). No
+NeMo-RL recipe uses Harbor, so this is a possible Gym follow-up, not an ask for this PR.
+</div>
+
+</div>
+</body>
+</html>
