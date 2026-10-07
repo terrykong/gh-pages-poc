@@ -209,6 +209,26 @@ With CC, a rewrite breaks the chain, so the ledger has several roots. RL no long
   <text class="note" x="16" y="552">Real prompts and outputs are far longer; the shapes, parents and row split are what the real code produced.</text>
 </svg>
 
+<p><b>With compaction on, step by step.</b> RL does not search the tree for leaves. It reads the order from the agent's output, cuts by each call's own parent field, and only then walks:</p>
+<div class="mono">① match the agent's output to calls, left to right   (<a href="https://github.com/NVIDIA-NeMo/RL/blob/c617a2c01fb4b848991b2cc245a861985045ed14/nemo_rl/environments/gym_selection.py#L175-L229">gym_selection.py L175-229</a>)
+   output items 0-1  [reasoning 1, answer]  → only c1 produced exactly these → c1
+   output items 2-3  [reasoning 2, answer]  → c2
+   output items 4-5  [reasoning 3, answer]  → c3
+   output items 6-7  [reasoning 5, answer]  → c5      (c4's output is not in the conversation)
+   selected = [c1, c2, c3, c5]   ← conversation order, no tree search
+
+② cut in one pass, looking only at each call's parent   (<a href="https://github.com/NVIDIA-NeMo/RL/blob/c617a2c01fb4b848991b2cc245a861985045ed14/nemo_rl/experience/rollout_reassembler.py#L1149-L1163">rollout_reassembler.py L1149-1163</a>)
+   c1  parent: none                 → start chain 0: [c1]
+   c2  parent: c1 = previous call   →       chain 0: [c1, c2]
+   c3  parent: none                 → start chain 1: [c3]
+   c5  parent: c3 = previous call   →       chain 1: [c3, c5]
+   (a parent that is not the previous selected call is an error)
+
+③ walk each chain up from its last call   (leaf set at <a href="https://github.com/NVIDIA-NeMo/RL/blob/c617a2c01fb4b848991b2cc245a861985045ed14/nemo_rl/experience/rollout_reassembler.py#L1166-L1172">L1166-1172</a>, walk in <a href="https://github.com/NVIDIA-NeMo/Gym/blob/b27e0db8faefee7e4760b5b1bfbfed713f528360/nemo_gym/token_id_capture/staging/rebuild.py#L201-L216">Gym rebuild.py L201-216</a>)
+   chain 0: c2 → c1 → stop (no parent)   → row group_g0_s0
+   chain 1: c5 → c3 → stop (no parent)   → row group_g0_s1</div>
+<p>Why the output and not just the tree: without compaction, the leaf's ancestors <i>are</i> the whole conversation. With compaction, c5's ancestors stop at c3, and nothing in the tree says c1 and c2 come first or were accepted. The agent's output is the only record of what it kept, and in what order.</p>
+
 <h2>What RL checks while it cuts</h2>
 <p>The cut is strict, so a wrong ledger fails loudly instead of training on the wrong tokens:</p>
 <ol>
