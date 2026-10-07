@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NVIDIA-NeMo/RL #4124 — subagents plus compaction: what the call forest looks like, and how to turn it into rows (proposal)</title>
+<style>
+:root{
+  --bg:#0d1117; --surface:#161b22; --surface2:#1c2128; --border:#30363d;
+  --text:#e6edf3; --dim:#8b949e; --accent:#58a6ff; --green:#3fb950;
+  --orange:#d29922; --red:#f85149; --purple:#bc8cff;
+}
+:root[data-theme="light"]{
+  --bg:#ffffff; --surface:#f6f8fa; --surface2:#eaeef2; --border:#d0d7de;
+  --text:#1f2328; --dim:#59636e; --accent:#0969da; --green:#1a7f37;
+  --orange:#9a6700; --red:#cf222e; --purple:#8250df;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:28px 20px 70px}
+h1{font-size:22px;margin:0 0 8px;line-height:1.3}
+h2{font-size:18px;margin:32px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;
+  font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
+.sub{color:var(--dim);font-size:13.5px;margin:0 0 16px}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);
+  border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;
+  font:13px/1 ui-monospace,Menlo,monospace;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.18)}
+.status{border:1px solid var(--border);border-radius:10px;background:var(--surface);
+  padding:2px 16px 10px;margin:0 0 20px}
+.status dl{display:grid;grid-template-columns:max-content 1fr;gap:4px 14px;margin:12px 0 0}
+.status dt{color:var(--dim);font-size:12px;text-transform:uppercase;letter-spacing:.04em;
+  white-space:nowrap;padding-top:2px}
+.status dd{margin:0;font-size:14px}
+.verdict{font-weight:700;color:var(--orange)}
+nav.chain{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 6px;padding:0}
+nav.chain a,nav.chain span{display:inline-block;padding:5px 11px;border:1px solid var(--border);
+  border-radius:20px;background:var(--surface);text-decoration:none;color:var(--accent);
+  font-size:12.5px;line-height:1.3;white-space:nowrap}
+nav.chain a:hover{background:var(--surface2)}
+nav.chain span.here{background:var(--accent);color:var(--bg);border-color:var(--accent);font-weight:600}
+p.chainnote{color:var(--dim);font-size:12px;margin:0 0 18px}
+.bg{border-left:3px solid var(--accent);background:var(--surface);padding:10px 14px;
+  margin:0 0 16px;border-radius:0 8px 8px 0;font-size:14px}
+.hl{border-left:3px solid var(--green);background:var(--surface);
+  padding:12px 16px;margin:18px 0;border-radius:0 8px 8px 0}
+.mono{font:12.5px/1.55 ui-monospace,SFMono-Regular,Menlo,monospace;
+  background:var(--surface);border:1px solid var(--border);border-radius:8px;
+  padding:12px;overflow-x:auto;white-space:pre;margin:10px 0}
+.tip{border-bottom:1px dotted var(--dim);cursor:help;position:relative;outline:none}
+.tip:hover::after,.tip:focus::after{content:attr(data-tip);position:absolute;left:0;top:1.7em;z-index:60;
+  width:max-content;max-width:min(340px,80vw);white-space:normal;background:var(--surface2);color:var(--text);
+  border:1px solid var(--border);border-radius:6px;padding:7px 10px;font:13px/1.45 -apple-system,sans-serif;
+  font-weight:400;box-shadow:0 4px 14px rgba(0,0,0,.3)}
+ol{padding-left:22px;margin:6px 0}
+li{margin:4px 0}
+svg{max-width:100%;height:auto;display:block;margin:16px 0}
+svg .call{fill:var(--surface);stroke:var(--accent);stroke-width:1.5}
+svg .root{fill:var(--accent);fill-opacity:.2;stroke:var(--accent);stroke-width:1.8}
+svg .dead{fill:var(--surface);stroke:var(--dim);stroke-width:1.3;stroke-dasharray:4 3}
+svg .row{fill:var(--purple);fill-opacity:.16;stroke:var(--purple);stroke-width:1.5}
+svg .lane{fill:none;stroke:var(--border);stroke-width:1;stroke-dasharray:2 3}
+svg .lbl{fill:var(--text);font:12px -apple-system,sans-serif}
+svg .lbl-b{fill:var(--text);font:bold 13.5px -apple-system,sans-serif}
+svg .cid{fill:var(--text);font:bold 12px ui-monospace,Menlo,monospace}
+svg .mono{fill:var(--text);font:10.5px ui-monospace,Menlo,monospace}
+svg .note{fill:var(--dim);font:11.5px -apple-system,sans-serif}
+svg .hdr{fill:var(--accent);font:bold 12.5px -apple-system,sans-serif}
+svg .edge{stroke:var(--accent);stroke-width:1.5;fill:none;marker-end:url(#ah)}
+svg .edge-dead{stroke:var(--dim);stroke-width:1.2;fill:none;stroke-dasharray:4 3}
+svg .walk{stroke:var(--orange);stroke-width:2;fill:none;marker-end:url(#aw)}
+svg .cut{stroke:var(--red);stroke-width:2;stroke-dasharray:5 4}
+svg .cut-lbl{fill:var(--red);font:bold 11px -apple-system,sans-serif}
+svg .walk-lbl{fill:var(--orange);font:bold 11px -apple-system,sans-serif}
+svg .ah{fill:var(--accent)}
+svg .aw{fill:var(--orange)}
+svg a text{text-decoration:underline;fill:var(--accent);font:10.5px ui-monospace,Menlo,monospace}
+
+svg .leaf{stroke:var(--green);stroke-width:2.6}
+svg .hand{stroke:var(--orange);stroke-width:1.5;fill:none;stroke-dasharray:5 4;marker-end:url(#ad)}
+svg .hand-lbl{fill:var(--orange);font:bold 11px -apple-system,sans-serif}
+svg .adm{fill:var(--orange)}
+svg .rowlink{stroke:var(--purple);stroke-width:1;stroke-dasharray:2 3}
+svg .row-lbl{fill:var(--text);font:bold 12px ui-monospace,Menlo,monospace}
+table{border-collapse:collapse;width:100%;font-size:13.5px;margin:10px 0}
+th,td{border:1px solid var(--border);padding:5px 8px;text-align:left;vertical-align:top}
+th{background:var(--surface2)}
+td.n{font:12.5px ui-monospace,Menlo,monospace;white-space:nowrap}
+.where{border-left:4px solid var(--accent);background:var(--surface);padding:6px 12px;margin:6px 0 10px}
+.q{border-left:3px solid var(--orange);background:var(--surface);padding:10px 14px;margin:14px 0;border-radius:0 8px 8px 0}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+  document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head>
+<body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+  function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+  function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
+    b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
+      else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+  document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+<div class="wrap">
+
+<h1>Subagents plus compaction: what the call forest looks like, and how to turn it into rows</h1>
+<p class="sub">Follow-up proposal for <a href="https://github.com/NVIDIA-NeMo/RL/pull/4124">NVIDIA-NeMo/RL #4124</a>
+(paired with <a href="https://github.com/NVIDIA-NeMo/Gym/pull/3368">NVIDIA-NeMo/Gym #3368</a>), building on
+<a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4124-calls-to-rows.html">page 3</a>.
+RL links pin <code>c617a2c</code>; Gym links pin <code>b27e0db</code>.</p>
+
+<div class="status">
+<dl>
+  <dt>Before</dt>
+  <dd>This PR turns one list of the leader's calls into rows. Each call in the list must continue the one before it, unless it is a root.</dd>
+  <dt>Proposal</dt>
+  <dd>Collect the calls every agent kept, then make one row per <b>leaf</b> and train each call in exactly one row.</dd>
+  <dt>Status</dt>
+  <dd><span class="verdict">Proposed — not implemented. A draft for discussion.</span> The 12-call example below is made up by hand, not from a real run.</dd>
+</dl>
+</div>
+
+<nav class="chain">
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4124-cc-old-vs-new.html">1 · old vs new</a>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4124-data-flow.html">2 · data flow</a>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4124-calls-to-rows.html">3 · calls → rows</a>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4124-tree-vs-forest.html">4 · tree vs forest</a>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4124-reward-to-rows.html">5 · reward → rows</a>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4124-dropped-group.html">6 · dropped group</a>
+  <span class="here">7 · subagents (proposal)</span>
+</nav>
+<p class="chainnote">Seven pages on this PR, one question each. This one: what changes when the agent has subagents.</p>
+
+<div class="bg"><b>How real harnesses run subagents.</b>
+In <a href="https://code.claude.com/docs/en/sub-agents">Claude Code</a>, a subagent normally starts with a fresh context: its own system prompt and a task, nothing else.
+A <i>fork</i> subagent instead starts with the leader's whole conversation.
+A <i>background</i> subagent runs while the leader keeps working, and its answer arrives later, or never, if the leader finishes first.
+Each subagent compacts on its own, and each keeps its own transcript.
+In <a href="https://learn.chatgpt.com/docs/agent-configuration/subagents">Codex</a>, each subagent is its own thread with its own context, and the leader collects the results.
+Gym's Claude Code harness already splits a run into one record per agent: each has its own list of calls and a link to the agent that started it
+(<a href="https://github.com/NVIDIA-NeMo/Gym/blob/b27e0db8faefee7e4760b5b1bfbfed713f528360/nemo_gym/rollout_observability.py#L98-L110"><code>AgentInvocation</code></a>, filled in at <a href="https://github.com/NVIDIA-NeMo/Gym/blob/b27e0db8faefee7e4760b5b1bfbfed713f528360/responses_api_agents/claude_code_agent/observability.py#L642-L651">observability.py L642-651</a>).</div>
+
+<h2>The example: a leader, three subagents, 12 calls</h2>
+<p>The leader <b>L</b> fixes a login bug. It starts <b>B</b> in the background to sign in, asks a fresh subagent <b>A</b> to find the bug, then forks <b>F</b> to write the fix.
+Then L compacts its history and runs the tests.</p>
+
+<svg viewBox="0 0 960 718" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Twelve model calls from a leader and three subagents, drawn in ledger order">
+<defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="ah" d="M0,0 L10,5 L0,10 z"/></marker><marker id="ad" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="adm" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<text class="hdr" x="20" y="22">L · leader</text>
+<text class="note" x="20" y="40">starts the task</text>
+<line class="lane" x1="110.0" y1="50" x2="110.0" y2="622"/>
+<text class="hdr" x="225" y="22">F · fork subagent</text>
+<text class="note" x="225" y="40">starts from L's history</text>
+<line class="lane" x1="315.0" y1="50" x2="315.0" y2="622"/>
+<text class="hdr" x="430" y="22">A · fresh subagent</text>
+<text class="note" x="430" y="40">starts empty</text>
+<line class="lane" x1="520.0" y1="50" x2="520.0" y2="622"/>
+<text class="hdr" x="635" y="22">B · background subagent</text>
+<text class="note" x="635" y="40">nobody reads its answer</text>
+<line class="lane" x1="725.0" y1="50" x2="725.0" y2="622"/>
+<text class="hdr" x="860" y="22">rows</text>
+<text class="note" x="860" y="40">one per leaf</text>
+<line class="cut" x1="14" y1="513" x2="215" y2="513"/>
+<text class="cut-lbl" x="20" y="509">L compacts here</text>
+<line class="edge" x1="110.0" y1="100" x2="110.0" y2="150"/>
+<line class="edge" x1="725.0" y1="144" x2="725.0" y2="194"/>
+<line class="edge" x1="520.0" y1="276" x2="520.0" y2="282"/>
+<line class="edge" x1="110.0" y1="188" x2="110.0" y2="326"/>
+<path class="edge" d="M170,364 L265,370"/>
+<line class="edge" x1="315.0" y1="408" x2="315.0" y2="414"/>
+<line class="edge" x1="110.0" y1="364" x2="110.0" y2="458"/>
+<line class="edge" x1="110.0" y1="574" x2="110.0" y2="580"/>
+<text class="note" x="275" y="362">same tokens + more</text>
+<path class="hand" d="M200,82.0 L635,126.0"/>
+<text class="hand-lbl" x="400" y="100">task</text>
+<path class="hand" d="M200,170.0 L430,258.0"/>
+<text class="hand-lbl" x="300" y="204">task</text>
+<path class="hand" d="M430,302.0 L200,346.0"/>
+<text class="hand-lbl" x="300" y="334">answer</text>
+<path class="hand" d="M225,434.0 L200,478.0"/>
+<text class="hand-lbl" x="214" y="460">answer</text>
+<path class="hand" d="M50,496 L50,536"/>
+<text class="hand-lbl" x="58" y="530">summary</text>
+<text class="note" x="635" y="247">answer never read</text>
+<rect class="root" x="20" y="64" width="180" height="36" rx="6"/>
+<text class="cid" x="28" y="79">C1</text>
+<text class="note" x="64" y="79">root</text>
+<text class="mono" x="28" y="94">→ Agent(B, background)</text>
+<rect class="root" x="635" y="108" width="180" height="36" rx="6"/>
+<text class="cid" x="643" y="123">C2</text>
+<text class="note" x="679" y="123">root</text>
+<text class="mono" x="643" y="138">→ curl /login</text>
+<rect class="call" x="20" y="152" width="180" height="36" rx="6"/>
+<text class="cid" x="28" y="167">C3</text>
+<text class="note" x="64" y="167">parent C1</text>
+<text class="mono" x="28" y="182">→ Agent(A, find the bug)</text>
+<rect class="call leaf" x="635" y="196" width="180" height="36" rx="6"/>
+<text class="cid" x="643" y="211">C4</text>
+<text class="note" x="679" y="211">parent C2</text>
+<text class="mono" x="643" y="226">→ &quot;Signed in.&quot;</text>
+<line class="rowlink" x1="815" y1="214.0" x2="858" y2="214.0"/>
+<rect class="row" x="860" y="202.0" width="84" height="24" rx="12"/>
+<text class="row-lbl" x="874" y="218.0">row 1</text>
+<rect class="root" x="430" y="240" width="180" height="36" rx="6"/>
+<text class="cid" x="438" y="255">C5</text>
+<text class="note" x="474" y="255">root</text>
+<text class="mono" x="438" y="270">→ grep login</text>
+<rect class="call leaf" x="430" y="284" width="180" height="36" rx="6"/>
+<text class="cid" x="438" y="299">C6</text>
+<text class="note" x="474" y="299">parent C5</text>
+<text class="mono" x="438" y="314">→ &quot;auth.py:12&quot;</text>
+<line class="rowlink" x1="610" y1="302.0" x2="858" y2="302.0"/>
+<rect class="row" x="860" y="290.0" width="84" height="24" rx="12"/>
+<text class="row-lbl" x="874" y="306.0">row 2</text>
+<rect class="call" x="20" y="328" width="180" height="36" rx="6"/>
+<text class="cid" x="28" y="343">C7</text>
+<text class="note" x="64" y="343">parent C3</text>
+<text class="mono" x="28" y="358">→ Agent(F, fork)</text>
+<rect class="call" x="225" y="372" width="180" height="36" rx="6"/>
+<text class="cid" x="233" y="387">C8</text>
+<text class="note" x="269" y="387">parent C7</text>
+<text class="mono" x="233" y="402">→ edit auth.py</text>
+<rect class="call leaf" x="225" y="416" width="180" height="36" rx="6"/>
+<text class="cid" x="233" y="431">C9</text>
+<text class="note" x="269" y="431">parent C8</text>
+<text class="mono" x="233" y="446">→ &quot;Fixed.&quot;</text>
+<line class="rowlink" x1="405" y1="434.0" x2="858" y2="434.0"/>
+<rect class="row" x="860" y="422.0" width="84" height="24" rx="12"/>
+<text class="row-lbl" x="874" y="438.0">row 3</text>
+<rect class="call leaf" x="20" y="460" width="180" height="36" rx="6"/>
+<text class="cid" x="28" y="475">C10</text>
+<text class="note" x="64" y="475">parent C7</text>
+<text class="mono" x="28" y="490">→ summary of C1–C9</text>
+<line class="rowlink" x1="200" y1="478.0" x2="858" y2="478.0"/>
+<rect class="row" x="860" y="466.0" width="84" height="24" rx="12"/>
+<text class="row-lbl" x="874" y="482.0">row 4</text>
+<rect class="root" x="20" y="538" width="180" height="36" rx="6"/>
+<text class="cid" x="28" y="553">C11</text>
+<text class="note" x="64" y="553">root</text>
+<text class="mono" x="28" y="568">→ pytest</text>
+<rect class="call leaf" x="20" y="582" width="180" height="36" rx="6"/>
+<text class="cid" x="28" y="597">C12</text>
+<text class="note" x="64" y="597">parent C11</text>
+<text class="mono" x="28" y="612">→ &quot;Done.&quot;</text>
+<line class="rowlink" x1="200" y1="600.0" x2="858" y2="600.0"/>
+<rect class="row" x="860" y="588.0" width="84" height="24" rx="12"/>
+<text class="row-lbl" x="874" y="604.0">row 5</text>
+<rect class="root" x="20" y="644" width="26" height="16" rx="3"/><text class="lbl" x="54" y="656">root: starts a new tree (new agent, or after compaction)</text>
+<rect class="call leaf" x="470" y="644" width="26" height="16" rx="3"/><text class="lbl" x="504" y="656">leaf: no accepted call continues it</text>
+<line class="edge" x1="20" y1="678" x2="46" y2="678"/><text class="lbl" x="54" y="682">parent: the next call resends these exact tokens and adds more</text>
+<line class="hand" x1="470" y1="678" x2="496" y2="678"/><text class="lbl" x="504" y="682">hand-over: only text is passed, so no parent link</text>
+<text class="note" x="20" y="708">C1–C12 are numbered in the order Gym's ledger records them. Four trees (roots C1, C2, C5, C11), five leaves, five rows.</text>
+</svg>
+
+<p>Two things make this harder than <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4124-tree-vs-forest.html">page 4's forest</a>:</p>
+<ol>
+<li><b>Some trees have more than one leaf.</b> F's first call C8 resends L's exact tokens, so C8 is a child of C7.
+So is C10, the call that writes L's summary: in Claude Code, compaction is itself a model call that continues the old history
+(Gym files it under L's calls, <a href="https://github.com/NVIDIA-NeMo/Gym/blob/b27e0db8faefee7e4760b5b1bfbfed713f528360/responses_api_agents/claude_code_agent/observability.py#L764-L773">observability.py L764-773</a>). C7 has two children, so the tree from C1 has two leaves.</li>
+<li><b>Calls from different agents interleave.</b> The ledger order is C1, C2, C3, …, but C2 belongs to B and C3 to L.
+No single list of calls can show the whole forest in order.</li>
+</ol>
+
+<h2>What this PR would do with it</h2>
+<p>This PR reads one list per rollout and cuts it at each root. Every other call must continue the call just before it, or RL raises
+<code>"Selected continuation must follow its selected predecessor"</code> (<a href="https://github.com/NVIDIA-NeMo/RL/blob/c617a2c01fb4b848991b2cc245a861985045ed14/nemo_rl/experience/rollout_reassembler.py#L1153-L1162">rollout_reassembler.py L1153-1162</a>).</p>
+<table>
+<tr><th>List the harness returns</th><th>What happens</th></tr>
+<tr><td>Only L's calls: C1 C3 C7 C10 C11 C12</td><td>2 rows: C1→C3→C7→C10 and C11→C12. The other 6 calls (A, B, F) were generated by the policy but never train; RL only cleans them up (<a href="https://github.com/NVIDIA-NeMo/RL/blob/c617a2c01fb4b848991b2cc245a861985045ed14/nemo_rl/experience/rollout_reassembler.py#L680-L687">L680-687</a>).</td></tr>
+<tr><td>All 12 calls, in ledger order</td><td>Raises at C3: its parent is C1, but the call before it in the list is C2.</td></tr>
+</table>
+<p>So you are right that one call order does not work. One order is one path through the forest, and this forest has five paths.</p>
+
+<h2>Proposed: one row per leaf, each call trained once</h2>
+<ol>
+<li><b>Collect the kept calls.</b> Take the union of every agent's call list. Gym already has a slot for this, one list per agent (<a href="https://github.com/NVIDIA-NeMo/Gym/blob/b27e0db8faefee7e4760b5b1bfbfed713f528360/nemo_gym/rollout_observability.py#L98-L110"><code>AgentInvocation.model_calls</code></a>), and Claude Code already fills it. Calls that no agent kept, such as retries, stay out, just as in this PR.</li>
+<li><b>Find the leaves.</b> A leaf is a kept call that no other kept call names as its parent. Here: C4, C6, C9, C10, C12.</li>
+<li><b>Walk each leaf up to its root.</b> This is the ordinary leaf-to-root walk from before this PR, run once per leaf instead of once per rollout (Gym's <a href="https://github.com/NVIDIA-NeMo/Gym/blob/b27e0db8faefee7e4760b5b1bfbfed713f528360/nemo_gym/token_id_capture/staging/rebuild.py#L238-L242"><code>verify_and_linearize</code></a> already takes a leaf).</li>
+<li><b>Train each call once.</b> When two leaves share calls, the leaf in the root's own agent trains them. The other row keeps them as context with the loss turned off.</li>
+<li><b>Reward:</b> unchanged. Every row gets the rollout's one reward, as on <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4124-reward-to-rows.html">page 5</a>.</li>
+</ol>
+<div class="mono">row  leaf  walk (leaf → root, shown root-first)   trains          context only
+1    C4    C2 C4                                C2 C4           -
+2    C6    C5 C6                                C5 C6           -
+3    C9    C1 C3 C7 C8 C9                       C8 C9           C1 C3 C7
+4    C10   C1 C3 C7 C10                         C1 C3 C7 C10    -
+5    C12   C11 C12                              C11 C12         -
+check: 12 kept calls, each trained exactly once</div>
+
+<p class="where"><b>Where it would land: mostly RL.</b> RL: replace the cut in <a href="https://github.com/NVIDIA-NeMo/RL/blob/c617a2c01fb4b848991b2cc245a861985045ed14/nemo_rl/experience/rollout_reassembler.py#L1147-L1162"><code>_plan_selected_calls</code></a> with steps 1–4, and add the per-row loss mask for shared calls.
+<b>Gym:</b> no schema change, since the per-agent lists exist. Each harness that runs subagents must fill them, as the Claude Code harness does.
+B is still covered when its start is never linked to L: Gym records the gap (<a href="https://github.com/NVIDIA-NeMo/Gym/blob/b27e0db8faefee7e4760b5b1bfbfed713f528360/responses_api_agents/claude_code_agent/observability.py#L620-L621"><code>subagent_parent_unavailable</code></a>) but keeps B's call list, and step 1 only needs the list.</p>
+
+<p>This also covers the cases without subagents. Ordinary capture is one tree with one leaf, so it gives one row. Compaction in this PR gives one leaf per tree.
+So this is still the one shared path that the <a href="https://github.com/NVIDIA-NeMo/RL/pull/4124#discussion_r4202905432">call-order follow-up</a> asks for. The change is the input: one list of kept calls per agent, instead of one order for the whole rollout.</p>
+
+<div class="q"><b>Open questions to settle before building it</b>
+<ol>
+<li><b>Should B's rows get the full reward?</b> B's sign-in changed the environment, so the reward does reflect it. That matches how compaction rows are treated, but it is a choice.</li>
+<li><b>Should the summary call (C10) train?</b> The policy wrote it, and a bad summary hurts every later call. This proposal trains it.</li>
+<li><b>Cost.</b> Row 3 runs C1, C3 and C7 again as context. A deep fork tree repeats a lot of prompt.</li>
+<li><b>What if F's first call is not an exact copy?</b> Then C8 becomes a new root. F's row then holds L's history as prompt text, which is never trained. The result is still correct and costs one more tree.</li>
+<li><b>Twin subagents.</b> Two subagents with the same task and the same answer hit the duplicate-output limit from <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4124-tree-vs-forest.html">page 4</a>.</li>
+</ol></div>
+
+</div>
+</body>
+</html>
