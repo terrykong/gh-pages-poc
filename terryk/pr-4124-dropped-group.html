@@ -133,8 +133,8 @@ Both ways of handling a dropped group then end the run.</p>
 <h2>How compaction is triggered, and where the length is checked</h2>
 <p>In this PR's built-in client (<code>simple_agent_with_compaction</code>), compaction is not set off by vLLM hitting its limit.
 It runs on a schedule. With a <b>context guard</b> set (<code>guards.max_total_tokens</code>, off by default), Gym also counts the prompt before every call and compacts early when it would be too long.
-The guard's <b>refusal</b> (a "guard rejection") happens only when compacting early still is not enough.</p>
-<svg viewBox="0 0 975 470" role="img" aria-label="Before each call: scheduled compaction, then with a guard the prompt is counted and compacted early; without a guard vLLM decides">
+The guard's <b>refusal</b> (a "guard rejection") happens only when compacting early still is not enough. The guard checks the prompt, not the reply: a reply can still run into the limit, and is then cut off (bottom box).</p>
+<svg viewBox="0 0 975 560" role="img" aria-label="Before each call: scheduled compaction, then with a guard the prompt is counted and compacted early; without a guard vLLM decides">
   <defs><marker id="ah2" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path class="ahead" d="M0,0 L8,4 L0,8 z"/></marker></defs>
   <rect class="box" x="16" y="10" width="939" height="62" rx="8"/>
   <text class="lbl" x="28" y="30"><tspan font-weight='bold'>Before every model call, both lanes:</tspan> scheduled compaction drops old images and old reasoning blocks,</text>
@@ -142,11 +142,11 @@ The guard's <b>refusal</b> (a "guard rejection") happens only when compacting ea
   <a href="https://github.com/NVIDIA-NeMo/Gym/blob/b27e0db8faefee7e4760b5b1bfbfed713f528360/nemo_gym/context_management/config.py#L52-L94"><text x="28" y="64">context_management/config.py L52-94</text></a>
   <path class="arrow" d="M240 74 L240 96"/>
   <path class="arrow" d="M725 74 L725 96"/>
-  <text class="hdr-ok" x="16" y="112">Guard on: Gym checks the length before sending</text>
+  <text class="hdr-ok" x="16" y="112">Guard on: Gym checks the prompt length before sending</text>
   <text class="hdr-bad" x="500" y="112">Guard off (default): nobody checks first</text>
   <rect class="box" x="16" y="122" width="455" height="44" rx="8"/>
-  <text class="lbl" x="28" y="142">Count the prompt tokens. Prompt + reserved output under</text>
-  <text class="lbl" x="28" y="159">guards.max_total_tokens?</text>
+  <text class="lbl" x="28" y="142">Count the prompt tokens. Is prompt + reserved output</text>
+  <text class="lbl" x="28" y="159">(default 0) under guards.max_total_tokens?</text>
   <rect class="box" x="500" y="122" width="455" height="44" rx="8"/>
   <text class="lbl" x="512" y="142">Send the call to vLLM as is.</text>
   <text class="lbl" x="512" y="159"></text>
@@ -191,9 +191,14 @@ The guard's <b>refusal</b> (a "guard rejection") happens only when compacting ea
   <text class="lbl" x="734" y="334">That one rollout is masked;</text>
   <text class="lbl" x="734" y="351">the rest of its group trains.</text>
   <text class="lbl" x="734" y="368">Lane A.</text>
-  <text class="note" x="16" y="400">"Still too long" happens when what is left is text, tool output or user turns: this client never drops those.</text>
-  <text class="note" x="16" y="418">Early compaction exists only for turn_chunked_recency; with rolling_recency the history is already compacted, so a guard hit refuses at once.</text>
-  <text class="note" x="16" y="436">Harnesses that summarize with the model (Claude Code, OpenCode) work differently, but this PR does not support them (page 1).</text>
+  <rect class="box" x="16" y="392" width="939" height="80" rx="8"/>
+  <text class="lbl" x="28" y="412"><tspan font-weight='bold'>Once a call is sent, both lanes:</tspan> RL caps the reply to the room left (max_model_len minus the prompt). The guard does</text>
+  <text class="lbl" x="28" y="429">not check the reply unless reserved_generation_tokens is set. A reply that reaches the cap is cut off with finish_reason "length":</text>
+  <text class="lbl" x="28" y="446">a normal truncated reply, not an error. RL then marks the rollout truncated; with overlong_filtering the whole rollout is masked.</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/c617a2c01fb4b848991b2cc245a861985045ed14/nemo_rl/models/generation/vllm/vllm_worker_async.py#L1018-L1037"><text x="28" y="463">vllm_worker_async.py L1018-1037</text></a>
+  <text class="note" x="16" y="490">"Still too long" happens when what is left is text, tool output or user turns: this client never drops those.</text>
+  <text class="note" x="16" y="508">Early compaction exists only for turn_chunked_recency; with rolling_recency the history is already compacted, so a guard hit refuses at once.</text>
+  <text class="note" x="16" y="526">Harnesses that summarize with the model (Claude Code, OpenCode) work differently, but this PR does not support them (page 1).</text>
   </svg>
 
 <h2>Same bad rollout, two places it can fail</h2>
