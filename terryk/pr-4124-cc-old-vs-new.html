@@ -100,7 +100,7 @@ RL links pin <code>c617a2c</code>; Gym links pin the Gym PR head <code>b27e0db</
   <dt>Before</dt>
   <dd>NeMo-RL main has no context compaction. An earlier design (never merged) had Gym send every call's full prompt tokens, and RL found the cuts afterwards.</dd>
   <dt>This PR</dt>
-  <dd>RL's own vLLM worker decides, call by call while serving, whether a request continues the current row or starts a new one. RL rebuilds the rows from ordinary Gym output.</dd>
+  <dd>The agent still decides when to compact, and it tells RL nothing about it. RL's vLLM worker detects the effect on each call: if the new request no longer extends the previous call's history, that call starts a new row. RL rebuilds the rows from ordinary Gym output.</dd>
   <dt>Status</dt>
   <dd><span class="verdict">Proposed — open PR, not merged.</span> It needs Gym #3368 merged and the Gym pin bumped first. Review findings are in the PR's review comments.</dd>
 </dl>
@@ -120,7 +120,7 @@ After a rewrite the new prompt no longer starts with the old one, so the two can
 <span class="tip" tabindex="0" data-tip="NeMo-RL's data store between generation and training. Workers write per-call tokens, log-probs and pixels into it; the trainer reads finished rows from it.">TransferQueue</span> is where the new design keeps the tokens.
 Dotted words have a short explanation: hover or tap them.</div>
 
-<p>Both designs end with the same rows. The example below is one rollout of 5 turns, with a rewrite after every 2 actions that keeps only the newest image. It gives 3 rows: turns {1,2}, {3,4} and {5}. In each row, only the tokens the model sampled carry gradient. The whole difference is <b>who decides where a row ends, when, and from what evidence</b>.
+<p>Both designs end with the same rows. The example below is one rollout of 5 turns, with a rewrite after every 2 actions that keeps only the newest image. It gives 3 rows: turns {1,2}, {3,4} and {5}. In each row, only the tokens the model sampled carry gradient. In both designs the agent decides <i>when to compact</i>. The difference is <b>who turns that rewrite into a row boundary, when, and from what evidence</b>.
 In the new design that decision is one short function,
 <a href="https://github.com/NVIDIA-NeMo/RL/blob/c617a2c01fb4b848991b2cc245a861985045ed14/nemo_rl/models/generation/capture_context.py#L25-L114"><code>decide_capture_input</code></a>. It runs inside the vLLM worker before generation starts.</p>
 
@@ -191,7 +191,7 @@ The harness sends only messages: no tokens, no segment IDs and no parent hint. G
 <h2>What changed, hop by hop</h2>
 <table>
 <tr><th></th><th>Earlier design</th><th>This PR</th></tr>
-<tr><td>Who cuts</td><td>RL, after the rollout, by scanning every call</td><td>RL's vLLM worker, per call, at request time (<a href="https://github.com/NVIDIA-NeMo/RL/blob/c617a2c01fb4b848991b2cc245a861985045ed14/nemo_rl/models/generation/vllm/vllm_worker_async.py#L1112">vllm_worker_async.py</a>). The reassembler only follows the parent links.</td></tr>
+<tr><td>Who cuts</td><td>The agent compacts; RL finds the cut after the rollout by scanning every call</td><td>The agent compacts; RL's vLLM worker finds the cut per call, at request time, by checking whether the request still extends its parent (<a href="https://github.com/NVIDIA-NeMo/RL/blob/c617a2c01fb4b848991b2cc245a861985045ed14/nemo_rl/models/generation/vllm/vllm_worker_async.py#L1112">vllm_worker_async.py</a>). The reassembler only follows the parent links.</td></tr>
 <tr><td>Continuation test</td><td>"Is the old prompt a token prefix of the new one?" plus the same test on image IDs. It was also cross-checked against Gym's own list of rewrites.</td><td>"Do the source messages and render options hash the same as the parent's summary?" There is no second check against Gym's rewrite list.</td></tr>
 <tr><td>Gym → RL</td><td>One large object per rollout (<a href="https://github.com/NVIDIA-NeMo/Gym/blob/17abf2ddc76f74e40d0ba5a15b0401710a46db26/responses_api_agents/simple_agent_with_compaction/compaction/session.py#L130"><code>ContextCompactedResponse</code></a>, deleted by Gym #3368): every call's full prompt tokens, rewrite events, and images by ID</td><td>The ordinary rollout output plus a small call list with no tokens (<a href="https://github.com/NVIDIA-NeMo/RL/blob/c617a2c01fb4b848991b2cc245a861985045ed14/nemo_rl/environments/nemo_gym.py#L1006-L1011">nemo_gym.py</a>). Tokens and pixels go straight from the worker to TransferQueue.</td></tr>
 <tr><td>Storage</td><td>The full prompt again on every call</td><td>A continuation stores only the new part; only a root stores the full prompt</td></tr>
