@@ -130,10 +130,71 @@ Dotted words have a short explanation: hover or tap them.</div>
 Where the failure happens decides everything. If a <b>model call</b> fails, the agent still finishes and returns a result, and RL masks just that rollout (<a href="https://github.com/NVIDIA-NeMo/RL/blob/c617a2c01fb4b848991b2cc245a861985045ed14/nemo_rl/environments/nemo_gym.py#L1114-L1120">nemo_gym.py L1114-1120</a>).
 If the <b>agent itself raises</b>, Gym answers with an HTTP 500, RL files it as an infrastructure failure, and CC drops the whole group without a retry (<a href="https://github.com/NVIDIA-NeMo/RL/blob/c617a2c01fb4b848991b2cc245a861985045ed14/nemo_rl/experience/rollout_manager.py#L2210-L2214">rollout_manager.py L2210-2214</a>).
 Both ways of handling a dropped group then end the run.</p>
-<p><b>A and B are the same problem: the history no longer fits in the model's context window.</b> They differ only in who notices it.
-In A, nobody checks ahead of time, so the call goes to vLLM, which refuses it with a 400. Gym's model server turns that refusal into a normal-looking empty reply (<a href="https://github.com/NVIDIA-NeMo/Gym/blob/b27e0db8faefee7e4760b5b1bfbfed713f528360/responses_api_models/vllm_model/app.py#L1113-L1124">app.py L1113-1124</a>), so the agent finishes and returns a result.
-In B, the run has set a <b>context guard</b>: an optional limit in Gym's compaction client (<code>guards.max_total_tokens</code>, off by default). Before each call, the client counts the prompt tokens, compacts once more if it can, and refuses to send the call if it is still too long (<a href="https://github.com/NVIDIA-NeMo/Gym/blob/b27e0db8faefee7e4760b5b1bfbfed713f528360/nemo_gym/context_management/client.py#L167-L177">client.py L167-177</a>).
-That refusal, a <b>guard rejection</b>, is raised as an error. The agent does not catch it, so the agent's request fails with a 500 and RL gets no result.</p>
+<h2>How compaction is triggered, and where the length is checked</h2>
+<p>In this PR's built-in client (<code>simple_agent_with_compaction</code>), compaction is not set off by vLLM hitting its limit.
+It runs on a schedule. With a <b>context guard</b> set (<code>guards.max_total_tokens</code>, off by default), Gym also counts the prompt before every call and compacts early when it would be too long.
+The guard's <b>refusal</b> (a "guard rejection") happens only when compacting early still is not enough.</p>
+<svg viewBox="0 0 975 470" role="img" aria-label="Before each call: scheduled compaction, then with a guard the prompt is counted and compacted early; without a guard vLLM decides">
+  <defs><marker id="ah2" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path class="ahead" d="M0,0 L8,4 L0,8 z"/></marker></defs>
+  <rect class="box" x="16" y="10" width="939" height="62" rx="8"/>
+  <text class="lbl" x="28" y="30"><tspan font-weight='bold'>Before every model call, both lanes:</tspan> scheduled compaction drops old images and old reasoning blocks,</text>
+  <text class="lbl" x="28" y="47">every call (rolling_recency) or every K actions (turn_chunked_recency). It is a plain rewrite: it never calls the model.</text>
+  <a href="https://github.com/NVIDIA-NeMo/Gym/blob/b27e0db8faefee7e4760b5b1bfbfed713f528360/nemo_gym/context_management/config.py#L52-L94"><text x="28" y="64">context_management/config.py L52-94</text></a>
+  <path class="arrow" d="M240 74 L240 96"/>
+  <path class="arrow" d="M725 74 L725 96"/>
+  <text class="hdr-ok" x="16" y="112">Guard on: Gym checks the length before sending</text>
+  <text class="hdr-bad" x="500" y="112">Guard off (default): nobody checks first</text>
+  <rect class="box" x="16" y="122" width="455" height="44" rx="8"/>
+  <text class="lbl" x="28" y="142">Count the prompt tokens. Prompt + reserved output under</text>
+  <text class="lbl" x="28" y="159">guards.max_total_tokens?</text>
+  <rect class="box" x="500" y="122" width="455" height="44" rx="8"/>
+  <text class="lbl" x="512" y="142">Send the call to vLLM as is.</text>
+  <text class="lbl" x="512" y="159"></text>
+  <path class="arrow" d="M120 168 L120 190"/>
+  <path class="arrow" d="M360 168 L360 190"/>
+  <text class="note" x="128" y="184">fits</text>
+  <text class="note" x="368" y="184">too long</text>
+  <rect class="ok" x="16" y="192" width="210" height="44" rx="8"/>
+  <text class="lbl" x="28" y="212">Send the call. ✅</text>
+  <text class="lbl" x="28" y="229">The normal case.</text>
+  <rect class="box" x="238" y="192" width="233" height="62" rx="8"/>
+  <text class="lbl" x="250" y="212">Compact early: close the chunk</text>
+  <text class="lbl" x="250" y="229">now, then count again.</text>
+  <a href="https://github.com/NVIDIA-NeMo/Gym/blob/b27e0db8faefee7e4760b5b1bfbfed713f528360/nemo_gym/context_management/client.py#L167-L177"><text x="250" y="246">client.py L167-177</text></a>
+  <path class="arrow" d="M580 168 L580 190"/>
+  <path class="arrow" d="M850 168 L850 190"/>
+  <text class="note" x="588" y="184">fits</text>
+  <text class="note" x="858" y="184">too long (400)</text>
+  <rect class="ok" x="500" y="192" width="210" height="44" rx="8"/>
+  <text class="lbl" x="512" y="212">vLLM runs it. ✅</text>
+  <text class="lbl" x="512" y="229">The normal case.</text>
+  <rect class="box" x="722" y="192" width="233" height="96" rx="8"/>
+  <text class="lbl" x="734" y="212">No compaction happens. Gym returns</text>
+  <text class="lbl" x="734" y="229">an empty reply with finish_reason</text>
+  <text class="lbl" x="734" y="246">"length"; the episode ends.</text>
+  <text class="lbl" x="734" y="263"></text>
+  <a href="https://github.com/NVIDIA-NeMo/Gym/blob/b27e0db8faefee7e4760b5b1bfbfed713f528360/responses_api_models/vllm_model/app.py#L1113-L1124"><text x="734" y="280">vllm_model/app.py L1113-1124</text></a>
+  <path class="arrow" d="M290 256 L290 278"/>
+  <path class="arrow" d="M420 256 L420 278"/>
+  <text class="note" x="298" y="272">fits</text>
+  <text class="note" x="428" y="272">still too long</text>
+  <rect class="ok" x="16" y="280" width="290" height="44" rx="8"/>
+  <text class="lbl" x="28" y="300">Send the call. ✅ Compaction was</text>
+  <text class="lbl" x="28" y="317">triggered by the length.</text>
+  <rect class="bad" x="316" y="280" width="155" height="96" rx="8"/>
+  <text class="lbl" x="328" y="300">Refuse the call.</text>
+  <text class="lbl" x="328" y="317">The agent crashes:</text>
+  <text class="lbl" x="328" y="334">HTTP 500, group</text>
+  <text class="lbl" x="328" y="351">dropped. Lane B.</text>
+  <path class="arrow" d="M850 290 L850 312"/>
+  <rect class="box" x="722" y="314" width="233" height="70" rx="8"/>
+  <text class="lbl" x="734" y="334">That one rollout is masked;</text>
+  <text class="lbl" x="734" y="351">the rest of its group trains.</text>
+  <text class="lbl" x="734" y="368">Lane A.</text>
+  <text class="note" x="16" y="400">"Still too long" happens when what is left is text, tool output or user turns: this client never drops those.</text>
+  <text class="note" x="16" y="418">Early compaction exists only for turn_chunked_recency; with rolling_recency the history is already compacted, so a guard hit refuses at once.</text>
+  <text class="note" x="16" y="436">Harnesses that summarize with the model (Claude Code, OpenCode) work differently, but this PR does not support them (page 1).</text>
+  </svg>
 
 <h2>Same bad rollout, two places it can fail</h2>
 
