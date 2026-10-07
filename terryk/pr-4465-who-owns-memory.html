@@ -49,7 +49,7 @@ code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;
 .diff .add{color:var(--green)}
 .diff .del{color:var(--red)}
 .diff .hunk{color:var(--accent)}
-.cref{margin:4px 0 0;font-size:13px}
+.cref{margin:0 0 0 4px;font-size:13px}
 .cref a{display:inline-block;padding:3px 9px;border:1px solid var(--border);
   border-radius:16px;background:var(--surface);font:12px ui-monospace,Menlo,monospace}
 .cref a:hover{background:var(--surface2);text-decoration:none}
@@ -218,7 +218,7 @@ in SingleController setup, and the units joining the save list in
 +        # loop is busy serving rollouts. Capture writes land in other segments.
 +        dp_client = build_data_plane_client(dp_cfg, bootstrap=False, segment_size=0)</span>
 
-<span class="hunk">@@ transfer_queue.py L859-L861 · _init_tq (the config every client attaches with)</span>
+<span class="hunk">@@ transfer_queue.py L812 → L859-L861 · _init_tq (the config every client attaches with)</span>
 <span class="del">-                    "global_segment_size": int(mooncake_cfg.global_segment_size),
 </span><span class="add">+                    "global_segment_size": 0
 +                    if mooncake_cfg.storage_unit_segment_size
@@ -240,10 +240,10 @@ The only difference is which processes have one. The <code>simple</code> backend
 <div class="warn">
 <b>The design holds; a few combinations need a guard.</b> These are in the review comments (the review is still pending, so its links work only for its author until it is published):
 <ul>
-<li><b>Megatron generation + token capture + storage units</b> stops at setup with a <code>TypeError</code>: only vLLM accepts the new <code>storage_segments</code> argument.</li>
-<li><b>Storage units outside the SingleController</b> (<code>run_grpo.py</code>, SFT v2) leave no process owning memory, so every put fails with a Mooncake error that never mentions storage units.</li>
-<li><b>One object over 2 GiB now fails.</b> The old pool registered big payloads one at a time; Mooncake's pool rejects anything above <code>max(4 × staging_buffer_size, local_buffer_size)</code>.</li>
-<li><b>Per-node cost of a placement.</b> The example configs set 2 units per node of the <i>whole</i> cluster, so <code>placement: inference</code> puts all of them on the vLLM nodes.</li>
+<li><b>Megatron generation + token capture + storage units</b> stops at setup with a <code>TypeError</code>: only vLLM accepts the new <code>storage_segments</code> argument. <span class="cref"><a href="https://github.com/NVIDIA-NeMo/RL/pull/4465#discussion_r4202354809">review comment — setup.py:1971</a></span></li>
+<li><b>Storage units outside the SingleController</b> (<code>run_grpo.py</code>, SFT v2) leave no process owning memory, so every put fails with a Mooncake error that never mentions storage units. <span class="cref"><a href="https://github.com/NVIDIA-NeMo/RL/pull/4465#discussion_r4202354815">review comment — transfer_queue.py:860</a></span></li>
+<li><b>One object over 2 GiB now fails.</b> The old pool registered big payloads one at a time; Mooncake's pool rejects anything above <code>max(4 × staging_buffer_size, local_buffer_size)</code>. <span class="cref"><a href="https://github.com/NVIDIA-NeMo/RL/pull/4465#discussion_r4202354819">review comment — transfer_queue.py:222</a></span></li>
+<li><b>Per-node cost of a placement.</b> The example configs set 2 units per node of the <i>whole</i> cluster, so <code>placement: inference</code> puts all of them on the vLLM nodes. <span class="cref"><a href="https://github.com/NVIDIA-NeMo/RL/pull/4465#discussion_r4202354836">review comment — grpo_math_1B.yaml:622</a></span></li>
 </ul>
 </div>
 
