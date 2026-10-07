@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NVIDIA-NeMo/RL #4124 — the call lineage as a tree (no compaction) and as a forest (compaction)</title>
+<style>
+:root{
+  --bg:#0d1117; --surface:#161b22; --surface2:#1c2128; --border:#30363d;
+  --text:#e6edf3; --dim:#8b949e; --accent:#58a6ff; --green:#3fb950;
+  --orange:#d29922; --red:#f85149; --purple:#bc8cff;
+}
+:root[data-theme="light"]{
+  --bg:#ffffff; --surface:#f6f8fa; --surface2:#eaeef2; --border:#d0d7de;
+  --text:#1f2328; --dim:#59636e; --accent:#0969da; --green:#1a7f37;
+  --orange:#9a6700; --red:#cf222e; --purple:#8250df;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:28px 20px 70px}
+h1{font-size:22px;margin:0 0 8px;line-height:1.3}
+h2{font-size:18px;margin:32px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;
+  font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
+.sub{color:var(--dim);font-size:13.5px;margin:0 0 16px}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);
+  border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;
+  font:13px/1 ui-monospace,Menlo,monospace;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.18)}
+.status{border:1px solid var(--border);border-radius:10px;background:var(--surface);
+  padding:2px 16px 10px;margin:0 0 20px}
+.status dl{display:grid;grid-template-columns:max-content 1fr;gap:4px 14px;margin:12px 0 0}
+.status dt{color:var(--dim);font-size:12px;text-transform:uppercase;letter-spacing:.04em;
+  white-space:nowrap;padding-top:2px}
+.status dd{margin:0;font-size:14px}
+.verdict{font-weight:700;color:var(--orange)}
+nav.chain{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 6px;padding:0}
+nav.chain a,nav.chain span{display:inline-block;padding:5px 11px;border:1px solid var(--border);
+  border-radius:20px;background:var(--surface);text-decoration:none;color:var(--accent);
+  font-size:12.5px;line-height:1.3;white-space:nowrap}
+nav.chain a:hover{background:var(--surface2)}
+nav.chain span.here{background:var(--accent);color:var(--bg);border-color:var(--accent);font-weight:600}
+p.chainnote{color:var(--dim);font-size:12px;margin:0 0 18px}
+.bg{border-left:3px solid var(--accent);background:var(--surface);padding:10px 14px;
+  margin:0 0 16px;border-radius:0 8px 8px 0;font-size:14px}
+.hl{border-left:3px solid var(--green);background:var(--surface);
+  padding:12px 16px;margin:18px 0;border-radius:0 8px 8px 0}
+table{border-collapse:collapse;width:100%;font-size:13.5px;margin:10px 0}
+th,td{border:1px solid var(--border);padding:7px 9px;vertical-align:top;text-align:left}
+th{background:var(--surface2);font-size:12.5px}
+td:first-child{color:var(--dim);white-space:nowrap}
+.tip{border-bottom:1px dotted var(--dim);cursor:help;position:relative;outline:none}
+.tip:hover::after,.tip:focus::after{content:attr(data-tip);position:absolute;left:0;top:1.7em;z-index:60;
+  width:max-content;max-width:min(340px,80vw);white-space:normal;background:var(--surface2);color:var(--text);
+  border:1px solid var(--border);border-radius:6px;padding:7px 10px;font:13px/1.45 -apple-system,sans-serif;
+  font-weight:400;box-shadow:0 4px 14px rgba(0,0,0,.3)}
+svg{max-width:100%;height:auto;display:block;margin:16px 0}
+svg .call{fill:var(--surface);stroke:var(--accent);stroke-width:1.5}
+svg .root{fill:var(--accent);fill-opacity:.2;stroke:var(--accent);stroke-width:1.8}
+svg .leaf{fill:var(--orange);fill-opacity:.2;stroke:var(--orange);stroke-width:2}
+svg .dead{fill:var(--surface);stroke:var(--dim);stroke-width:1.3;stroke-dasharray:4 3}
+svg .row{fill:var(--purple);fill-opacity:.15;stroke:var(--purple);stroke-width:1.4}
+svg .lane{fill:none;stroke:var(--border);stroke-width:1;stroke-dasharray:2 3}
+svg .lbl{fill:var(--text);font:12px -apple-system,sans-serif}
+svg .lbl-b{fill:var(--text);font:bold 13.5px -apple-system,sans-serif}
+svg .cid{fill:var(--text);font:bold 12px ui-monospace,Menlo,monospace}
+svg .cid-dead{fill:var(--dim);font:12px ui-monospace,Menlo,monospace}
+svg .mono{fill:var(--text);font:10.5px ui-monospace,Menlo,monospace}
+svg .note{fill:var(--dim);font:11.5px -apple-system,sans-serif}
+svg .edge{stroke:var(--accent);stroke-width:1.5;fill:none}
+svg .edge-dead{stroke:var(--dim);stroke-width:1.2;fill:none;stroke-dasharray:4 3}
+svg .walk{stroke:var(--orange);stroke-width:2.2;fill:none;marker-end:url(#aw)}
+svg .walk-lbl{fill:var(--orange);font:bold 11.5px -apple-system,sans-serif}
+svg .cut{stroke:var(--red);stroke-width:1.8;stroke-dasharray:5 4}
+svg .cut-lbl{fill:var(--red);font:bold 11px -apple-system,sans-serif}
+svg .aw{fill:var(--orange)}
+svg a text{text-decoration:underline;fill:var(--accent);font:10.5px ui-monospace,Menlo,monospace}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+  document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head>
+<body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+  function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+  function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
+    b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
+      else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+  document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+<div class="wrap">
+
+<h1>The call lineage is a tree without compaction and a forest with it — and RL walks up from one accepted leaf per tree</h1>
+<p class="sub">Explainer for <a href="https://github.com/NVIDIA-NeMo/RL/pull/4124">NVIDIA-NeMo/RL #4124</a>
+(paired with <a href="https://github.com/NVIDIA-NeMo/Gym/pull/3368">NVIDIA-NeMo/Gym #3368</a>).
+RL links pin <code>c617a2c</code>; Gym links pin <code>b27e0db</code>.</p>
+
+<div class="status">
+<dl>
+  <dt>Before</dt>
+  <dd>Ordinary capture: every call hangs off the call before it, so a rollout's calls form one tree. RL walks up from a single leaf and builds one row.</dd>
+  <dt>This PR</dt>
+  <dd>With context compaction (CC), each rewrite starts a new root, so the calls form a forest. RL walks up once per tree and builds one row per tree.</dd>
+  <dt>Status</dt>
+  <dd><span class="verdict">Proposed — open PR, not merged.</span> Both pictures below are real runs of the PR's code, with a stand-in model.</dd>
+</dl>
+</div>
+
+<nav class="chain">
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4124-cc-old-vs-new.html">1 · old vs new</a>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4124-data-flow.html">2 · data flow</a>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4124-calls-to-rows.html">3 · calls → rows</a>
+  <span class="here">4 · tree vs forest</span>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4124-dropped-group.html">5 · dropped group</a>
+</nav>
+<p class="chainnote">Five pages on this PR, one question each. This one: what the call lineage looks like, and which leaves RL walks up from.</p>
+
+<div class="bg"><b>Background.</b> Gym's <span class="tip" tabindex="0" data-tip="One small record per model call: its id, its parent call, three lengths, hashes and the response id. Tokens live in TransferQueue, not here.">ledger</span> records each model call's <b>parent</b>: the earlier call whose tokens this call's prompt starts with.
+Drawn out, that is a tree. A <b>root</b> has no parent and stores its whole prompt. A <b>leaf</b> has no children.
+When the agent rejects a response and asks again, the retry gets the same parent as the rejected call, so the tree <b>branches</b>.
+Dotted words have a short explanation: hover or tap them.</div>
+
+<p>The same conversation was run twice through the PR's code: 7 accepted actions, and the agent rejects one response at action 4 and one at action 6. That makes 9 model calls, <code>c1</code>–<code>c9</code>.
+Without compaction every call extends its parent, so the 9 calls form one tree with 3 leaves. RL walks up from just one of them, the response the agent ended on (<a href="https://github.com/NVIDIA-NeMo/Gym/blob/b27e0db8faefee7e4760b5b1bfbfed713f528360/nemo_gym/token_id_capture/staging/rebuild.py#L201-L216">Gym <code>_terminal_chain</code></a>).
+With compaction every 2 actions, each rewrite starts a new root, giving 4 trees. RL picks the accepted calls from the agent's output, cuts them at each root, and walks up once per tree from that tree's accepted leaf (<a href="https://github.com/NVIDIA-NeMo/RL/blob/c617a2c01fb4b848991b2cc245a861985045ed14/nemo_rl/experience/rollout_reassembler.py#L1153-L1161"><code>_plan_selected_calls</code></a>, then <a href="https://github.com/NVIDIA-NeMo/RL/blob/c617a2c01fb4b848991b2cc245a861985045ed14/nemo_rl/experience/rollout_reassembler.py#L1250-L1256"><code>finalize_rollout</code> per tree</a>).
+Rejected leaves are never walked in either case.</p>
+
+<h2>Same 9 calls, as one tree and as a forest</h2>
+
+<svg viewBox="0 0 960 640" role="img" aria-label="Top: one tree c1-c2-c3, branching to rejected c4 and to c5-c6, branching to rejected c7 and to c8-c9; RL walks up from leaf c9 only and builds one row of 21 tokens. Bottom: four trees c1-c2, c3 with rejected c4 and c5, c6 with rejected c7 and c8, and c9 alone; RL walks up from c2, c5, c8 and c9 and builds four rows.">
+  <defs><marker id="aw" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path class="aw" d="M0,0 L8,4 L0,8 z"/></marker></defs>
+
+  <!-- ===== TOP: one tree ===== -->
+  <rect class="lane" x="8" y="8" width="944" height="270" rx="8"/>
+  <text class="lbl-b" x="20" y="30">Compaction off · one tree, 3 leaves, 1 walked</text>
+  <!-- nodes (main line y=86, rejected branches y=46) -->
+  <rect class="root" x="30" y="70" width="56" height="32" rx="6"/><text class="cid" x="47" y="91">c1</text>
+  <rect class="call" x="120" y="70" width="56" height="32" rx="6"/><text class="cid" x="137" y="91">c2</text>
+  <rect class="call" x="210" y="70" width="56" height="32" rx="6"/><text class="cid" x="227" y="91">c3</text>
+  <rect class="dead" x="300" y="34" width="56" height="28" rx="6"/><text class="cid-dead" x="317" y="53">c4</text>
+  <rect class="call" x="300" y="70" width="56" height="32" rx="6"/><text class="cid" x="317" y="91">c5</text>
+  <rect class="call" x="390" y="70" width="56" height="32" rx="6"/><text class="cid" x="407" y="91">c6</text>
+  <rect class="dead" x="480" y="34" width="56" height="28" rx="6"/><text class="cid-dead" x="497" y="53">c7</text>
+  <rect class="call" x="480" y="70" width="56" height="32" rx="6"/><text class="cid" x="497" y="91">c8</text>
+  <rect class="leaf" x="570" y="70" width="56" height="32" rx="6"/><text class="cid" x="587" y="91">c9</text>
+  <path class="edge" d="M86 86 L120 86 M176 86 L210 86 M266 86 L300 86 M356 86 L390 86 M446 86 L480 86 M536 86 L570 86"/>
+  <path class="edge-dead" d="M266 80 L300 50 M446 80 L480 50"/>
+  <text class="note" x="362" y="53">✗ rejected leaf</text><text class="note" x="542" y="53">✗ rejected leaf</text>
+  <text class="note" x="634" y="84">accepted leaf = the</text><text class="note" x="634" y="99">response the agent ended on</text>
+  <!-- walk -->
+  <path class="walk" d="M598 108 C598 136, 590 136, 560 136 L70 136 C50 136, 58 120, 58 106"/>
+  <text class="walk-lbl" x="200" y="156">walk up from c9 only: c9 → c8 → c6 → c5 → c3 → c2 → c1, then reverse</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/c617a2c01fb4b848991b2cc245a861985045ed14/nemo_rl/environments/nemo_gym.py#L1257-L1300"><text x="200" y="174">pick the leaf: nemo_gym.py L1257-1300</text></a>
+  <a href="https://github.com/NVIDIA-NeMo/Gym/blob/b27e0db8faefee7e4760b5b1bfbfed713f528360/nemo_gym/token_id_capture/staging/rebuild.py#L201-L216"><text x="480" y="174">walk: rebuild.py L201-216</text></a>
+  <!-- row -->
+  <rect class="row" x="30" y="190" width="900" height="64" rx="7"/>
+  <text class="lbl-b" x="42" y="210">1 row · group_g0_s0 · 21 tokens · 7 with gradient · advantage +0.5</text>
+  <text class="mono" x="42" y="232">[10,11,1001, 20,21,1002, 30,31,1003, 50,51,1005, 60,61,1006, 80,81,1008, 90,91,1009]</text>
+  <text class="note" x="42" y="248">c1 · c2 · c3 · c5 · c6 · c8 · c9 — c4 and c7 add nothing</text>
+
+  <!-- ===== BOTTOM: forest ===== -->
+  <rect class="lane" x="8" y="292" width="944" height="290" rx="8"/>
+  <text class="lbl-b" x="20" y="314">Compaction on (every 2 actions) · a forest of 4 trees, 6 leaves, 4 walked</text>
+  <!-- tree 1 -->
+  <rect class="root" x="30" y="356" width="56" height="32" rx="6"/><text class="cid" x="47" y="377">c1</text>
+  <rect class="leaf" x="110" y="356" width="56" height="32" rx="6"/><text class="cid" x="127" y="377">c2</text>
+  <path class="edge" d="M86 372 L110 372"/>
+  <path class="walk" d="M138 394 C138 412, 64 412, 60 396"/>
+  <path class="cut" d="M196 330 L196 450"/><text class="cut-lbl" x="174" y="466">rewrite</text>
+  <!-- tree 2 -->
+  <rect class="root" x="220" y="356" width="56" height="32" rx="6"/><text class="cid" x="237" y="377">c3</text>
+  <rect class="dead" x="300" y="324" width="56" height="26" rx="6"/><text class="cid-dead" x="317" y="342">c4</text>
+  <rect class="leaf" x="300" y="356" width="56" height="32" rx="6"/><text class="cid" x="317" y="377">c5</text>
+  <path class="edge" d="M276 372 L300 372"/><path class="edge-dead" d="M276 366 L300 340"/>
+  <path class="walk" d="M328 394 C328 412, 254 412, 250 396"/>
+  <path class="cut" d="M386 330 L386 450"/><text class="cut-lbl" x="364" y="466">rewrite</text>
+  <!-- tree 3 -->
+  <rect class="root" x="410" y="356" width="56" height="32" rx="6"/><text class="cid" x="427" y="377">c6</text>
+  <rect class="dead" x="490" y="324" width="56" height="26" rx="6"/><text class="cid-dead" x="507" y="342">c7</text>
+  <rect class="leaf" x="490" y="356" width="56" height="32" rx="6"/><text class="cid" x="507" y="377">c8</text>
+  <path class="edge" d="M466 372 L490 372"/><path class="edge-dead" d="M466 366 L490 340"/>
+  <path class="walk" d="M518 394 C518 412, 444 412, 440 396"/>
+  <path class="cut" d="M576 330 L576 450"/><text class="cut-lbl" x="554" y="466">rewrite</text>
+  <!-- tree 4 -->
+  <rect class="leaf" x="600" y="356" width="56" height="32" rx="6"/><text class="cid" x="617" y="377">c9</text>
+  <text class="note" x="600" y="404">root + leaf</text>
+  <!-- how RL finds the leaves -->
+  <text class="walk-lbl" x="680" y="340">1. accepted calls = what the</text>
+  <text class="walk-lbl" x="680" y="356">agent's output contains:</text>
+  <text class="mono" x="680" y="374">c1 c2 c3 c5 c6 c8 c9</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/c617a2c01fb4b848991b2cc245a861985045ed14/nemo_rl/environments/gym_selection.py#L91-L249"><text x="680" y="390">gym_selection.py L91-249</text></a>
+  <text class="walk-lbl" x="680" y="414">2. cut at every root → 4 chains;</text>
+  <text class="walk-lbl" x="680" y="430">each chain's last call is the leaf</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/c617a2c01fb4b848991b2cc245a861985045ed14/nemo_rl/experience/rollout_reassembler.py#L1153-L1161"><text x="680" y="446">rollout_reassembler.py L1153-1161</text></a>
+  <!-- rows -->
+  <rect class="row" x="30" y="484" width="214" height="78" rx="7"/>
+  <text class="lbl-b" x="40" y="504">group_g0_s0</text><text class="mono" x="40" y="522">c1 · c2  6 tok</text><text class="mono" x="40" y="540">[10,11,1001,20,21,1002]</text>
+  <rect class="row" x="254" y="484" width="214" height="78" rx="7"/>
+  <text class="lbl-b" x="264" y="504">group_g0_s1</text><text class="mono" x="264" y="522">c3 · c5  6 tok</text><text class="mono" x="264" y="540">[10,11,1003,50,51,1005]</text>
+  <rect class="row" x="478" y="484" width="214" height="78" rx="7"/>
+  <text class="lbl-b" x="488" y="504">group_g0_s2</text><text class="mono" x="488" y="522">c6 · c8  6 tok</text><text class="mono" x="488" y="540">[10,11,1006,80,81,1008]</text>
+  <rect class="row" x="702" y="484" width="214" height="78" rx="7"/>
+  <text class="lbl-b" x="712" y="504">group_g0_s3</text><text class="mono" x="712" y="522">c9  3 tok</text><text class="mono" x="712" y="540">[10,11,1009]</text>
+  <text class="note" x="40" y="576">All 4 rows: reward 1.0, advantage +0.5 — one value for the whole rollout, copied to each row.</text>
+
+  <!-- legend -->
+  <rect class="root" x="16" y="598" width="18" height="12" rx="3"/><text class="note" x="40" y="609">root</text>
+  <rect class="call" x="90" y="598" width="18" height="12" rx="3"/><text class="note" x="114" y="609">continues its parent</text>
+  <rect class="leaf" x="262" y="598" width="18" height="12" rx="3"/><text class="note" x="286" y="609">accepted leaf (walked)</text>
+  <rect class="dead" x="438" y="598" width="18" height="12" rx="3"/><text class="note" x="462" y="609">rejected leaf (never walked)</text>
+  <path class="walk" d="M640 604 L670 604"/><text class="note" x="676" y="609">walk up to the root</text>
+  <rect class="row" x="808" y="598" width="18" height="12" rx="3"/><text class="note" x="832" y="609">training row</text>
+  <text class="note" x="16" y="632">Token values come from the PR test's stand-in for vLLM: a root's prompt is [10, 11]; call i adds two observation tokens and generates 1000+i.</text>
+</svg>
+
+<h2>Which leaves get walked, and why not all of them</h2>
+<table>
+<tr><th></th><th>Compaction off</th><th>Compaction on</th></tr>
+<tr><td>Shape of the lineage</td><td>1 tree</td><td>4 trees, one per stretch between rewrites</td></tr>
+<tr><td>Leaves</td><td>3 (c4, c7, c9)</td><td>6 (c2, c4, c5, c7, c8, c9)</td></tr>
+<tr><td>Leaves walked</td><td>1: the response the agent ended on (c9)</td><td>4: the last accepted call in each tree (c2, c5, c8, c9)</td></tr>
+<tr><td>How RL finds them</td><td>From the harness's declared final response, or the scored response, matched to a ledger row</td><td>From the agent's whole output: every accepted response is matched to its call, then the list is cut at each root</td></tr>
+<tr><td>Rows</td><td>1 row, 21 tokens</td><td>4 rows: 6 + 6 + 6 + 3 tokens</td></tr>
+<tr><td>Rejected calls (c4, c7)</td><td colspan="2">Same in both: never walked and never trained, but still read, checked and cleaned out of storage with the rest (<a href="https://github.com/NVIDIA-NeMo/RL/blob/c617a2c01fb4b848991b2cc245a861985045ed14/nemo_rl/experience/rollout_reassembler.py#L680-L687">rollout_reassembler.py L680-687</a>)</td></tr>
+</table>
+<p>Walking up from every leaf would train the rejected responses c4 and c7, which the agent threw away. So in both cases RL uses the agent's own record of what it kept to pick the leaves. With compaction that record has to cover the whole conversation, not just the end: a tree whose calls are missing from the agent's output is never walked, so it never trains.</p>
+
+<div class="hl"><b>So what.</b> The walk itself did not change: inside each tree, RL still goes from one leaf up to the root and joins the stored tokens.
+What changed is how many trees there are, and how RL finds the leaf of each: from the agent's full output instead of a single final response.
+A rollout with 3 rewrites becomes 4 rows that share one reward and one advantage.</div>
+
+</div>
+</body>
+</html>
