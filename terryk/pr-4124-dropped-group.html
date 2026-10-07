@@ -104,7 +104,7 @@ RL links pin <code>c617a2c</code>; Gym links pin <code>b27e0db</code>.</p>
   <dt>This PR</dt>
   <dd>Under CC, a failed model call now masks only its own rollout. But a whole dropped group still ends the run, while the new guide says it stays within the drop budget.</dd>
   <dt>Status</dt>
-  <dd><span class="verdict open">Open — not fixed in this PR.</span> Raised in the review (comment below); the Gym half belongs in Gym #3368.</dd>
+  <dd><span class="verdict open">Open — not fixed in this PR.</span> Raised in the review (comment below). The Gym half belongs in Gym #3368, and retry is tracked in <a href="https://github.com/NVIDIA-NeMo/RL/issues/4557">#4557</a>.</dd>
 </dl>
 </div>
 
@@ -219,18 +219,54 @@ That refusal, a <b>guard rejection</b>, is raised as an error. The agent does no
 <p class="cref">🔴 <a href="https://github.com/NVIDIA-NeMo/RL/pull/4124#discussion_r4188764556">review comment — context-compaction.md:47</a></p>
 
 <h2>What would fix it — proposed, not in the PR</h2>
-<p>Nothing below is implemented.</p>
-<p class="where"><b>Where the fix lands: RL (docs, in this PR) and Gym (agent, in Gym #3368).</b>
-<b>RL:</b> make <a href="https://github.com/NVIDIA-NeMo/RL/blob/c617a2c01fb4b848991b2cc245a861985045ed14/docs/guides/context-compaction.md#L47"><code>context-compaction.md</code> L47</a> say what the code does, so nobody raises a drop budget expecting it to help.
-<b>Gym:</b> <a href="https://github.com/NVIDIA-NeMo/Gym/blob/b27e0db8faefee7e4760b5b1bfbfed713f528360/responses_api_agents/simple_agent_with_compaction/app.py#L99-L105"><code>simple_agent_with_compaction</code></a> should catch the guard's refusal, end the episode there, and return what it has, the way lane A already does. RL then masks that one rollout instead of dropping the whole group. That needs a small design choice (how the returned result marks the rollout as masked), so it is not shown as a diff here.</p>
+<p>Nothing below is implemented or has been run.</p>
+<p class="where"><b>Where the fix lands: RL code and docs (this PR), the Gym agent (Gym #3368), and a follow-up issue for retry.</b>
+The ordinary path has two safety nets for a failed group: retry it, then train without it. CC turned both off. The fix puts them back, one at a time.</p>
 
+<h3 style="font-size:15.5px;margin:20px 0 6px">1 · RL, in this PR: train without the dropped group</h3>
+<p>Let a CC step train on the groups it has, the way the ordinary path does. The loss is divided by the token count and the advantage is per rollout, so nothing in the math needs the full count (<a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4124-cc-batch-size.html">page 7</a>).</p>
+<pre class="diff"><span class="hunk">@@ config.py L1437-L1438 · CC config check</span>
+             raise ValueError(
+                 "context compaction requires direct routed-expert assembly"
+             )
+<span class="del">-        if async_config.rollout_failure.min_step_batch_fraction != 1:
+-            raise ValueError("context compaction requires min_step_batch_fraction=1")
+</span>         validate_cc_objective(master_config.grpo, master_config.loss_fn)
+<span class="hunk">@@ single_controller.py L3206-L3213 · _train_pump, before finish_train_step</span>
+                 if not self._is_ppo:
+                     if context_compaction and (
+<span class="del">-                        groups_dispatched != self._algo_cfg.num_prompts_per_step
+-                        or len(logical_owners)
+-                        != self._master_config.policy["train_global_batch_size"]
+</span><span class="add">+                        # A dropped group shrinks the step, as on the ordinary path.
++                        groups_dispatched != self._target_groups_for_step(version_during_step)
++                        or len(logical_owners)
++                        != groups_dispatched * self._algo_cfg.num_generations_per_prompt
+</span>                     ):
+                         raise ValueError(
+<span class="del">-                            "CC optimizer step requires the full logical sample count"
+</span><span class="add">+                            "CC optimizer step requires every rollout of every kept group"
+</span>                         )</pre>
+<p><a href="https://github.com/NVIDIA-NeMo/RL/blob/c617a2c01fb4b848991b2cc245a861985045ed14/nemo_rl/algorithms/single_controller.py#L2608-L2647"><code>_target_groups_for_step</code></a> already returns the number of groups minus the dropped ones, and still enforces <code>min_step_batch_fraction</code>.
+The <code>"gbs"</code> case in <a href="https://github.com/NVIDIA-NeMo/RL/blob/c617a2c01fb4b848991b2cc245a861985045ed14/tests/unit/single_controller/test_cc_optimizer_batch.py#L270"><code>test_cc_optimizer_batch.py</code></a> needs its expected message updated.
+Also add one test where a group drops and the step trains with the rest.
+With this change, a dropped group in lane B costs one group of data instead of the whole run. That holds once the user sets a drop budget above 0, exactly as on the ordinary path.</p>
+
+<h3 style="font-size:15.5px;margin:20px 0 6px">2 · Gym, in #3368: a guard rejection should not crash the agent</h3>
+<p><a href="https://github.com/NVIDIA-NeMo/Gym/blob/b27e0db8faefee7e4760b5b1bfbfed713f528360/responses_api_agents/simple_agent_with_compaction/app.py#L99-L105"><code>simple_agent_with_compaction</code></a> should catch the guard's refusal, end the episode there, and return what it has, the way lane A already does.
+RL then masks that one rollout instead of dropping the whole group.</p>
+
+<h3 style="font-size:15.5px;margin:20px 0 6px">3 · Follow-up: retry the failed group (<a href="https://github.com/NVIDIA-NeMo/RL/issues/4557">#4557</a>)</h3>
+<p>The ordinary path re-runs a failed group with backoff (<a href="https://github.com/NVIDIA-NeMo/RL/blob/c617a2c01fb4b848991b2cc245a861985045ed14/nemo_rl/experience/rollout_manager.py#L2215-L2219">rollout_manager.py L2215-2219</a>). CC skips that (<a href="https://github.com/NVIDIA-NeMo/RL/blob/c617a2c01fb4b848991b2cc245a861985045ed14/nemo_rl/experience/rollout_manager.py#L2210-L2214">L2210-2214</a>), because RL keeps the record of which responses the agent accepted only for that one request.
+This can land after this PR, but it matters: at moderate scale, timeouts and transport errors are routine. Without retry, each one throws away a group the ordinary path would have recovered.</p>
+
+<h3 style="font-size:15.5px;margin:20px 0 6px">4 · Docs: say what the code does</h3>
 <pre class="diff"><span class="hunk">@@ docs/guides/context-compaction.md L47 · Measurement and lifecycle</span>
 <span class="del">- Set `async_rl.rollout_failure.nemo_gym.rollout_timeout_s` as a backstop for a hung prompt-group stream; it is not a per-model-call deadline or an acknowledgement that the remote engine stopped. A timeout or transport failure that prevents an agent result drops the group under the existing consecutive-drop budget. This baseline does not redispatch CC groups because selected-response metadata is request-local; checkpoint/retry support is a separate change. Data-integrity errors still raise, and operator cancellation still propagates.
-</span><span class="add">+ Set `async_rl.rollout_failure.nemo_gym.rollout_timeout_s` as a backstop for a hung prompt-group stream; it is not a per-model-call deadline or an acknowledgement that the remote engine stopped. A timeout, transport failure or agent exception that prevents an agent result drops the group, and so does a group with no valid owner. Because context compaction requires `min_step_batch_fraction: 1` and does not replace dropped groups, any dropped group currently stops the run. This baseline does not redispatch CC groups because selected-response metadata is request-local; checkpoint/retry support is a separate change. Data-integrity errors still raise, and operator cancellation still propagates.</span></pre>
-<p>The doc fix only makes the guide true; the run still stops. Lane B's guard case stops ending the run once the Gym agent change lands. Timeouts and transport errors stay run-ending until CC can re-send or replace a dropped group, which the author has left for later checkpoint/retry work.</p>
+</span><span class="add">+ Set `async_rl.rollout_failure.nemo_gym.rollout_timeout_s` as a backstop for a hung prompt-group stream; it is not a per-model-call deadline or an acknowledgement that the remote engine stopped. A timeout, transport failure or agent exception that prevents an agent result drops the group without a retry, and so does a group with no valid owner. A dropped group shrinks that training step, within `max_consecutive_dropped_prompts` and `min_step_batch_fraction`, the same as on the ordinary path; with the default budget of 0, the first drop still stops the run. CC groups are not redispatched because selected-response metadata is request-local; retry is tracked in NVIDIA-NeMo/RL#4557. Data-integrity errors still raise, and operator cancellation still propagates.</span></pre>
 
 <div class="warn"><b>So what.</b> Today a context guard makes a CC run <i>less</i> robust, not more: without a guard, an oversized request masks one rollout (lane A); with a guard, the same situation stops the run (lane B).
-Until the Gym change lands, any rollout error that keeps the agent from returning a result ends a context-compaction training run. Plan multi-day runs with that in mind.</div>
+Until fix 1 lands, any rollout error that keeps the agent from returning a result ends a context-compaction training run. With fix 1, it costs one group. With retry (<a href="https://github.com/NVIDIA-NeMo/RL/issues/4557">#4557</a>), most such errors would cost nothing.</div>
 
 </div>
 </body>
