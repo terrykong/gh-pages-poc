@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NVIDIA-NeMo/RL #4124 — how a context-compaction step fits a variable number of rows into one batch</title>
+<style>
+:root{
+  --bg:#0d1117; --surface:#161b22; --surface2:#1c2128; --border:#30363d;
+  --text:#e6edf3; --dim:#8b949e; --accent:#58a6ff; --green:#3fb950;
+  --orange:#d29922; --red:#f85149; --purple:#bc8cff;
+}
+:root[data-theme="light"]{
+  --bg:#ffffff; --surface:#f6f8fa; --surface2:#eaeef2; --border:#d0d7de;
+  --text:#1f2328; --dim:#59636e; --accent:#0969da; --green:#1a7f37;
+  --orange:#9a6700; --red:#cf222e; --purple:#8250df;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:28px 20px 70px}
+h1{font-size:22px;margin:0 0 8px;line-height:1.3}
+h2{font-size:18px;margin:32px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;
+  font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
+.sub{color:var(--dim);font-size:13.5px;margin:0 0 16px}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);
+  border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;
+  font:13px/1 ui-monospace,Menlo,monospace;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.18)}
+.status{border:1px solid var(--border);border-radius:10px;background:var(--surface);
+  padding:2px 16px 10px;margin:0 0 20px}
+.status dl{display:grid;grid-template-columns:max-content 1fr;gap:4px 14px;margin:12px 0 0}
+.status dt{color:var(--dim);font-size:12px;text-transform:uppercase;letter-spacing:.04em;
+  white-space:nowrap;padding-top:2px}
+.status dd{margin:0;font-size:14px}
+.verdict{font-weight:700;color:var(--orange)}
+nav.chain{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 6px;padding:0}
+nav.chain a,nav.chain span{display:inline-block;padding:5px 11px;border:1px solid var(--border);
+  border-radius:20px;background:var(--surface);text-decoration:none;color:var(--accent);
+  font-size:12.5px;line-height:1.3;white-space:nowrap}
+nav.chain a:hover{background:var(--surface2)}
+nav.chain span.here{background:var(--accent);color:var(--bg);border-color:var(--accent);font-weight:600}
+p.chainnote{color:var(--dim);font-size:12px;margin:0 0 18px}
+.bg{border-left:3px solid var(--accent);background:var(--surface);padding:10px 14px;
+  margin:0 0 16px;border-radius:0 8px 8px 0;font-size:14px}
+.hl{border-left:3px solid var(--green);background:var(--surface);
+  padding:12px 16px;margin:18px 0;border-radius:0 8px 8px 0}
+.mono{font:12.5px/1.55 ui-monospace,SFMono-Regular,Menlo,monospace;
+  background:var(--surface);border:1px solid var(--border);border-radius:8px;
+  padding:12px;overflow-x:auto;white-space:pre;margin:10px 0}
+.tip{border-bottom:1px dotted var(--dim);cursor:help;position:relative;outline:none}
+.tip:hover::after,.tip:focus::after{content:attr(data-tip);position:absolute;left:0;top:1.7em;z-index:60;
+  width:max-content;max-width:min(340px,80vw);white-space:normal;background:var(--surface2);color:var(--text);
+  border:1px solid var(--border);border-radius:6px;padding:7px 10px;font:13px/1.45 -apple-system,sans-serif;
+  font-weight:400;box-shadow:0 4px 14px rgba(0,0,0,.3)}
+ol{padding-left:22px;margin:6px 0}
+li{margin:4px 0}
+svg{max-width:100%;height:auto;display:block;margin:16px 0}
+svg .call{fill:var(--surface);stroke:var(--accent);stroke-width:1.5}
+svg .root{fill:var(--accent);fill-opacity:.2;stroke:var(--accent);stroke-width:1.8}
+svg .dead{fill:var(--surface);stroke:var(--dim);stroke-width:1.3;stroke-dasharray:4 3}
+svg .row{fill:var(--purple);fill-opacity:.16;stroke:var(--purple);stroke-width:1.5}
+svg .lane{fill:none;stroke:var(--border);stroke-width:1;stroke-dasharray:2 3}
+svg .lbl{fill:var(--text);font:12px -apple-system,sans-serif}
+svg .lbl-b{fill:var(--text);font:bold 13.5px -apple-system,sans-serif}
+svg .cid{fill:var(--text);font:bold 12px ui-monospace,Menlo,monospace}
+svg .mono{fill:var(--text);font:10.5px ui-monospace,Menlo,monospace}
+svg .note{fill:var(--dim);font:11.5px -apple-system,sans-serif}
+svg .hdr{fill:var(--accent);font:bold 12.5px -apple-system,sans-serif}
+svg .edge{stroke:var(--accent);stroke-width:1.5;fill:none;marker-end:url(#ah)}
+svg .edge-dead{stroke:var(--dim);stroke-width:1.2;fill:none;stroke-dasharray:4 3}
+svg .walk{stroke:var(--orange);stroke-width:2;fill:none;marker-end:url(#aw)}
+svg .cut{stroke:var(--red);stroke-width:2;stroke-dasharray:5 4}
+svg .cut-lbl{fill:var(--red);font:bold 11px -apple-system,sans-serif}
+svg .walk-lbl{fill:var(--orange);font:bold 11px -apple-system,sans-serif}
+svg .ah{fill:var(--accent)}
+svg .aw{fill:var(--orange)}
+svg a text{text-decoration:underline;fill:var(--accent);font:10.5px ui-monospace,Menlo,monospace}
+
+svg .ga{fill:var(--accent);fill-opacity:.22;stroke:var(--accent);stroke-width:1.3}
+svg .gb{fill:var(--green);fill-opacity:.22;stroke:var(--green);stroke-width:1.3}
+svg .gc{fill:var(--purple);fill-opacity:.22;stroke:var(--purple);stroke-width:1.3}
+svg .pad{fill:none;stroke:var(--dim);stroke-width:1.2;stroke-dasharray:4 3}
+svg .rank{fill:var(--surface);stroke:var(--border);stroke-width:1}
+svg .ok{fill:var(--green);fill-opacity:.1;stroke:var(--green);stroke-width:1.5}
+table{border-collapse:collapse;width:100%;font-size:13.5px;margin:10px 0}
+th,td{border:1px solid var(--border);padding:5px 8px;text-align:left;vertical-align:top}
+th{background:var(--surface2)}
+.q{border-left:3px solid var(--orange);background:var(--surface);padding:10px 14px;margin:14px 0;border-radius:0 8px 8px 0}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+  document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head>
+<body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+  function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+  function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
+    b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
+      else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+  document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+<div class="wrap">
+
+<h1>How a context-compaction step fits a variable number of rows into one batch</h1>
+<p class="sub">Explainer for <a href="https://github.com/NVIDIA-NeMo/RL/pull/4124">NVIDIA-NeMo/RL #4124</a>
+(paired with <a href="https://github.com/NVIDIA-NeMo/Gym/pull/3368">NVIDIA-NeMo/Gym #3368</a>).
+RL links pin <code>c617a2c</code>.</p>
+
+<div class="status">
+<dl>
+  <dt>Before</dt>
+  <dd><code>train_global_batch_size</code> = prompts × generations, and each rollout is exactly one row.</dd>
+  <dt>This PR</dt>
+  <dd>Under context compaction (CC), the batch size still counts <b>rollouts</b>. The number of rows per step varies, and padding keeps it even across GPUs.</dd>
+  <dt>Status</dt>
+  <dd><span class="verdict">Explains the PR's code — no change proposed.</span> The example numbers are worked by hand from the code's formulas, not taken from a run.</dd>
+</dl>
+</div>
+
+<nav class="chain">
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4124-cc-old-vs-new.html">1 · old vs new</a>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4124-data-flow.html">2 · data flow</a>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4124-calls-to-rows.html">3 · calls → rows</a>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4124-tree-vs-forest.html">4 · tree vs forest</a>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4124-reward-to-rows.html">5 · reward → rows</a>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4124-dropped-group.html">6 · dropped group</a>
+  <span class="here">7 · batch size</span>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4124-subagents.html">8 · subagents (proposal)</a>
+</nav>
+<p class="chainnote">Eight pages on this PR, one question each. This one: what "batch size" means when one rollout can be several rows.</p>
+
+<p>The config check is unchanged: prompts × generations must equal <code>train_global_batch_size</code> (<a href="https://github.com/NVIDIA-NeMo/RL/blob/c617a2c01fb4b848991b2cc245a861985045ed14/nemo_rl/algorithms/single_controller_utils/config.py#L1355-L1363">config.py L1355-1363</a>).
+Under CC, that number counts rollouts, not rows. A step closes when it holds exactly that many rollouts, however many rows they produced, and raises otherwise (<a href="https://github.com/NVIDIA-NeMo/RL/blob/c617a2c01fb4b848991b2cc245a861985045ed14/nemo_rl/algorithms/single_controller.py#L3206-L3213">single_controller.py L3206-3213</a>).
+Two things make a variable row count work. Each group is padded to an even multiple, so every GPU runs the same number of micro batches. And gradients are added up across all micro batches and divided once, by the total token count, at the end of the step.</p>
+
+<svg viewBox="0 0 960 590" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Six rollouts become 13 rows plus 3 padding rows, dealt evenly to 4 GPUs, then one optimizer step">
+<defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="ah" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<text class="hdr" x="16" y="22">Ordinary GRPO: one row per rollout</text>
+<rect class="ga" x="16" y="34" width="56" height="24" rx="4"/>
+<text class="mono" x="22" y="50">g0·r0</text>
+<rect class="ga" x="78" y="34" width="56" height="24" rx="4"/>
+<text class="mono" x="84" y="50">g0·r1</text>
+<rect class="gb" x="140" y="34" width="56" height="24" rx="4"/>
+<text class="mono" x="146" y="50">g1·r0</text>
+<rect class="gb" x="202" y="34" width="56" height="24" rx="4"/>
+<text class="mono" x="208" y="50">g1·r1</text>
+<rect class="gc" x="264" y="34" width="56" height="24" rx="4"/>
+<text class="mono" x="270" y="50">g2·r0</text>
+<rect class="gc" x="326" y="34" width="56" height="24" rx="4"/>
+<text class="mono" x="332" y="50">g2·r1</text>
+<text class="lbl" x="396" y="51">3 prompts × 2 generations = 6 rollouts = 6 rows = <tspan class="mono">train_global_batch_size</tspan></text>
+<text class="hdr" x="16" y="96">Context compaction: each rollout gives one row per segment, so the count varies</text>
+<text class="cid" x="16" y="124">g0</text>
+<rect class="ga" x="50" y="108" width="56" height="24" rx="4"/>
+<text class="mono" x="56" y="124">r0·s1</text>
+<rect class="ga" x="110" y="108" width="56" height="24" rx="4"/>
+<text class="mono" x="116" y="124">r1·s1</text>
+<rect class="ga" x="170" y="108" width="56" height="24" rx="4"/>
+<text class="mono" x="176" y="124">r1·s2</text>
+<rect class="ga" x="230" y="108" width="56" height="24" rx="4"/>
+<text class="mono" x="236" y="124">r1·s3</text>
+<text class="lbl" x="546" y="124">1 + 3 = 4 rows, +0 pad → 4</text>
+<text class="cid" x="16" y="158">g1</text>
+<rect class="gb" x="50" y="142" width="56" height="24" rx="4"/>
+<text class="mono" x="56" y="158">r0·s1</text>
+<rect class="gb" x="110" y="142" width="56" height="24" rx="4"/>
+<text class="mono" x="116" y="158">r0·s2</text>
+<rect class="gb" x="170" y="142" width="56" height="24" rx="4"/>
+<text class="mono" x="176" y="158">r1·s1</text>
+<rect class="gb" x="230" y="142" width="56" height="24" rx="4"/>
+<text class="mono" x="236" y="158">r1·s2</text>
+<rect class="gb" x="290" y="142" width="56" height="24" rx="4"/>
+<text class="mono" x="296" y="158">r1·s3</text>
+<rect class="gb" x="350" y="142" width="56" height="24" rx="4"/>
+<text class="mono" x="356" y="158">r1·s4</text>
+<rect class="gb" x="410" y="142" width="56" height="24" rx="4"/>
+<text class="mono" x="416" y="158">r1·s5</text>
+<rect class="pad" x="470" y="142" width="56" height="24" rx="4"/>
+<text class="mono" x="476" y="158">pad</text>
+<text class="lbl" x="546" y="158">2 + 5 = 7 rows, +1 pad → 8</text>
+<text class="cid" x="16" y="192">g2</text>
+<rect class="gc" x="50" y="176" width="56" height="24" rx="4"/>
+<text class="mono" x="56" y="192">r0·s1</text>
+<rect class="gc" x="110" y="176" width="56" height="24" rx="4"/>
+<text class="mono" x="116" y="192">r1·s1</text>
+<rect class="pad" x="170" y="176" width="56" height="24" rx="4"/>
+<text class="mono" x="176" y="192">pad</text>
+<rect class="pad" x="230" y="176" width="56" height="24" rx="4"/>
+<text class="mono" x="236" y="192">pad</text>
+<text class="lbl" x="546" y="192">1 + 1 = 2 rows, +2 pad → 4</text>
+<text class="note" x="16" y="218">Each group is padded up to a multiple of Q = 4 GPUs × lcm(micro batch 1, logprob batch 1) = 4.</text>
+<text class="note" x="16" y="234">A padding row copies a real row's input, has reward 0, and is masked.</text>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/c617a2c01fb4b848991b2cc245a861985045ed14/nemo_rl/experience/rollout_reassembler.py#L853-L882"><text x="16" y="252">rollout_reassembler.py L853-882</text></a>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/c617a2c01fb4b848991b2cc245a861985045ed14/nemo_rl/algorithms/single_controller_utils/config.py#L882-L908"><text x="250" y="252">config.py L882-908 (Q)</text></a>
+<path class="edge" d="M480 260 L480 282"/>
+<text class="note" x="490" y="276">13 real rows + 3 pad = 16 rows for 6 rollouts</text>
+<text class="hdr" x="16" y="300">Each group is split evenly across the 4 GPUs, so every GPU runs the same number of micro batches</text>
+<rect class="rank" x="16" y="312" width="220" height="154" rx="8"/>
+<text class="lbl-b" x="26" y="332">GPU 0</text>
+<rect class="ga" x="26" y="342" width="56" height="24" rx="4"/>
+<text class="mono" x="32" y="358">r0·s1</text>
+<text class="note" x="90" y="358">g0 · micro batch 1</text>
+<rect class="gb" x="26" y="372" width="56" height="24" rx="4"/>
+<text class="mono" x="32" y="388">r0·s1</text>
+<text class="note" x="90" y="388">g1 · micro batch 2</text>
+<rect class="gb" x="26" y="402" width="56" height="24" rx="4"/>
+<text class="mono" x="32" y="418">r0·s2</text>
+<text class="note" x="90" y="418">g1 · micro batch 3</text>
+<rect class="gc" x="26" y="432" width="56" height="24" rx="4"/>
+<text class="mono" x="32" y="448">r0·s1</text>
+<text class="note" x="90" y="448">g2 · micro batch 4</text>
+<rect class="rank" x="252" y="312" width="220" height="154" rx="8"/>
+<text class="lbl-b" x="262" y="332">GPU 1</text>
+<rect class="ga" x="262" y="342" width="56" height="24" rx="4"/>
+<text class="mono" x="268" y="358">r1·s1</text>
+<text class="note" x="326" y="358">g0 · micro batch 1</text>
+<rect class="gb" x="262" y="372" width="56" height="24" rx="4"/>
+<text class="mono" x="268" y="388">r1·s1</text>
+<text class="note" x="326" y="388">g1 · micro batch 2</text>
+<rect class="gb" x="262" y="402" width="56" height="24" rx="4"/>
+<text class="mono" x="268" y="418">r1·s2</text>
+<text class="note" x="326" y="418">g1 · micro batch 3</text>
+<rect class="gc" x="262" y="432" width="56" height="24" rx="4"/>
+<text class="mono" x="268" y="448">r1·s1</text>
+<text class="note" x="326" y="448">g2 · micro batch 4</text>
+<rect class="rank" x="488" y="312" width="220" height="154" rx="8"/>
+<text class="lbl-b" x="498" y="332">GPU 2</text>
+<rect class="ga" x="498" y="342" width="56" height="24" rx="4"/>
+<text class="mono" x="504" y="358">r1·s2</text>
+<text class="note" x="562" y="358">g0 · micro batch 1</text>
+<rect class="gb" x="498" y="372" width="56" height="24" rx="4"/>
+<text class="mono" x="504" y="388">r1·s3</text>
+<text class="note" x="562" y="388">g1 · micro batch 2</text>
+<rect class="gb" x="498" y="402" width="56" height="24" rx="4"/>
+<text class="mono" x="504" y="418">r1·s4</text>
+<text class="note" x="562" y="418">g1 · micro batch 3</text>
+<rect class="pad" x="498" y="432" width="56" height="24" rx="4"/>
+<text class="mono" x="504" y="448">pad</text>
+<text class="note" x="562" y="448">g2 · micro batch 4</text>
+<rect class="rank" x="724" y="312" width="220" height="154" rx="8"/>
+<text class="lbl-b" x="734" y="332">GPU 3</text>
+<rect class="ga" x="734" y="342" width="56" height="24" rx="4"/>
+<text class="mono" x="740" y="358">r1·s3</text>
+<text class="note" x="798" y="358">g0 · micro batch 1</text>
+<rect class="gb" x="734" y="372" width="56" height="24" rx="4"/>
+<text class="mono" x="740" y="388">r1·s5</text>
+<text class="note" x="798" y="388">g1 · micro batch 2</text>
+<rect class="pad" x="734" y="402" width="56" height="24" rx="4"/>
+<text class="mono" x="740" y="418">pad</text>
+<text class="note" x="798" y="418">g1 · micro batch 3</text>
+<rect class="pad" x="734" y="432" width="56" height="24" rx="4"/>
+<text class="mono" x="740" y="448">pad</text>
+<text class="note" x="798" y="448">g2 · micro batch 4</text>
+<text class="note" x="16" y="476">Which row goes to which GPU is drawn for illustration. The code only guarantees that every GPU gets the same number.</text>
+<path class="edge" d="M480 486 L480 508"/>
+<rect class="ok" x="16" y="512" width="928" height="66" rx="8"/>
+<text class="lbl-b" x="30" y="534">Gradients from all 16 micro batches add up, then are divided once by N,</text>
+<text class="lbl" x="30" y="554">the valid tokens summed over every GPU (padding counts 0). Then one optimizer step, however many rows there were.</text>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/c617a2c01fb4b848991b2cc245a861985045ed14/nemo_rl/models/policy/workers/megatron_policy_worker.py#L2018-L2036"><text x="30" y="571">megatron_policy_worker.py L2018-2036</text></a>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/c617a2c01fb4b848991b2cc245a861985045ed14/nemo_rl/algorithms/single_controller.py#L3206-L3213"><text x="330" y="571">single_controller.py L3206-3213 (6 rollouts or raise)</text></a>
+</svg>
+
+<h2>Why the row count does not change the math</h2>
+<ol>
+<li><b>Loss:</b> each micro batch adds its summed token loss to the gradients. <code>finish_train_step</code> sums the valid tokens over every GPU and scales the gradients by 1/N (<a href="https://github.com/NVIDIA-NeMo/RL/blob/c617a2c01fb4b848991b2cc245a861985045ed14/nemo_rl/models/policy/workers/megatron_policy_worker.py#L2018-L2036">L2018-2036</a>). Each generated token is trained once, whether its rollout sits in 1 row or 3. Padding rows have no valid tokens, so they add nothing.</li>
+<li><b>Advantage:</b> computed once per rollout and copied to all its rows (<a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4124-reward-to-rows.html">page 5</a>). Padding rows get 0.</li>
+<li><b>Optimizer:</b> one step per training step, as before. More rows means more micro batches, not more optimizer steps.</li>
+</ol>
+
+<h2>What it costs</h2>
+<table>
+<tr><th>Cost</th><th>Why</th></tr>
+<tr><td>Megatron only, fixed batch: no sequence packing, no dynamic batching, no interleaved pipeline</td><td>Padding to a fixed multiple only works when every micro batch has a fixed number of rows. The config check rejects the other modes (<a href="https://github.com/NVIDIA-NeMo/RL/blob/c617a2c01fb4b848991b2cc245a861985045ed14/nemo_rl/algorithms/single_controller_utils/config.py#L891-L900">config.py L891-900</a>).</td></tr>
+<tr><td>Up to Q − 1 padding rows per group</td><td>Here 3 of 16 rows (19%) are padding. More GPUs or a larger micro batch raise Q, and with it the waste.</td></tr>
+<tr><td>Step time grows with compaction</td><td>6 rollouts cost 16 forward/backward rows here, against 6 in ordinary GRPO. Memory per micro batch stays the same.</td></tr>
+<tr><td>Row-count metrics change meaning</td><td><code>global_valid_seqs</code> counts rows, so under CC it can exceed the number of rollouts. The proposed L1 test uses this to check that rows were split.</td></tr>
+</table>
+
+<div class="hl"><b>So what.</b> You get no more than <code>train_global_batch_size</code> rollouts per step, and no fewer. Extra compaction rows become extra micro batches inside the same optimizer step, normalized by tokens. This is also why a dropped group cannot simply be skipped (<a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4124-dropped-group.html">page 6</a>): the step insists on the full rollout count.</div>
+
+</div>
+</body>
+</html>
