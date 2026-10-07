@@ -126,7 +126,7 @@ After the rollout, the RL driver pulls the ledger and rebuilds rows from Transfe
 
 <h2>One call, then the end of the rollout</h2>
 
-<svg viewBox="0 0 960 860" role="img" aria-label="Sequence diagram: agent sends messages to Gym; Gym proposes parent c1; the RL worker decides to continue c1, fetches c1's tokens from TransferQueue, generates, stages new tokens, returns coordinates; Gym writes a ledger row; after the rollout the RL driver pulls the ledger and the tokens and builds rows.">
+<svg viewBox="0 0 960 896" role="img" aria-label="Sequence diagram: agent sends messages to Gym; Gym proposes parent c1; the RL worker decides to continue c1, fetches c1's tokens from TransferQueue, generates, stages new tokens, returns coordinates; Gym writes a ledger row; after the rollout the RL driver pulls the ledger and the tokens and builds rows.">
   <defs><marker id="am" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path class="am" d="M0,0 L8,4 L0,8 z"/></marker></defs>
   <!-- heads -->
   <rect class="head-gym" x="20" y="14" width="140" height="44" rx="7"/><text class="lbl-b" x="40" y="34">Agent (Gym)</text><text class="note" x="40" y="50">owns the history</text>
@@ -157,16 +157,16 @@ After the rollout, the RL driver pulls the ledger and rebuilds rows from Transfe
   <!-- 5 -->
   <text class="lbl" x="488" y="296">⑤ fetch c1's exact tokens</text>
   <path class="msg" d="M675 304 L483 304"/>
-  <text class="mono" x="488" y="320">c1 → [10, 11, 1001]</text>
-  <a href="https://github.com/NVIDIA-NeMo/RL/blob/c617a2c01fb4b848991b2cc245a861985045ed14/nemo_rl/models/generation/vllm/vllm_worker_async.py#L1134-L1142"><text x="690" y="320">vllm_worker_async.py L1134-1142</text></a>
+  <text class="mono" x="488" y="320">[10,11] task + [1001] c1's answer</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/c617a2c01fb4b848991b2cc245a861985045ed14/nemo_rl/models/generation/vllm/vllm_worker_async.py#L1134-L1142"><text x="715" y="320">vllm_worker_async.py L1134-1142</text></a>
   <!-- 6 -->
-  <rect class="self" x="410" y="332" width="260" height="44" rx="7"/>
-  <text class="lbl" x="421" y="350">⑥ add the new observation, generate</text>
-  <text class="mono" x="421" y="368">[10,11,1001,20,21] → 1002</text>
+  <rect class="self" x="410" y="332" width="400" height="44" rx="7"/>
+  <text class="lbl" x="421" y="350">⑥ append observation 1's tokens [20, 21], then generate</text>
+  <text class="mono" x="421" y="368">[10,11,1001] + [20,21] → 1002 (c2's answer)</text>
   <!-- 7 -->
   <text class="lbl" x="488" y="398">⑦ store only the new tokens</text>
   <path class="msg" d="M480 406 L672 406"/>
-  <text class="mono" x="488" y="422">key group_g0/c2: tokens [20,21,1002] mask [0,0,1]</text>
+  <text class="mono" x="488" y="422">group_g0/c2 → [20,21 | 1002] mask [0,0,1]</text>
   <a href="https://github.com/NVIDIA-NeMo/Gym/blob/b27e0db8faefee7e4760b5b1bfbfed713f528360/nemo_gym/token_id_capture/staging/capture.py#L156-L246"><text x="805" y="422">capture.py L156-246</text></a>
   <!-- 8 -->
   <text class="lbl" x="293" y="446">⑧ return small numbers, no tokens</text>
@@ -209,7 +209,7 @@ After the rollout, the RL driver pulls the ledger and rebuilds rows from Transfe
   <!-- legend -->
   <rect class="new" x="20" y="800" width="16" height="12" rx="3"/><text class="note" x="42" y="811">new in this PR</text>
   <rect class="self" x="160" y="800" width="16" height="12" rx="3"/><text class="note" x="182" y="811">work inside one part</text>
-  <text class="note" x="20" y="836">Token values: the PR test's stand-in for vLLM.</text>
+  <text class="note" x="20" y="866">Token key (the PR test's stand-in for vLLM): [10, 11] = the task · [20, 21] = observation 1, the tool result after c1 ·</text><text class="note" x="20" y="883">1001 and 1002 = the tokens the model generated in c1 and c2.</text>
 </svg>
 
 <h2>What changed for each kind of request</h2>
