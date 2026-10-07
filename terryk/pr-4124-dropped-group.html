@@ -122,27 +122,32 @@ RL links pin <code>c617a2c</code>; Gym links pin <code>b27e0db</code>.</p>
 <div class="bg"><b>Background.</b> A GRPO training step needs a fixed number of <b>prompt groups</b>; each group is one prompt run several times (each run is a <b>rollout</b>).
 NeMo-RL normally tolerates a few lost groups: a <span class="tip" tabindex="0" data-tip="max_consecutive_dropped_prompts. How many groups in a row may be dropped as infrastructure failures before the run stops. Default 0.">drop budget</span> and a
 <span class="tip" tabindex="0" data-tip="min_step_batch_fraction. The smallest share of a step's groups that may still train. 0.9 means a step of 10 groups may close with 9.">minimum step size</span> decide how many.
-Context compaction forces that minimum to 100% (<a href="https://github.com/NVIDIA-NeMo/RL/blob/c617a2c01fb4b848991b2cc245a861985045ed14/nemo_rl/algorithms/single_controller_utils/config.py#L1437-L1438">config.py L1437-1438</a>), and it never replaces a dropped group.
+<br><b>Why context compaction (CC) cannot absorb a drop.</b> CC turns off both ways to absorb one. It forces the minimum to 100% (<a href="https://github.com/NVIDIA-NeMo/RL/blob/c617a2c01fb4b848991b2cc245a861985045ed14/nemo_rl/algorithms/single_controller_utils/config.py#L1437-L1438">config.py L1437-1438</a>), because each CC optimizer step must hold exactly <code>train_global_batch_size</code> rollouts, or it raises <code>"CC optimizer step requires the full logical sample count"</code> (<a href="https://github.com/NVIDIA-NeMo/RL/blob/c617a2c01fb4b848991b2cc245a861985045ed14/nemo_rl/algorithms/single_controller.py#L3206-L3213">single_controller.py L3206-3213</a>). It also never re-sends a dropped group, because RL keeps the record of which responses the agent accepted only inside the request that ran it (<a href="https://github.com/NVIDIA-NeMo/RL/blob/c617a2c01fb4b848991b2cc245a861985045ed14/docs/guides/context-compaction.md#L47">guide L47</a>). Neither the code nor the guide says why a short step would be wrong. The per-rollout advantage and the token-level loss work for any number of rollouts, so this looks like a limit of the first version, not a math requirement.
 Dotted words have a short explanation: hover or tap them.</div>
 
 <p>The figure follows one step of 4 prompt groups with 2 rollouts each, and one bad rollout in group <code>g1</code>.
 Where the failure happens decides everything. If a <b>model call</b> fails, the agent still finishes and returns a result, and RL masks just that rollout (<a href="https://github.com/NVIDIA-NeMo/RL/blob/c617a2c01fb4b848991b2cc245a861985045ed14/nemo_rl/environments/nemo_gym.py#L1114-L1120">nemo_gym.py L1114-1120</a>).
 If the <b>agent itself raises</b>, Gym answers with an HTTP 500, RL files it as an infrastructure failure, and CC drops the whole group without a retry (<a href="https://github.com/NVIDIA-NeMo/RL/blob/c617a2c01fb4b848991b2cc245a861985045ed14/nemo_rl/experience/rollout_manager.py#L2210-L2214">rollout_manager.py L2210-2214</a>).
 Both ways of handling a dropped group then end the run.</p>
+<p><b>A and B are the same problem: the history no longer fits in the model's context window.</b> They differ only in who notices it.
+In A, nobody checks ahead of time, so the call goes to vLLM, which refuses it with a 400. Gym's model server turns that refusal into a normal-looking empty reply (<a href="https://github.com/NVIDIA-NeMo/Gym/blob/b27e0db8faefee7e4760b5b1bfbfed713f528360/responses_api_models/vllm_model/app.py#L1113-L1124">app.py L1113-1124</a>), so the agent finishes and returns a result.
+In B, the run has set a <b>context guard</b>: an optional limit in Gym's compaction client (<code>guards.max_total_tokens</code>, off by default). Before each call, the client counts the prompt tokens, compacts once more if it can, and refuses to send the call if it is still too long (<a href="https://github.com/NVIDIA-NeMo/Gym/blob/b27e0db8faefee7e4760b5b1bfbfed713f528360/nemo_gym/context_management/client.py#L167-L177">client.py L167-177</a>).
+That refusal, a <b>guard rejection</b>, is raised as an error. The agent does not catch it, so the agent's request fails with a 500 and RL gets no result.</p>
 
 <h2>Same bad rollout, two places it can fail</h2>
 
 <svg viewBox="0 0 975 590" role="img" aria-label="Left lane: a model call fails, the rollout is masked and the step trains with 4 of 4 groups. Right lane: the agent raises, Gym returns HTTP 500, RL drops group g1, and the run stops either at the drop budget or at the step floor.">
   <defs><marker id="ah" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path class="ahead" d="M0,0 L8,4 L0,8 z"/></marker></defs>
-  <text class="note" x="16" y="20">one training step · 4 prompt groups (g0–g3) · 2 rollouts each · rollout g1_0 hits a context that does not fit</text>
+  <text class="note" x="16" y="20">one training step · 4 prompt groups (g0–g3) · 2 rollouts each · rollout g1_0's history grows too long for the model</text>
 
   <!-- LEFT: model call fails -->
-  <text class="hdr-ok" x="16" y="50">A · a model call fails (no context guard set)</text>
+  <text class="hdr-ok" x="16" y="50">A · no guard: vLLM notices, after the call is sent</text>
   <rect class="box" x="10" y="62" width="455" height="82" rx="8"/>
-  <text class="lbl" x="22" y="82">vLLM rejects the call (400). Gym's model server answers with an</text>
-  <text class="lbl" x="22" y="99">empty response marked <tspan class="mono">finish_reason="length"</tspan>; the agent stops.</text>
-  <text class="mono" x="22" y="120">ledger: pending_call_ids=["c3"]   reward: from verifier</text>
-  <a href="https://github.com/NVIDIA-NeMo/Gym/blob/b27e0db8faefee7e4760b5b1bfbfed713f528360/responses_api_models/vllm_model/app.py#L1113-L1124"><text x="22" y="137">Gym vllm_model/app.py L1113-1124</text></a>
+  <text class="lbl" x="22" y="79">The call is sent; vLLM refuses it (400, prompt too long).</text>
+  <text class="lbl" x="22" y="95">Gym's model server catches the 400 and returns an empty reply</text>
+  <text class="lbl" x="22" y="111">with <tspan class="mono">finish_reason="length"</tspan>, so the agent ends normally.</text>
+  <text class="mono" x="22" y="126">ledger: c3 failed, no tokens   reward: from verifier</text>
+  <a href="https://github.com/NVIDIA-NeMo/Gym/blob/b27e0db8faefee7e4760b5b1bfbfed713f528360/responses_api_models/vllm_model/app.py#L1113-L1124"><text x="22" y="140">Gym vllm_model/app.py L1113-1124</text></a>
   <path class="arrow" d="M237 146 L237 166"/>
   <rect class="box" x="10" y="168" width="455" height="70" rx="8"/>
   <text class="lbl" x="22" y="188">RL sees a capture that never finished and poisons only this rollout.</text>
@@ -159,12 +164,13 @@ Both ways of handling a dropped group then end the run.</p>
   <text class="lbl" x="22" y="390">The run continues.</text>
 
   <!-- RIGHT: agent raises -->
-  <text class="hdr-bad" x="495" y="50">B · the agent itself raises (guard on, timeout, …)</text>
+  <text class="hdr-bad" x="495" y="50">B · guard on: Gym notices, before the call is sent</text>
   <rect class="box" x="490" y="62" width="460" height="82" rx="8"/>
-  <text class="lbl" x="502" y="82">The context guard rejects the next request before it is sent.</text>
-  <text class="lbl" x="502" y="99">Nothing catches it; Gym's middleware turns it into an HTTP 500.</text>
-  <text class="mono" x="502" y="120">500 "ContextGuardRejected('Context guard …')"</text>
-  <a href="https://github.com/NVIDIA-NeMo/Gym/blob/b27e0db8faefee7e4760b5b1bfbfed713f528360/nemo_gym/context_management/client.py#L176"><text x="502" y="137">Gym client.py L176</text></a><a href="https://github.com/NVIDIA-NeMo/Gym/blob/b27e0db8faefee7e4760b5b1bfbfed713f528360/nemo_gym/server_utils.py#L1297-L1303"><text x="650" y="137">server_utils.py L1297-1303</text></a>
+  <text class="lbl" x="502" y="79">The context guard (optional, off by default) counts the prompt</text>
+  <text class="lbl" x="502" y="95">before each call and refuses to send it if it is too long.</text>
+  <text class="lbl" x="502" y="111">That refusal is an error the agent never catches → HTTP 500.</text>
+  <text class="mono" x="502" y="126">500 "ContextGuardRejected('Context guard …')"</text>
+  <a href="https://github.com/NVIDIA-NeMo/Gym/blob/b27e0db8faefee7e4760b5b1bfbfed713f528360/nemo_gym/context_management/client.py#L176"><text x="502" y="140">Gym client.py L176</text></a><a href="https://github.com/NVIDIA-NeMo/Gym/blob/b27e0db8faefee7e4760b5b1bfbfed713f528360/nemo_gym/server_utils.py#L1297-L1303"><text x="650" y="140">server_utils.py L1297-1303</text></a>
   <path class="arrow" d="M720 146 L720 166"/>
   <rect class="box" x="490" y="168" width="460" height="70" rx="8"/>
   <text class="lbl" x="502" y="188">RL reads a 500 as an infrastructure failure. Under CC it does not</text>
@@ -215,7 +221,7 @@ Both ways of handling a dropped group then end the run.</p>
 <p>Nothing below is implemented.</p>
 <p class="where"><b>Where the fix lands: RL (docs, in this PR) and Gym (agent, in Gym #3368).</b>
 <b>RL:</b> make <a href="https://github.com/NVIDIA-NeMo/RL/blob/c617a2c01fb4b848991b2cc245a861985045ed14/docs/guides/context-compaction.md#L47"><code>context-compaction.md</code> L47</a> say what the code does, so nobody raises a drop budget expecting it to help.
-<b>Gym:</b> <a href="https://github.com/NVIDIA-NeMo/Gym/blob/b27e0db8faefee7e4760b5b1bfbfed713f528360/responses_api_agents/simple_agent_with_compaction/app.py#L99-L105"><code>simple_agent_with_compaction</code></a> should end the episode on a guard rejection and return a result RL masks, the way lane A already works, instead of letting the error become an HTTP 500. That needs a small design choice (how the returned result marks the rollout as masked), so it is not shown as a diff here.</p>
+<b>Gym:</b> <a href="https://github.com/NVIDIA-NeMo/Gym/blob/b27e0db8faefee7e4760b5b1bfbfed713f528360/responses_api_agents/simple_agent_with_compaction/app.py#L99-L105"><code>simple_agent_with_compaction</code></a> should catch the guard's refusal, end the episode there, and return what it has, the way lane A already does. RL then masks that one rollout instead of dropping the whole group. That needs a small design choice (how the returned result marks the rollout as masked), so it is not shown as a diff here.</p>
 
 <pre class="diff"><span class="hunk">@@ docs/guides/context-compaction.md L47 · Measurement and lifecycle</span>
 <span class="del">- Set `async_rl.rollout_failure.nemo_gym.rollout_timeout_s` as a backstop for a hung prompt-group stream; it is not a per-model-call deadline or an acknowledgement that the remote engine stopped. A timeout or transport failure that prevents an agent result drops the group under the existing consecutive-drop budget. This baseline does not redispatch CC groups because selected-response metadata is request-local; checkpoint/retry support is a separate change. Data-integrity errors still raise, and operator cancellation still propagates.
