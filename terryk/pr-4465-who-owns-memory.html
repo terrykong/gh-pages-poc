@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NVIDIA-NeMo/RL #4465 — who owns Mooncake memory, and so who a checkpoint save waits on</title>
+<style>
+:root{
+  --bg:#0d1117; --surface:#161b22; --surface2:#1c2128; --border:#30363d;
+  --text:#e6edf3; --dim:#8b949e; --accent:#58a6ff; --green:#3fb950;
+  --orange:#d29922; --red:#f85149;
+}
+:root[data-theme="light"]{
+  --bg:#ffffff; --surface:#f6f8fa; --surface2:#eaeef2; --border:#d0d7de;
+  --text:#1f2328; --dim:#59636e; --accent:#0969da; --green:#1a7f37;
+  --orange:#9a6700; --red:#cf222e;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:28px 20px 70px}
+h1{font-size:22px;margin:0 0 8px;line-height:1.3}
+h2{font-size:18px;margin:30px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;
+  font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
+.sub{color:var(--dim);font-size:13.5px;margin:0 0 16px}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);
+  border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;
+  font:13px/1 ui-monospace,Menlo,monospace;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.18)}
+.status{border:1px solid var(--border);border-radius:10px;background:var(--surface);
+  padding:2px 16px 10px;margin:0 0 20px}
+.status dl{display:grid;grid-template-columns:max-content 1fr;gap:4px 14px;margin:12px 0 0}
+.status dt{color:var(--dim);font-size:12px;text-transform:uppercase;letter-spacing:.04em;
+  white-space:nowrap;padding-top:2px}
+.status dd{margin:0;font-size:14px}
+.verdict{font-weight:700}
+.verdict.good{color:var(--green)}
+.verdict.open{color:var(--red)}
+.bg{border-left:4px solid var(--dim);background:var(--surface);padding:8px 14px;margin:0 0 16px;font-size:14px}
+.where{border-left:4px solid var(--accent);background:var(--surface);padding:6px 12px;margin:6px 0 10px}
+.warn{border-left:3px solid var(--red);background:var(--surface);
+  padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0}
+.warn ul{margin:6px 0 0;padding-left:20px}
+.warn li{margin:4px 0}
+.diff{font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--surface);
+  border:1px solid var(--border);border-radius:8px;padding:12px;overflow-x:auto;white-space:pre;margin:10px 0}
+.diff .add{color:var(--green)}
+.diff .del{color:var(--red)}
+.diff .hunk{color:var(--accent)}
+.cref{margin:4px 0 0;font-size:13px}
+.cref a{display:inline-block;padding:3px 9px;border:1px solid var(--border);
+  border-radius:16px;background:var(--surface);font:12px ui-monospace,Menlo,monospace}
+.cref a:hover{background:var(--surface2);text-decoration:none}
+.tip{border-bottom:1px dotted var(--dim);cursor:help;position:relative;outline:none}
+.tip:hover::after,.tip:focus::after{content:attr(data-tip);position:absolute;left:0;top:1.7em;z-index:60;
+  width:max-content;max-width:min(340px,80vw);white-space:normal;background:var(--surface2);color:var(--text);
+  border:1px solid var(--border);border-radius:6px;padding:7px 10px;font:13px/1.45 -apple-system,sans-serif;
+  font-weight:400;box-shadow:0 4px 14px rgba(0,0,0,.3)}
+svg{max-width:100%;height:auto;display:block;margin:16px 0}
+svg .col{fill:none;stroke:var(--border);stroke-width:1.2}
+svg .node{fill:var(--surface);stroke:var(--border);stroke-width:1.2}
+svg .own{fill:var(--green);fill-opacity:.28;stroke:var(--green);stroke-width:1.6}
+svg .busy{fill:var(--red);fill-opacity:.28;stroke:var(--red);stroke-width:1.6}
+svg .cli{fill:none;stroke:var(--dim);stroke-width:1.3;stroke-dasharray:4 3}
+svg .chip{fill:var(--text);font:bold 12px ui-monospace,Menlo,monospace}
+svg .lbl{fill:var(--text);font:12px ui-monospace,Menlo,monospace}
+svg .lbl-b{fill:var(--text);font:bold 13.5px -apple-system,sans-serif}
+svg .note{fill:var(--dim);font:11.5px -apple-system,sans-serif}
+svg .hdr{fill:var(--accent);font:bold 12.5px -apple-system,sans-serif}
+svg .big{fill:var(--text);font:bold 15px -apple-system,sans-serif}
+svg .bad{fill:var(--red);font:bold 12px -apple-system,sans-serif}
+svg .good{fill:var(--green);font:bold 12px -apple-system,sans-serif}
+svg .arr{stroke:var(--accent);stroke-width:1.5;fill:none}
+svg .arrh{fill:var(--accent)}
+svg a text{text-decoration:underline;fill:var(--accent);font:11px ui-monospace,Menlo,monospace}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+  document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head>
+<body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+  function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+  function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
+    b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
+      else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+  document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+<div class="wrap">
+
+<h1>Who owns Mooncake memory — and so who every checkpoint save has to wait on</h1>
+<p class="sub">Explainer for <a href="https://github.com/NVIDIA-NeMo/RL/pull/4465">NVIDIA-NeMo/RL #4465</a>
+(faster Mooncake CPU-RDMA checkpoints). All permalinks pin the PR head <code>7847eeb</code>.</p>
+
+<div class="status">
+<dl>
+  <dt>Before</dt>
+  <dd>Every Mooncake process held data in its own RAM, including the vLLM serving workers. A save had to call all of them, and the vLLM ones answered late because they were busy serving rollouts.</dd>
+  <dt>This PR</dt>
+  <dd>vLLM workers stop holding data. An opt-in mode moves all data into small CPU-only "storage unit" actors, so no GPU process is called during a save.</dd>
+  <dt>Status</dt>
+  <dd><span class="verdict good">Works as described for the SingleController path.</span>
+  <span class="verdict open">Open review items</span> on a few combinations — see the last section.</dd>
+</dl>
+</div>
+
+<p class="bg"><b>Background.</b> The data plane moves rollout rows between processes. With the
+<code>mooncake_cpu</code> backend, every process is a Mooncake <b>client</b> (it puts and gets rows over RDMA), and
+most are also an <b>owner</b>: a block of their RAM, the
+<span class="tip" tabindex="0" data-tip="The block of RAM a process gives to Mooncake. Its size is global_segment_size (64 GiB by default). Rows written by any client can land in any owner's segment.">segment</span>,
+holds rows. A checkpoint save writes each owner's rows to disk, so the save must call every owner and waits for the slowest.
+Dotted words have a short explanation: hover or tap them.</p>
+
+<p>A process takes part in a save only if its segment is bigger than 0
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/7847eeb7f6e194aa41d35f6fed5f2e5202ba0d90/nemo_rl/data_plane/adapters/tq_mooncake_checkpoint.py#L1390">tq_mooncake_checkpoint.py:1390</a>).
+So "who is on the save path" is just "who has a segment". The PR changes that in two steps. vLLM workers now attach with
+<code>segment_size=0</code>
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/7847eeb7f6e194aa41d35f6fed5f2e5202ba0d90/nemo_rl/models/generation/vllm/vllm_worker_async.py#L559">vllm_worker_async.py:559</a>).
+And when <code>mooncake_cpu.storage_unit_segment_size &gt; 0</code>, every client gets 0
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/7847eeb7f6e194aa41d35f6fed5f2e5202ba0d90/nemo_rl/data_plane/adapters/transfer_queue.py#L859-L861">transfer_queue.py:859</a>)
+and new <code>MooncakeStorageUnit</code> actors own all memory
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/7847eeb7f6e194aa41d35f6fed5f2e5202ba0d90/nemo_rl/data_plane/mooncake_storage_unit.py#L42">mooncake_storage_unit.py:42</a>).
+That is the same shape the <code>simple</code> backend already had with TransferQueue's <code>SimpleStorageUnit</code>.</p>
+
+<h2>The same 2-node job, three ways</h2>
+
+<svg viewBox="0 0 940 520" role="img" aria-label="Three columns: before the PR six processes own memory and the two busy vLLM workers slow the save; after the PR with defaults four processes own memory; with storage units on, five CPU storage units on the inference node are the only owners.">
+  <!-- legend -->
+  <rect class="own" x="16" y="10" width="22" height="16" rx="3"/><text class="note" x="44" y="23">owns a segment — the save calls it</text>
+  <rect class="busy" x="250" y="10" width="22" height="16" rx="3"/><text class="note" x="278" y="23">owns a segment, busy with rollouts</text>
+  <rect class="cli" x="636" y="10" width="22" height="16" rx="3"/><text class="note" x="664" y="23">client only (segment 0) — not called</text>
+
+  <!-- column A -->
+  <rect class="col" x="10" y="38" width="300" height="470" rx="10"/>
+  <text class="lbl-b" x="24" y="62">Before this PR</text>
+  <text class="note" x="24" y="78">every process owns 64 GiB</text>
+  <rect class="node" x="24" y="90" width="272" height="96" rx="8"/>
+  <text class="hdr" x="36" y="108">train node</text>
+  <rect class="own" x="36" y="120" width="54" height="34" rx="5"/><text class="chip" x="51" y="142">T0</text>
+  <rect class="own" x="98" y="120" width="54" height="34" rx="5"/><text class="chip" x="113" y="142">T1</text>
+  <rect class="own" x="160" y="120" width="54" height="34" rx="5"/><text class="chip" x="175" y="142">T2</text>
+  <rect class="own" x="222" y="120" width="62" height="34" rx="5"/><text class="chip" x="232" y="142">ctrl</text>
+  <text class="note" x="36" y="174">3 trainer workers + the controller</text>
+  <rect class="node" x="24" y="200" width="272" height="96" rx="8"/>
+  <text class="hdr" x="36" y="218">inference node</text>
+  <rect class="busy" x="36" y="230" width="54" height="34" rx="5"/><text class="chip" x="51" y="252">V0</text>
+  <rect class="busy" x="98" y="230" width="54" height="34" rx="5"/><text class="chip" x="113" y="252">V1</text>
+  <text class="note" x="36" y="284">2 vLLM workers (token capture on)</text>
+  <text class="big" x="24" y="336">save calls 6 owners</text>
+  <text class="bad" x="24" y="356">waits behind rollout traffic on V0, V1</text>
+  <text class="note" x="24" y="400">86 nodes, timing/train/checkpointing:</text>
+  <text class="lbl" x="24" y="420">mean 43.0 s · worst 63.9 s</text>
+
+  <!-- column B -->
+  <rect class="col" x="320" y="38" width="300" height="470" rx="10"/>
+  <text class="lbl-b" x="334" y="62">After — default</text>
+  <text class="note" x="334" y="78">storage_unit_segment_size: 0</text>
+  <rect class="node" x="334" y="90" width="272" height="96" rx="8"/>
+  <text class="hdr" x="346" y="108">train node</text>
+  <rect class="own" x="346" y="120" width="54" height="34" rx="5"/><text class="chip" x="361" y="142">T0</text>
+  <rect class="own" x="408" y="120" width="54" height="34" rx="5"/><text class="chip" x="423" y="142">T1</text>
+  <rect class="own" x="470" y="120" width="54" height="34" rx="5"/><text class="chip" x="485" y="142">T2</text>
+  <rect class="own" x="532" y="120" width="62" height="34" rx="5"/><text class="chip" x="542" y="142">ctrl</text>
+  <rect class="node" x="334" y="200" width="272" height="96" rx="8"/>
+  <text class="hdr" x="346" y="218">inference node</text>
+  <rect class="cli" x="346" y="230" width="54" height="34" rx="5"/><text class="chip" x="361" y="252">V0</text>
+  <rect class="cli" x="408" y="230" width="54" height="34" rx="5"/><text class="chip" x="423" y="252">V1</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/7847eeb7f6e194aa41d35f6fed5f2e5202ba0d90/nemo_rl/models/generation/vllm/vllm_worker_async.py#L559" target="_blank" rel="noopener"><text x="346" y="284">segment_size=0 · :559</text></a>
+  <text class="big" x="334" y="336">save calls 4 owners</text>
+  <text class="good" x="334" y="356">vLLM rows land in trainer/ctrl RAM</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/7847eeb7f6e194aa41d35f6fed5f2e5202ba0d90/nemo_rl/data_plane/adapters/tq_mooncake_checkpoint.py#L1424-L1425" target="_blank" rel="noopener"><text x="334" y="376">non-owners dropped once · :1424</text></a>
+  <text class="note" x="334" y="400">86 nodes (changes 1–3, earlier branch):</text>
+  <text class="lbl" x="334" y="420">mean 14.6 s · worst 24.4 s</text>
+
+  <!-- column C -->
+  <rect class="col" x="630" y="38" width="300" height="470" rx="10"/>
+  <text class="lbl-b" x="644" y="62">After — storage units on</text>
+  <text class="note" x="644" y="78">segment &gt; 0, placement: inference, 5 units</text>
+  <rect class="node" x="644" y="90" width="272" height="96" rx="8"/>
+  <text class="hdr" x="656" y="108">train node</text>
+  <rect class="cli" x="656" y="120" width="54" height="34" rx="5"/><text class="chip" x="671" y="142">T0</text>
+  <rect class="cli" x="718" y="120" width="54" height="34" rx="5"/><text class="chip" x="733" y="142">T1</text>
+  <rect class="cli" x="780" y="120" width="54" height="34" rx="5"/><text class="chip" x="795" y="142">T2</text>
+  <rect class="cli" x="842" y="120" width="62" height="34" rx="5"/><text class="chip" x="852" y="142">ctrl</text>
+  <rect class="node" x="644" y="200" width="272" height="150" rx="8"/>
+  <text class="hdr" x="656" y="218">inference node</text>
+  <rect class="cli" x="656" y="230" width="54" height="34" rx="5"/><text class="chip" x="671" y="252">V0</text>
+  <rect class="cli" x="718" y="230" width="54" height="34" rx="5"/><text class="chip" x="733" y="252">V1</text>
+  <rect class="own" x="656" y="294" width="44" height="30" rx="5"/><text class="chip" x="664" y="314">U0</text>
+  <rect class="own" x="706" y="294" width="44" height="30" rx="5"/><text class="chip" x="714" y="314">U1</text>
+  <rect class="own" x="756" y="294" width="44" height="30" rx="5"/><text class="chip" x="764" y="314">U2</text>
+  <rect class="own" x="806" y="294" width="44" height="30" rx="5"/><text class="chip" x="814" y="314">U3</text>
+  <rect class="own" x="856" y="294" width="44" height="30" rx="5"/><text class="chip" x="864" y="314">U4</text>
+  <path class="arr" d="M683 264 L683 290"/><path class="arrh" d="M683 293 L679 285 L687 285 Z"/>
+  <text class="note" x="790" y="252">vLLM puts prefer</text>
+  <text class="note" x="790" y="266">a unit on its node</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/7847eeb7f6e194aa41d35f6fed5f2e5202ba0d90/nemo_rl/data_plane/mooncake_storage_unit.py#L42" target="_blank" rel="noopener"><text x="656" y="342">MooncakeStorageUnit (1 CPU each) · :42</text></a>
+  <text class="big" x="644" y="376">save calls 5 CPU units only</text>
+  <text class="good" x="644" y="396">no GPU process is on the save path</text>
+  <text class="note" x="644" y="420">86 nodes (changes 1–4, units on vLLM):</text>
+  <text class="lbl" x="644" y="440">mean 10.9 s · worst 13.5 s</text>
+
+  <text class="note" x="16" y="470">Numbers are from the PR description. The 86-node rows ran on an earlier branch of this code; this head was tested on 12 nodes.</text>
+  <text class="note" x="16" y="488">Trainer puts with units on go over RDMA to any unit. With placement "inference", trainer nodes hold no data plane memory at all.</text>
+</svg>
+
+<h2>Where the change is, in code</h2>
+
+<p class="where"><b>Where it lands: RL only.</b> No TransferQueue or Mooncake change. Three lines decide who owns a segment;
+the rest is wiring: <a href="https://github.com/NVIDIA-NeMo/RL/blob/7847eeb7f6e194aa41d35f6fed5f2e5202ba0d90/nemo_rl/algorithms/single_controller_utils/setup.py#L1959"><code>start_storage_units</code></a>
+in SingleController setup, and the units joining the save list in
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/7847eeb7f6e194aa41d35f6fed5f2e5202ba0d90/nemo_rl/algorithms/single_controller.py#L414"><code>single_controller.py:414</code></a>.</p>
+
+<pre class="diff"><span class="hunk">@@ vllm_worker_async.py L550 → L559 · setup_token_capture</span>
+<span class="del">-        dp_client = build_data_plane_client(dp_cfg, bootstrap=False)
+</span><span class="add">+        # Own no segment: a save would otherwise wait on this actor, whose event
++        # loop is busy serving rollouts. Capture writes land in other segments.
++        dp_client = build_data_plane_client(dp_cfg, bootstrap=False, segment_size=0)</span>
+
+<span class="hunk">@@ transfer_queue.py L859-L861 · _init_tq (the config every client attaches with)</span>
+<span class="del">-                    "global_segment_size": int(mooncake_cfg.global_segment_size),
+</span><span class="add">+                    "global_segment_size": 0
++                    if mooncake_cfg.storage_unit_segment_size
++                    else int(mooncake_cfg.global_segment_size),</span>
+
+<span class="hunk">@@ tq_mooncake_checkpoint.py L1423-L1425 · configure_checkpoint_workers</span>
+         manager._checkpoint_workers = list(workers)
+<span class="add">+        _, owners = _live_participants(manager)
++        manager._checkpoint_workers = list(owners.values())</span></pre>
+
+<p>The save code itself did not change. Both layouts run the same save: call every process with a segment
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/7847eeb7f6e194aa41d35f6fed5f2e5202ba0d90/nemo_rl/data_plane/adapters/tq_mooncake_checkpoint.py#L1388-L1391">:1388-1391</a>).
+The only difference is which processes have one. The <code>simple</code> backend gets the same node picker through
+<code>simple.storage_unit_placement</code>, which pins TransferQueue's own storage units to chosen nodes
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/7847eeb7f6e194aa41d35f6fed5f2e5202ba0d90/nemo_rl/data_plane/adapters/transfer_queue.py#L740">transfer_queue.py:740</a>).</p>
+
+<h2>What the review asks for</h2>
+
+<div class="warn">
+<b>The design holds; a few combinations need a guard.</b> These are in the review comments (the review is still pending, so its links work only for its author until it is published):
+<ul>
+<li><b>Megatron generation + token capture + storage units</b> stops at setup with a <code>TypeError</code>: only vLLM accepts the new <code>storage_segments</code> argument.</li>
+<li><b>Storage units outside the SingleController</b> (<code>run_grpo.py</code>, SFT v2) leave no process owning memory, so every put fails with a Mooncake error that never mentions storage units.</li>
+<li><b>One object over 2 GiB now fails.</b> The old pool registered big payloads one at a time; Mooncake's pool rejects anything above <code>max(4 × staging_buffer_size, local_buffer_size)</code>.</li>
+<li><b>Per-node cost of a placement.</b> The example configs set 2 units per node of the <i>whole</i> cluster, so <code>placement: inference</code> puts all of them on the vLLM nodes.</li>
+</ul>
+</div>
+
+</div>
+</body>
+</html>
