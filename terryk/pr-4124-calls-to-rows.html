@@ -187,7 +187,7 @@ With CC, a rewrite breaks the chain, so the ledger has several roots. RL no long
   <text class="walk-lbl" x="510" y="242">2. cut: read each call's own parent field, no walking</text>
   <text class="mono" x="510" y="260">c1 none → new [c1]   ·  c2 ← c1 → [c1, c2]</text><text class="mono" x="510" y="276">c3 none → new [c3]   ·  c5 ← c3 → [c3, c5]</text>
   <a href="https://github.com/NVIDIA-NeMo/RL/blob/c617a2c01fb4b848991b2cc245a861985045ed14/nemo_rl/experience/rollout_reassembler.py#L1149-L1163"><text x="510" y="292">rollout_reassembler.py L1149-1163</text></a>
-  <text class="walk-lbl" x="510" y="310">3. only now walk each chain up: c2 → c1, c5 → c3</text>
+  <text class="walk-lbl" x="510" y="310">3. reuse the old row builder per chain (re-walks as a check)</text>
   <!-- two rows -->
   <rect class="row" x="510" y="318" width="210" height="58" rx="7"/>
   <text class="lbl-b" x="520" y="338">group_g0_s0 · 6 tok</text>
@@ -224,9 +224,10 @@ With CC, a rewrite breaks the chain, so the ledger has several roots. RL no long
    c5  parent: c3 = previous call   →       chain 1: [c3, c5]
    (a parent that is not the previous selected call is an error)
 
-③ walk each chain up from its last call   (leaf set at <a href="https://github.com/NVIDIA-NeMo/RL/blob/c617a2c01fb4b848991b2cc245a861985045ed14/nemo_rl/experience/rollout_reassembler.py#L1166-L1172">L1166-1172</a>, walk in <a href="https://github.com/NVIDIA-NeMo/Gym/blob/b27e0db8faefee7e4760b5b1bfbfed713f528360/nemo_gym/token_id_capture/staging/rebuild.py#L201-L216">Gym rebuild.py L201-216</a>)
+③ reuse the old row builder on each chain; it re-walks the chain as a check and joins tokens   (leaf set at <a href="https://github.com/NVIDIA-NeMo/RL/blob/c617a2c01fb4b848991b2cc245a861985045ed14/nemo_rl/experience/rollout_reassembler.py#L1166-L1172">L1166-1172</a>, walk in <a href="https://github.com/NVIDIA-NeMo/Gym/blob/b27e0db8faefee7e4760b5b1bfbfed713f528360/nemo_gym/token_id_capture/staging/rebuild.py#L201-L216">Gym rebuild.py L201-216</a>)
    chain 0: c2 → c1 → stop (no parent)   → row group_g0_s0
    chain 1: c5 → c3 → stop (no parent)   → row group_g0_s1</div>
+<p>Step ② already knows every chain; step ③ only reuses the existing finalizer, which checks hashes and lengths and joins the stored tokens, and RL confirms it finds the same calls (<a href="https://github.com/NVIDIA-NeMo/RL/blob/c617a2c01fb4b848991b2cc245a861985045ed14/nemo_rl/experience/rollout_reassembler.py#L1263-L1273">L1263-1273</a>).</p>
 <p>Why the output and not just the tree: without compaction, the leaf's ancestors <i>are</i> the whole conversation. With compaction, c5's ancestors stop at c3, and nothing in the tree says c1 and c2 come first or were accepted. The agent's output is the only record of what it kept, and in what order.</p>
 
 <h2>What RL checks while it cuts</h2>
