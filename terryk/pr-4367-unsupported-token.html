@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NVIDIA-NeMo/RL #4367 — what happens to a sampled token the training policy filtered out</title>
+<style>
+:root{
+  --bg:#0d1117; --surface:#161b22; --surface2:#1c2128; --border:#30363d;
+  --text:#e6edf3; --dim:#8b949e; --accent:#58a6ff; --green:#3fb950;
+  --orange:#d29922; --red:#f85149;
+}
+:root[data-theme="light"]{
+  --bg:#ffffff; --surface:#f6f8fa; --surface2:#eaeef2; --border:#d0d7de;
+  --text:#1f2328; --dim:#59636e; --accent:#0969da; --green:#1a7f37;
+  --orange:#9a6700; --red:#cf222e;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:28px 20px 70px}
+h1{font-size:22px;margin:0 0 8px;line-height:1.3}
+h2{font-size:18px;margin:32px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;
+  font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
+.sub{color:var(--dim);font-size:13.5px;margin:0 0 16px}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);
+  border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;
+  font:13px/1 ui-monospace,Menlo,monospace;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.18)}
+.status{border:1px solid var(--border);border-radius:10px;background:var(--surface);
+  padding:2px 16px 10px;margin:0 0 20px}
+.status dl{display:grid;grid-template-columns:max-content 1fr;gap:4px 14px;margin:12px 0 0}
+.status dt{color:var(--dim);font-size:12px;text-transform:uppercase;letter-spacing:.04em;
+  white-space:nowrap;padding-top:2px}
+.status dd{margin:0;font-size:14px}
+.verdict{font-weight:700}
+.verdict.good{color:var(--green)}
+.verdict.open{color:var(--red)}
+.bg{border-left:3px solid var(--dim);background:var(--surface);padding:8px 14px;margin:0 0 16px;font-size:14px}
+.warn{border-left:3px solid var(--red);background:var(--surface);
+  padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0}
+.where{border-left:4px solid var(--accent);background:var(--surface);padding:6px 12px;margin:6px 0 10px}
+.diff{font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--surface);
+  border:1px solid var(--border);border-radius:8px;padding:12px;overflow-x:auto;white-space:pre;margin:10px 0}
+.diff .add{color:var(--green)}
+.diff .del{color:var(--red)}
+.diff .hunk{color:var(--accent)}
+.cref{margin:6px 0 0;font-size:13px}
+.cref a{display:inline-block;padding:4px 10px;border:1px solid var(--border);
+  border-radius:16px;background:var(--surface);font:12.5px ui-monospace,Menlo,monospace}
+.cref a:hover{background:var(--surface2);text-decoration:none}
+.tip{border-bottom:1px dotted var(--dim);cursor:help;position:relative;outline:none}
+.tip:hover::after,.tip:focus::after{content:attr(data-tip);position:absolute;left:0;top:1.7em;z-index:60;
+  width:max-content;max-width:min(340px,80vw);white-space:normal;background:var(--surface2);color:var(--text);
+  border:1px solid var(--border);border-radius:6px;padding:7px 10px;font:13px/1.45 -apple-system,sans-serif;
+  font-weight:400;box-shadow:0 4px 14px rgba(0,0,0,.3)}
+svg{max-width:100%;height:auto;display:block;margin:16px 0}
+svg .box{fill:var(--surface);stroke:var(--border);stroke-width:1.4}
+svg .lbl{fill:var(--text);font:12px ui-monospace,Menlo,monospace}
+svg .lbl-b{fill:var(--text);font:bold 13px -apple-system,sans-serif}
+svg .note{fill:var(--dim);font:11.5px -apple-system,sans-serif}
+svg .hdr{fill:var(--accent);font:bold 13px -apple-system,sans-serif}
+svg .ok{fill:var(--green);opacity:.55;stroke:var(--green)}
+svg .bad{fill:var(--red);opacity:.55;stroke:var(--red)}
+svg .off{fill:var(--dim);opacity:.25;stroke:var(--dim)}
+svg .t{fill:var(--text);font:bold 10.5px ui-monospace,Menlo,monospace}
+svg .good{fill:var(--green);font:bold 11.5px -apple-system,sans-serif}
+svg .bad-t{fill:var(--red);font:bold 11.5px -apple-system,sans-serif}
+svg .chg{fill:var(--orange);font:bold 11.5px -apple-system,sans-serif}
+svg .sep{stroke:var(--border);stroke-width:1}
+svg a text{text-decoration:underline;fill:var(--accent);font:11px ui-monospace,Menlo,monospace}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+  document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head>
+<body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+  function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+  function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
+    b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
+      else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+  document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+<div class="wrap">
+
+<h1>What happens to a sampled token that the training policy filtered out — on main, and with this PR</h1>
+<p class="sub">Explainer for <a href="https://github.com/NVIDIA-NeMo/RL/pull/4367">NVIDIA-NeMo/RL #4367</a>,
+which builds on <a href="https://github.com/NVIDIA-NeMo/RL/pull/4154">#4154</a> (already on main).
+Permalinks pin the PR head <code>ca01e85</code>; "main" links pin the PR's base <code>8661b47</code>.</p>
+
+<div class="status">
+<dl>
+  <dt>Before</dt>
+  <dd>On main, #4154 already removes such a token from <code>token_mask</code>, so the actor loss skips it — but so do the reference KL and the sequence-error check.</dd>
+  <dt>This PR</dt>
+  <dd>Keeps <code>token_mask</code> whole and leaves <code>-inf</code> in the logprobs; the loss builds its own actor mask. Reference KL now keeps the token.</dd>
+  <dt>Status</dt>
+  <dd><span class="verdict good">KL part: fixed by this PR.</span>
+  <span class="verdict open">New problem: open — not fixed in this PR.</span>
+  When <code>seq_logprob_error_threshold</code> is set, one such token now throws away the whole response. Raised in the review.</dd>
+</dl>
+</div>
+
+<div class="bg"><b>Background.</b> With top-k or top-p sampling, vLLM samples a token from its filtered set. The trainer
+recomputes the same filtering, but the two can disagree near the cut-off. Then the trainer gives the sampled token
+log-probability <code>-inf</code>: in its view the token could not be sampled. NeMo-RL compares three logprobs per token:
+<span class="tip" tabindex="0" data-tip="The trainer's live logprob, recomputed on every update. It carries the gradient.">curr</span>,
+<span class="tip" tabindex="0" data-tip="The trainer's logprob from before this step's updates. It is the 'old policy' in the PPO ratio exp(curr - prev).">prev</span> and
+<span class="tip" tabindex="0" data-tip="The logprob vLLM reported when it sampled the token.">generation</span>.
+Dotted words have a short explanation: hover or tap them.</div>
+
+<p>Before this PR, the worker replaced that <code>-inf</code> with 0 and removed the token from <code>token_mask</code>
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/8661b4753a19031626f4014512755061404aeb2e/nemo_rl/algorithms/loss/loss_input.py#L269-L280">main: loss_input.py</a>,
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/8661b4753a19031626f4014512755061404aeb2e/nemo_rl/algorithms/grpo.py#L3604-L3607">main: grpo.py write-back</a>).
+<code>token_mask</code> is shared by everything after it, so the token also left the reference KL.
+This PR keeps <code>-inf</code> on valid tokens
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/ca01e859d4d19090f7309a48281136d3d4c6694f/nemo_rl/models/megatron/train.py#L860-L873">megatron/train.py</a>)
+and lets the loss drop it from the actor terms only
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/ca01e859d4d19090f7309a48281136d3d4c6694f/nemo_rl/algorithms/loss/loss_functions.py#L657-L677">loss_functions.py</a>).
+But one more reader of <code>prev_logprobs</code> runs before the loss and was not changed: the sequence-error check.</p>
+
+<h2>One response, four tokens, token 3 filtered out</h2>
+
+<svg viewBox="0 0 900 470" role="img" aria-label="A four-token response where token 3 has prev logprob -inf. On main, token 3 is skipped everywhere and the response is kept. With the PR, reference KL keeps token 3, the loss denominator counts it, and the sequence-error check gives error infinity and drops the whole response.">
+  <text class="hdr" x="16" y="22">The response: 4 tokens. vLLM sampled token 3, but the trainer's top-k/top-p set does not contain it.</text>
+  <text class="lbl" x="16" y="50">generation</text>
+  <text class="lbl" x="16" y="70">prev</text>
+  <rect class="ok"  x="130" y="34" width="70" height="44"/><text class="t" x="142" y="50">-0.3</text><text class="t" x="142" y="70">-0.4</text>
+  <rect class="ok"  x="206" y="34" width="70" height="44"/><text class="t" x="218" y="50">-0.9</text><text class="t" x="218" y="70">-0.9</text>
+  <rect class="bad" x="282" y="34" width="70" height="44"/><text class="t" x="294" y="50">-2.0</text><text class="t" x="294" y="70">-inf</text>
+  <rect class="ok"  x="358" y="34" width="70" height="44"/><text class="t" x="370" y="50">-0.5</text><text class="t" x="370" y="70">-0.5</text>
+  <text class="note" x="142" y="94">token 1</text><text class="note" x="218" y="94">token 2</text><text class="note" x="294" y="94">token 3</text><text class="note" x="370" y="94">token 4</text>
+  <rect class="ok" x="470" y="40" width="14" height="12"/><text class="note" x="490" y="51">token counts here</text>
+  <rect class="off" x="470" y="60" width="14" height="12"/><text class="note" x="490" y="71">token skipped</text>
+  <rect class="bad" x="610" y="40" width="14" height="12"/><text class="note" x="630" y="51">token -inf, or whole response dropped</text>
+
+  <line class="sep" x1="16" y1="110" x2="884" y2="110"/>
+  <text class="lbl-b" x="250" y="132">main (with #4154)</text>
+  <text class="lbl-b" x="590" y="132">this PR</text>
+
+  <!-- row 1 actor loss -->
+  <text class="lbl-b" x="16" y="166">Actor loss</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/ca01e859d4d19090f7309a48281136d3d4c6694f/nemo_rl/algorithms/loss/loss_functions.py#L667-L677" target="_blank" rel="noopener"><text x="16" y="182">loss_functions.py:667</text></a>
+  <rect class="ok" x="250" y="152" width="22" height="18"/><rect class="ok" x="276" y="152" width="22" height="18"/><rect class="off" x="302" y="152" width="22" height="18"/><rect class="ok" x="328" y="152" width="22" height="18"/>
+  <text class="good" x="362" y="166">token 3 skipped</text>
+  <rect class="ok" x="590" y="152" width="22" height="18"/><rect class="ok" x="616" y="152" width="22" height="18"/><rect class="off" x="642" y="152" width="22" height="18"/><rect class="ok" x="668" y="152" width="22" height="18"/>
+  <text class="good" x="702" y="166">same — token 3 skipped</text>
+
+  <!-- row 2 reference KL -->
+  <line class="sep" x1="16" y1="196" x2="884" y2="196"/>
+  <text class="lbl-b" x="16" y="226">Reference KL</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/ca01e859d4d19090f7309a48281136d3d4c6694f/nemo_rl/algorithms/loss/loss_functions.py#L657-L663" target="_blank" rel="noopener"><text x="16" y="242">loss_functions.py:657</text></a>
+  <rect class="ok" x="250" y="212" width="22" height="18"/><rect class="ok" x="276" y="212" width="22" height="18"/><rect class="off" x="302" y="212" width="22" height="18"/><rect class="ok" x="328" y="212" width="22" height="18"/>
+  <text class="chg" x="362" y="226">token 3's KL term lost</text>
+  <rect class="ok" x="590" y="212" width="22" height="18"/><rect class="ok" x="616" y="212" width="22" height="18"/><rect class="ok" x="642" y="212" width="22" height="18"/><rect class="ok" x="668" y="212" width="22" height="18"/>
+  <text class="good" x="702" y="226">kept (KL uses unfiltered</text>
+  <text class="good" x="702" y="241">logprobs) — the fix</text>
+
+  <!-- row 3 denominator -->
+  <line class="sep" x1="16" y1="256" x2="884" y2="256"/>
+  <text class="lbl-b" x="16" y="286">Tokens counted</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/ca01e859d4d19090f7309a48281136d3d4c6694f/nemo_rl/models/megatron/data.py#L1199-L1204" target="_blank" rel="noopener"><text x="16" y="302">megatron/data.py:1199</text></a>
+  <text class="lbl" x="250" y="286">global_valid_toks = 3</text>
+  <text class="lbl" x="590" y="286">global_valid_toks = 4</text>
+  <text class="chg" x="590" y="304">actor loss now × 3/4 (small)</text>
+
+  <!-- row 4 seq error check -->
+  <line class="sep" x1="16" y1="318" x2="884" y2="318"/>
+  <text class="lbl-b" x="16" y="346">Sequence-error</text>
+  <text class="lbl-b" x="16" y="362">check (limit 2.0)</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/ca01e859d4d19090f7309a48281136d3d4c6694f/nemo_rl/algorithms/utils.py#L264-L283" target="_blank" rel="noopener"><text x="16" y="378">utils.py:264</text></a>
+  <rect class="ok" x="250" y="334" width="22" height="18"/><rect class="ok" x="276" y="334" width="22" height="18"/><rect class="off" x="302" y="334" width="22" height="18"/><rect class="ok" x="328" y="334" width="22" height="18"/>
+  <text class="lbl" x="250" y="372">error = 1.035</text>
+  <text class="good" x="362" y="348">response kept</text>
+  <rect class="bad" x="590" y="334" width="22" height="18"/><rect class="bad" x="616" y="334" width="22" height="18"/><rect class="bad" x="642" y="334" width="22" height="18"/><rect class="bad" x="668" y="334" width="22" height="18"/>
+  <text class="lbl" x="590" y="372">error = inf</text>
+  <text class="bad-t" x="702" y="348">whole response dropped</text>
+  <text class="note" x="702" y="364">from actor loss AND KL</text>
+
+  <line class="sep" x1="16" y1="392" x2="884" y2="392"/>
+  <text class="note" x="16" y="414">error = mean over counted tokens of exp(|generation − prev|). Main: (e^0.1 + 1 + 1) / 3 = 1.035 ≤ 2.0, so the response stays.</text>
+  <text class="note" x="16" y="432">PR: token 3 still counts, |−2.0 − (−inf)| = inf, so the error is inf and fails any limit. The logged max/mean error also read inf,</text>
+  <text class="note" x="16" y="450">even with no limit set. The same check runs in the GRPO, async GRPO, sync-TQ, PPO and SingleController drivers, and inside the loss.</text>
+</svg>
+
+<p class="cref" id="cref-c1">🔴 <a href="https://github.com/NVIDIA-NeMo/RL/pull/4367/files">review comment — loss_input.py:270</a></p>
+
+<h2>What would fix it — proposed, not in the PR</h2>
+
+<p class="where"><b>Where the fix lands: RL only.</b>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/ca01e859d4d19090f7309a48281136d3d4c6694f/nemo_rl/algorithms/utils.py#L264-L283"><code>compute_seq_logprob_errors</code></a>
+and its callers. No vLLM change: vLLM's own logprob is right; the trainer's filter is the side that disagrees.</p>
+
+<p>Nothing below is implemented or run. The check must skip a <code>-inf</code> token <b>only when top-k/top-p is on</b>.
+With filtering off, a <code>-inf</code> is a real bug, and existing tests
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/ca01e859d4d19090f7309a48281136d3d4c6694f/tests/unit/algorithms/test_single_forward_grpo.py#L162-L215">test_single_forward_grpo.py</a>)
+require that such a response is rejected. Skipping it unconditionally breaks one of them (NaN gradients).</p>
+
+<pre class="diff"><span class="hunk">@@ nemo_rl/algorithms/utils.py L264-L279 · compute_seq_logprob_errors</span>
+     token_mask: torch.Tensor,
+     sample_mask: torch.Tensor,
+<span class="add">+    exclude_unsupported: bool = False,
+</span> ) -> tuple[torch.Tensor, torch.Tensor]:
+     ...
+     mask = token_mask * sample_mask.unsqueeze(-1)
+<span class="add">+    if exclude_unsupported:
++        # Under top-k/top-p, -inf means "outside the trainer's filtered set":
++        # skip that token (as main did), not the whole response. NaN still fails.
++        mask = mask * (~torch.isneginf(policy_logprobs)).to(mask.dtype)
+</span>     counts = mask.sum(dim=-1)</pre>
+
+<p>Each caller passes <code>exclude_unsupported=need_top_k_or_top_p_filtering(sampling_params)</code> — the same test the
+workers already use to decide whether to filter
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/ca01e859d4d19090f7309a48281136d3d4c6694f/nemo_rl/algorithms/loss/loss_input.py#L269">loss_input.py:269</a>).
+That covers the driver call
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/ca01e859d4d19090f7309a48281136d3d4c6694f/nemo_rl/algorithms/grpo.py#L2846-L2855">grpo.py:2846</a>)
+and the in-loss call
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/ca01e859d4d19090f7309a48281136d3d4c6694f/nemo_rl/algorithms/loss/loss_functions.py#L625-L650">loss_functions.py:625</a>).
+With it, the example above gives error 1.035 again and the response stays.</p>
+
+<div class="warn">
+<strong>So what.</strong> The PR's goal — keep the KL on token 3 — is right, and the actor loss treats token 3 the same as main.
+But for anyone who sets <code>seq_logprob_error_threshold</code> together with top-k/top-p, one disagreeing token now throws
+away the whole response, and long responses are the most likely to contain one. No shipped recipe sets both, so CI will
+not catch it. Fix the check as above, and add a test with filtering on.
+</div>
+
+</div>
+</body>
+</html>
