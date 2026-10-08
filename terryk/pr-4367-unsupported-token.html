@@ -190,35 +190,40 @@ But one more reader of <code>prev_logprobs</code> runs before the loss and was n
 <h2>What would fix it — proposed, not in the PR</h2>
 
 <p class="where"><b>Where the fix lands: RL only.</b>
+the callers of
 <a href="https://github.com/NVIDIA-NeMo/RL/blob/ca01e859d4d19090f7309a48281136d3d4c6694f/nemo_rl/algorithms/utils.py#L264-L283"><code>compute_seq_logprob_errors</code></a>
-and its callers. No vLLM change: vLLM's own logprob is right; the trainer's filter is the side that disagrees.</p>
+(the drivers and <code>prepare_loss_input</code>). No vLLM change: vLLM's own logprob is right; the trainer's filter is the side that disagrees.</p>
 
 <p>Nothing below is implemented or run. The check must skip a <code>-inf</code> token <b>only when top-k/top-p is on</b>.
 With filtering off, a <code>-inf</code> is a real bug, and existing tests
 (<a href="https://github.com/NVIDIA-NeMo/RL/blob/ca01e859d4d19090f7309a48281136d3d4c6694f/tests/unit/algorithms/test_single_forward_grpo.py#L162-L215">test_single_forward_grpo.py</a>)
 require that such a response is rejected. Skipping it unconditionally breaks one of them (NaN gradients).</p>
 
-<pre class="diff"><span class="hunk">@@ nemo_rl/algorithms/utils.py L264-L279 · compute_seq_logprob_errors</span>
-     token_mask: torch.Tensor,
-     sample_mask: torch.Tensor,
-<span class="add">+    exclude_unsupported: bool = False,
-</span> ) -> tuple[torch.Tensor, torch.Tensor]:
+<p><code>compute_seq_logprob_errors</code> itself stays as it is. The caller narrows the mask first, because only
+the caller knows whether filtering is on. The driver side, as one example:</p>
+
+<pre class="diff"><span class="hunk">@@ nemo_rl/algorithms/grpo.py L2822-L2855 · compute_and_apply_seq_logprob_error_masking</span>
+     train_data: BatchedDataDict,
+     rewards: torch.Tensor,
+     seq_logprob_error_threshold: Optional[float],
+<span class="add">+    filtering_on: bool = False,
+</span> ) -> dict:
      ...
-     mask = token_mask * sample_mask.unsqueeze(-1)
-<span class="add">+    if exclude_unsupported:
+     prev_logprobs = train_data["prev_logprobs"][:, 1:]
+     generation_logprobs = train_data["generation_logprobs"][:, 1:]
+<span class="add">+    if filtering_on:
 +        # Under top-k/top-p, -inf means "outside the trainer's filtered set":
 +        # skip that token (as main did), not the whole response. NaN still fails.
-+        mask = mask * (~torch.isneginf(policy_logprobs)).to(mask.dtype)
-</span>     counts = mask.sum(dim=-1)</pre>
++        token_mask = token_mask * (~torch.isneginf(prev_logprobs)).to(token_mask.dtype)
+</span>     seq_mult_prob_error, valid_seq_mask = compute_seq_logprob_errors(</pre>
 
-<p>Each caller passes <code>exclude_unsupported=need_top_k_or_top_p_filtering(sampling_params)</code> — the same test the
-workers already use to decide whether to filter
+<p>Each driver passes <code>filtering_on=need_top_k_or_top_p_filtering(...)</code> with its sampling settings — the same
+test the workers use to decide whether to filter
 (<a href="https://github.com/NVIDIA-NeMo/RL/blob/ca01e859d4d19090f7309a48281136d3d4c6694f/nemo_rl/algorithms/loss/loss_input.py#L269">loss_input.py:269</a>).
-That covers the driver call
-(<a href="https://github.com/NVIDIA-NeMo/RL/blob/ca01e859d4d19090f7309a48281136d3d4c6694f/nemo_rl/algorithms/grpo.py#L2846-L2855">grpo.py:2846</a>)
-and the in-loss call
-(<a href="https://github.com/NVIDIA-NeMo/RL/blob/ca01e859d4d19090f7309a48281136d3d4c6694f/nemo_rl/algorithms/loss/loss_functions.py#L625-L650">loss_functions.py:625</a>).
-With it, the example above gives error 1.035 again and the response stays.</p>
+For the in-loss check
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/ca01e859d4d19090f7309a48281136d3d4c6694f/nemo_rl/algorithms/loss/loss_functions.py#L625-L650">loss_functions.py:625</a>),
+<code>prepare_loss_input</code> builds the same "inside the top-k/top-p set" mask in that branch and the loss ANDs it
+into <code>token_mask</code> before the check. With either, the example above gives error 1.035 again and the response stays.</p>
 
 <div class="warn">
 <strong>So what.</strong> The PR's goal — keep the KL on token 3 — is right, and the actor loss treats token 3 the same as main.
