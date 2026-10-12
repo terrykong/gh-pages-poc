@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NVIDIA-NeMo/RL #4537 — shared-prefix GRPO vs MiniMax Forge and QwenGyre</title>
+<style>
+:root{--bg:#0d1117;--surface:#161b22;--surface2:#1c2128;--border:#30363d;--text:#e6edf3;--dim:#8b949e;
+  --accent:#58a6ff;--green:#3fb950;--orange:#d29922;--red:#f85149;--purple:#bc8cff}
+:root[data-theme="light"]{--bg:#ffffff;--surface:#f6f8fa;--surface2:#eaeef2;--border:#d0d7de;--text:#1f2328;
+  --dim:#59636e;--accent:#0969da;--green:#1a7f37;--orange:#9a6700;--red:#cf222e;--purple:#8250df}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:28px 16px 70px}
+h1{font-size:22px;margin:0 0 8px;line-height:1.3}
+h2{font-size:18px;margin:30px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+a{color:var(--accent);text-decoration:none} a:hover{text-decoration:underline}
+code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
+.sub{color:var(--dim);font-size:13.5px;margin:0 0 14px}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);border:1px solid var(--border);
+  color:var(--text);border-radius:20px;padding:6px 12px;font:13px/1 ui-monospace,Menlo,monospace;cursor:pointer}
+.status{border:1px solid var(--border);border-radius:10px;background:var(--surface);padding:2px 16px 10px;margin:0 0 16px}
+.status dl{display:grid;grid-template-columns:max-content 1fr;gap:4px 14px;margin:12px 0 0}
+.status dt{color:var(--dim);font-size:12px;text-transform:uppercase;letter-spacing:.04em;white-space:nowrap;padding-top:2px}
+.status dd{margin:0;font-size:14px}
+.verdict{font-weight:700;color:var(--orange)}
+nav.chain{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 6px}
+nav.chain a,nav.chain span{display:inline-block;padding:5px 11px;border:1px solid var(--border);border-radius:20px;
+  background:var(--surface);color:var(--accent);font-size:12.5px;white-space:nowrap}
+nav.chain span.here{background:var(--accent);color:var(--bg);border-color:var(--accent);font-weight:600}
+p.chainnote{color:var(--dim);font-size:12px;margin:0 0 16px}
+.tw{overflow-x:auto}
+table{border-collapse:collapse;width:100%;font-size:13.5px;margin:8px 0}
+th,td{border:1px solid var(--border);padding:6px 9px;vertical-align:top;text-align:left}
+th{background:var(--surface);font-weight:600}
+td:first-child{color:var(--dim);white-space:nowrap}
+.hl{border-left:3px solid var(--green);background:var(--surface);padding:10px 16px;margin:18px 0;border-radius:0 8px 8px 0}
+svg{max-width:100%;height:auto;display:block;margin:12px 0}
+svg .panel{fill:var(--surface);stroke:var(--border)}
+svg .ph{fill:var(--text);font:bold 13.5px -apple-system,sans-serif}
+svg .pq{fill:var(--accent);font:12px -apple-system,sans-serif}
+svg .pn{fill:var(--dim);font:11.5px -apple-system,sans-serif}
+svg .pk{fill:var(--text);font:bold 12px -apple-system,sans-serif}
+svg .lg{fill:var(--dim);font:11px -apple-system,sans-serif}
+svg .nl{fill:var(--bg);font:bold 11px -apple-system,sans-serif}
+svg .n-once{fill:var(--accent)} svg .n-comp{fill:var(--green)} svg .n-store{fill:var(--purple)} svg .n-ctx{fill:var(--orange)}
+svg .edge{stroke:var(--dim);stroke-width:1.5;fill:none}
+svg .sep{stroke:var(--border);stroke-dasharray:4 4}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head>
+<body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+function wire(){var b=document.getElementById('theme-toggle');if(!b)return;b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+<div class="wrap">
+
+<h1>How shared-prefix GRPO in NeMo RL differs from MiniMax Forge and QwenGyre</h1>
+<p class="sub"><a href="https://github.com/NVIDIA-NeMo/RL/pull/4537">NVIDIA-NeMo/RL #4537</a> (draft) at <code>f524ddc9</code>, compared with the
+<a href="https://www.minimax.io/news/forge-scalable-agent-rl-framework-and-algorithm">Forge blog post</a> and the <a href="https://arxiv.org/abs/2609.33848">QwenGyre paper (arXiv 2609.33848)</a>. Where a source says nothing on a point, the table says "not described".</p>
+
+<div class="status"><dl>
+<dt>Before</dt><dd>NeMo RL computed every completion's prompt again for each completion, in both the log-probability pass and training.</dd>
+<dt>This PR</dt><dd>Computes each GRPO prompt once per forward, with its completions as branches of a one-level tree.</dd>
+<dt>Status</dt><dd><span class="verdict">Proposed — draft, off by default.</span> Needs the unmerged Megatron-LM #7914.</dd>
+</dl></div>
+
+<nav class="chain"><a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4537-batch-forming.html">how the batch is formed</a>
+<span class="here">vs Forge and QwenGyre</span></nav>
+<p class="chainnote">Two pages on this PR — this one: what each system shares, and where the work is saved.</p>
+
+<p>All three avoid repeated work on text that many training rows have in common. They differ in <b>what</b> they treat as common and <b>where</b> they save the work. This PR shares only the GRPO prompt and saves forward compute. Forge shares multi-turn agent history and also saves forward compute. QwenGyre stores agent runs as trees but trains ordinary rows; it saves by not training the same target tokens twice.</p>
+
+<svg viewBox="0 0 940 400" role="img" aria-label="Three ways to avoid repeated work. This PR: one prompt with its completions, computed once per forward. Forge: a deeper multi-turn history tree, computed as a tree. QwenGyre: an execution tree kept in storage, then up to five paths trained as ordinary rows with repeated targets masked.">
+<rect class="panel" x="8" y="8" width="292" height="384" rx="10"/>
+<rect class="panel" x="316" y="8" width="292" height="384" rx="10"/>
+<rect class="panel" x="624" y="8" width="308" height="384" rx="10"/>
+<text class="ph" x="20" y="32">This PR (+ Megatron-LM #7914)</text>
+<text class="ph" x="328" y="32">MiniMax Forge</text>
+<text class="ph" x="636" y="32">QwenGyre</text>
+<text class="pq" x="20" y="52">What is shared: one GRPO prompt</text>
+<text class="pq" x="328" y="52">What is shared: agent history</text>
+<text class="pq" x="636" y="52">What is shared: one agent run</text>
+<rect class="n-once" x="95" y="70" width="110" height="22" rx="4"/><text class="nl" x="150.0" y="85" text-anchor="middle">prompt</text><path class="edge" d="M150 92 C150 111.0 60 111.0 60 130"/><path class="edge" d="M150 92 C150 111.0 150 111.0 150 130"/><path class="edge" d="M150 92 C150 111.0 240 111.0 240 130"/><rect class="n-comp" x="30" y="130" width="60" height="22" rx="4"/><text class="nl" x="60.0" y="145" text-anchor="middle">c1</text><rect class="n-comp" x="120" y="130" width="60" height="22" rx="4"/><text class="nl" x="150.0" y="145" text-anchor="middle">c2</text><rect class="n-comp" x="210" y="130" width="60" height="22" rx="4"/><text class="nl" x="240.0" y="145" text-anchor="middle">c3</text>
+<rect class="n-once" x="403" y="70" width="110" height="22" rx="4"/><text class="nl" x="458.0" y="85" text-anchor="middle">system + task</text><path class="edge" d="M458 92 C458 106.0 398 106.0 398 120"/><path class="edge" d="M458 92 C458 106.0 523 106.0 523 120"/><rect class="n-once" x="348" y="120" width="100" height="22" rx="4"/><text class="nl" x="398.0" y="135" text-anchor="middle">turns 1–3</text><rect class="n-comp" x="483" y="120" width="80" height="22" rx="4"/><text class="nl" x="523.0" y="135" text-anchor="middle">branch</text><path class="edge" d="M398 142 C398 156.0 358 156.0 358 170"/><path class="edge" d="M398 142 C398 156.0 443 156.0 443 170"/><rect class="n-comp" x="323" y="170" width="70" height="22" rx="4"/><text class="nl" x="358.0" y="185" text-anchor="middle">turn 4a</text><rect class="n-comp" x="408" y="170" width="70" height="22" rx="4"/><text class="nl" x="443.0" y="185" text-anchor="middle">turn 4b</text>
+<rect class="n-store" x="711" y="70" width="110" height="22" rx="4"/><text class="nl" x="766.0" y="85" text-anchor="middle">main agent</text><path class="edge" d="M766 92 C766 106.0 696 106.0 696 120"/><path class="edge" d="M766 92 C766 106.0 836 106.0 836 120"/><rect class="n-store" x="651" y="120" width="90" height="22" rx="4"/><text class="nl" x="696.0" y="135" text-anchor="middle">compaction</text><rect class="n-store" x="796" y="120" width="80" height="22" rx="4"/><text class="nl" x="836.0" y="135" text-anchor="middle">sub-agent</text><path class="edge" d="M696 142 C696 156.0 696 156.0 696 170"/><rect class="n-store" x="651" y="170" width="90" height="22" rx="4"/><text class="nl" x="696.0" y="185" text-anchor="middle">summary</text>
+<text class="pn" x="20" y="182">depth 1 only (a "star")</text>
+<text class="pn" x="20" y="198">matched by group tag + exact prompt tokens</text>
+<text class="pn" x="328" y="212">"merged into a single prefix tree</text>
+<text class="pn" x="328" y="228">at the sample level"; depth not stated</text>
+<text class="pn" x="636" y="204">trained as rows, ≤5 paths per run:</text>
+<rect class="n-ctx" x="636" y="212" width="120" height="14"/><rect class="n-comp" x="756" y="212" width="60" height="14"/><rect class="n-ctx" x="636" y="230" width="150" height="14"/><rect class="n-comp" x="786" y="230" width="70" height="14"/><rect class="n-ctx" x="636" y="248" width="90" height="14"/><rect class="n-comp" x="726" y="248" width="50" height="14"/>
+<text class="pn" x="636" y="278">context recomputed in every row;</text>
+<text class="pn" x="636" y="294">tokens already trained are masked</text>
+
+<line class="sep" x1="20" y1="310" x2="920" y2="310"/>
+<text class="pk" x="20" y="332">Forward: tree attention, prompt once</text>
+<text class="pk" x="328" y="332">Forward: tree attention (Magi)</text>
+<text class="pk" x="636" y="332">Forward: ordinary expanded rows</text>
+<text class="pn" x="20" y="352">Saves: prompt compute (24–48% fewer</text>
+<text class="pn" x="20" y="368">tokens in page 1's example)</text>
+<text class="pn" x="328" y="352">Saves: history compute; claims "40x"</text>
+<text class="pn" x="328" y="368">with no baseline given</text>
+<text class="pn" x="636" y="352">Saves: duplicate targets; 25.2% less</text>
+<text class="pn" x="636" y="368">fwd-bwd vs. training every path</text>
+
+<rect class="n-once" x="20" y="380" width="12" height="9"/><text class="lg" x="36" y="388">computed once</text>
+<rect class="n-comp" x="130" y="380" width="12" height="9"/><text class="lg" x="146" y="388">trained branch</text>
+<rect class="n-store" x="636" y="380" width="12" height="9"/><text class="lg" x="652" y="388">stored once</text>
+<rect class="n-ctx" x="736" y="380" width="12" height="9"/><text class="lg" x="752" y="388">recomputed context</text>
+</svg>
+
+<h2>Side by side</h2>
+<div class="tw"><table>
+<tr><th></th><th>This PR</th><th>MiniMax Forge</th><th>QwenGyre</th></tr>
+<tr><td>Unit that is shared</td><td>The prompt of one GRPO group</td><td>Agent history: completions "merged into a single prefix tree at the sample level"</td><td>All model calls of one agent run, as a tree; branches come from context compaction and sub-agents</td></tr>
+<tr><td>How shared text is found</td><td>Same group tag <b>and</b> identical prompt token IDs; prompt end comes from the rollout (<a href="https://github.com/jalbericiola/Megatron-LM/blob/e1786cd6b986e0196ca2308d75817845e0994d3b/megatron/rl/shared_prefix_packing.py#L516-L635">planner</a>)</td><td>Not described</td><td>A proxy records exact input/output tokens per call and matches each new request against stored paths</td></tr>
+<tr><td>Tree depth</td><td>1 (prompt → completions); deeper trees are rejected (<a href="https://github.com/jalbericiola/Megatron-LM/blob/e1786cd6b986e0196ca2308d75817845e0994d3b/megatron/rl/tree_layout.py#L157-L178">iter_star_roots</a>)</td><td>Not stated; multi-turn implies deeper</td><td>Any depth</td></tr>
+<tr><td>Forward pass</td><td>Tree: FlashAttention with each completion seeing only its prompt; Mamba state copied per branch (<a href="https://github.com/jalbericiola/Megatron-LM/blob/e1786cd6b986e0196ca2308d75817845e0994d3b/megatron/core/models/hybrid/shared_prefix_fused.py#L168-L195">attention</a>)</td><td>Tree, using Magi Attention</td><td>Chosen paths become ordinary token rows; the paper describes no tree attention</td></tr>
+<tr><td>Batch and rank balancing</td><td>Whole groups per rank, longest first; bins packed by full length; one all-reduce agrees the forward count (<a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4537-batch-forming.html">page 1</a>)</td><td>Not described</td><td>Rows streamed as small steps that workers pull from a shared queue; faster workers take more</td></tr>
+<tr><td>Loss</td><td>Exactly the dense GRPO loss on a rebuilt <code>[rows, S−1]</code> tensor (<a href="https://github.com/NVIDIA-NeMo/RL/blob/f524ddc9fc4cbf96f8c7f128e828614810faaff9/nemo_rl/models/megatron/train.py#L1024-L1045">train.py</a>)</td><td>Tree "deconstructed … to compute the loss normally"</td><td>Averaged within each run, then across runs; at most 5 paths per run, repeated targets masked</td></tr>
+<tr><td>Same numbers as no sharing?</td><td>Same loss formula; BF16 gradients differ slightly, an open question in the <a href="https://github.com/NVIDIA-NeMo/RL/blob/f524ddc9fc4cbf96f8c7f128e828614810faaff9/docs/design-docs/shared-prefix-execution.md#L161-L172">design doc</a></td><td>Claims "strict mathematical equivalence"</td><td>Not the goal: it changes which tokens are trained</td></tr>
+<tr><td>Reported speed</td><td>26% lower step time on 848 GPUs, measured together with a 3× packing budget and different rollout work, so not prefix sharing alone</td><td>"40x training speedup", no baseline given</td><td>25.2% less forward-backward time with 5 paths vs all paths; its up-to-1.85× end-to-end gains come from GPU scheduling, not the tree</td></tr>
+</table></div>
+
+<h2>What this PR does not do</h2>
+<ul>
+<li><b>No multi-turn sharing.</b> Turns after the first are part of the completion, so two branches that share turns 1–3 still compute those turns twice. Forge targets exactly this case.</li>
+<li><b>No sharing across bins or ranks.</b> Each forward stores its own copy of a prompt, and the token budget still counts rows at full length.</li>
+<li><b>No target selection.</b> GRPO completions don't overlap, so QwenGyre's masking has nothing to remove here.</li>
+</ul>
+
+<div class="hl"><b>So what.</b> This PR is the GRPO-shaped special case of Forge's idea: one shared prompt, one level deep, fully specified down to the rank and the attention kernel. Forge's post claims more, but describes too little to compare packing or exactness. QwenGyre solves a different problem: it limits repeated <em>training targets</em> in long agent runs, and still recomputes shared context. Extending this PR to multi-turn agents would need deeper trees, which the layout can describe but the model code rejects today.</div>
+
+</div>
+</body>
+</html>
