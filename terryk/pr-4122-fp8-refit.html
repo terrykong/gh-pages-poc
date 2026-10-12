@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NVIDIA-NeMo/RL #4122 — what changes in a TRT-LLM refit when rollouts run in FP8</title>
+<style>
+:root{
+  --bg:#0d1117; --surface:#161b22; --surface2:#1c2128; --border:#30363d;
+  --text:#e6edf3; --dim:#8b949e; --accent:#58a6ff; --green:#3fb950;
+  --orange:#d29922; --red:#f85149;
+}
+:root[data-theme="light"]{
+  --bg:#ffffff; --surface:#f6f8fa; --surface2:#eaeef2; --border:#d0d7de;
+  --text:#1f2328; --dim:#59636e; --accent:#0969da; --green:#1a7f37;
+  --orange:#9a6700; --red:#cf222e;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:28px 20px 70px}
+h1{font-size:22px;margin:0 0 8px;line-height:1.3}
+h2{font-size:18px;margin:30px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;
+  font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
+.sub{color:var(--dim);font-size:13.5px;margin:0 0 14px}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);
+  border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;
+  font:13px/1 ui-monospace,Menlo,monospace;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.18)}
+.status{border:1px solid var(--border);border-radius:10px;background:var(--surface);padding:2px 16px 10px;margin:0 0 16px}
+.status dl{display:grid;grid-template-columns:max-content 1fr;gap:4px 14px;margin:12px 0 0}
+.status dt{color:var(--dim);font-size:12px;text-transform:uppercase;letter-spacing:.04em;white-space:nowrap;padding-top:2px}
+.status dd{margin:0;font-size:14px}
+.verdict{font-weight:700}.verdict.good{color:var(--green)}.verdict.open{color:var(--red)}
+nav.chain{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 6px;padding:0}
+nav.chain a,nav.chain span{display:inline-block;padding:5px 11px;border:1px solid var(--border);
+  border-radius:20px;background:var(--surface);text-decoration:none;color:var(--accent);
+  font-size:12.5px;line-height:1.3;white-space:nowrap}
+nav.chain a:hover{background:var(--surface2)}
+nav.chain span.here{background:var(--accent);color:var(--bg);border-color:var(--accent);font-weight:600}
+p.chainnote{color:var(--dim);font-size:12px;margin:0 0 18px}
+.bg{border-left:4px solid var(--dim);background:var(--surface);padding:8px 14px;margin:0 0 14px;font-size:14px}
+.hl{border-left:3px solid var(--accent);background:var(--surface);padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0}
+.cref{margin:6px 0 0;font-size:13px}
+.cref a{display:inline-block;padding:4px 10px;border:1px solid var(--border);border-radius:16px;background:var(--surface);font:12.5px ui-monospace,Menlo,monospace}
+.tip{border-bottom:1px dotted var(--dim);cursor:help;position:relative;outline:none}
+.tip:hover::after,.tip:focus::after{content:attr(data-tip);position:absolute;left:0;top:1.7em;z-index:60;
+  width:max-content;max-width:min(340px,80vw);white-space:normal;background:var(--surface2);color:var(--text);
+  border:1px solid var(--border);border-radius:6px;padding:7px 10px;font:13px/1.45 -apple-system,sans-serif;
+  font-weight:400;box-shadow:0 4px 14px rgba(0,0,0,.3)}
+svg{max-width:100%;height:auto;display:block;margin:14px 0}
+svg .box{fill:var(--surface);stroke:var(--border);stroke-width:1.4}
+svg .new{fill:var(--surface);stroke:var(--orange);stroke-width:2}
+svg .same{fill:var(--surface);stroke:var(--green);stroke-width:2}
+svg .lbl{fill:var(--text);font:11.5px ui-monospace,Menlo,monospace}
+svg .lbl-b{fill:var(--text);font:bold 13px -apple-system,sans-serif}
+svg .note{fill:var(--dim);font:11.5px -apple-system,sans-serif}
+svg .hdr{fill:var(--accent);font:bold 13px -apple-system,sans-serif}
+svg .or{fill:var(--orange);font:bold 11.5px -apple-system,sans-serif}
+svg .gr{fill:var(--green);font:bold 11.5px -apple-system,sans-serif}
+svg .arr{stroke:var(--dim);stroke-width:1.4;fill:none}
+svg a text{text-decoration:underline;fill:var(--accent);font:11px ui-monospace,Menlo,monospace}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+  document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head>
+<body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+  function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+  function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
+    b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
+      else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+  document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+<div class="wrap">
+
+<h1>What changes in a TensorRT-LLM weight refit when rollouts run in FP8</h1>
+<p class="sub"><a href="https://github.com/NVIDIA-NeMo/RL/pull/4122">NVIDIA-NeMo/RL #4122</a>
+(Qwen3.5 routed-expert block-FP8 / MXFP8 refit). All permalinks pin the PR head <code>6908199</code>.</p>
+
+<div class="status"><dl>
+  <dt>Before</dt><dd>TensorRT-LLM rollouts ran only in BF16. Every refit copied the trainer's BF16 weights into a BF16 engine as-is.</dd>
+  <dt>This PR</dt><dd>Adds <code>trtllm_cfg.precision: fp8</code>. The trainer still sends BF16; the inference worker turns the MoE expert weights into FP8 (plus scales) on arrival.</dd>
+  <dt>Status</dt><dd><span class="verdict good">New feature, proposed in this PR.</span> The default setup is consistent end to end. Setting <code>quantization_ignore_patterns</code> has a bug — see the second page.</dd>
+</dl></div>
+
+<nav class="chain">
+  <span class="here">FP8 refit vs BF16 refit</span>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4122-fp8-silent-cast.html">ignore patterns cast FP8 into BF16</a>
+</nav>
+<p class="chainnote">Two pages on this PR, one question each — this one: how the new path compares with the existing one.</p>
+
+<div class="bg"><b>Background.</b> A <i>refit</i> copies the trainer's new weights into the inference engine after each
+training step. With TRT-LLM on separate GPUs, the trainer broadcasts BF16 tensors over NCCL and each
+inference worker loads them. Dotted words have a short explanation: hover or tap them.</div>
+
+<p>The trainer side does not change: it sends the same BF16 tensors it always sent. Two things change on the
+inference side. At startup, the engine is built with an FP8
+<span class="tip" tabindex="0" data-tip="A dict TRT-LLM reads to decide which Linear layers to build in FP8: quant_method fp8, 128x128 blocks, and a list of modules to keep in BF16.">quantization config</span>
+and empty weights
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/6908199bb045f3219fff3280be740401bf8c35db/nemo_rl/models/generation/trtllm/quantization/fp8.py#L239-L280"><code>configure_fp8_llm_kwargs</code></a>).
+On every refit, the worker converts the incoming expert weights before loading them
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/6908199bb045f3219fff3280be740401bf8c35db/nemo_rl/models/generation/trtllm/trtllm_backend.py#L213-L225"><code>load_model_weight_func</code></a>).
+Both paths then end in the same TRT-LLM call.</p>
+
+<h2>One refit, side by side</h2>
+
+<svg viewBox="0 0 900 470" role="img" aria-label="Two lanes, BF16 refit and FP8 refit, showing the same weights at each step. They differ only at engine startup and at the convert step, and both end in model_loader.reload.">
+  <text class="hdr" x="16" y="22">Same tiny MoE layer in both lanes: 2 experts, intermediate 128, hidden 256 (real CPU run of the PR code)</text>
+  <text class="lbl-b" x="200" y="50">Existing: BF16 refit</text>
+  <text class="lbl-b" x="600" y="50">New: precision: fp8</text>
+
+  <text class="note" x="16" y="82">1. engine startup</text>
+  <rect class="box" x="140" y="62" width="330" height="50" rx="6"/>
+  <text class="lbl" x="152" y="82">every Linear built in BF16</text>
+  <text class="lbl" x="152" y="100">weights loaded from the checkpoint</text>
+  <rect class="new" x="490" y="62" width="398" height="50" rx="6"/>
+  <text class="lbl" x="502" y="80">quant: fp8, blocks [128,128], load: "dummy"</text>
+  <text class="lbl" x="502" y="96">keep BF16: self_attn*, mlp.gate, shared_expert*…</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/6908199bb045f3219fff3280be740401bf8c35db/nemo_rl/models/generation/trtllm/quantization/fp8.py#L41-L58"><text x="502" y="109">default keep-BF16 list fp8.py:41-58</text></a>
+
+  <text class="note" x="16" y="152">2. trainer sends</text>
+  <rect class="same" x="140" y="132" width="748" height="50" rx="6"/>
+  <text class="gr" x="152" y="150">identical in both lanes</text>
+  <text class="lbl" x="152" y="168">experts.gate_up_proj [2,256,256] bf16 · mlp.gate.weight [2,256] bf16 · q_proj bf16</text>
+
+  <text class="note" x="16" y="234">3. worker converts</text>
+  <rect class="box" x="140" y="200" width="330" height="96" rx="6"/>
+  <text class="lbl" x="152" y="222">dict(weight_list)</text>
+  <text class="lbl" x="152" y="240">nothing changes:</text>
+  <text class="lbl" x="152" y="258">experts.gate_up_proj [2,256,256] bf16</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/6908199bb045f3219fff3280be740401bf8c35db/nemo_rl/models/generation/trtllm/trtllm_backend.py#L224-L225"><text x="152" y="284">trtllm_backend.py:224-225</text></a>
+  <rect class="new" x="490" y="200" width="398" height="96" rx="6"/>
+  <text class="or" x="502" y="218">fp8.load_weights: experts only</text>
+  <text class="lbl" x="502" y="236">experts.0.gate_proj.weight [128,256] e4m3</text>
+  <text class="lbl" x="502" y="252">experts.0.gate_proj.weight_scale_inv [1,2] fp32</text>
+  <text class="lbl" x="502" y="268">… ×2 experts ×3 (gate, up, down) = 12 tensors</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/6908199bb045f3219fff3280be740401bf8c35db/nemo_rl/models/generation/trtllm/quantization/fp8.py#L565-L604"><text x="502" y="286">load_weights fp8.py:565</text></a>
+
+  <text class="note" x="16" y="330">router, attention</text>
+  <rect class="same" x="140" y="312" width="748" height="34" rx="6"/>
+  <text class="lbl" x="152" y="334">both lanes: mlp.gate.weight [2,256] bf16 and self_attn.q_proj.weight stay BF16, untouched</text>
+
+  <path class="arr" d="M305 346 L305 372 M300 366 L305 372 L310 366"/>
+  <path class="arr" d="M689 346 L689 372 M684 366 L689 372 L694 366"/>
+  <text class="note" x="16" y="398">4. load (same call)</text>
+  <rect class="same" x="140" y="376" width="748" height="44" rx="6"/>
+  <text class="gr" x="152" y="394">the lanes merge here</text>
+  <text class="lbl" x="152" y="410">model_engine.model_loader.reload(model, weights, allow_partial_loading=True)</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/6908199bb045f3219fff3280be740401bf8c35db/nemo_rl/models/generation/trtllm/trtllm_backend.py#L226-L230"><text x="700" y="394">trtllm_backend.py:226</text></a>
+
+  <rect class="same" x="16" y="440" width="14" height="12"/><text class="note" x="36" y="451">same in both</text>
+  <rect class="new" x="140" y="440" width="14" height="12"/><text class="note" x="160" y="451">new in the FP8 lane</text>
+  <text class="note" x="300" y="451">MXFP8 (is_mx: true): same names, scale is uint8 [128, 8] (one per 32 values)</text>
+</svg>
+
+<h2>What still differs after they merge</h2>
+<p>Only the dictionary handed to <code>reload</code>. In BF16 it holds one fused tensor per projection. In FP8 it
+holds one tensor per expert and projection, each with a <code>weight_scale_inv</code> partner, and the
+engine's FP8 expert layers read those scales. Everything around the call is shared: the NCCL receive, the
+<span class="tip" tabindex="0" data-tip="WorkerExtension.begin/finalize/finish_weight_update in the pinned TRT-LLM. finish also clears the prefix cache, so new requests never reuse KV computed with old weights.">begin/finish weight-update calls</span>,
+and the prefix-cache reset. Two FP8-only guards are new: setup checks that something will actually be
+quantized (<a href="https://github.com/NVIDIA-NeMo/RL/blob/6908199bb045f3219fff3280be740401bf8c35db/nemo_rl/models/generation/trtllm/quantization/fp8.py#L199-L236"><code>validate_routed_experts</code></a>),
+and a refit that fails halfway marks the worker as unusable instead of serving a mix of old and new weights
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/6908199bb045f3219fff3280be740401bf8c35db/nemo_rl/models/generation/trtllm/trtllm_backend.py#L154-L179"><code>_abort_weight_update_after_failure</code></a>).</p>
+
+<div class="hl"><b>Why keep both.</b> BF16 is the reference and needs no extra choices. FP8 halves the bytes of every expert weight,
+which is where most of a MoE model's weights live, but the rollouts now sample from a slightly different model than the one
+being trained. The PR does not yet show how large that gap is (no reward or
+<code>gen_kl_error</code> curves), so that is the main open question for this feature.</div>
+
+</div>
+</body>
+</html>

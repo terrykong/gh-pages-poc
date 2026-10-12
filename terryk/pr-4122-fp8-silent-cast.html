@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NVIDIA-NeMo/RL #4122 — why setting quantization_ignore_patterns can silently corrupt the MoE router</title>
+<style>
+:root{
+  --bg:#0d1117; --surface:#161b22; --surface2:#1c2128; --border:#30363d;
+  --text:#e6edf3; --dim:#8b949e; --accent:#58a6ff; --green:#3fb950;
+  --orange:#d29922; --red:#f85149;
+}
+:root[data-theme="light"]{
+  --bg:#ffffff; --surface:#f6f8fa; --surface2:#eaeef2; --border:#d0d7de;
+  --text:#1f2328; --dim:#59636e; --accent:#0969da; --green:#1a7f37;
+  --orange:#9a6700; --red:#cf222e;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:28px 20px 70px}
+h1{font-size:22px;margin:0 0 8px;line-height:1.3}
+h2{font-size:18px;margin:30px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;
+  font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
+.sub{color:var(--dim);font-size:13.5px;margin:0 0 14px}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);
+  border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;
+  font:13px/1 ui-monospace,Menlo,monospace;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.18)}
+.status{border:1px solid var(--border);border-radius:10px;background:var(--surface);padding:2px 16px 10px;margin:0 0 16px}
+.status dl{display:grid;grid-template-columns:max-content 1fr;gap:4px 14px;margin:12px 0 0}
+.status dt{color:var(--dim);font-size:12px;text-transform:uppercase;letter-spacing:.04em;white-space:nowrap;padding-top:2px}
+.status dd{margin:0;font-size:14px}
+.verdict{font-weight:700}.verdict.good{color:var(--green)}.verdict.open{color:var(--red)}
+nav.chain{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 6px;padding:0}
+nav.chain a,nav.chain span{display:inline-block;padding:5px 11px;border:1px solid var(--border);
+  border-radius:20px;background:var(--surface);text-decoration:none;color:var(--accent);
+  font-size:12.5px;line-height:1.3;white-space:nowrap}
+nav.chain a:hover{background:var(--surface2)}
+nav.chain span.here{background:var(--accent);color:var(--bg);border-color:var(--accent);font-weight:600}
+p.chainnote{color:var(--dim);font-size:12px;margin:0 0 18px}
+.warn{border-left:3px solid var(--red);background:var(--surface);padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0}
+.where{border-left:4px solid var(--accent);background:var(--surface);padding:6px 12px;margin:6px 0 10px}
+.cref{margin:6px 0 0;font-size:13px}
+.cref a{display:inline-block;padding:4px 10px;border:1px solid var(--border);border-radius:16px;background:var(--surface);font:12.5px ui-monospace,Menlo,monospace}
+.cref a:hover{background:var(--surface2);text-decoration:none}
+.tip{border-bottom:1px dotted var(--dim);cursor:help;position:relative;outline:none}
+.tip:hover::after,.tip:focus::after{content:attr(data-tip);position:absolute;left:0;top:1.7em;z-index:60;
+  width:max-content;max-width:min(340px,80vw);white-space:normal;background:var(--surface2);color:var(--text);
+  border:1px solid var(--border);border-radius:6px;padding:7px 10px;font:13px/1.45 -apple-system,sans-serif;
+  font-weight:400;box-shadow:0 4px 14px rgba(0,0,0,.3)}
+.diff{font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--surface);
+  border:1px solid var(--border);border-radius:8px;padding:12px;overflow-x:auto;white-space:pre;margin:10px 0}
+.diff .add{color:var(--green)}.diff .del{color:var(--red)}.diff .hunk{color:var(--accent)}
+svg{max-width:100%;height:auto;display:block;margin:14px 0}
+svg .box{fill:var(--surface);stroke:var(--border);stroke-width:1.4}
+svg .bad{fill:var(--surface);stroke:var(--red);stroke-width:2}
+svg .ok{fill:var(--surface);stroke:var(--green);stroke-width:2}
+svg .lbl{fill:var(--text);font:11.5px ui-monospace,Menlo,monospace}
+svg .lbl-b{fill:var(--text);font:bold 13px -apple-system,sans-serif}
+svg .note{fill:var(--dim);font:11.5px -apple-system,sans-serif}
+svg .hdr{fill:var(--accent);font:bold 13px -apple-system,sans-serif}
+svg .rd{fill:var(--red);font:bold 11.5px ui-monospace,Menlo,monospace}
+svg .gn{fill:var(--green);font:bold 11.5px ui-monospace,Menlo,monospace}
+svg .arr{stroke:var(--dim);stroke-width:1.4;fill:none}
+svg a text{text-decoration:underline;fill:var(--accent);font:11px ui-monospace,Menlo,monospace}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+  document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head>
+<body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+  function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+  function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
+    b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
+      else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+  document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+<div class="wrap">
+
+<h1>Why setting quantization_ignore_patterns can silently corrupt the MoE router in an FP8 refit</h1>
+<p class="sub"><a href="https://github.com/NVIDIA-NeMo/RL/pull/4122">NVIDIA-NeMo/RL #4122</a>.
+NeMo-RL permalinks pin the PR head <code>6908199</code>; TensorRT-LLM permalinks pin the version the repo builds, <code>f94eeb3</code>.</p>
+
+<div class="status"><dl>
+  <dt>Before</dt><dd>There was no FP8 refit for TensorRT-LLM, so this could not happen.</dd>
+  <dt>This PR</dt><dd>Adds <code>trtllm_cfg.quantization_ignore_patterns</code>. When set, the worker decides on its own which incoming weights to send as FP8.</dd>
+  <dt>Status</dt><dd><span class="verdict open">Open — not fixed in this PR.</span> Raised in the PR review. The default setup (no patterns) is not affected.</dd>
+</dl></div>
+
+<nav class="chain">
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4122-fp8-refit.html">FP8 refit vs BF16 refit</a>
+  <span class="here">ignore patterns cast FP8 into BF16</span>
+</nav>
+<p class="chainnote">Two pages on this PR, one question each — this one: what goes wrong when the user sets ignore patterns.</p>
+
+<p>Two places decide whether a weight is FP8, and they must agree. The <b>engine</b> decides once, when it
+builds each layer. The <b>refit worker</b> decides again for every incoming tensor: once
+<code>quantization_ignore_patterns</code> is set, it sends every 2-D <code>.weight</code> the patterns do not
+match as FP8 plus a scale
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/6908199bb045f3219fff3280be740401bf8c35db/nemo_rl/models/generation/trtllm/quantization/fp8.py#L185-L196"><code>_is_quantized_weight</code></a>).
+But TensorRT-LLM builds the MoE router, <code>shared_expert_gate</code> and the MTP <code>fc</code> in BF16
+no matter what the list says
+(<a href="https://github.com/NVIDIA/TensorRT-LLM/blob/f94eeb3738aeacb4bdf9676ba06f620499cdb357/tensorrt_llm/_torch/models/modeling_qwen3_next.py#L179">router</a>,
+<a href="https://github.com/NVIDIA/TensorRT-LLM/blob/f94eeb3738aeacb4bdf9676ba06f620499cdb357/tensorrt_llm/_torch/models/modeling_qwen3_next.py#L334">gate</a>).
+When FP8 bytes reach a BF16 weight, TensorRT-LLM copies them with a plain type cast and never reads the scale
+(<a href="https://github.com/NVIDIA/TensorRT-LLM/blob/f94eeb3738aeacb4bdf9676ba06f620499cdb357/tensorrt_llm/_torch/models/modeling_qwen3_moe.py#L66"><code>self.weight.copy_</code></a>,
+<a href="https://github.com/NVIDIA/TensorRT-LLM/blob/f94eeb3738aeacb4bdf9676ba06f620499cdb357/tensorrt_llm/_torch/modules/linear.py#L207"><code>src.to(dst.dtype)</code></a>).
+Nothing raises.</p>
+
+<h2>One router weight, from trainer to engine</h2>
+
+<svg viewBox="0 0 900 400" role="img" aria-label="A router weight with values -0.0063, 0.0075, 0.0164, 0.052 is quantized by the refit worker to FP8 codes -44, 52, 112, 352 with scale 0.000149. The engine router is BF16, so it stores -44, 52, 112, 352 and drops the scale: 6697 times too large.">
+  <text class="hdr" x="16" y="22">quantization_ignore_patterns: ["*self_attn*"] — real CPU run of the PR's load_weights</text>
+
+  <text class="note" x="16" y="58">trainer sends</text>
+  <rect class="ok" x="140" y="40" width="748" height="34" rx="6"/>
+  <text class="lbl" x="152" y="62">…layers.3.mlp.gate.weight [2, 256] bf16   row 0 = [-0.0063, 0.0075, 0.0164, 0.052, …]</text>
+
+  <path class="arr" d="M300 74 L300 94 M295 88 L300 94 L305 88"/>
+  <text class="note" x="16" y="118">refit worker</text>
+  <rect class="bad" x="140" y="98" width="748" height="62" rx="6"/>
+  <text class="lbl" x="152" y="118">does "*self_attn*" (or lm_head, embed_tokens) match mlp.gate?  no → send as FP8</text>
+  <text class="rd" x="152" y="136">mlp.gate.weight [2,256] e4m3 = [-44, 52, 112, 352, …]  +  weight_scale_inv = 0.000149</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/6908199bb045f3219fff3280be740401bf8c35db/nemo_rl/models/generation/trtllm/quantization/fp8.py#L588-L604"><text x="152" y="152">fp8.py:588 load_weights</text></a>
+
+  <path class="arr" d="M300 160 L300 180 M295 174 L300 180 L305 174"/>
+  <text class="note" x="16" y="204">engine</text>
+  <rect class="bad" x="140" y="184" width="748" height="80" rx="6"/>
+  <text class="lbl" x="152" y="204">router was built in BF16 (TRT-LLM never quantizes it) → copy_ casts the codes as numbers</text>
+  <text class="rd" x="152" y="222">stored router row 0 = [-44.0, 52.0, 112.0, 352.0, …] bf16      scale: never read</text>
+  <text class="gn" x="152" y="240">what it should hold = codes × scale = [-0.0066, 0.0078, 0.0167, 0.0526, …]</text>
+  <a href="https://github.com/NVIDIA/TensorRT-LLM/blob/f94eeb3738aeacb4bdf9676ba06f620499cdb357/tensorrt_llm/_torch/modules/linear.py#L207"><text x="152" y="256">TRT-LLM linear.py:207</text></a>
+
+  <rect class="box" x="140" y="282" width="748" height="44" rx="6" style="stroke:var(--red)"/>
+  <text class="lbl-b" x="152" y="302">Result: router weights 6,697× too large (largest value 0.067 → 448). No error.</text>
+  <text class="note" x="152" y="318">Routing scores are on the wrong scale, so tokens can go to the wrong experts. Setup and refit report success.</text>
+
+  <text class="lbl-b" x="16" y="352">Same failure, two more ways in:</text>
+  <text class="lbl" x="16" y="372">• pattern "model.layers.*.self_attn*" — engine strips "model.language_model." and matches; refit does not → attention sent FP8</text>
+  <text class="lbl" x="16" y="390">• pattern "…mlp.experts.*" — engine's ".*" rule uses a wildcard match; refit's uses "==" → experts sent FP8</text>
+</svg>
+<!--CREF-->
+
+<h2>What would fix it — proposed, not in the PR</h2>
+<p class="where"><b>Where the fix lands: NeMo-RL only, one file</b>,
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/6908199bb045f3219fff3280be740401bf8c35db/nemo_rl/models/generation/trtllm/quantization/fp8.py"><code>trtllm/quantization/fp8.py</code></a>.
+No TensorRT-LLM change is needed, though it would help if its copy raised on an FP8 → BF16 cast.</p>
+<p>Nothing below is implemented. With all three hunks, the PR's 23 FP8 unit tests still pass (CPU run), and the
+router stays BF16 in the example above. Not run on a GPU.</p>
+<pre class="diff"><span class="hunk">@@ fp8.py L35-L36 · module constants</span>
+<span class="del">-# Never quantized, whatever the user lists (same as the vLLM path's lm_head rule).
+-ALWAYS_BF16_PATTERNS = ("lm_head", "*embed_tokens*")
+</span><span class="add">+# Never quantized, whatever the user lists. lm_head/embeddings follow the vLLM path; the rest are
++# modules TRT-LLM always builds in BF16, so sending them FP8 would be silently cast.
++ALWAYS_BF16_PATTERNS = (
++    "lm_head", "*embed_tokens*",
++    "*.mlp.gate", "*.shared_expert_gate", "mtp.fc", "model.visual*",
++)
+</span>
+<span class="hunk">@@ fp8.py L100 · is_module_ignored</span>
+<span class="add">+    # TRT-LLM strips the Qwen3.5 VLM prefix before matching, so accept either name.
++    if module_name.startswith("model.language_model."):
++        stripped = "model." + module_name.removeprefix("model.language_model.")
++        if is_module_ignored(stripped, patterns):
++            return True
+</span>     parts = module_name.split(".")
+
+<span class="hunk">@@ fp8.py L109 · is_module_ignored</span>
+<span class="del">-            elif pattern.endswith(".*") and candidate == pattern[:-2]:
+</span><span class="add">+            elif pattern.endswith(".*") and fnmatch.fnmatchcase(candidate, pattern[:-2]):</span></pre>
+<p>Hunk 1 keeps the modules TensorRT-LLM never quantizes out of the FP8 path. Hunk 2 matches names the way the
+engine does for Qwen3.5
+(<a href="https://github.com/NVIDIA/TensorRT-LLM/blob/f94eeb3738aeacb4bdf9676ba06f620499cdb357/tensorrt_llm/_torch/models/modeling_qwen3_5.py#L484-L487">engine strips the prefix</a>).
+Hunk 3 copies the engine's own <code>.*</code> rule
+(<a href="https://github.com/NVIDIA/TensorRT-LLM/blob/f94eeb3738aeacb4bdf9676ba06f620499cdb357/tensorrt_llm/models/modeling_utils.py#L277-L279">modeling_utils.py:277</a>).
+A sturdier long-term rule is the one the vLLM path uses: look at the dtype of the engine weight each tensor
+lands in
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/6908199bb045f3219fff3280be740401bf8c35db/nemo_rl/models/generation/vllm/quantization/fp8.py#L513-L522">vllm fp8.py:513</a>),
+and fail at setup on any mismatch.</p>
+
+<div class="warn"><b>So what.</b> With the default setup (no patterns), refit and engine agree for Qwen3.5 and
+Qwen3 MoE, so this only bites users who set <code>quantization_ignore_patterns</code>. But the docs suggest
+exactly that, and the result is rollouts from a broken router with no error anywhere. Until fixed, keep the
+router, gates and MTP <code>fc</code> in the list, written to match both <code>model.layers.*</code> and
+<code>model.language_model.layers.*</code>.</div>
+
+</div>
+</body>
+</html>
