@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NVIDIA-NeMo/RL #4296 — built-in vs file-backed Energon cookers</title>
+<style>
+:root{
+  --bg:#0d1117; --surface:#161b22; --surface2:#1c2128; --border:#30363d;
+  --text:#e6edf3; --dim:#8b949e; --accent:#58a6ff; --green:#3fb950;
+  --orange:#d29922; --red:#f85149;
+}
+:root[data-theme="light"]{
+  --bg:#ffffff; --surface:#f6f8fa; --surface2:#eaeef2; --border:#d0d7de;
+  --text:#1f2328; --dim:#59636e; --accent:#0969da; --green:#1a7f37;
+  --orange:#9a6700; --red:#cf222e;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:28px 16px 70px}
+h1{font-size:22px;margin:0 0 8px;line-height:1.3}
+h2{font-size:18px;margin:30px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;
+  font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
+.sub{color:var(--dim);font-size:13.5px;margin:0 0 14px}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);
+  border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;
+  font:13px/1 ui-monospace,Menlo,monospace;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.18)}
+.status{border:1px solid var(--border);border-radius:10px;background:var(--surface);
+  padding:2px 16px 10px;margin:0 0 16px}
+.status dl{display:grid;grid-template-columns:max-content 1fr;gap:4px 14px;margin:12px 0 0}
+.status dt{color:var(--dim);font-size:12px;text-transform:uppercase;letter-spacing:.04em;
+  white-space:nowrap;padding-top:2px}
+.status dd{margin:0;font-size:14px}
+.verdict{font-weight:700}
+.verdict.open{color:var(--red)}
+nav.chain{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 6px;padding:0}
+nav.chain a,nav.chain span{display:inline-block;padding:5px 11px;border:1px solid var(--border);
+  border-radius:20px;background:var(--surface);text-decoration:none;color:var(--accent);
+  font-size:12.5px;line-height:1.3;white-space:nowrap}
+nav.chain a:hover{background:var(--surface2)}
+nav.chain span.here{background:var(--accent);color:var(--bg);border-color:var(--accent);font-weight:600}
+p.chainnote{color:var(--dim);font-size:12px;margin:0 0 18px}
+.bg{border-left:3px solid var(--accent);background:var(--surface);padding:10px 14px;margin:0 0 16px;
+  border-radius:0 8px 8px 0;font-size:14px}
+.hl{border-left:3px solid var(--orange);background:var(--surface);padding:12px 16px;margin:16px 0;
+  border-radius:0 8px 8px 0}
+.tip{border-bottom:1px dotted var(--dim);cursor:help;position:relative;outline:none}
+.tip:hover::after,.tip:focus::after{content:attr(data-tip);position:absolute;left:0;top:1.7em;z-index:60;
+  width:max-content;max-width:min(340px,80vw);white-space:normal;background:var(--surface2);color:var(--text);
+  border:1px solid var(--border);border-radius:6px;padding:7px 10px;font:13px/1.45 -apple-system,sans-serif;
+  font-weight:400;box-shadow:0 4px 14px rgba(0,0,0,.3)}
+.cref{margin:6px 0 0;font-size:13px}
+.cref a{display:inline-block;padding:4px 10px;border:1px solid var(--border);
+  border-radius:16px;background:var(--surface);font:12.5px ui-monospace,Menlo,monospace}
+.cref a:hover{background:var(--surface2);text-decoration:none}
+svg{max-width:100%;height:auto;display:block;margin:14px 0}
+svg .box{fill:var(--surface);stroke:var(--border);stroke-width:1.4}
+svg .box-ok{fill:var(--surface);stroke:var(--green);stroke-width:2}
+svg .box-bad{fill:var(--surface);stroke:var(--red);stroke-width:2}
+svg .box-merge{fill:var(--surface2);stroke:var(--accent);stroke-width:2}
+svg .lbl{fill:var(--text);font:11.5px ui-monospace,Menlo,monospace}
+svg .lbl-b{fill:var(--text);font:bold 12.5px -apple-system,sans-serif}
+svg .note{fill:var(--dim);font:11.5px -apple-system,sans-serif}
+svg .hdr{fill:var(--accent);font:bold 13px -apple-system,sans-serif}
+svg .ok{fill:var(--green);font:bold 11.5px -apple-system,sans-serif}
+svg .bad{fill:var(--red);font:bold 11.5px -apple-system,sans-serif}
+svg .arr{stroke:var(--dim);stroke-width:1.4;fill:none;marker-end:url(#ah)}
+svg .ahead{fill:var(--dim)}
+svg a text{text-decoration:underline;fill:var(--accent);font:11px ui-monospace,Menlo,monospace}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+  document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head>
+<body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+  function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+  function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
+    b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
+      else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+  document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+<div class="wrap">
+
+<h1>How a cooker from your own Python file reaches Energon, next to a built-in one</h1>
+<p class="sub">Explainer for <a href="https://github.com/NVIDIA-NeMo/RL/pull/4296">NVIDIA-NeMo/RL #4296</a>
+(external Energon encoder plugins). All permalinks pin the PR head <code>5c089ee9</code>.</p>
+
+<div class="status">
+<dl>
+  <dt>Before</dt>
+  <dd>An Energon SFT cooker or task encoder could only be one of the names built into NeMo-RL's registry.</dd>
+  <dt>This PR</dt>
+  <dd>Adds a second way: point <code>python_file</code> at an absolute <code>.py</code> path and pick the exported function with <code>object_name</code>.</dd>
+  <dt>Status</dt>
+  <dd><span class="verdict open">Open — PR under review.</span> The new path works without <code>options</code>. With <code>options</code>, every sample fails (<a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4296-cooker-options-stateless.html">page 2</a>).</dd>
+</dl>
+</div>
+
+<nav class="chain">
+  <span class="here">1 · built-in vs file cooker</span>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4296-cooker-options-stateless.html">2 · options break the cooker</a>
+</nav>
+<p class="chainnote">Two pages on this PR. This one: how the new path compares to the old one. The PR's packing-config and loss-mask changes are covered in the review comments.</p>
+
+<div class="bg"><b>Background.</b> NeMo-RL's SFTv2 reads data with <span class="tip" tabindex="0" data-tip="NVIDIA's dataset library. It reads shards, runs a task encoder in loader worker processes, and can save and restore its read position.">Energon</span>.
+A <b>cooker</b> turns one raw dataset row into a conversation (a list of messages). A <b>task encoder</b> then tokenizes and batches those conversations.
+Energon calls the cooker inside its loader workers, and it checks a mark on the function, <code>@stateless</code>, before each call.
+Dotted words have a short explanation: hover or tap them.</div>
+
+<p>The YAML picks each cooker. A built-in one is a registry key, which
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/5c089ee9ff06c908f34ab59c391a5cba841947b0/nemo_rl/data/energon/multimodal/registry.py#L78"><code>LazyRegistry.resolve</code></a> turns into an imported function.
+A file-backed one is a path: the registry checks it, hashes it, and runs the file as a fresh module
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/5c089ee9ff06c908f34ab59c391a5cba841947b0/nemo_rl/data/energon/multimodal/registry.py#L187"><code>_file_details</code></a>,
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/5c089ee9ff06c908f34ab59c391a5cba841947b0/nemo_rl/data/energon/multimodal/registry.py#L218"><code>_load_file_module</code></a>).
+Both go through one method,
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/5c089ee9ff06c908f34ab59c391a5cba841947b0/nemo_rl/data/energon/multimodal/registry.py#L95"><code>resolve_configured</code></a>,
+and both end up in the same Energon <code>Cooker(...)</code> object.</p>
+
+<h2>Two ways to pick a cooker, side by side</h2>
+
+<svg viewBox="0 0 940 640" role="img" aria-label="Two lanes: built-in cooker by registry key on the left, file-backed cooker on the right. Both reach the same Cooker object. The options step on the file lane is red.">
+  <defs><marker id="ah" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path class="ahead" d="M0,0 L8,4 L0,8 z"/></marker></defs>
+  <text class="hdr" x="150" y="22">Built-in (before and after this PR)</text>
+  <text class="hdr" x="520" y="22">File-backed (new in this PR)</text>
+
+  <text class="lbl-b" x="14" y="62">1 · YAML</text>
+  <rect class="box" x="140" y="40" width="350" height="44" rx="6"/>
+  <text class="lbl" x="152" y="66">cookers: [{name: generic_conversation}]</text>
+  <rect class="box" x="510" y="40" width="416" height="44" rx="6"/>
+  <text class="lbl" x="522" y="58">cookers: [{python_file: …/my_cooker.py,</text>
+  <text class="lbl" x="522" y="74">           object_name: cook_with_prefix}]</text>
+
+  <path class="arr" d="M315 84 L315 104"/><path class="arr" d="M718 84 L718 104"/>
+
+  <text class="lbl-b" x="14" y="128">2 · find it</text>
+  <rect class="box" x="140" y="106" width="350" height="64" rx="6"/>
+  <text class="lbl" x="152" y="126">import nemo_rl…cookers.generic</text>
+  <text class="lbl" x="152" y="144">→ cook_conversation</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/5c089ee9ff06c908f34ab59c391a5cba841947b0/nemo_rl/data/energon/multimodal/registry.py#L78" target="_blank" rel="noopener"><text x="152" y="162">resolve :78</text></a>
+  <rect class="box" x="510" y="106" width="416" height="64" rx="6"/>
+  <text class="lbl" x="522" y="126">read + sha256 the file, run it as a module</text>
+  <text class="lbl" x="522" y="144">_nemo_rl_energon_component_a1cc… → cook_with_prefix</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/5c089ee9ff06c908f34ab59c391a5cba841947b0/nemo_rl/data/energon/multimodal/registry.py#L218" target="_blank" rel="noopener"><text x="522" y="162">_load_file_module :218</text></a>
+
+  <g transform="translate(0,14)">
+  <path class="arr" d="M315 156 L315 176"/><path class="arr" d="M718 156 L718 176"/>
+
+  <text class="lbl-b" x="14" y="198">3 · @stateless?</text>
+  <rect class="box-ok" x="140" y="178" width="350" height="40" rx="6"/>
+  <text class="ok" x="152" y="203">yes — decorated in the NeMo-RL source</text>
+  <rect class="box-ok" x="510" y="178" width="416" height="40" rx="6"/>
+  <text class="ok" x="522" y="203">yes — decorated in the user's file</text>
+
+  <path class="arr" d="M315 218 L315 238"/><path class="arr" d="M718 218 L718 238"/>
+
+  <text class="lbl-b" x="14" y="262">4 · options</text>
+  <rect class="box-ok" x="140" y="240" width="350" height="50" rx="6"/>
+  <text class="lbl" x="152" y="260">options: {…} → refused at setup</text>
+  <text class="note" x="152" y="278">"The generic conversation cooker has no options."</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/5c089ee9ff06c908f34ab59c391a5cba841947b0/nemo_rl/data/energon/sft_dataloader.py#L236-L240" target="_blank" rel="noopener"><text x="152" y="304">_loader_config :236-240</text></a>
+  <rect class="box-bad" x="510" y="240" width="416" height="50" rx="6"/>
+  <text class="lbl" x="522" y="260">options: {prefix: "P:"} →</text>
+  <text class="lbl" x="522" y="278">partial(cook_with_prefix, prefix="P:")</text>
+  <text class="bad" x="790" y="260">@stateless lost</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/5c089ee9ff06c908f34ab59c391a5cba841947b0/nemo_rl/data/energon/sft_dataloader.py#L384-L385" target="_blank" rel="noopener"><text x="522" y="304">_task_encoder :384-385</text></a>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4296-cooker-options-stateless.html" target="_blank" rel="noopener"><text x="790" y="278">see page 2</text></a>
+
+  <path class="arr" d="M315 312 L470 336"/><path class="arr" d="M718 312 L560 336"/>
+
+  <text class="lbl-b" x="14" y="364">5 · same object</text>
+  <rect class="box-merge" x="140" y="338" width="786" height="54" rx="8"/>
+  <text class="lbl" x="152" y="360">Cooker(cook=&lt;function&gt;, has_subflavors=…)  — one list, one Energon task encoder</text>
+  <text class="note" x="152" y="380">From here the two paths are the same code. Energon checks @stateless, then calls cook(sample) in each loader worker.</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/5c089ee9ff06c908f34ab59c391a5cba841947b0/nemo_rl/data/energon/sft_dataloader.py#L386-L391" target="_blank" rel="noopener"><text x="790" y="360">:386-391</text></a>
+
+  <path class="arr" d="M315 392 L315 418"/><path class="arr" d="M718 392 L718 418"/>
+
+  <text class="lbl-b" x="14" y="440">6 · resume ID</text>
+  <rect class="box" x="140" y="420" width="350" height="80" rx="6"/>
+  <text class="lbl" x="152" y="440">{key: "generic_conversation",</text>
+  <text class="lbl" x="152" y="458"> version: "1"}</text>
+  <text class="note" x="152" y="476">changes when the registry version is bumped</text>
+  <rect class="box" x="510" y="420" width="416" height="80" rx="6"/>
+  <text class="lbl" x="522" y="440">{python_file: "…/my_cooker.py",</text>
+  <text class="lbl" x="522" y="458"> object: "cook_with_prefix", sha256: "425a12b1…"}</text>
+  <text class="note" x="522" y="476">any edit to the file changes the hash, so resume refuses</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/5c089ee9ff06c908f34ab59c391a5cba841947b0/nemo_rl/data/energon/multimodal/registry.py#L126-L145" target="_blank" rel="noopener"><text x="522" y="494">configured_identity :126</text></a>
+
+  <rect class="box-ok" x="140" y="528" width="18" height="14" rx="3"/><text class="note" x="166" y="540">works as intended</text>
+  <rect class="box-bad" x="320" y="528" width="18" height="14" rx="3"/><text class="note" x="346" y="540">breaks: Energon refuses the cooker</text>
+  <rect class="box-merge" x="580" y="528" width="18" height="14" rx="3"/><text class="note" x="606" y="540">where the two paths become one</text>
+  <text class="note" x="140" y="574">Values are from a real run of this PR's code with Energon 7.4.1 (paths and hash shortened with "…").</text>
+  <text class="note" x="140" y="592">The same two lanes exist for task encoders: name: generic_sft, or python_file + object_name.</text>
+  </g>
+</svg>
+
+<h2>Where they meet, and what still differs</h2>
+
+<p>They become one at the <code>Cooker(...)</code> call in
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/5c089ee9ff06c908f34ab59c391a5cba841947b0/nemo_rl/data/energon/sft_dataloader.py#L386-L391"><code>_task_encoder</code></a>.
+After that, Energon cannot tell them apart. Two things still differ:</p>
+<ul>
+  <li><b>What a resume checks.</b> A built-in cooker is pinned by its registry key and version. A file-backed one is pinned by path, name, and a sha256 of the file (of every <code>.py</code> under the folder when you point at an <code>__init__.py</code>), so a changed plugin fails at resume instead of silently running different code
+  (<a href="https://github.com/NVIDIA-NeMo/RL/blob/5c089ee9ff06c908f34ab59c391a5cba841947b0/nemo_rl/data/energon/multimodal/registry.py#L205-L216"><code>_source_bytes</code></a>).</li>
+  <li><b>Options.</b> The built-in cooker takes none and refuses any at setup. A file-backed cooker gets its options bound with <code>functools.partial</code>, and that wrapper is where the new path breaks — <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4296-cooker-options-stateless.html">page 2</a>.</li>
+</ul>
+
+<div class="hl"><b>Why keep both.</b> Built-in names cover the conversations NeMo-RL ships support for, and need no files on the cluster.
+The file path lets a team run its own model-specific cooker or task encoder without copying it into NeMo-RL. The cost is that the code lives outside the repo, so NeMo-RL only checks it at setup (absolute path, <code>.py</code>, readable, declares its model families) and pins it by hash.
+Energon starts its loader workers by forking (<a href="https://github.com/NVIDIA/Megatron-Energon/blob/0397ac7f653468851dc0991525c7bc4a51d58d8b/src/megatron/energon/savable_loader.py#L775">savable_loader.py:775</a>), so the module loaded from the file is already there in each worker.</div>
+
+</div>
+</body>
+</html>
