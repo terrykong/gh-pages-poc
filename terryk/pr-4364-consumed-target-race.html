@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NVIDIA-NeMo/RL #4364 — why the collector regenerated a step training had already used</title>
+<style>
+:root{
+  --bg:#0d1117; --surface:#161b22; --surface2:#1c2128; --border:#30363d;
+  --text:#e6edf3; --dim:#8b949e; --accent:#58a6ff; --green:#3fb950;
+  --orange:#d29922; --red:#f85149;
+}
+:root[data-theme="light"]{
+  --bg:#ffffff; --surface:#f6f8fa; --surface2:#eaeef2; --border:#d0d7de;
+  --text:#1f2328; --dim:#59636e; --accent:#0969da; --green:#1a7f37;
+  --orange:#9a6700; --red:#cf222e;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:28px 16px 70px}
+h1{font-size:22px;margin:0 0 8px;line-height:1.3}
+h2{font-size:18px;margin:30px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;
+  font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
+.sub{color:var(--dim);font-size:13.5px;margin:0 0 16px}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);
+  border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;
+  font:13px/1 ui-monospace,Menlo,monospace;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.18)}
+.status{border:1px solid var(--border);border-radius:10px;background:var(--surface);
+  padding:2px 16px 10px;margin:0 0 20px}
+.status dl{display:grid;grid-template-columns:max-content 1fr;gap:4px 14px;margin:12px 0 0}
+.status dt{color:var(--dim);font-size:12px;text-transform:uppercase;letter-spacing:.04em;
+  white-space:nowrap;padding-top:2px}
+.status dd{margin:0;font-size:14px}
+.verdict{font-weight:700}
+.verdict.good{color:var(--green)}
+.bg{border-left:3px solid var(--dim);background:var(--surface);padding:8px 14px;margin:0 0 16px;font-size:14px}
+.tip{border-bottom:1px dotted var(--dim);cursor:help;position:relative;outline:none}
+.tip:hover::after,.tip:focus::after{content:attr(data-tip);position:absolute;left:0;top:1.7em;z-index:60;
+  width:max-content;max-width:min(340px,80vw);white-space:normal;background:var(--surface2);color:var(--text);
+  border:1px solid var(--border);border-radius:6px;padding:7px 10px;font:13px/1.45 -apple-system,sans-serif;
+  font-weight:400;box-shadow:0 4px 14px rgba(0,0,0,.3)}
+.diff{font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--surface);
+  border:1px solid var(--border);border-radius:8px;padding:12px;overflow-x:auto;white-space:pre;margin:10px 0}
+.diff .add{color:var(--green)}
+.diff .del{color:var(--red)}
+.diff .hunk{color:var(--accent)}
+.where{border-left:4px solid var(--accent);background:var(--surface);padding:6px 12px;margin:6px 0 10px}
+.hl{border-left:3px solid var(--green);background:var(--surface);
+  padding:12px 16px;margin:18px 0;border-radius:0 8px 8px 0}
+.cref{margin:6px 0 0;font-size:13px}
+.cref a{display:inline-block;padding:4px 10px;border:1px solid var(--border);
+  border-radius:16px;background:var(--surface);font:12.5px ui-monospace,Menlo,monospace}
+svg{max-width:100%;height:auto;display:block;margin:14px 0}
+svg .box{fill:var(--surface);stroke:var(--border);stroke-width:1.4}
+svg .life{stroke:var(--border);stroke-width:1.4;stroke-dasharray:4 4}
+svg .lbl{fill:var(--text);font:12px ui-monospace,Menlo,monospace}
+svg .lbl-b{fill:var(--text);font:bold 13px -apple-system,sans-serif}
+svg .txt{fill:var(--text);font:12.5px -apple-system,sans-serif}
+svg .note{fill:var(--dim);font:11.5px -apple-system,sans-serif}
+svg .hdr{fill:var(--accent);font:bold 12.5px -apple-system,sans-serif}
+svg .arr{stroke:var(--text);stroke-width:1.5;fill:none}
+svg .arr-r{stroke:var(--red);stroke-width:1.5;fill:none}
+svg .arr-g{stroke:var(--green);stroke-width:1.5;fill:none}
+svg .ret{stroke:var(--dim);stroke-width:1.3;stroke-dasharray:5 3;fill:none}
+svg .tr{stroke:var(--orange);stroke-width:2;fill:none}
+svg .gap{fill:var(--orange);opacity:.14}
+svg .gap-t{fill:var(--orange);font:bold 11.5px -apple-system,sans-serif}
+svg .red{fill:var(--red);font:bold 12px -apple-system,sans-serif}
+svg .grn{fill:var(--green);font:bold 12px -apple-system,sans-serif}
+svg .bx-r{fill:var(--surface);stroke:var(--red);stroke-width:1.6}
+svg .bx-g{fill:var(--surface);stroke:var(--green);stroke-width:1.6}
+svg .sw-r{fill:var(--red)} svg .sw-g{fill:var(--green)} svg .sw-o{fill:var(--orange);opacity:.5}
+svg a text{text-decoration:underline;fill:var(--accent);font:11.5px ui-monospace,Menlo,monospace}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+  document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head>
+<body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+  function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+  function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
+    b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
+      else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+  document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+<div class="wrap">
+
+<h1>Why the collector could regenerate a step that training had already used</h1>
+<p class="sub"><a href="https://github.com/NVIDIA-NeMo/RL/pull/4364">NVIDIA-NeMo/RL #4364</a>
+· all permalinks pin the PR head <code>fcbcd7c5</code>.</p>
+
+<div class="status">
+<dl>
+  <dt>Before</dt>
+  <dd>If training used up a step between two of the collector's calls, the buffer said that step
+  still needed a full batch, so the collector generated one nobody would ever train on.</dd>
+  <dt>This PR</dt>
+  <dd>The buffer answers "0 needed" for any step training has already used, inside the same lock
+  training uses to record it.</dd>
+  <dt>Status</dt>
+  <dd><span class="verdict good">Fixed by this PR.</span> Steps training has not reached yet still
+  report their real shortfall.</dd>
+</dl>
+</div>
+
+<div class="bg"><b>Background — async GRPO.</b> A <b>collector</b> generates rollouts ahead of
+training and puts them in a <b>replay buffer</b> (a Ray actor). Each row is tagged with the training
+step it is meant for. At step <i>N</i>, the <b>trainer</b> takes exactly
+<span class="tip" tabindex="0" data-tip="num_prompts_per_step: how many prompt groups one training step uses. 3 in the example below.">one batch</span>
+of rows tagged <i>N</i>, then records <i>N</i> as the
+<span class="tip" tabindex="0" data-tip="last_target_weight_already_generated in the code. Training steps run in order, so every step at or below it has been used.">last used step</span>.
+Dotted words have a short explanation: hover or tap them.</div>
+
+<p>To pick work, the collector makes <b>two separate actor calls</b>: it reads the last used step
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/fcbcd7c5e05bc14a61be72cb68efe2e819181676/nemo_rl/algorithms/async_utils/trajectory_collector.py#L347-L349">trajectory_collector.py:347</a>),
+skips anything at or below it
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/fcbcd7c5e05bc14a61be72cb68efe2e819181676/nemo_rl/algorithms/async_utils/trajectory_collector.py#L353">:353</a>),
+then asks how many rows a step still needs
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/fcbcd7c5e05bc14a61be72cb68efe2e819181676/nemo_rl/algorithms/async_utils/trajectory_collector.py#L358-L362">:358</a>).
+Training removes a step's rows when it uses them
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/fcbcd7c5e05bc14a61be72cb68efe2e819181676/nemo_rl/algorithms/async_utils/replay_buffer.py#L650-L657">replay_buffer.py:650-657</a>).
+So if training uses the step between the two calls, the second call counts zero rows and reports a full batch missing.</p>
+
+<h2>The race, with 3 prompts per step</h2>
+
+<svg viewBox="0 0 900 470" role="img" aria-label="Sequence diagram: the collector reads last used step 4, the trainer uses step 5, then the collector asks how many rows step 5 needs. Before the fix the answer is 3, after it is 0.">
+  <text class="hdr" x="14" y="22">Collector is choosing step 5 · num_prompts_per_step = 3 · last used step starts at 4</text>
+  <!-- legend -->
+  <rect class="sw-r" x="14" y="36" width="12" height="12"/><text class="note" x="32" y="46">before this PR</text>
+  <rect class="sw-g" x="132" y="36" width="12" height="12"/><text class="note" x="150" y="46">with this PR</text>
+  <rect class="sw-o" x="242" y="36" width="12" height="12"/><text class="note" x="260" y="46">gap between the collector's two calls</text>
+
+  <!-- heads -->
+  <rect class="box" x="40" y="62" width="150" height="30" rx="6"/><text class="lbl-b" x="82" y="82">collector</text>
+  <rect class="box" x="300" y="62" width="180" height="30" rx="6"/><text class="lbl-b" x="342" y="82">replay buffer</text>
+  <rect class="box" x="560" y="62" width="120" height="30" rx="6"/><text class="lbl-b" x="594" y="82">trainer</text>
+  <line class="life" x1="115" y1="92" x2="115" y2="330"/>
+  <line class="life" x1="390" y1="92" x2="390" y2="330"/>
+  <line class="life" x1="620" y1="92" x2="620" y2="330"/>
+
+  <!-- gap band on collector -->
+  <rect class="gap" x="100" y="128" width="30" height="132"/>
+
+  <!-- 1 -->
+  <line class="arr" x1="115" y1="118" x2="386" y2="118"/><path class="arr" d="M386 118 l-7 -4 M386 118 l-7 4"/>
+  <text class="txt" x="128" y="112">① last used step?</text>
+  <line class="ret" x1="390" y1="134" x2="119" y2="134"/><path class="ret" d="M119 134 l7 -4 M119 134 l7 4"/>
+  <text class="lbl" x="260" y="149">→ 4</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/fcbcd7c5e05bc14a61be72cb68efe2e819181676/nemo_rl/algorithms/async_utils/trajectory_collector.py#L347-L349" target="_blank" rel="noopener"><text x="700" y="122">① collector L347</text></a>
+
+  <!-- 2 -->
+  <text class="txt" x="138" y="176">② 5 &gt; 4, keep going</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/fcbcd7c5e05bc14a61be72cb68efe2e819181676/nemo_rl/algorithms/async_utils/trajectory_collector.py#L353" target="_blank" rel="noopener"><text x="700" y="176">② collector L353</text></a>
+
+  <!-- 3 trainer -->
+  <line class="tr" x1="620" y1="206" x2="394" y2="206"/><path class="tr" d="M394 206 l7 -4 M394 206 l7 4"/>
+  <text class="txt" x="430" y="199">③ sample(step 5)</text>
+  <text class="note" x="400" y="224">removes its 3 rows · last used: 4 → 5</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/fcbcd7c5e05bc14a61be72cb68efe2e819181676/nemo_rl/algorithms/async_utils/replay_buffer.py#L650-L657" target="_blank" rel="noopener"><text x="700" y="210">③ buffer L650-657</text></a>
+
+  <!-- 4 -->
+  <line class="arr" x1="115" y1="256" x2="386" y2="256"/><path class="arr" d="M386 256 l-7 -4 M386 256 l-7 4"/>
+  <text class="txt" x="128" y="250">④ rows step 5 still needs?</text>
+  <line class="ret" x1="390" y1="276" x2="119" y2="276"/><path class="ret" d="M119 276 l7 -4 M119 276 l7 4"/>
+  <text class="red" x="140" y="296">before: 3 (it counts 0 rows)</text>
+  <text class="grn" x="140" y="314">with PR: 0 (5 ≤ 5, already used)</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/fcbcd7c5e05bc14a61be72cb68efe2e819181676/nemo_rl/algorithms/async_utils/trajectory_collector.py#L358-L362" target="_blank" rel="noopener"><text x="700" y="260">④ collector L358</text></a>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/fcbcd7c5e05bc14a61be72cb68efe2e819181676/nemo_rl/algorithms/async_utils/replay_buffer.py#L1033-L1034" target="_blank" rel="noopener"><text x="700" y="278">fix: buffer L1033</text></a>
+
+  <!-- outcomes -->
+  <rect class="bx-r" x="14" y="346" width="430" height="112" rx="8"/>
+  <text class="red" x="28" y="368">Before: wasted work</text>
+  <text class="note" x="28" y="388">The collector reserves step 5 and generates 3 new prompts for it.</text>
+  <text class="note" x="28" y="405">Training only takes rows for the step it is on, and it has moved</text>
+  <text class="note" x="28" y="422">past 5, so these rows wait in the buffer until they age out.</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/fcbcd7c5e05bc14a61be72cb68efe2e819181676/nemo_rl/algorithms/async_utils/trajectory_collector.py#L366" target="_blank" rel="noopener"><text x="28" y="444">reserve L366</text></a>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/fcbcd7c5e05bc14a61be72cb68efe2e819181676/nemo_rl/algorithms/async_utils/replay_buffer.py#L611-L615" target="_blank" rel="noopener"><text x="140" y="444">current-step filter L611</text></a>
+
+  <rect class="bx-g" x="456" y="346" width="430" height="112" rx="8"/>
+  <text class="grn" x="470" y="368">With this PR: skip</text>
+  <text class="note" x="470" y="388">0 means "no work", so the collector moves on to the next</text>
+  <text class="note" x="470" y="405">step that really needs rows. No prompts are spent on step 5.</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/fcbcd7c5e05bc14a61be72cb68efe2e819181676/nemo_rl/algorithms/async_utils/trajectory_collector.py#L363-L364" target="_blank" rel="noopener"><text x="470" y="444">skip on 0 L363-364</text></a>
+</svg>
+
+<h2>The fix</h2>
+
+<p class="where"><b>Where the fix lands: RL only, one method.</b>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/fcbcd7c5e05bc14a61be72cb68efe2e819181676/nemo_rl/algorithms/async_utils/replay_buffer.py#L1023-L1036"><code>ReplayBufferImpl.get_trajectories_needed</code></a>,
+plus the matching docstring on the
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/fcbcd7c5e05bc14a61be72cb68efe2e819181676/nemo_rl/algorithms/async_utils/interfaces.py#L97-L100">protocol</a>.
+<b>No collector change:</b> every caller already treats 0 as "no work".</p>
+
+<pre class="diff"><span class="hunk">@@ replay_buffer.py L1029-L1036 · ReplayBufferImpl.get_trajectories_needed</span>
+<span class="del">-        """Return additional trajectories needed for ``target_step``."""
+</span><span class="add">+        """Return additional trajectories needed for an unconsumed ``target_step``."""
+</span>         with self._lock:
+<span class="add">+            # Training may consume the target after the collector reads the
++            # frontier. An empty consumed target must not become new work.
++            if target_step &lt;= self.last_target_weight_already_generated:
++                return 0
+</span>             current_count = self._count_for_target(target_step, max_age_steps)
+             return max(0, num_prompts_per_step - current_count)</pre>
+
+<p>Why this closes the gap: the new check reads the last used step under
+<code>self._lock</code>, the same lock
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/fcbcd7c5e05bc14a61be72cb68efe2e819181676/nemo_rl/algorithms/async_utils/replay_buffer.py#L556"><code>sample()</code></a>
+holds while it removes the rows and moves the last used step forward. So the check and the row
+count always see the same moment: either step 5 is not used yet and its rows are counted, or it is
+used and the answer is 0. The collector asks the same question again right before it generates
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/fcbcd7c5e05bc14a61be72cb68efe2e819181676/nemo_rl/algorithms/async_utils/trajectory_collector.py#L864-L875">:864-875</a>);
+there a 0 releases the step and hands the prompts back unused, so the one check covers that call too.</p>
+
+<div class="hl">
+<b>So what.</b> Before this PR the race spent real prompts and GPU time on rows that could never be
+trained on, and those rows took buffer space until they aged out. After it, a step training has
+already used always reports 0. The new test fails on the old code with <code>assert 2 == 0</code>
+and also fails if <code>&lt;=</code> is changed to <code>&lt;</code>.
+</div>
+
+</div>
+</body>
+</html>
