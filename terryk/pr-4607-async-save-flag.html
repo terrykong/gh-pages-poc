@@ -89,7 +89,7 @@ svg a text{text-decoration:underline;fill:var(--accent);font:11.5px ui-monospace
 
 <h1>Why the new <code>rl.checkpoint.async_save</code> tag says <code>true</code> on every save</h1>
 <p class="sub"><a href="https://github.com/NVIDIA-NeMo/RL/pull/4607">NVIDIA-NeMo/RL #4607</a>.
-All permalinks pin the PR head <code>62647d9</code>.</p>
+All permalinks pin the PR head <code>2f6b955</code>.</p>
 
 <div class="status">
 <dl>
@@ -109,13 +109,13 @@ All permalinks pin the PR head <code>62647d9</code>.</p>
 <p class="chainnote">Two pages on this PR, one question each. This one: the async_save tag bug.</p>
 
 <p>The tag is set from whether the caller passed a wait function:
-<a href="https://github.com/NVIDIA-NeMo/RL/blob/62647d9a40f6f46e3cce4fc5ee4650779319a23b/nemo_rl/utils/checkpoint.py#L489"><code>async_save=wait_fn is not None</code></a>.
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/2f6b955c9b434e5bc649def6a6d55bf697d95af2/nemo_rl/utils/checkpoint.py#L489"><code>async_save=wait_fn is not None</code></a>.
 But every training loop passes one on every save, sync or async (e.g.
-<a href="https://github.com/NVIDIA-NeMo/RL/blob/62647d9a40f6f46e3cce4fc5ee4650779319a23b/nemo_rl/algorithms/grpo.py#L4125">grpo.py:4125</a>; all 12 callers do the same).
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/2f6b955c9b434e5bc649def6a6d55bf697d95af2/nemo_rl/algorithms/grpo.py#L4129">grpo.py:4125</a>; all 12 callers do the same).
 With async save off, that function
-<a href="https://github.com/NVIDIA-NeMo/RL/blob/62647d9a40f6f46e3cce4fc5ee4650779319a23b/nemo_rl/models/policy/lm_policy.py#L1466">does nothing</a>, but it is still not <code>None</code>.
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/2f6b955c9b434e5bc649def6a6d55bf697d95af2/nemo_rl/models/policy/lm_policy.py#L1466">does nothing</a>, but it is still not <code>None</code>.
 The PR's test for the sync case
-(<a href="https://github.com/NVIDIA-NeMo/RL/blob/62647d9a40f6f46e3cce4fc5ee4650779319a23b/tests/unit/telemetry/test_checkpoint_spans.py#L196">test_checkpoint_spans.py:196</a>)
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/2f6b955c9b434e5bc649def6a6d55bf697d95af2/tests/unit/telemetry/test_checkpoint_spans.py#L196">test_checkpoint_spans.py:196</a>)
 passes no wait function at all, which no real caller does.</p>
 
 <h2>The same tag for two different saves</h2>
@@ -153,19 +153,19 @@ passes no wait function at all, which no real caller does.</p>
   <rect class="ok" x="480" y="248" width="400" height="34" rx="6"/>
   <text class="grn" x="492" y="270">rl.checkpoint.async_save = true  ✓</text>
 
-  <a href="https://github.com/NVIDIA-NeMo/RL/blob/62647d9a40f6f46e3cce4fc5ee4650779319a23b/nemo_rl/utils/checkpoint.py#L489" target="_blank" rel="noopener"><text x="42" y="304">checkpoint.py:489 — async_save=wait_fn is not None</text></a>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/2f6b955c9b434e5bc649def6a6d55bf697d95af2/nemo_rl/utils/checkpoint.py#L489" target="_blank" rel="noopener"><text x="42" y="304">checkpoint.py:489 — async_save=wait_fn is not None</text></a>
   <rect class="sw-r" x="490" y="296" width="12" height="12"/><text class="note" x="508" y="306">wrong</text>
   <rect class="sw-g" x="560" y="296" width="12" height="12"/><text class="note" x="578" y="306">right only by luck</text>
 </svg>
 
 <p>The tag answers "was a function passed", which is always yes. So a short finalize span still cannot be read as "sync save" or "async save that had already finished", which is the question the tag was added for
-(<a href="https://github.com/NVIDIA-NeMo/RL/blob/62647d9a40f6f46e3cce4fc5ee4650779319a23b/docs/observability/span-groups.md#L130">span-groups.md:130</a>).</p>
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/2f6b955c9b434e5bc649def6a6d55bf697d95af2/docs/observability/span-groups.md#L130">span-groups.md:130</a>).</p>
 
 <h2>The fix — proposed, not in the PR</h2>
 <p class="where"><b>Where the fix lands: RL only.</b> Nothing below is implemented.
 Remove the tag. The real setting lives in two backend-specific places (Megatron's <code>checkpoint.async_save</code>, Automodel's <code>is_async</code>), and passing it through all 12 save sites only to label a span costs more than the tag is worth.
 The same change also deletes the constant at
-<a href="https://github.com/NVIDIA-NeMo/RL/blob/62647d9a40f6f46e3cce4fc5ee4650779319a23b/nemo_rl/telemetry/instrumentation.py#L101">instrumentation.py:101</a>, the docs row, and the sync-case test.</p>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/2f6b955c9b434e5bc649def6a6d55bf697d95af2/nemo_rl/telemetry/instrumentation.py#L101">instrumentation.py:101</a>, the docs row, and the sync-case test.</p>
 
 <pre class="diff"><span class="hunk">@@ utils/checkpoint.py L489 · begin_finalization._finalize</span>
              try:
@@ -191,6 +191,8 @@ The same change also deletes the constant at
 <span class="del">-    attrs: dict[str, Any] = {RL_CHECKPOINT_ASYNC_ATTR: async_save, **attributes}
 </span><span class="add">+    attrs: dict[str, Any] = dict(attributes)
 </span>     if iteration is not None:</pre>
+
+<p class="cref">🔴 <a href="https://github.com/NVIDIA-NeMo/RL/pull/4607#discussion_r4250548251">review comment — checkpoint.py:489</a></p>
 
 <p>The finalize span itself stays. Its duration is still the time from staging to "resumable", and a reader who needs the save mode can read it from the run config.</p>
 
