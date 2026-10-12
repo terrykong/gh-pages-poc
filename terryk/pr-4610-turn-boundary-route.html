@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NVIDIA-NeMo/RL #4610 — which experts the trainer replays at a turn boundary</title>
+<style>
+:root{
+  --bg:#0d1117; --surface:#161b22; --surface2:#1c2128; --border:#30363d;
+  --text:#e6edf3; --dim:#8b949e; --accent:#58a6ff; --green:#3fb950;
+  --orange:#d29922; --red:#f85149; --purple:#bc8cff;
+}
+:root[data-theme="light"]{
+  --bg:#ffffff; --surface:#f6f8fa; --surface2:#eaeef2; --border:#d0d7de;
+  --text:#1f2328; --dim:#59636e; --accent:#0969da; --green:#1a7f37;
+  --orange:#9a6700; --red:#cf222e; --purple:#8250df;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:28px 16px 70px}
+h1{font-size:22px;margin:0 0 8px;line-height:1.3}
+h2{font-size:18px;margin:32px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;
+  font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
+.sub{color:var(--dim);font-size:13.5px;margin:0 0 16px}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);
+  border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;
+  font:13px/1 ui-monospace,Menlo,monospace;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.18)}
+.status{border:1px solid var(--border);border-radius:10px;background:var(--surface);
+  padding:2px 16px 10px;margin:0 0 20px}
+.status dl{display:grid;grid-template-columns:max-content 1fr;gap:4px 14px;margin:12px 0 0}
+.status dt{color:var(--dim);font-size:12px;text-transform:uppercase;letter-spacing:.04em;
+  white-space:nowrap;padding-top:2px}
+.status dd{margin:0;font-size:14px}
+.verdict{font-weight:700}
+.verdict.good{color:var(--green)}
+.bg{border-left:3px solid var(--dim);background:var(--surface);padding:10px 14px;margin:0 0 16px;
+  border-radius:0 8px 8px 0;font-size:14px}
+.tip{border-bottom:1px dotted var(--dim);cursor:help;position:relative;outline:none}
+.tip:hover::after,.tip:focus::after{content:attr(data-tip);position:absolute;left:0;top:1.7em;z-index:60;
+  width:max-content;max-width:min(340px,80vw);white-space:normal;background:var(--surface2);color:var(--text);
+  border:1px solid var(--border);border-radius:6px;padding:7px 10px;font:13px/1.45 -apple-system,sans-serif;
+  font-weight:400;box-shadow:0 4px 14px rgba(0,0,0,.3)}
+.where{border-left:4px solid var(--accent);background:var(--surface);padding:6px 12px;margin:6px 0 10px}
+.diff{font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--surface);
+  border:1px solid var(--border);border-radius:8px;padding:12px;overflow-x:auto;white-space:pre;margin:10px 0}
+.diff .add{color:var(--green)}
+.diff .del{color:var(--red)}
+.diff .hunk{color:var(--accent)}
+.hl{border-left:3px solid var(--green);background:var(--surface);
+  padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0}
+ol li{margin:2px 0}
+svg{max-width:100%;height:auto;display:block;margin:16px 0}
+svg .lane{fill:var(--text);font:bold 13px -apple-system,sans-serif}
+svg .note{fill:var(--dim);font:11.5px -apple-system,sans-serif}
+svg .hdr{fill:var(--accent);font:bold 12.5px -apple-system,sans-serif}
+svg .ct{fill:var(--text);font:11px ui-monospace,Menlo,monospace}
+svg .c1{fill:var(--accent);fill-opacity:.32;stroke:var(--accent)}
+svg .c2{fill:var(--purple);fill-opacity:.32;stroke:var(--purple)}
+svg .bad{fill:var(--red);fill-opacity:.45;stroke:var(--red);stroke-width:2.2}
+svg .good{fill:var(--purple);fill-opacity:.32;stroke:var(--green);stroke-width:3}
+svg .none{fill:var(--dim);fill-opacity:.12;stroke:var(--dim);stroke-dasharray:4 3}
+svg .brk-bad{stroke:var(--red);stroke-width:2;fill:none}
+svg .brk-good{stroke:var(--green);stroke-width:2;fill:none}
+svg .t-bad{fill:var(--red);font:bold 12px -apple-system,sans-serif}
+svg .t-good{fill:var(--green);font:bold 12px -apple-system,sans-serif}
+svg .arr{stroke:var(--green);stroke-width:2;fill:none}
+svg a text{text-decoration:underline;fill:var(--accent);font:11.5px ui-monospace,Menlo,monospace}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+  document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head>
+<body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+  function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+  function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
+    b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
+      else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+  document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+<div class="wrap">
+
+<h1>Which experts the trainer replays for the last token of each turn</h1>
+<p class="sub"><a href="https://github.com/NVIDIA-NeMo/RL/pull/4610">NVIDIA-NeMo/RL #4610</a>
+(router replay with token capture, multi-turn). All permalinks pin the PR head <code>8df2f08</code>.</p>
+
+<div class="status">
+<dl>
+  <dt>Before</dt>
+  <dd>In a multi-turn rollout, the last token of every assistant turn except the final one was trained
+  with made-up experts <code>0, 1, …, k−1</code> instead of the ones vLLM actually used. No metric showed it.</dd>
+  <dt>This PR</dt>
+  <dd>Each later vLLM call also keeps the route it computed for the previous turn's last token, and that route
+  is written into the training row.</dd>
+  <dt>Status</dt>
+  <dd><span class="verdict good">Fixed by this PR.</span> Only runs with token capture + router replay + more than one vLLM call per rollout were affected.</dd>
+</dl>
+</div>
+
+<div class="bg"><b>Background.</b> In a mixture-of-experts model, each token is sent to a few
+"experts" per layer. <span class="tip" tabindex="0" data-tip="policy.router_replay. vLLM records which experts each token used; the trainer reuses those exact choices, so training matches what generated the text.">Router replay</span>
+makes the trainer use the same experts vLLM chose. With
+<span class="tip" tabindex="0" data-tip="token_capture.enabled. Gym saves each vLLM call's new tokens (and their expert routes) as one piece; NeMo-RL joins the pieces into one training row afterward.">token capture</span>,
+each vLLM call saves only its <i>new</i> tokens' routes, and the pieces are joined later.
+Dotted words have a short explanation: hover or tap them.</div>
+
+<p>vLLM records a token's experts only when the token is <i>fed into</i> the model. The last token it samples is
+never fed in, so a sequence of length S comes back with S−1 routes. NeMo-RL used to fill that last row with
+<code>0, 1, …, k−1</code>
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/3df254d30675093603cd48c61d812b590ff415ec/nemo_rl/models/generation/vllm/utils.py#L321-L330">utils.py, before</a>).
+The next turn's vLLM call does feed that token in, so it has the real route — but the old code kept only the
+call's new rows, <code>experts[prev_len:]</code>
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/3df254d30675093603cd48c61d812b590ff415ec/nemo_rl/models/generation/vllm/vllm_worker_async.py#L823">vllm_worker_async.py, before</a>),
+and threw the real route away.</p>
+
+<svg viewBox="0 0 940 470" role="img" aria-label="Two vLLM calls and the training row before and after the fix. Before, token p4 gets made-up experts; after, it gets call 2's real route.">
+  <text class="hdr" x="16" y="22">Example: call 1 = 3 prompt tokens, makes 2 (p3, p4). Call 2 = those 5 + 1 tool token (p5), makes 4 (p6–p9).</text>
+
+  <!-- lane: vLLM call 1 -->
+  <text class="lane" x="16" y="72">vLLM call 1</text>
+  <text class="note" x="16" y="88">returns 4 routes</text>
+  <rect class="c1" x="210" y="54" width="64" height="34" rx="5"/><text class="ct" x="234" y="76">p0</text>
+  <rect class="c1" x="278" y="54" width="64" height="34" rx="5"/><text class="ct" x="302" y="76">p1</text>
+  <rect class="c1" x="346" y="54" width="64" height="34" rx="5"/><text class="ct" x="370" y="76">p2</text>
+  <rect class="c1" x="414" y="54" width="64" height="34" rx="5"/><text class="ct" x="438" y="76">p3</text>
+  <rect class="none" x="482" y="54" width="64" height="34" rx="5"/><text class="ct" x="506" y="76">p4</text>
+  <text class="note" x="556" y="68">p4 was sampled, never fed in:</text>
+  <text class="note" x="556" y="83">vLLM has no route for it</text>
+
+  <!-- lane: vLLM call 2 -->
+  <text class="lane" x="16" y="142">vLLM call 2</text>
+  <text class="note" x="16" y="158">returns 9 routes</text>
+  <rect class="c2" x="210" y="124" width="64" height="34" rx="5"/><text class="ct" x="234" y="146">p0</text>
+  <rect class="c2" x="278" y="124" width="64" height="34" rx="5"/><text class="ct" x="302" y="146">p1</text>
+  <rect class="c2" x="346" y="124" width="64" height="34" rx="5"/><text class="ct" x="370" y="146">p2</text>
+  <rect class="c2" x="414" y="124" width="64" height="34" rx="5"/><text class="ct" x="438" y="146">p3</text>
+  <rect class="c2" x="482" y="124" width="64" height="34" rx="5" style="stroke:var(--green);stroke-width:3"/><text class="ct" x="506" y="146">p4</text>
+  <rect class="c2" x="550" y="124" width="64" height="34" rx="5"/><text class="ct" x="574" y="146">p5</text>
+  <rect class="c2" x="618" y="124" width="64" height="34" rx="5"/><text class="ct" x="642" y="146">p6</text>
+  <rect class="c2" x="686" y="124" width="64" height="34" rx="5"/><text class="ct" x="710" y="146">p7</text>
+  <rect class="c2" x="754" y="124" width="64" height="34" rx="5"/><text class="ct" x="778" y="146">p8</text>
+  <rect class="none" x="822" y="124" width="64" height="34" rx="5"/><text class="ct" x="846" y="146">p9</text>
+
+  <!-- what each version keeps from call 2 -->
+  <path class="brk-bad" d="M552 170 L552 178 L884 178 L884 170"/>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/3df254d30675093603cd48c61d812b590ff415ec/nemo_rl/models/generation/vllm/vllm_worker_async.py#L823" target="_blank" rel="noopener"><text x="560" y="194">before: experts[5:] — p4's real route dropped</text></a>
+  <path class="brk-good" d="M484 204 L484 212 L884 212 L884 204"/>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/8df2f08423430ad64381b41732212ac37731bd74/nemo_rl/models/generation/vllm/vllm_worker_async.py#L824-L825" target="_blank" rel="noopener"><text x="492" y="228">after: experts[4:] — one extra row, for p4</text></a>
+
+  <!-- lane: training row before -->
+  <text class="lane" x="16" y="272">Training row</text>
+  <text class="t-bad" x="16" y="288">before</text>
+  <rect class="c1" x="210" y="254" width="64" height="34" rx="5"/><text class="ct" x="234" y="276">p0</text>
+  <rect class="c1" x="278" y="254" width="64" height="34" rx="5"/><text class="ct" x="302" y="276">p1</text>
+  <rect class="c1" x="346" y="254" width="64" height="34" rx="5"/><text class="ct" x="370" y="276">p2</text>
+  <rect class="c1" x="414" y="254" width="64" height="34" rx="5"/><text class="ct" x="438" y="276">p3</text>
+  <rect class="bad" x="482" y="254" width="64" height="34" rx="5"/><text class="ct" x="490" y="270">p4 0,1</text><text class="ct" x="490" y="283">fake</text>
+  <rect class="c2" x="550" y="254" width="64" height="34" rx="5"/><text class="ct" x="574" y="276">p5</text>
+  <rect class="c2" x="618" y="254" width="64" height="34" rx="5"/><text class="ct" x="642" y="276">p6</text>
+  <rect class="c2" x="686" y="254" width="64" height="34" rx="5"/><text class="ct" x="710" y="276">p7</text>
+  <rect class="c2" x="754" y="254" width="64" height="34" rx="5"/><text class="ct" x="778" y="276">p8</text>
+  <rect class="none" x="822" y="254" width="64" height="34" rx="5"/><text class="ct" x="846" y="276">p9</text>
+
+  <!-- lane: training row after -->
+  <text class="lane" x="16" y="352">Training row</text>
+  <text class="t-good" x="16" y="368">after</text>
+  <rect class="c1" x="210" y="334" width="64" height="34" rx="5"/><text class="ct" x="234" y="356">p0</text>
+  <rect class="c1" x="278" y="334" width="64" height="34" rx="5"/><text class="ct" x="302" y="356">p1</text>
+  <rect class="c1" x="346" y="334" width="64" height="34" rx="5"/><text class="ct" x="370" y="356">p2</text>
+  <rect class="c1" x="414" y="334" width="64" height="34" rx="5"/><text class="ct" x="438" y="356">p3</text>
+  <rect class="good" x="482" y="334" width="64" height="34" rx="5"/><text class="ct" x="506" y="356">p4</text>
+  <rect class="c2" x="550" y="334" width="64" height="34" rx="5"/><text class="ct" x="574" y="356">p5</text>
+  <rect class="c2" x="618" y="334" width="64" height="34" rx="5"/><text class="ct" x="642" y="356">p6</text>
+  <rect class="c2" x="686" y="334" width="64" height="34" rx="5"/><text class="ct" x="710" y="356">p7</text>
+  <rect class="c2" x="754" y="334" width="64" height="34" rx="5"/><text class="ct" x="778" y="356">p8</text>
+  <rect class="none" x="822" y="334" width="64" height="34" rx="5"/><text class="ct" x="846" y="356">p9</text>
+  <path class="arr" d="M470 216 C440 260 440 300 482 340"/>
+  <path class="arr" d="M482 340 L472 336 M482 340 L478 330"/>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/8df2f08423430ad64381b41732212ac37731bd74/nemo_rl/experience/route_assembly.py#L180-L182" target="_blank" rel="noopener"><text x="210" y="396">routed[position - 1] = routes[0]  (route_assembly.py)</text></a>
+
+  <!-- legend -->
+  <rect class="c1" x="16" y="418" width="18" height="14" rx="3"/><text class="note" x="40" y="430">route from call 1</text>
+  <rect class="c2" x="160" y="418" width="18" height="14" rx="3"/><text class="note" x="184" y="430">route from call 2</text>
+  <rect class="bad" x="304" y="418" width="18" height="14" rx="3"/><text class="note" x="328" y="430">made-up experts 0,1 — trained on</text>
+  <rect class="none" x="530" y="418" width="18" height="14" rx="3"/><text class="note" x="554" y="430">no route (−1): trainer uses its own router</text>
+  <text class="note" x="16" y="456">p9 is the last token of the whole row: nothing is predicted from it, so its missing route does not change the loss.</text>
+</svg>
+
+<h2>The fix</h2>
+
+<p class="where"><b>Where the fix lands: RL only.</b> The vLLM worker keeps one extra row, the route plan records it,
+and the route assembler writes it into the row. <b>No Gym change:</b> Gym stores and hashes routes as an opaque
+value and never checks their length
+(<a href="https://github.com/NVIDIA-NeMo/Gym/blob/17abf2ddc76f74e40d0ba5a15b0401710a46db26/nemo_gym/token_id_capture/staging/digest.py#L173-L189"><code>compute_extras_digest</code></a>).</p>
+
+<pre class="diff"><span class="hunk">@@ vllm_worker_async.py L824-L825 · _delta_align_routed_experts  (call 2: prev_len = 5)</span>
+                     f"length {expected_full_len}"
+                 )
+<span class="del">-            message["routed_experts"] = encode_routed_experts(experts[prev_len:])
+</span><span class="add">+            start = prev_len - boundary_route_rows(prev_len)
++            message["routed_experts"] = encode_routed_experts(experts[start:])
+</span>
+<span class="hunk">@@ route_assembly.py L180-L182 · execute_route_plan  (span 2: position = 5)</span>
+             if tuple(routes.shape[1:]) != (num_moe_layers, top_k):
+                 return None, ROUTE_FAILURE_MODEL_SHAPE
+<span class="add">+            if span.boundary_rows:
++                routed[position - 1] = routes[0].to(torch.int16)
++                routes = routes[1:]
+</span>             if mode == "full":
+
+<span class="hunk">@@ utils.py L321-L326 · pad_and_align_routed_expert_indices</span>
+<span class="del">-    default_route = torch.arange(
+-        routed.shape[2],
+-        dtype=routed_experts_dtype,
+-        device=device,
+-    )
+-    full = (
+-        default_route.view(1, 1, -1)
+-        .expand(padded_length, routed.shape[1], routed.shape[2])
+-        .clone()
+-    )
+</span><span class="add">+    full = torch.full(
++        (padded_length, routed.shape[1], routed.shape[2]),
++        R3_MISSING_ROUTE_SENTINEL,
++        dtype=routed_experts_dtype,
++        device=device,
++    )
+</span></pre>
+
+<ol>
+<li><a href="https://github.com/NVIDIA-NeMo/RL/blob/8df2f08423430ad64381b41732212ac37731bd74/nemo_rl/experience/route_assembly.py#L59-L66"><code>boundary_route_rows(prev_len)</code></a>
+is 1 for every call after the first, 0 for the first. Call 2 has <code>prev_len = 5</code>, so it keeps <code>experts[4:]</code>: 6 rows, p4–p9.</li>
+<li>The finalizer records that extra row in the plan as
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/8df2f08423430ad64381b41732212ac37731bd74/nemo_rl/experience/route_plan.py#L44"><code>RouteSpan.boundary_rows</code></a>
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/8df2f08423430ad64381b41732212ac37731bd74/nemo_rl/experience/rollout_reassembler.py#L431-L435">set here</a>), and the plan's schema version goes from 2 to 3.</li>
+<li>When the row is put together, span 2 starts at position 5. Its first row goes to position 4, the last token of
+call 1, and the other 5 rows fill p5–p9 as before.</li>
+<li>The filler for "no route" is now <code>−1</code> instead of <code>0, 1, …</code>. The trainer already treats
+an all-<code>−1</code> row as "route this token yourself"
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/8df2f08423430ad64381b41732212ac37731bd74/nemo_rl/models/megatron/router_replay.py#L525">fallback patch</a>),
+so a missed boundary can no longer pass as a real route.</li>
+</ol>
+
+<div class="hl">
+<strong>What changes for a run.</strong> In a token-capture run with router replay, every assistant turn except
+the last one trained its final token with experts <code>0, 1, …, k−1</code>. That token's hidden state is also read
+by every later token through attention. After this PR it gets the experts vLLM actually used. Token-echo rollouts
+already did this
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/8df2f08423430ad64381b41732212ac37731bd74/nemo_rl/environments/nemo_gym.py#L1283-L1286">nemo_gym.py</a>),
+and single-turn rollouts were never affected.
+</div>
+
+</div>
+</body>
+</html>
