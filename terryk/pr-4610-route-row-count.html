@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>NVIDIA-NeMo/RL #4610 — how many route rows a call stages</title>
+<style>
+:root{
+  --bg:#0d1117; --surface:#161b22; --surface2:#1c2128; --border:#30363d;
+  --text:#e6edf3; --dim:#8b949e; --accent:#58a6ff; --green:#3fb950;
+  --orange:#d29922; --red:#f85149; --purple:#bc8cff;
+}
+:root[data-theme="light"]{
+  --bg:#ffffff; --surface:#f6f8fa; --surface2:#eaeef2; --border:#d0d7de;
+  --text:#1f2328; --dim:#59636e; --accent:#0969da; --green:#1a7f37;
+  --orange:#9a6700; --red:#cf222e; --purple:#8250df;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:28px 16px 70px}
+h1{font-size:22px;margin:0 0 8px;line-height:1.3}
+h2{font-size:18px;margin:32px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;
+  font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
+.sub{color:var(--dim);font-size:13.5px;margin:0 0 16px}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);
+  border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;
+  font:13px/1 ui-monospace,Menlo,monospace;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.18)}
+.status{border:1px solid var(--border);border-radius:10px;background:var(--surface);
+  padding:2px 16px 10px;margin:0 0 20px}
+.status dl{display:grid;grid-template-columns:max-content 1fr;gap:4px 14px;margin:12px 0 0}
+.status dt{color:var(--dim);font-size:12px;text-transform:uppercase;letter-spacing:.04em;
+  white-space:nowrap;padding-top:2px}
+.status dd{margin:0;font-size:14px}
+.verdict{font-weight:700}
+.verdict.good{color:var(--green)}
+.bg{border-left:3px solid var(--dim);background:var(--surface);padding:10px 14px;margin:0 0 16px;
+  border-radius:0 8px 8px 0;font-size:14px}
+.tip{border-bottom:1px dotted var(--dim);cursor:help;position:relative;outline:none}
+.tip:hover::after,.tip:focus::after{content:attr(data-tip);position:absolute;left:0;top:1.7em;z-index:60;
+  width:max-content;max-width:min(340px,80vw);white-space:normal;background:var(--surface2);color:var(--text);
+  border:1px solid var(--border);border-radius:6px;padding:7px 10px;font:13px/1.45 -apple-system,sans-serif;
+  font-weight:400;box-shadow:0 4px 14px rgba(0,0,0,.3)}
+.where{border-left:4px solid var(--accent);background:var(--surface);padding:6px 12px;margin:6px 0 10px}
+.diff{font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--surface);
+  border:1px solid var(--border);border-radius:8px;padding:12px;overflow-x:auto;white-space:pre;margin:10px 0}
+.diff .add{color:var(--green)}
+.diff .del{color:var(--red)}
+.diff .hunk{color:var(--accent)}
+.hl{border-left:3px solid var(--green);background:var(--surface);
+  padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0}
+ol li{margin:2px 0}
+table.cmp{border-collapse:collapse;width:100%;font-size:13.5px;margin:12px 0;display:block;overflow-x:auto}
+table.cmp th,table.cmp td{border:1px solid var(--border);padding:7px 10px;text-align:left;vertical-align:top}
+table.cmp th{background:var(--surface2);font-size:12.5px}
+table.cmp .dim{color:var(--dim);font-size:12px}
+table.cmp .t-bad{color:var(--red);font-weight:600}
+table.cmp .t-ok{color:var(--text);font-weight:600}
+table.cmp .t-best{color:var(--green);font-weight:600}
+svg{max-width:100%;height:auto;display:block;margin:16px 0}
+svg .lane{fill:var(--text);font:bold 13px -apple-system,sans-serif}
+svg .note{fill:var(--dim);font:11.5px -apple-system,sans-serif}
+svg .hdr{fill:var(--accent);font:bold 12.5px -apple-system,sans-serif}
+svg .ct{fill:var(--text);font:11px ui-monospace,Menlo,monospace}
+svg .c1{fill:var(--accent);fill-opacity:.32;stroke:var(--accent)}
+svg .c2{fill:var(--purple);fill-opacity:.32;stroke:var(--purple)}
+svg .bad{fill:var(--red);fill-opacity:.45;stroke:var(--red);stroke-width:2.2}
+svg .good{fill:var(--purple);fill-opacity:.32;stroke:var(--green);stroke-width:3}
+svg .none{fill:var(--dim);fill-opacity:.12;stroke:var(--dim);stroke-dasharray:4 3}
+svg .brk-bad{stroke:var(--red);stroke-width:2;fill:none}
+svg .brk-good{stroke:var(--green);stroke-width:2;fill:none}
+svg .t-bad{fill:var(--red);font:bold 12px -apple-system,sans-serif}
+svg .t-good{fill:var(--green);font:bold 12px -apple-system,sans-serif}
+svg .arr{stroke:var(--green);stroke-width:2;fill:none}
+svg a text{text-decoration:underline;fill:var(--accent);font:11.5px ui-monospace,Menlo,monospace}
+
+nav.chain{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 6px;padding:0}
+nav.chain a,nav.chain span{display:inline-block;padding:5px 11px;border:1px solid var(--border);
+  border-radius:20px;background:var(--surface);text-decoration:none;color:var(--accent);
+  font-size:12.5px;line-height:1.3;white-space:nowrap}
+nav.chain a:hover{background:var(--surface2)}
+nav.chain span.here{background:var(--accent);color:var(--bg);border-color:var(--accent);font-weight:600}
+p.chainnote{color:var(--dim);font-size:12px;margin:0 0 18px}
+.verdict.open{color:var(--red)}
+table.cmp td.num{font:13px ui-monospace,Menlo,monospace;white-space:nowrap}
+svg .keep{fill:var(--purple);fill-opacity:.32;stroke:var(--purple)}
+svg .tok{fill:var(--surface2);stroke:var(--border)}
+svg .brk{stroke:var(--dim);stroke-width:1.5;fill:none}
+svg .bt{fill:var(--text);font:bold 12px -apple-system,sans-serif}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+  document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head><body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+  function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+  function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
+    b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
+      else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+  document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+<div class="wrap">
+<h1>How many route rows each vLLM or Megatron Inference call must stage, and why #4307 breaks after #4610</h1>
+<p class="sub"><a href="https://github.com/NVIDIA-NeMo/RL/pull/4610">#4610</a> (vLLM turn-boundary route) meets
+<a href="https://github.com/NVIDIA-NeMo/RL/pull/4307">#4307</a> (Megatron Inference router replay, still open).
+Permalinks pin #4610 at <code>8df2f08</code>, #4307 at <code>293e5a4</code>, and main at <code>3df254d</code>.</p>
+
+<div class="status"><dl>
+<dt>Before</dt><dd>Each call staged one route row per new token (<code>delta_len</code>), and both length checks expected exactly that.</dd>
+<dt>This PR</dt><dd>vLLM calls after the first stage one extra row, for the previous turn's last token. Both checks now expect <code>delta_len + 1</code> for those calls.</dd>
+<dt>Status</dt><dd><span class="verdict open">Open, not fixed in either PR.</span> Megatron Inference (MInf) in #4307 still stages <code>delta_len</code> rows.
+Whichever PR merges second must change MInf's slice, or every multi-turn MInf rollout fails to stage.</dd>
+</dl></div>
+
+<nav class="chain">
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4610-turn-boundary-route.html">1 · the turn-boundary route</a>
+  <span class="here">2 · how many rows</span>
+</nav>
+<p class="chainnote">Two pages on this PR. This one covers the row count, and why it matters for Megatron Inference.</p>
+
+<p>Three numbers describe one call. Each call's tokens are the earlier tokens plus its new ones.
+<b><code>prev_len</code></b> counts the earlier tokens, which an earlier call already staged.
+<b><code>delta_len</code></b> counts the new ones (<a href="https://github.com/NVIDIA-NeMo/RL/blob/8df2f08423430ad64381b41732212ac37731bd74/nemo_rl/data_plane/tq_token_sink.py#L513"><code>len(record.token_ids_delta)</code></a>).
+<b><code>routed_len</code></b> counts the route rows the call actually stages.
+#4610 adds <a href="https://github.com/NVIDIA-NeMo/RL/blob/8df2f08423430ad64381b41732212ac37731bd74/nemo_rl/experience/route_assembly.py#L59-L66"><code>boundary_route_rows(prev_len)</code></a>,
+which is 1 when there are earlier tokens and 0 on the first call. Every staged call must then satisfy
+<code>routed_len == delta_len + boundary_route_rows(prev_len)</code>.</p>
+
+<p style="color:var(--dim);font-size:13px;margin:0">Example: the same call 1 as page 1 (p0–p4). Call 2 adds 2 tool tokens (p5, p6) and generates 4 (p7–p10),
+so no two numbers below are equal.</p>
+<svg viewBox="0 0 940 434" role="img" aria-label="Which route rows each backend stages for call 2"><text class="lane" x="10" y="49">call 2 tokens</text><rect class="tok" x="158" y="30" width="50" height="30" rx="5"/><text class="ct" x="183.0" y="49" text-anchor="middle">p0</text><rect class="tok" x="214" y="30" width="50" height="30" rx="5"/><text class="ct" x="239.0" y="49" text-anchor="middle">p1</text><rect class="tok" x="270" y="30" width="50" height="30" rx="5"/><text class="ct" x="295.0" y="49" text-anchor="middle">p2</text><rect class="tok" x="326" y="30" width="50" height="30" rx="5"/><text class="ct" x="351.0" y="49" text-anchor="middle">p3</text><rect class="tok" x="382" y="30" width="50" height="30" rx="5"/><text class="ct" x="407.0" y="49" text-anchor="middle">p4</text><rect class="tok" x="438" y="30" width="50" height="30" rx="5"/><text class="ct" x="463.0" y="49" text-anchor="middle">p5</text><rect class="tok" x="494" y="30" width="50" height="30" rx="5"/><text class="ct" x="519.0" y="49" text-anchor="middle">p6</text><rect class="tok" x="550" y="30" width="50" height="30" rx="5"/><text class="ct" x="575.0" y="49" text-anchor="middle">p7</text><rect class="tok" x="606" y="30" width="50" height="30" rx="5"/><text class="ct" x="631.0" y="49" text-anchor="middle">p8</text><rect class="tok" x="662" y="30" width="50" height="30" rx="5"/><text class="ct" x="687.0" y="49" text-anchor="middle">p9</text><rect class="tok" x="718" y="30" width="50" height="30" rx="5"/><text class="ct" x="743.0" y="49" text-anchor="middle">p10</text><path class="brk" d="M158,68 v6 H435 v-6"/><text class="bt" x="296.5" y="90" text-anchor="middle">prev_len = 5 (already staged by call 1)</text><path class="brk" d="M441,68 v6 H768 v-6"/><text class="bt" x="603.0" y="90" text-anchor="middle">delta_len = 6 (new in call 2)</text><text class="lane" x="10" y="147">engine routes</text><rect class="c2" x="158" y="128" width="50" height="30" rx="5"/><text class="ct" x="183.0" y="147" text-anchor="middle">p0</text><rect class="c2" x="214" y="128" width="50" height="30" rx="5"/><text class="ct" x="239.0" y="147" text-anchor="middle">p1</text><rect class="c2" x="270" y="128" width="50" height="30" rx="5"/><text class="ct" x="295.0" y="147" text-anchor="middle">p2</text><rect class="c2" x="326" y="128" width="50" height="30" rx="5"/><text class="ct" x="351.0" y="147" text-anchor="middle">p3</text><rect class="c2" x="382" y="128" width="50" height="30" rx="5"/><text class="ct" x="407.0" y="147" text-anchor="middle">p4</text><rect class="c2" x="438" y="128" width="50" height="30" rx="5"/><text class="ct" x="463.0" y="147" text-anchor="middle">p5</text><rect class="c2" x="494" y="128" width="50" height="30" rx="5"/><text class="ct" x="519.0" y="147" text-anchor="middle">p6</text><rect class="c2" x="550" y="128" width="50" height="30" rx="5"/><text class="ct" x="575.0" y="147" text-anchor="middle">p7</text><rect class="c2" x="606" y="128" width="50" height="30" rx="5"/><text class="ct" x="631.0" y="147" text-anchor="middle">p8</text><rect class="c2" x="662" y="128" width="50" height="30" rx="5"/><text class="ct" x="687.0" y="147" text-anchor="middle">p9</text><rect class="none" x="718" y="128" width="50" height="30" rx="5"/><text class="ct" x="743.0" y="147" text-anchor="middle">−1</text><text class="note" x="158" y="174">11 tokens in, 10 routes out: p10 was sampled, never fed in, so its row is filled with −1. p4 <tspan font-weight="bold">does</tspan> have a real route here.</text><text class="lane" x="10" y="219">vLLM before</text><rect class="none" x="158" y="200" width="50" height="30" rx="5"/><text class="ct" x="183.0" y="219" text-anchor="middle">p0</text><rect class="none" x="214" y="200" width="50" height="30" rx="5"/><text class="ct" x="239.0" y="219" text-anchor="middle">p1</text><rect class="none" x="270" y="200" width="50" height="30" rx="5"/><text class="ct" x="295.0" y="219" text-anchor="middle">p2</text><rect class="none" x="326" y="200" width="50" height="30" rx="5"/><text class="ct" x="351.0" y="219" text-anchor="middle">p3</text><rect class="none" x="382" y="200" width="50" height="30" rx="5"/><text class="ct" x="407.0" y="219" text-anchor="middle">p4</text><rect class="keep" x="438" y="200" width="50" height="30" rx="5"/><text class="ct" x="463.0" y="219" text-anchor="middle">p5</text><rect class="keep" x="494" y="200" width="50" height="30" rx="5"/><text class="ct" x="519.0" y="219" text-anchor="middle">p6</text><rect class="keep" x="550" y="200" width="50" height="30" rx="5"/><text class="ct" x="575.0" y="219" text-anchor="middle">p7</text><rect class="keep" x="606" y="200" width="50" height="30" rx="5"/><text class="ct" x="631.0" y="219" text-anchor="middle">p8</text><rect class="keep" x="662" y="200" width="50" height="30" rx="5"/><text class="ct" x="687.0" y="219" text-anchor="middle">p9</text><rect class="keep" x="718" y="200" width="50" height="30" rx="5"/><text class="ct" x="743.0" y="219" text-anchor="middle">−1</text><text class="t-good" x="776" y="213">6 rows</text><text class="t-good" x="776" y="228">old check: 6 ✓</text><a href="https://github.com/NVIDIA-NeMo/RL/blob/3df254d30675093603cd48c61d812b590ff415ec/nemo_rl/models/generation/vllm/vllm_worker_async.py#L823"><text x="10" y="244">experts[5:]</text></a><text class="lane" x="10" y="281">vLLM, #4610</text><rect class="none" x="158" y="262" width="50" height="30" rx="5"/><text class="ct" x="183.0" y="281" text-anchor="middle">p0</text><rect class="none" x="214" y="262" width="50" height="30" rx="5"/><text class="ct" x="239.0" y="281" text-anchor="middle">p1</text><rect class="none" x="270" y="262" width="50" height="30" rx="5"/><text class="ct" x="295.0" y="281" text-anchor="middle">p2</text><rect class="none" x="326" y="262" width="50" height="30" rx="5"/><text class="ct" x="351.0" y="281" text-anchor="middle">p3</text><rect class="good" x="382" y="262" width="50" height="30" rx="5"/><text class="ct" x="407.0" y="281" text-anchor="middle">p4</text><rect class="keep" x="438" y="262" width="50" height="30" rx="5"/><text class="ct" x="463.0" y="281" text-anchor="middle">p5</text><rect class="keep" x="494" y="262" width="50" height="30" rx="5"/><text class="ct" x="519.0" y="281" text-anchor="middle">p6</text><rect class="keep" x="550" y="262" width="50" height="30" rx="5"/><text class="ct" x="575.0" y="281" text-anchor="middle">p7</text><rect class="keep" x="606" y="262" width="50" height="30" rx="5"/><text class="ct" x="631.0" y="281" text-anchor="middle">p8</text><rect class="keep" x="662" y="262" width="50" height="30" rx="5"/><text class="ct" x="687.0" y="281" text-anchor="middle">p9</text><rect class="keep" x="718" y="262" width="50" height="30" rx="5"/><text class="ct" x="743.0" y="281" text-anchor="middle">−1</text><text class="t-good" x="776" y="275">7 rows</text><text class="t-good" x="776" y="290">new check: 7 ✓</text><a href="https://github.com/NVIDIA-NeMo/RL/blob/8df2f08423430ad64381b41732212ac37731bd74/nemo_rl/models/generation/vllm/vllm_worker_async.py#L824-L825"><text x="10" y="306">experts[4:]</text></a><text class="lane" x="10" y="343">MInf, #4307</text><rect class="none" x="158" y="324" width="50" height="30" rx="5"/><text class="ct" x="183.0" y="343" text-anchor="middle">p0</text><rect class="none" x="214" y="324" width="50" height="30" rx="5"/><text class="ct" x="239.0" y="343" text-anchor="middle">p1</text><rect class="none" x="270" y="324" width="50" height="30" rx="5"/><text class="ct" x="295.0" y="343" text-anchor="middle">p2</text><rect class="none" x="326" y="324" width="50" height="30" rx="5"/><text class="ct" x="351.0" y="343" text-anchor="middle">p3</text><rect class="bad" x="382" y="324" width="50" height="30" rx="5"/><text class="ct" x="407.0" y="343" text-anchor="middle">p4?</text><rect class="keep" x="438" y="324" width="50" height="30" rx="5"/><text class="ct" x="463.0" y="343" text-anchor="middle">p5</text><rect class="keep" x="494" y="324" width="50" height="30" rx="5"/><text class="ct" x="519.0" y="343" text-anchor="middle">p6</text><rect class="keep" x="550" y="324" width="50" height="30" rx="5"/><text class="ct" x="575.0" y="343" text-anchor="middle">p7</text><rect class="keep" x="606" y="324" width="50" height="30" rx="5"/><text class="ct" x="631.0" y="343" text-anchor="middle">p8</text><rect class="keep" x="662" y="324" width="50" height="30" rx="5"/><text class="ct" x="687.0" y="343" text-anchor="middle">p9</text><rect class="keep" x="718" y="324" width="50" height="30" rx="5"/><text class="ct" x="743.0" y="343" text-anchor="middle">−1</text><text class="t-bad" x="776" y="337">6 rows</text><text class="t-bad" x="776" y="352">new check: 7 ✗</text><a href="https://github.com/NVIDIA-NeMo/RL/blob/293e5a4bcc5ed86c8bf8fbf7f5a1a744be991087/nemo_rl/models/generation/megatron/token_capture.py#L104"><text x="10" y="368">aligned[5:]</text></a><text class="note" x="158" y="390">Every lane keeps the 6 new rows p5–p10. #4610 also keeps p4 (green); MInf leaves it out, so its count is one short.</text><rect class="keep" x="10" y="408" width="16" height="14" rx="3"/><text class="note" x="32" y="419.5">row staged</text><rect class="good" x="125" y="408" width="16" height="14" rx="3"/><text class="note" x="147" y="419.5">boundary row (prev_len − 1)</text><rect class="none" x="347" y="408" width="16" height="14" rx="3"/><text class="note" x="369" y="419.5">not staged</text><rect class="bad" x="462" y="408" width="16" height="14" rx="3"/><text class="note" x="484" y="419.5">boundary row missing</text></svg>
+
+<table class="cmp">
+<tr><th>Call</th><th><code>prev_len</code></th><th><code>delta_len</code></th><th>boundary row</th><th>rows needed</th><th>vLLM, #4610</th><th>MInf, #4307</th></tr>
+<tr><td>call 1 (p0–p4)</td><td class="num">0</td><td class="num">5</td><td class="num">0</td><td class="num">5</td><td class="num">5 ✓</td><td class="num">5 ✓</td></tr>
+<tr><td>call 2 (p0–p10)</td><td class="num">5</td><td class="num">6</td><td class="num">1 (p4)</td><td class="num">7</td><td class="num">7 ✓</td><td class="num t-bad">6 ✗</td></tr>
+</table>
+<p>The first call of a rollout has no earlier turn, so both backends pass. That is why single-turn runs would not show the problem.</p>
+
+<h2>Who checks the count</h2>
+<p>Two places check the same rule. Before #4610, both compared against <code>delta_len</code>. Now both add the boundary row:</p>
+<ol>
+<li><b>At capture, the token sink</b> (<a href="https://github.com/NVIDIA-NeMo/RL/blob/8df2f08423430ad64381b41732212ac37731bd74/nemo_rl/data_plane/tq_token_sink.py#L534-L541"><code>TQTokenSink.stage</code></a>; main version
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/3df254d30675093603cd48c61d812b590ff415ec/nemo_rl/data_plane/tq_token_sink.py#L534-L537">here</a>). Both vLLM and MInf write through it
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/293e5a4bcc5ed86c8bf8fbf7f5a1a744be991087/nemo_rl/models/generation/megatron/token_capture.py#L361">MInf's <code>complete_call</code></a>).
+This check fires first. For MInf call 2 it raises
+<code>routed_experts must already be delta-aligned … (expected 7 rows)</code>. Gym catches the error and marks the call
+capture-failed (<a href="https://github.com/NVIDIA-NeMo/Gym/blob/17abf2ddc76f74e40d0ba5a15b0401710a46db26/nemo_gym/token_id_capture/staging/capture.py#L241-L250">capture.py</a>), so the rollout never gets a usable row.</li>
+<li><b>At rebuild, the reassembler</b> (<a href="https://github.com/NVIDIA-NeMo/RL/blob/8df2f08423430ad64381b41732212ac37731bd74/nemo_rl/experience/rollout_reassembler.py#L410-L414"><code>routed_len_mismatch</code></a>;
+main version <a href="https://github.com/NVIDIA-NeMo/RL/blob/3df254d30675093603cd48c61d812b590ff415ec/nemo_rl/experience/rollout_reassembler.py#L409-L410">here</a>). This is a second check, in case a
+row slips past the sink. In this case the sink has already failed, so this check never sees the call.</li>
+</ol>
+<p>The two counts are not both "right" in general. The rule itself changed. MInf follows the old rule, and #4610 changed the rule in both checks and in vLLM, but not in MInf,
+because MInf's stager only exists on the #4307 branch. The PRs change different files, so git will not report a conflict.</p>
+
+<h2>What would fix it (proposed, not in either PR)</h2>
+<p class="where"><b>Where the fix lands: RL only, one line in MInf's stager</b>,
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/293e5a4bcc5ed86c8bf8fbf7f5a1a744be991087/nemo_rl/models/generation/megatron/token_capture.py#L96-L104"><code>_delta_align_minf_routing_indices</code></a>.
+Nothing below is implemented or run. The route assembler from #4610 already writes the extra row into p4's slot
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/8df2f08423430ad64381b41732212ac37731bd74/nemo_rl/experience/route_assembly.py#L180-L182">route_assembly.py</a>), so nothing else changes.</p>
+<pre class="diff"><span class="hunk">@@ token_capture.py L102-L104 (#4307) · _delta_align_minf_routing_indices (call 2: prev_len = 5)</span>
+     if expected_routes:
+         aligned[:-1].copy_(routes)
+<span class="del">-    return aligned[prev_len:]
+</span><span class="add">+    # Keep the previous turn's last token (p4): this call's prefill routed it.
++    return aligned[prev_len - boundary_route_rows(prev_len):]</span></pre>
+<p>On call 2 this returns <code>aligned[4:]</code>, which is 7 rows, so it passes both checks. It also gives MInf the real route for p4 instead of
+the <code>−1</code> it uses today (MInf already writes <code>−1</code>, not <code>0…k−1</code>, so it never had the #4355 fake-route bug).
+Two MInf tests in #4307 assert the old count and would need the extra row:
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/293e5a4bcc5ed86c8bf8fbf7f5a1a744be991087/tests/unit/data_plane/test_tq_token_sink.py#L887"><code>test_megatron_stager_delta_aligns_token_in_routes</code></a> and
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/293e5a4bcc5ed86c8bf8fbf7f5a1a744be991087/tests/unit/data_plane/test_rollout_reassembler.py#L591"><code>test_finalize_group_publishes_minf_routes_staged_through_the_stager</code></a>.</p>
+</div></body></html>
