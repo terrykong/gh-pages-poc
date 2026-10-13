@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>NVIDIA-NeMo/RL #4506 — where the 3,752 lines go, and which ~360 can be replaced</title>
+<title>NVIDIA-NeMo/RL #4506 — where the 3,752 lines go, and which ~300 source lines can be replaced</title>
 <style>
 :root{
   --bg:#0d1117; --surface:#161b22; --surface2:#1c2128; --border:#30363d;
@@ -74,6 +74,12 @@ svg .sep{stroke:var(--bg);stroke-width:1.5}
 svg .hatch-bar{fill:var(--orange)}
 svg .hatched{fill:url(#hatch);stroke:var(--orange);stroke-width:1.2}
 svg .zoom{stroke:var(--dim);stroke-width:1;stroke-dasharray:4 4;fill:none}
+.cref{margin:6px 0 0;font-size:13px}
+.cref a{display:inline-block;padding:4px 10px;border:1px solid var(--border);
+  border-radius:16px;background:var(--surface);font:12.5px ui-monospace,Menlo,monospace;margin:2px 4px 2px 0}
+.cref a:hover{background:var(--surface2);text-decoration:none}
+td .cref{margin:4px 0 0}
+td .cref a{font-size:11.5px;padding:2px 8px}
 nav.chain{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 6px;padding:0}
 nav.chain a,nav.chain span{display:inline-block;padding:5px 11px;border:1px solid var(--border);
   border-radius:20px;background:var(--surface);text-decoration:none;color:var(--accent);
@@ -95,9 +101,9 @@ p.chainnote{color:var(--dim);font-size:12px;margin:0 0 18px}
   document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
 <div class="wrap">
 
-<h1>Where the 3,752 lines go, and which ~360 can be replaced by code that already exists</h1>
+<h1>Where the 3,752 lines go, and which ~300 source lines can be replaced by code that already exists</h1>
 <p class="sub">Size review of <a href="https://github.com/NVIDIA-NeMo/RL/pull/4506">NVIDIA-NeMo/RL #4506</a>. Line counts are from
-<code>git diff cf124ff 0c54ff7</code> (the PR against its real base, <a href="https://github.com/NVIDIA-NeMo/RL/pull/4501">#4501</a>). All permalinks pin the PR head <code>0c54ff7</code>.</p>
+<code>git diff cf124ff 0c54ff7</code> (the PR against its real base, <a href="https://github.com/NVIDIA-NeMo/RL/pull/4501">#4501</a>). All permalinks pin the PR head <code>0c54ff7</code>. Review comments are in a pending review; the links work once it is published.</p>
 
 <div class="status">
 <dl>
@@ -117,7 +123,7 @@ p.chainnote{color:var(--dim);font-size:12px;margin:0 0 18px}
 <p class="chainnote">Two pages on this PR — this one: how big it is, and what can go.</p>
 
 <p>The rework from the earlier version of this change (<a href="https://github.com/NVIDIA-NeMo/RL/pull/4319">#4319</a>, +6,304) cut tests, not source:
-the new cut module went from 904 to 821 lines and the vLLM worker changes from 786 to 761. Most of the ~360 lines below can be swapped for one call into code that already exists.
+the new cut module went from 904 to 821 lines and the vLLM worker changes from 786 to 761. Most of the ~300 source lines below (plus ~55 test lines) can be swapped for one call into code that already exists.
 Asking now matters because the next PRs in the stack build on these files: by <a href="https://github.com/NVIDIA-NeMo/RL/pull/4508">#4508</a> the cut module is about 1,500 lines.</p>
 
 <h2>Where the lines go</h2>
@@ -193,14 +199,14 @@ Asking now matters because the next PRs in the stack build on these files: by <a
 
 <div class="tbl"><table>
 <tr><th></th><th>What the PR writes</th><th>Replace with</th><th class="n">lines</th></tr>
-<tr><td>S1</td><td>Two hand-written output accumulators (<a href="https://github.com/NVIDIA-NeMo/RL/blob/0c54ff74c776dadced4b2cc4e2d9da5f77ebdd8b/nemo_rl/models/generation/vllm/vllm_worker_async.py#L226">vllm_worker_async.py:226</a>)</td><td>vLLM's own <code>CUMULATIVE</code> output mode — diff below</td><td class="n">~95</td></tr>
-<tr><td>S2</td><td>Freeze / seal / rollback buffers per call (<a href="https://github.com/NVIDIA-NeMo/RL/blob/0c54ff74c776dadced4b2cc4e2d9da5f77ebdd8b/nemo_rl/models/generation/generation_cut_capture.py#L109">generation_cut_capture.py:109</a>)</td><td>One token list plus a count of tokens already saved</td><td class="n">~65</td></tr>
-<tr><td>S4</td><td>Fence start/release with two flags and two exception groups, plus a re-indent (<a href="https://github.com/NVIDIA-NeMo/RL/blob/0c54ff74c776dadced4b2cc4e2d9da5f77ebdd8b/nemo_rl/algorithms/single_controller.py#L4765">single_controller.py:4765</a>)</td><td>One <code>async with</code> context manager</td><td class="n">~45</td></tr>
-<tr><td>S6</td><td>Re-checks of token count, digest and version (<a href="https://github.com/NVIDIA-NeMo/RL/blob/0c54ff74c776dadced4b2cc4e2d9da5f77ebdd8b/nemo_rl/models/generation/generation_cut_capture.py#L396">generation_cut_capture.py:396</a>)</td><td>Gym's own checks, which run right after (<a href="https://github.com/NVIDIA-NeMo/Gym/blob/120d516f09cfd0377dbed6828247ab1606e9e686/nemo_gym/token_id_capture/staging/capture.py#L156">capture.py:156</a>)</td><td class="n">~40</td></tr>
-<tr><td>S5</td><td>A fallback that returns the same failure on every branch (<a href="https://github.com/NVIDIA-NeMo/RL/blob/0c54ff74c776dadced4b2cc4e2d9da5f77ebdd8b/nemo_rl/models/generation/generation_cut_capture.py#L554">generation_cut_capture.py:554</a>)</td><td>Delete; build failure replies with Gym's <code>GenerationCutPrefixAck.failure</code></td><td class="n">~28</td></tr>
-<tr><td>S9</td><td>A second "log-prob of the chosen token" loop (<a href="https://github.com/NVIDIA-NeMo/RL/blob/0c54ff74c776dadced4b2cc4e2d9da5f77ebdd8b/nemo_rl/models/generation/vllm/utils.py#L56">vllm/utils.py:56</a>)</td><td>Have the existing loop at <a href="https://github.com/NVIDIA-NeMo/RL/blob/0c54ff74c776dadced4b2cc4e2d9da5f77ebdd8b/nemo_rl/models/generation/vllm/utils.py#L526">:526</a> call the new function</td><td class="n">~20</td></tr>
-<tr><td>S7</td><td>Support for a key format and two config keys that never shipped (<a href="https://github.com/NVIDIA-NeMo/RL/blob/0c54ff74c776dadced4b2cc4e2d9da5f77ebdd8b/nemo_rl/data_plane/tq_token_sink.py#L173">tq_token_sink.py:173</a>, <a href="https://github.com/NVIDIA-NeMo/RL/blob/0c54ff74c776dadced4b2cc4e2d9da5f77ebdd8b/nemo_rl/algorithms/single_controller_utils/config.py#L731">config.py:731</a>)</td><td>Delete</td><td class="n">~10</td></tr>
-<tr><td>S8</td><td>Functional-test helpers copied from the turn-recovery script (<a href="https://github.com/NVIDIA-NeMo/RL/blob/0c54ff74c776dadced4b2cc4e2d9da5f77ebdd8b/tests/functional/_gym_prefix_recovery_snapshot.py#L37">_gym_prefix_recovery_snapshot.py:37</a>)</td><td>One shared helper module both tests import</td><td class="n">~55 test</td></tr>
+<tr><td>S1</td><td>Two hand-written output accumulators (<a href="https://github.com/NVIDIA-NeMo/RL/blob/0c54ff74c776dadced4b2cc4e2d9da5f77ebdd8b/nemo_rl/models/generation/vllm/vllm_worker_async.py#L226">vllm_worker_async.py:226</a>)<p class="cref"><a href="https://github.com/NVIDIA-NeMo/RL/pull/4506#discussion_r4262413930">review comment — vllm_worker_async.py:226</a></p></td><td>vLLM's own <code>CUMULATIVE</code> output mode — diff below</td><td class="n">~95</td></tr>
+<tr><td>S2</td><td>Freeze / seal / rollback buffers per call (<a href="https://github.com/NVIDIA-NeMo/RL/blob/0c54ff74c776dadced4b2cc4e2d9da5f77ebdd8b/nemo_rl/models/generation/generation_cut_capture.py#L109">generation_cut_capture.py:109</a>)<p class="cref"><a href="https://github.com/NVIDIA-NeMo/RL/pull/4506#discussion_r4262413947">review comment — generation_cut_capture.py:109</a></p></td><td>One token list plus a count of tokens already saved</td><td class="n">~65</td></tr>
+<tr><td>S4</td><td>Fence start/release with two flags and two exception groups, plus a re-indent (<a href="https://github.com/NVIDIA-NeMo/RL/blob/0c54ff74c776dadced4b2cc4e2d9da5f77ebdd8b/nemo_rl/algorithms/single_controller.py#L4765">single_controller.py:4765</a>)<p class="cref"><a href="https://github.com/NVIDIA-NeMo/RL/pull/4506#discussion_r4262413958">review comment — single_controller.py:4789</a></p></td><td>One <code>async with</code> context manager</td><td class="n">~45</td></tr>
+<tr><td>S6</td><td>Re-checks of token count, digest and version (<a href="https://github.com/NVIDIA-NeMo/RL/blob/0c54ff74c776dadced4b2cc4e2d9da5f77ebdd8b/nemo_rl/models/generation/generation_cut_capture.py#L396">generation_cut_capture.py:396</a>)<p class="cref"><a href="https://github.com/NVIDIA-NeMo/RL/pull/4506#discussion_r4262413986">review comment — generation_cut_capture.py:428</a></p></td><td>Gym's own checks, which run right after (<a href="https://github.com/NVIDIA-NeMo/Gym/blob/120d516f09cfd0377dbed6828247ab1606e9e686/nemo_gym/token_id_capture/staging/capture.py#L156">capture.py:156</a>)</td><td class="n">~40</td></tr>
+<tr><td>S5</td><td>A fallback that returns the same failure on every branch (<a href="https://github.com/NVIDIA-NeMo/RL/blob/0c54ff74c776dadced4b2cc4e2d9da5f77ebdd8b/nemo_rl/models/generation/generation_cut_capture.py#L554">generation_cut_capture.py:554</a>)<p class="cref"><a href="https://github.com/NVIDIA-NeMo/RL/pull/4506#discussion_r4262413976">review comment — generation_cut_capture.py:587</a></p></td><td>Delete; build failure replies with Gym's <code>GenerationCutPrefixAck.failure</code></td><td class="n">~28</td></tr>
+<tr><td>S9</td><td>A second "log-prob of the chosen token" loop (<a href="https://github.com/NVIDIA-NeMo/RL/blob/0c54ff74c776dadced4b2cc4e2d9da5f77ebdd8b/nemo_rl/models/generation/vllm/utils.py#L56">vllm/utils.py:56</a>)<p class="cref"><a href="https://github.com/NVIDIA-NeMo/RL/pull/4506#discussion_r4262414062">review comment — utils.py:56</a></p></td><td>Have the existing loop at <a href="https://github.com/NVIDIA-NeMo/RL/blob/0c54ff74c776dadced4b2cc4e2d9da5f77ebdd8b/nemo_rl/models/generation/vllm/utils.py#L526">:526</a> call the new function</td><td class="n">~20</td></tr>
+<tr><td>S7</td><td>Support for a key format and two config keys that never shipped (<a href="https://github.com/NVIDIA-NeMo/RL/blob/0c54ff74c776dadced4b2cc4e2d9da5f77ebdd8b/nemo_rl/data_plane/tq_token_sink.py#L173">tq_token_sink.py:173</a>, <a href="https://github.com/NVIDIA-NeMo/RL/blob/0c54ff74c776dadced4b2cc4e2d9da5f77ebdd8b/nemo_rl/algorithms/single_controller_utils/config.py#L731">config.py:731</a>)<p class="cref"><a href="https://github.com/NVIDIA-NeMo/RL/pull/4506#discussion_r4262414001">review comment — tq_token_sink.py:174</a> <a href="https://github.com/NVIDIA-NeMo/RL/pull/4506#discussion_r4262414026">review comment — config.py:732</a></p></td><td>Delete</td><td class="n">~10</td></tr>
+<tr><td>S8</td><td>Functional-test helpers copied from the turn-recovery script (<a href="https://github.com/NVIDIA-NeMo/RL/blob/0c54ff74c776dadced4b2cc4e2d9da5f77ebdd8b/tests/functional/_gym_prefix_recovery_snapshot.py#L37">_gym_prefix_recovery_snapshot.py:37</a>)<p class="cref"><a href="https://github.com/NVIDIA-NeMo/RL/pull/4506#discussion_r4262414048">review comment — _gym_prefix_recovery_snapshot.py:37</a></p></td><td>One shared helper module both tests import</td><td class="n">~55 test</td></tr>
 </table></div>
 
 <h2>One of them as a diff — proposed, not in the PR</h2>
@@ -280,6 +286,7 @@ Asking now matters because the next PRs in the stack build on these files: by <a
 (4) delete the two classes (<a href="https://github.com/NVIDIA-NeMo/RL/blob/0c54ff74c776dadced4b2cc4e2d9da5f77ebdd8b/nemo_rl/models/generation/vllm/vllm_worker_async.py#L226">:226</a>).
 Do not use vLLM's <code>RequestOutput.add</code> instead: it drops <code>routed_experts</code>, which router replay (#4612) needs.
 Two costs to check: the log-prob helper still reads the whole output each step, and vLLM's slow-tokenizer path copies the text each step.</p>
+<p class="cref"><a href="https://github.com/NVIDIA-NeMo/RL/pull/4506#discussion_r4262413930">review comment — vllm_worker_async.py:226</a></p>
 
 <div class="warn"><b>So what.</b> About 300 of the 2,007 source lines, and 55 test lines, repeat code that already exists. Applying these before the next PRs in the stack build on the same files keeps the feature smaller everywhere above this PR.
 <b>One open design question, not a finding:</b> the snapshot fence (~250 source lines) and #4655's 253-line cleanup module both exist so that a finishing call can delete its chunk rows while a checkpoint is being taken. Was moving that delete to a point outside the checkpoint considered? If it was, the PR body should say why it does not work.</div>
