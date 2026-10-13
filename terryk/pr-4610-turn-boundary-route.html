@@ -53,6 +53,13 @@ code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;
 .hl{border-left:3px solid var(--green);background:var(--surface);
   padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0}
 ol li{margin:2px 0}
+table.cmp{border-collapse:collapse;width:100%;font-size:13.5px;margin:12px 0;display:block;overflow-x:auto}
+table.cmp th,table.cmp td{border:1px solid var(--border);padding:7px 10px;text-align:left;vertical-align:top}
+table.cmp th{background:var(--surface2);font-size:12.5px}
+table.cmp .dim{color:var(--dim);font-size:12px}
+table.cmp .t-bad{color:var(--red);font-weight:600}
+table.cmp .t-ok{color:var(--text);font-weight:600}
+table.cmp .t-best{color:var(--green);font-weight:600}
 svg{max-width:100%;height:auto;display:block;margin:16px 0}
 svg .lane{fill:var(--text);font:bold 13px -apple-system,sans-serif}
 svg .note{fill:var(--dim);font:11.5px -apple-system,sans-serif}
@@ -85,7 +92,9 @@ svg a text{text-decoration:underline;fill:var(--accent);font:11.5px ui-monospace
 
 <h1>Which experts the trainer replays for the last token of each turn</h1>
 <p class="sub"><a href="https://github.com/NVIDIA-NeMo/RL/pull/4610">NVIDIA-NeMo/RL #4610</a>
-(router replay with token capture, multi-turn). All permalinks pin the PR head <code>8df2f08</code>.</p>
+(router replay with token capture, multi-turn), which also closes
+<a href="https://github.com/NVIDIA-NeMo/RL/issues/4355">#4355</a>.
+All permalinks pin the PR head <code>8df2f08</code>.</p>
 
 <div class="status">
 <dl>
@@ -94,7 +103,7 @@ svg a text{text-decoration:underline;fill:var(--accent);font:11.5px ui-monospace
   with made-up experts <code>0, 1, …, k−1</code> instead of the ones vLLM actually used. No metric showed it.</dd>
   <dt>This PR</dt>
   <dd>Each later vLLM call also keeps the route it computed for the previous turn's last token, and that route
-  is written into the training row.</dd>
+  is written into the training row. Rows with no route are now marked <code>−1</code>, which is what #4355 asked for.</dd>
   <dt>Status</dt>
   <dd><span class="verdict good">Fixed by this PR.</span> Only runs with token capture + router replay + more than one vLLM call per rollout were affected.</dd>
 </dl>
@@ -107,8 +116,10 @@ makes the trainer use the same experts vLLM chose. With
 each vLLM call saves only its <i>new</i> tokens' routes, and the pieces are joined later.
 Dotted words have a short explanation: hover or tap them.</div>
 
-<p>vLLM records a token's experts only when the token is <i>fed into</i> the model. The last token it samples is
-never fed in, so a sequence of length S comes back with S−1 routes. NeMo-RL used to fill that last row with
+<p>vLLM records a token's experts only when the token is <i>fed into</i> the model. Each call returns routes for its
+whole sequence: the prompt (computed during prefill) and the generated tokens, joined at
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/8df2f08423430ad64381b41732212ac37731bd74/nemo_rl/models/generation/vllm/utils.py#L255-L268">utils.py</a>.
+The last token it samples is never fed in, so a sequence of length S comes back with S−1 routes. NeMo-RL used to fill that last row with
 <code>0, 1, …, k−1</code>
 (<a href="https://github.com/NVIDIA-NeMo/RL/blob/3df254d30675093603cd48c61d812b590ff415ec/nemo_rl/models/generation/vllm/utils.py#L321-L330">utils.py, before</a>).
 The next turn's vLLM call does feed that token in, so it has the real route — but the old code kept only the
@@ -121,7 +132,8 @@ and threw the real route away.</p>
 
   <!-- lane: vLLM call 1 -->
   <text class="lane" x="16" y="72">vLLM call 1</text>
-  <text class="note" x="16" y="88">returns 4 routes</text>
+  <text class="note" x="16" y="88">prefill p0–p2</text>
+  <text class="note" x="16" y="102">+ generated p3</text>
   <rect class="c1" x="210" y="54" width="64" height="34" rx="5"/><text class="ct" x="234" y="76">p0</text>
   <rect class="c1" x="278" y="54" width="64" height="34" rx="5"/><text class="ct" x="302" y="76">p1</text>
   <rect class="c1" x="346" y="54" width="64" height="34" rx="5"/><text class="ct" x="370" y="76">p2</text>
@@ -132,7 +144,9 @@ and threw the real route away.</p>
 
   <!-- lane: vLLM call 2 -->
   <text class="lane" x="16" y="142">vLLM call 2</text>
-  <text class="note" x="16" y="158">returns 9 routes</text>
+  <text class="note" x="16" y="158">prefill p0–p5</text>
+  <text class="note" x="16" y="172">+ generated p6–p8</text>
+  <text class="note" x="482" y="114">↓ here p4 is a prompt token, so call 2's prefill routes it</text>
   <rect class="c2" x="210" y="124" width="64" height="34" rx="5"/><text class="ct" x="234" y="146">p0</text>
   <rect class="c2" x="278" y="124" width="64" height="34" rx="5"/><text class="ct" x="302" y="146">p1</text>
   <rect class="c2" x="346" y="124" width="64" height="34" rx="5"/><text class="ct" x="370" y="146">p2</text>
@@ -243,6 +257,37 @@ an all-<code>−1</code> row as "route this token yourself"
 (<a href="https://github.com/NVIDIA-NeMo/RL/blob/8df2f08423430ad64381b41732212ac37731bd74/nemo_rl/models/megatron/router_replay.py#L525">fallback patch</a>),
 so a missed boundary can no longer pass as a real route.</li>
 </ol>
+
+<h2>It also closes #4355: "no route" is now −1, not 0, 1, …</h2>
+
+<p><a href="https://github.com/NVIDIA-NeMo/RL/issues/4355">#4355</a> reported the same symptom from the other side.
+vLLM's filler for the last token was experts <code>0, 1, …, k−1</code>. That looks like a real route, so the trainer
+replays it. The issue asked for <code>−1</code> instead, the value Megatron inference already uses: on a
+<code>−1</code> row the trainer picks the experts with its own router
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/8df2f08423430ad64381b41732212ac37731bd74/nemo_rl/models/megatron/router_replay.py#L525">fallback patch</a>).
+The third hunk above, in <code>pad_and_align_routed_expert_indices</code>, is exactly that change. The second hunk goes one
+step further for p4:</p>
+
+<table class="cmp">
+<tr><th>Token in the example</th><th>Before</th><th>What #4355 asked</th><th>This PR</th></tr>
+<tr><td><b>p4</b>: last token of turn 1<br><span class="dim">call 2 routes it during prefill</span></td>
+  <td class="t-bad">experts 0,1<br><span class="dim">fake, replayed</span></td>
+  <td class="t-ok">−1<br><span class="dim">trainer picks its own</span></td>
+  <td class="t-best">call 2's real route<br><span class="dim">the experts vLLM used</span></td></tr>
+<tr><td><b>p9</b>: last token of the row<br><span class="dim">no later call</span></td>
+  <td class="t-bad">experts 0,1<br><span class="dim">fake, replayed</span></td>
+  <td class="t-ok">−1</td>
+  <td class="t-ok">−1<br><span class="dim">nothing is predicted from p9</span></td></tr>
+<tr><td><b>batch padding</b><br><span class="dim">rows past the end</span></td>
+  <td>experts 0,1</td>
+  <td>may stay 0,1</td>
+  <td>−1, then refilled by the trainer
+  (<a href="https://github.com/NVIDIA-NeMo/RL/blob/8df2f08423430ad64381b41732212ac37731bd74/nemo_rl/models/megatron/data.py#L1406">data.py</a>)<br><span class="dim">no effect</span></td></tr>
+</table>
+
+<p>The real route is better than <code>−1</code> at p4. p5–p9 were generated while reading vLLM's version of p4,
+so replaying the experts vLLM used keeps training and inference the same. With <code>−1</code>, the trainer's own
+router could pick different experts there.</p>
 
 <div class="hl">
 <strong>What changes for a run.</strong> In a token-capture run with router replay, every assistant turn except
