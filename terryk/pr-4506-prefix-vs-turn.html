@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NVIDIA-NeMo/RL #4506 — what prefix recovery keeps that turn recovery throws away</title>
+<style>
+:root{
+  --bg:#0d1117; --surface:#161b22; --surface2:#1c2128; --border:#30363d;
+  --text:#e6edf3; --dim:#8b949e; --accent:#58a6ff; --green:#3fb950;
+  --orange:#d29922; --red:#f85149;
+}
+:root[data-theme="light"]{
+  --bg:#ffffff; --surface:#f6f8fa; --surface2:#eaeef2; --border:#d0d7de;
+  --text:#1f2328; --dim:#59636e; --accent:#0969da; --green:#1a7f37;
+  --orange:#9a6700; --red:#cf222e;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:28px 16px 70px}
+h1{font-size:22px;margin:0 0 8px;line-height:1.3}
+h2{font-size:18px;margin:32px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;
+  font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
+.sub{color:var(--dim);font-size:13.5px;margin:0 0 16px}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);
+  border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;
+  font:13px/1 ui-monospace,Menlo,monospace;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.18)}
+.status{border:1px solid var(--border);border-radius:10px;background:var(--surface);
+  padding:2px 16px 10px;margin:0 0 20px}
+.status dl{display:grid;grid-template-columns:max-content 1fr;gap:4px 14px;margin:12px 0 0}
+.status dt{color:var(--dim);font-size:12px;text-transform:uppercase;letter-spacing:.04em;
+  white-space:nowrap;padding-top:2px}
+.status dd{margin:0;font-size:14px}
+.verdict{font-weight:700}
+.verdict.good{color:var(--green)}
+.verdict.open{color:var(--orange)}
+.bg{border-left:3px solid var(--dim);background:var(--surface);padding:10px 14px;margin:0 0 16px;
+  font-size:14px;border-radius:0 8px 8px 0}
+.mono{font:12.5px ui-monospace,SFMono-Regular,Menlo,monospace;
+  background:var(--surface);border:1px solid var(--border);border-radius:8px;
+  padding:13px;overflow-x:auto;white-space:pre}
+.warn{border-left:3px solid var(--orange);background:var(--surface);
+  padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0}
+.kept{color:var(--green);font-weight:700}
+.drop{color:var(--red);font-weight:700}
+.tip{border-bottom:1px dotted var(--dim);cursor:help;position:relative;outline:none}
+.tip:hover::after,.tip:focus::after{content:attr(data-tip);position:absolute;left:0;top:1.7em;z-index:60;
+  width:max-content;max-width:min(340px,80vw);white-space:normal;background:var(--surface2);color:var(--text);
+  border:1px solid var(--border);border-radius:6px;padding:7px 10px;font:13px/1.45 -apple-system,sans-serif;
+  font-weight:400;box-shadow:0 4px 14px rgba(0,0,0,.3)}
+svg{max-width:100%;height:auto;display:block;margin:16px 0}
+svg .box{fill:var(--surface);stroke:var(--border);stroke-width:1.4}
+svg .box-new{fill:var(--surface);stroke:var(--accent);stroke-width:2}
+svg .box-bad{fill:var(--surface);stroke:var(--red);stroke-width:2}
+svg .box-shared{fill:var(--surface2);stroke:var(--green);stroke-width:2}
+svg .t{fill:var(--text);font:bold 12.5px -apple-system,sans-serif}
+svg .d{fill:var(--text);font:11.5px ui-monospace,Menlo,monospace}
+svg .bad{fill:var(--red);font:bold 11.5px ui-monospace,Menlo,monospace}
+svg .good{fill:var(--green);font:bold 11.5px ui-monospace,Menlo,monospace}
+svg .note{fill:var(--dim);font:11.5px -apple-system,sans-serif}
+svg .lane{fill:var(--accent);font:bold 13px -apple-system,sans-serif}
+svg .lane-old{fill:var(--dim);font:bold 13px -apple-system,sans-serif}
+svg .arrow{stroke:var(--dim);stroke-width:1.4;fill:none}
+svg .ah{fill:var(--dim)}
+svg .sw-new{fill:var(--accent)} svg .sw-shared{fill:var(--green)} svg .sw-bad{fill:var(--red)}
+svg a text{text-decoration:underline;fill:var(--accent);font:11px ui-monospace,Menlo,monospace}
+nav.chain{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 6px;padding:0}
+nav.chain a,nav.chain span{display:inline-block;padding:5px 11px;border:1px solid var(--border);
+  border-radius:20px;background:var(--surface);text-decoration:none;color:var(--accent);
+  font-size:12.5px;line-height:1.3;white-space:nowrap}
+nav.chain a:hover{background:var(--surface2)}
+nav.chain span.here{background:var(--accent);color:var(--bg);border-color:var(--accent);font-weight:600}
+p.chainnote{color:var(--dim);font-size:12px;margin:0 0 18px}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+  document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head>
+<body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+  function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+  function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
+    b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
+      else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+  document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+<div class="wrap">
+
+<h1>What prefix recovery keeps that turn recovery throws away</h1>
+<p class="sub">Explainer for <a href="https://github.com/NVIDIA-NeMo/RL/pull/4506">NVIDIA-NeMo/RL #4506</a>, which sits on
+<a href="https://github.com/NVIDIA-NeMo/RL/pull/4501">#4501</a> (turn-level recovery). All permalinks pin the PR head <code>0c54ff7</code>.</p>
+
+<div class="status">
+<dl>
+  <dt>Before</dt>
+  <dd>Turn-level recovery. A model call that was still decoding at the checkpoint is thrown away; after a restart it runs again from scratch, from the start of its turn.</dd>
+  <dt>This PR</dt>
+  <dd>Adds <code>rollout_recovery.target_level: prefix</code>. Each checkpoint also saves the tokens every running call has decoded so far, and the restarted call continues from them.</dd>
+  <dt>Status</dt>
+  <dd><span class="verdict good">New feature, opt-in.</span> <span class="verdict open">Open review findings</span>: a stop string can come back after restore, and stop strings or presence/frequency penalties can change the output across a cut. Both are tracked in the review comments. No GPU CI has run on this PR yet.</dd>
+</dl>
+</div>
+
+<nav class="chain">
+  <span class="here">prefix vs turn</span>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4506-size-and-reuse.html">size and reuse</a>
+</nav>
+<p class="chainnote">Two pages on this PR — this one: what prefix recovery adds next to turn recovery.</p>
+
+<div class="bg"><b>Background.</b> In a Gym rollout, an agent server (<span class="tip" tabindex="0" data-tip="NeMo Gym: the service that runs agents and environments. It calls the model through an OpenAI-style HTTP endpoint on each vLLM worker.">Gym</span>) calls the model many times. NeMo-RL's vLLM workers answer, and store each finished call's token ids as a row in <span class="tip" tabindex="0" data-tip="TransferQueue: the shared store that holds token rows for the trainer. Rollout snapshots save it to disk.">TQ</span>.
+Every few seconds the <span class="tip" tabindex="0" data-tip="The single process that drives rollouts and training, and takes the rollout snapshots.">single controller</span> takes a rollout snapshot. With turn recovery, Gym saves its agents in that snapshot, so a restart goes back to the last finished turn
+(<a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4266-gym-turn-recovery.html">turn recovery, explained</a>). Dotted words have a short explanation: hover or tap them.</div>
+
+<p>At each Gym checkpoint the controller first holds back <span class="tip" tabindex="0" data-tip="The write that saves a finished call's full token row to TQ. It is held so a call cannot finish and delete its partial rows while the snapshot is being taken.">terminal row writes</span> on every vLLM worker; decoding keeps running
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/0c54ff74c776dadced4b2cc4e2d9da5f77ebdd8b/nemo_rl/algorithms/single_controller.py#L4771">single_controller.py:4771</a>).
+Gym then asks each worker to cut its running calls, and the worker saves the tokens decoded so far as a TQ <span class="tip" tabindex="0" data-tip="A partial row: only the tokens decoded since the previous cut. A long call can have several, read back in order.">chunk row</span>
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/0c54ff74c776dadced4b2cc4e2d9da5f77ebdd8b/nemo_rl/models/generation/generation_cut_capture.py#L699">generation_cut_capture.py:699</a>).
+After a restart the worker reads those rows back, adds them to the end of the prompt, and lowers <code>max_tokens</code> and <code>min_tokens</code> by the same count
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/0c54ff74c776dadced4b2cc4e2d9da5f77ebdd8b/nemo_rl/models/generation/vllm/vllm_worker_async.py#L1553">vllm_worker_async.py:1553</a>).
+It then puts the decoded text in front of the reply (<a href="https://github.com/NVIDIA-NeMo/RL/blob/0c54ff74c776dadced4b2cc4e2d9da5f77ebdd8b/nemo_rl/models/generation/vllm/vllm_worker_async.py#L1035">:1035</a>).
+A call that cannot be cut — the deadline passed, the cut lands inside a multi-byte character, or an output step was missed — falls back to the turn path.</p>
+
+<h2>Where each path does the work — and where they join</h2>
+
+<svg viewBox="0 0 940 440" role="img" aria-label="Two lanes. Turn recovery: the running call is not saved, and after restart vLLM decodes all 13 tokens again. Prefix recovery: the 5 decoded tokens are saved as a TQ chunk row, spliced into the prompt after restart, and vLLM decodes only 8. Both end in the same terminal-row function.">
+  <text class="t" x="16" y="22">One model call: 13-token budget, 5 tokens decoded at the checkpoint</text>
+  <rect class="sw-new" x="470" y="11" width="13" height="12" rx="2"/><text class="note" x="489" y="21">new in this PR</text>
+  <rect class="sw-shared" x="590" y="11" width="13" height="12" rx="2"/><text class="note" x="609" y="21">same code, both paths</text>
+  <rect class="sw-bad" x="750" y="11" width="13" height="12" rx="2"/><text class="note" x="769" y="21">work thrown away</text>
+
+  <!-- TURN lane -->
+  <text class="lane-old" x="16" y="50">Turn recovery (before)</text>
+  <rect class="box" x="16" y="58" width="162" height="78" rx="7"/>
+  <text class="t" x="26" y="76">1 · checkpoint</text>
+  <text class="d" x="26" y="94">call decoding:</text>
+  <text class="d" x="26" y="110">t1 t2 t3 t4 t5</text>
+  <text class="bad" x="26" y="126">not saved</text>
+  <rect class="box" x="200" y="58" width="162" height="78" rx="7"/>
+  <text class="t" x="210" y="76">2 · saved</text>
+  <text class="d" x="210" y="94">finished turns</text>
+  <text class="d" x="210" y="110">+ Gym agent state</text>
+  <text class="d" x="210" y="126">cut: None</text>
+  <rect class="box-shared" x="384" y="58" width="162" height="78" rx="7"/>
+  <text class="t" x="394" y="76">3 · restart call</text>
+  <text class="d" x="394" y="94">prompt: 11 ids</text>
+  <text class="d" x="394" y="110">max_tokens 13</text>
+  <text class="d" x="394" y="126">min_tokens 7</text>
+  <rect class="box-bad" x="568" y="58" width="162" height="78" rx="7"/>
+  <text class="t" x="578" y="76">4 · vLLM decodes</text>
+  <text class="d" x="578" y="94">13 new tokens</text>
+  <text class="bad" x="578" y="110">t1..t5 redone</text>
+  <path class="arrow" d="M178 97 L195 97"/><path class="ah" d="M199 97 L192 93 L192 101 Z"/>
+  <path class="arrow" d="M362 97 L379 97"/><path class="ah" d="M383 97 L376 93 L376 101 Z"/>
+  <path class="arrow" d="M546 97 L563 97"/><path class="ah" d="M567 97 L560 93 L560 101 Z"/>
+  <path class="arrow" d="M730 97 L747 97"/><path class="ah" d="M751 97 L744 93 L744 101 Z"/>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/0c54ff74c776dadced4b2cc4e2d9da5f77ebdd8b/nemo_rl/experience/rollout_recovery.py#L128" target="_blank" rel="noopener"><text x="16" y="152">TURN :128</text></a>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/0c54ff74c776dadced4b2cc4e2d9da5f77ebdd8b/nemo_rl/models/generation/vllm/vllm_worker_async.py#L1583" target="_blank" rel="noopener"><text x="384" y="152">splice :1583</text></a>
+
+  <!-- PREFIX lane -->
+  <text class="lane" x="16" y="190">Prefix recovery (this PR)</text>
+  <rect class="box-new" x="16" y="198" width="162" height="78" rx="7"/>
+  <text class="t" x="26" y="216">1 · hold + cut</text>
+  <text class="d" x="26" y="234">hold row writes</text>
+  <text class="d" x="26" y="250">Gym POSTs a cut</text>
+  <text class="d" x="26" y="266">freeze t1..t5</text>
+  <rect class="box-new" x="200" y="198" width="162" height="78" rx="7"/>
+  <text class="t" x="210" y="216">2 · TQ chunk row</text>
+  <text class="d" x="210" y="234">ids [t1..t5]</text>
+  <text class="d" x="210" y="250">prefix_count 5</text>
+  <text class="d" x="210" y="266">output limit 13</text>
+  <rect class="box-new" x="384" y="198" width="162" height="78" rx="7"/>
+  <text class="t" x="394" y="216">3 · restart + splice</text>
+  <text class="d" x="394" y="234">prompt 11+5 = 16</text>
+  <text class="d" x="394" y="250">max 13−5 = 8</text>
+  <text class="d" x="394" y="266">min 7−5 = 2</text>
+  <rect class="box-new" x="568" y="198" width="162" height="78" rx="7"/>
+  <text class="t" x="578" y="216">4 · vLLM decodes</text>
+  <text class="d" x="578" y="234">8 new tokens</text>
+  <text class="d" x="578" y="250">text = t1..t5</text>
+  <text class="d" x="578" y="266">  + new text</text>
+  <path class="arrow" d="M178 237 L195 237"/><path class="ah" d="M199 237 L192 233 L192 241 Z"/>
+  <path class="arrow" d="M362 237 L379 237"/><path class="ah" d="M383 237 L376 233 L376 241 Z"/>
+  <path class="arrow" d="M546 237 L563 237"/><path class="ah" d="M567 237 L560 233 L560 241 Z"/>
+  <path class="arrow" d="M730 237 L747 237"/><path class="ah" d="M751 237 L744 233 L744 241 Z"/>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/0c54ff74c776dadced4b2cc4e2d9da5f77ebdd8b/nemo_rl/algorithms/single_controller.py#L4771" target="_blank" rel="noopener"><text x="16" y="292">hold :4771</text></a>
+  <a href="https://github.com/NVIDIA-NeMo/Gym/blob/120d516f09cfd0377dbed6828247ab1606e9e686/nemo_gym/_checkpoint/model.py#L712" target="_blank" rel="noopener"><text x="16" y="306">Gym POST :712</text></a>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/0c54ff74c776dadced4b2cc4e2d9da5f77ebdd8b/nemo_rl/models/generation/generation_cut_capture.py#L699" target="_blank" rel="noopener"><text x="200" y="292">stage chunk :699</text></a>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/0c54ff74c776dadced4b2cc4e2d9da5f77ebdd8b/nemo_rl/models/generation/vllm/vllm_worker_async.py#L1780" target="_blank" rel="noopener"><text x="200" y="306">cut endpoint :1780</text></a>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/0c54ff74c776dadced4b2cc4e2d9da5f77ebdd8b/nemo_rl/models/generation/vllm/vllm_worker_async.py#L1553" target="_blank" rel="noopener"><text x="384" y="292">splice :1553</text></a>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/0c54ff74c776dadced4b2cc4e2d9da5f77ebdd8b/nemo_rl/models/generation/generation_cut_capture.py#L168" target="_blank" rel="noopener"><text x="384" y="306">limits :168</text></a>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/0c54ff74c776dadced4b2cc4e2d9da5f77ebdd8b/nemo_rl/models/generation/vllm/vllm_worker_async.py#L1035" target="_blank" rel="noopener"><text x="568" y="292">prepend text :1035</text></a>
+
+  <!-- shared terminal row -->
+  <rect class="box-shared" x="752" y="58" width="172" height="218" rx="8"/>
+  <text class="t" x="764" y="78">5 · terminal row</text>
+  <text class="d" x="764" y="98">both paths run</text>
+  <text class="d" x="764" y="114">the same code:</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/0c54ff74c776dadced4b2cc4e2d9da5f77ebdd8b/nemo_rl/models/generation/vllm/vllm_worker_async.py#L1253" target="_blank" rel="noopener"><text x="764" y="134">finish capture :1253</text></a>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/0c54ff74c776dadced4b2cc4e2d9da5f77ebdd8b/nemo_rl/models/generation/vllm/vllm_worker_async.py#L1283" target="_blank" rel="noopener"><text x="764" y="152">complete_call :1283</text></a>
+  <text class="good" x="764" y="180">13 output tokens</text>
+  <text class="d" x="764" y="198">turn: 13 new</text>
+  <text class="d" x="764" y="214">prefix: 5 + 8</text>
+  <text class="d" x="764" y="242">Gym continues</text>
+  <text class="d" x="764" y="258">the agent's turn</text>
+
+  <!-- what still differs -->
+  <rect class="box" x="16" y="326" width="908" height="100" rx="8"/>
+  <text class="t" x="30" y="348">What still differs on the prefix path (everything else, including the splice, is shared)</text>
+  <text class="note" x="30" y="370">• the reply text starts with the decoded t1..t5, and the reasoning / tool parser is fed those ids first</text>
+  <text class="note" x="30" y="389">• the logged output count adds the 5 restored tokens to the 8 new ones</text>
+  <text class="note" x="30" y="408">• once the terminal row is saved, the chunk rows are deleted from TQ</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/0c54ff74c776dadced4b2cc4e2d9da5f77ebdd8b/nemo_rl/models/generation/vllm/vllm_worker_async.py#L195" target="_blank" rel="noopener"><text x="760" y="370">parser :195</text></a>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/0c54ff74c776dadced4b2cc4e2d9da5f77ebdd8b/nemo_rl/models/generation/vllm/vllm_worker_async.py#L1289" target="_blank" rel="noopener"><text x="760" y="389">count :1289</text></a>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/0c54ff74c776dadced4b2cc4e2d9da5f77ebdd8b/nemo_rl/models/generation/vllm/vllm_worker_async.py#L1245" target="_blank" rel="noopener"><text x="760" y="408">delete chunks :1245</text></a>
+</svg>
+
+<h2>Same call, two restarts</h2>
+
+<p>The numbers in the figure, side by side. They are picked by hand to show the mechanism; no GPU run backs this page.</p>
+
+<div class="mono">model call: prompt 11 ids, max_tokens 13, min_tokens 7 — 5 tokens decoded when the checkpoint runs
+
+                       turn (before)             prefix (this PR)
+saved for this call    nothing                   chunk row  t1..t5
+prompt after restart   11 ids                    16 ids  (11 + 5)
+max / min tokens       13 / 7                    8 / 2
+tokens decoded again   <span class="drop">13  (t1..t5 redone)</span>       <span class="kept">8   (nothing redone)</span>
+final output           13 tokens                 13 tokens  (5 + 8)</div>
+
+<p><b>Why keep both.</b> Turn recovery needs nothing from the vLLM worker beyond normal token capture. Prefix recovery needs the vLLM async engine and a Gym build with the cut endpoint, and setup rejects it with multimodal capture or router replay
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/0c54ff74c776dadced4b2cc4e2d9da5f77ebdd8b/nemo_rl/algorithms/single_controller_utils/setup.py#L1258">setup.py:1258</a>).
+Any call it cannot cut simply restarts the turn way, so turn recovery stays the fallback inside prefix mode.</p>
+
+<h2>What it costs, and what is still open</h2>
+
+<p>The gain is the decode work up to the last cut: a long call keeps everything it decoded before the checkpoint instead of nothing. The price: with prefix on, the "nothing changed, skip this snapshot" shortcut is off whenever a model call is running
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/0c54ff74c776dadced4b2cc4e2d9da5f77ebdd8b/nemo_rl/algorithms/single_controller.py#L4916">single_controller.py:4916</a>),
+so every snapshot interval holds row writes on all workers and pauses Gym. The PR has no timing numbers for that yet.</p>
+
+<div class="warn">
+<strong>Open review findings (tracked in the review comments).</strong>
+(1) <b>A stop string can come back.</b> If a call had already finished on a stop string when the cut ran, the restored reply is rebuilt from the saved ids, and decoding them brings back the stop string vLLM had cut off. This only matters when an agent sets its own <code>stop</code> list
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/0c54ff74c776dadced4b2cc4e2d9da5f77ebdd8b/nemo_rl/models/generation/vllm/vllm_worker_async.py#L1035">:1035</a>).
+(2) <b>Some calls change across a cut.</b> A stop string that starts before the cut and ends after it never matches, and presence / frequency penalties stop counting the restored tokens. The proposed fix marks such calls as not cuttable, so they take the turn path
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/0c54ff74c776dadced4b2cc4e2d9da5f77ebdd8b/nemo_rl/models/generation/vllm/vllm_worker_async.py#L1763">:1763</a>).
+</div>
+
+</div>
+</body>
+</html>
