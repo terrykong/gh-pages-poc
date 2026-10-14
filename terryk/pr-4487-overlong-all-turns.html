@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NVIDIA-NeMo/RL #4487 — the overlong penalty now counts every assistant turn</title>
+<style>
+:root{
+  --bg:#0d1117; --surface:#161b22; --surface2:#1c2128; --border:#30363d;
+  --text:#e6edf3; --dim:#8b949e; --accent:#58a6ff; --green:#3fb950;
+  --orange:#d29922; --red:#f85149;
+}
+:root[data-theme="light"]{
+  --bg:#ffffff; --surface:#f6f8fa; --surface2:#eaeef2; --border:#d0d7de;
+  --text:#1f2328; --dim:#59636e; --accent:#0969da; --green:#1a7f37;
+  --orange:#9a6700; --red:#cf222e;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:28px 16px 70px}
+h1{font-size:22px;margin:0 0 8px;line-height:1.3}
+h2{font-size:18px;margin:30px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;
+  font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
+.sub{color:var(--dim);font-size:13.5px;margin:0 0 16px}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);
+  border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;
+  font:13px/1 ui-monospace,Menlo,monospace;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.18)}
+.status{border:1px solid var(--border);border-radius:10px;background:var(--surface);
+  padding:2px 16px 10px;margin:0 0 20px}
+.status dl{display:grid;grid-template-columns:max-content 1fr;gap:4px 14px;margin:12px 0 0}
+.status dt{color:var(--dim);font-size:12px;text-transform:uppercase;letter-spacing:.04em;
+  white-space:nowrap;padding-top:2px}
+.status dd{margin:0;font-size:14px}
+.verdict{font-weight:700}
+.verdict.good{color:var(--green)}
+.bg{border:1px dashed var(--border);border-radius:8px;padding:8px 14px;margin:0 0 16px;font-size:14px;color:var(--dim)}
+.bg b{color:var(--text)}
+.diff{font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--surface);
+  border:1px solid var(--border);border-radius:8px;padding:12px;overflow-x:auto;white-space:pre;margin:10px 0}
+.diff .add{color:var(--green)}
+.diff .del{color:var(--red)}
+.diff .hunk{color:var(--accent)}
+.where{border-left:4px solid var(--accent);background:var(--surface);padding:6px 12px;margin:6px 0 10px}
+.hl{border-left:3px solid var(--orange);background:var(--surface);
+  padding:10px 16px;margin:16px 0;border-radius:0 8px 8px 0}
+.cref{margin:6px 0 0;font-size:13px}
+.cref a{display:inline-block;padding:4px 10px;border:1px solid var(--border);
+  border-radius:16px;background:var(--surface);font:12.5px ui-monospace,Menlo,monospace}
+.cref a:hover{background:var(--surface2);text-decoration:none}
+.tip{border-bottom:1px dotted var(--dim);cursor:help;position:relative;outline:none}
+.tip:hover::after,.tip:focus::after{content:attr(data-tip);position:absolute;left:0;top:1.7em;z-index:60;
+  width:max-content;max-width:min(340px,80vw);white-space:normal;background:var(--surface2);color:var(--text);
+  border:1px solid var(--border);border-radius:6px;padding:7px 10px;font:13px/1.45 -apple-system,sans-serif;
+  font-weight:400;box-shadow:0 4px 14px rgba(0,0,0,.3)}
+svg{max-width:100%;height:auto;display:block;margin:16px 0}
+svg .box{fill:var(--surface);stroke:var(--border);stroke-width:1.4}
+svg .asst{fill:var(--accent);opacity:.25;stroke:var(--accent);stroke-width:1.4}
+svg .lbl{fill:var(--text);font:12.5px ui-monospace,Menlo,monospace}
+svg .lbl-b{fill:var(--text);font:bold 13px -apple-system,sans-serif}
+svg .note{fill:var(--dim);font:11.5px -apple-system,sans-serif}
+svg .hdr{fill:var(--accent);font:bold 12.5px -apple-system,sans-serif}
+svg .bar-old{fill:var(--red);opacity:.55}
+svg .bar-new{fill:var(--green);opacity:.6}
+svg .z-ok{fill:var(--green);opacity:.18}
+svg .z-pen{fill:var(--orange);opacity:.3}
+svg .axis{stroke:var(--dim);stroke-width:1}
+svg .mk-old{stroke:var(--red);stroke-width:2.6}
+svg .mk-new{stroke:var(--green);stroke-width:2.6}
+svg .t-old{fill:var(--red);font:bold 12px -apple-system,sans-serif}
+svg .t-new{fill:var(--green);font:bold 12px -apple-system,sans-serif}
+svg a text{text-decoration:underline;fill:var(--accent);font:11.5px ui-monospace,Menlo,monospace}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+  document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head>
+<body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+  function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+  function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
+    b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
+      else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+  document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+<div class="wrap">
+
+<h1>Why a long multi-turn answer escaped the overlong penalty, and how this PR counts every turn</h1>
+<p class="sub"><a href="https://github.com/NVIDIA-NeMo/RL/pull/4487">NVIDIA-NeMo/RL #4487</a>.
+All permalinks pin the PR head <code>c169600</code>.</p>
+
+<div class="status">
+<dl>
+  <dt>Before</dt>
+  <dd>The overlong penalty measured only the <b>first</b> assistant turn of a sample. Later turns were never counted.</dd>
+  <dt>This PR</dt>
+  <dd>Adds up the tokens of <b>all</b> assistant turns, on both places that measure length.</dd>
+  <dt>Status</dt>
+  <dd><span class="verdict good">Fixed by this PR.</span> Single-turn runs get the same numbers as before. The review asks for one more change (see the end).</dd>
+</dl>
+</div>
+
+<div class="bg"><b>Background.</b> DAPO's <span class="tip" tabindex="0" data-tip="A reward change from the DAPO paper (section 3.4). Responses near the length limit lose reward in proportion to how far they go past a threshold.">overlong reward shaping</span>
+lowers the reward of answers that run too long. With <code>max_response_length</code> = M and
+<code>overlong_buffer_length</code> = B, an answer up to M − B tokens keeps its reward. Each token past that costs
+1/B of the penalty weight (<a href="https://github.com/NVIDIA-NeMo/RL/blob/c16960064a3d8e6978317357e4d463efae84bac9/nemo_rl/algorithms/reward_functions.py#L132">reward_functions.py:132</a>,
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/c16960064a3d8e6978317357e4d463efae84bac9/nemo_rl/algorithms/reward_functions.py#L165-L168">L165-168</a>).
+Dotted words have a short explanation: hover or tap them.</div>
+
+<p>In a multi-turn rollout (tool use, agents, <code>max_rollout_turns &gt; 1</code>), one sample holds several
+assistant turns with tool or environment output between them. The length is read in two places:
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/c16960064a3d8e6978317357e4d463efae84bac9/nemo_rl/algorithms/reward_functions.py#L144-L156"><code>apply_reward_shaping</code></a>
+scans the <span class="tip" tabindex="0" data-tip="The list of turns in one sample: each entry has a role (user, assistant, environment, tool) and its token ids.">message log</span>,
+and <a href="https://github.com/NVIDIA-NeMo/RL/blob/c16960064a3d8e6978317357e4d463efae84bac9/nemo_rl/data/llm_message_utils.py#L816-L817"><code>decompose_message_log</code></a>
+precomputes <code>response_token_lengths</code> for the
+<span class="tip" tabindex="0" data-tip="The newer synchronous GRPO path that keeps message logs in a separate data store and passes only small per-sample fields to the driver.">data-plane path</span>.
+Both used to stop at the first assistant turn. So an answer split into many short turns was never penalized,
+however long it was in total.</p>
+
+<h2>One sample, measured two ways</h2>
+
+<svg viewBox="0 0 900 360" role="img" aria-label="A sample with user 4, assistant 15, environment 6, assistant 12 tokens. Before the PR the length is 15, which earns no penalty. With the PR it is 27, which is 3 tokens past the threshold of 24, so the reward drops from 1.0 to 0.625.">
+  <text class="hdr" x="16" y="22">One sample: max_response_length = 32, overlong_buffer_length = 8, so the penalty starts after 32 − 8 = 24 tokens</text>
+
+  <!-- turns: 18 px per token, start x=150 -->
+  <text class="lbl-b" x="16" y="62">turns</text>
+  <rect class="box" x="150" y="42" width="72" height="30" rx="5"/><text class="lbl" x="158" y="62">user 4</text>
+  <rect class="asst" x="222" y="42" width="270" height="30" rx="5"/><text class="lbl" x="232" y="62">assistant 15</text>
+  <rect class="box" x="492" y="42" width="108" height="30" rx="5"/><text class="lbl" x="500" y="62">env 6</text>
+  <rect class="asst" x="600" y="42" width="216" height="30" rx="5"/><text class="lbl" x="610" y="62">assistant 12</text>
+
+  <!-- before -->
+  <text class="lbl-b" x="16" y="108">before</text>
+  <rect class="bar-old" x="222" y="94" width="270" height="18" rx="3"/>
+  <text class="t-old" x="500" y="108">first assistant turn only = 15</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/f201e5b7c4be59b6030d1d185998193483c81887/nemo_rl/algorithms/reward_functions.py#L144-L155"><text x="150" y="130">old loop: break at first assistant turn</text></a>
+
+  <!-- after -->
+  <text class="lbl-b" x="16" y="166">this PR</text>
+  <rect class="bar-new" x="222" y="152" width="270" height="18" rx="3"/>
+  <rect class="bar-new" x="600" y="152" width="216" height="18" rx="3"/>
+  <text class="t-new" x="500" y="166">15 + 12</text>
+  <text class="t-new" x="824" y="166">= 27</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/c16960064a3d8e6978317357e4d463efae84bac9/nemo_rl/algorithms/reward_functions.py#L148-L156"><text x="150" y="188">sum(assistant_lengths)</text></a>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/c16960064a3d8e6978317357e4d463efae84bac9/nemo_rl/data/llm_message_utils.py#L816-L817"><text x="330" y="188">response_lengths[i] += length</text></a>
+
+  <!-- penalty axis: 20 px per token from x=150, 0..32 -->
+  <text class="lbl-b" x="16" y="236">penalty</text>
+  <rect class="z-ok" x="150" y="218" width="480" height="28"/>
+  <rect class="z-pen" x="630" y="218" width="160" height="28"/>
+  <line class="axis" x1="150" y1="246" x2="800" y2="246"/>
+  <text class="note" x="146" y="262">0</text>
+  <text class="note" x="622" y="262">24</text>
+  <text class="note" x="782" y="262">32</text>
+  <text class="note" x="330" y="236">no penalty</text>
+  <text class="note" x="660" y="236">penalty grows</text>
+  <line class="mk-old" x1="450" y1="210" x2="450" y2="254"/>
+  <line class="mk-new" x1="690" y1="210" x2="690" y2="254"/>
+  <text class="t-old" x="150" y="290">before: 15 ≤ 24 → reward stays 1.0</text>
+  <text class="t-new" x="150" y="312">this PR: 27 is 3 past 24 → 1.0 − 3/8 = 0.625</text>
+
+  <!-- legend -->
+  <rect class="asst" x="150" y="330" width="14" height="12"/><text class="note" x="170" y="340">assistant turn</text>
+  <rect class="bar-old" x="290" y="330" width="14" height="12"/><text class="note" x="310" y="340">counted before</text>
+  <rect class="bar-new" x="430" y="330" width="14" height="12"/><text class="note" x="450" y="340">counted by this PR</text>
+  <rect class="z-pen" x="590" y="330" width="14" height="12"/><text class="note" x="610" y="340">penalty zone</text>
+</svg>
+
+<p>The numbers come from running the real <code>apply_reward_shaping</code> on this sample with a reward of 1.0.
+The old code returns 1.0 and the new code returns 0.625. The data-plane path gives the same two answers
+(<code>response_token_lengths</code> 15 before, 27 after).</p>
+
+<h2>The fix</h2>
+<p class="where"><b>Where the fix lands: RL only, two functions.</b>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/c16960064a3d8e6978317357e4d463efae84bac9/nemo_rl/algorithms/reward_functions.py#L144-L156"><code>apply_reward_shaping</code></a> (scans the message log) and
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/c16960064a3d8e6978317357e4d463efae84bac9/nemo_rl/data/llm_message_utils.py#L816-L817"><code>decompose_message_log</code></a> (data-plane path). No config change.</p>
+
+<pre class="diff"><span class="hunk">@@ reward_functions.py L144-L156 (head) · apply_reward_shaping</span>
+<span class="add">+        # The response length is the total over all assistant turns, so that
++        # multi-turn rollouts are measured by everything the policy generated.
+</span>         response_lengths = []
+         for message_log in batch["message_log"]:
+<span class="del">-            length = None
+-            for message in message_log:
+-                if message["role"] == "assistant":
+-                    length = message["token_ids"].shape[0]
+-                    break
+-            assert length is not None, (
+</span><span class="add">+            assistant_lengths = [
++                message["token_ids"].shape[0]
++                for message in message_log
++                if message["role"] == "assistant"
++            ]
++            assert assistant_lengths, (
+</span>                 "Assistant response not found during reward shaping"
+             )
+<span class="del">-            response_lengths.append(length)
+</span><span class="add">+            response_lengths.append(sum(assistant_lengths))</span>
+
+<span class="hunk">@@ llm_message_utils.py L816-L817 (head) · decompose_message_log</span>
+             lengths_i[t] = length
+<span class="del">-            if role == "assistant" and response_lengths[i] == 0:
+-                response_lengths[i] = length
+</span><span class="add">+            if role == "assistant":
++                response_lengths[i] += length</span></pre>
+
+<p>The first hunk replaces "stop at the first assistant turn" with "collect every assistant turn and add them up".
+The second does the same for the precomputed field, so both paths agree. A new test runs the same two-turn sample
+through both paths and checks the same penalty
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/c16960064a3d8e6978317357e4d463efae84bac9/tests/unit/algorithms/test_reward_functions.py#L331-L370">test_reward_shaping_counts_all_assistant_turns</a>).</p>
+
+<div class="hl"><b>Who notices.</b> Only runs with reward shaping on <i>and</i> more than one assistant turn per sample.
+They will see more overlong penalties and may need to retune <code>max_response_length</code>.
+No shipped example config has both, so no shipped recipe changes.
+<b>Open in review:</b> the sum also counts assistant turns that arrive as part of the prompt history, which the
+policy never wrote. The review asks to count only turns that carry <code>generation_logprobs</code>, the same marker the
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/c16960064a3d8e6978317357e4d463efae84bac9/nemo_rl/algorithms/grpo.py#L2262-L2264">loss mask</a> uses.</div>
+
+</div>
+</body>
+</html>
