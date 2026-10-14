@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NVIDIA-NeMo/RL #4634 — skipping logprob objects that token capture throws away</title>
+<style>
+:root{
+  --bg:#0d1117; --surface:#161b22; --surface2:#1c2128; --border:#30363d;
+  --text:#e6edf3; --dim:#8b949e; --accent:#58a6ff; --green:#3fb950;
+  --orange:#d29922; --red:#f85149;
+}
+:root[data-theme="light"]{
+  --bg:#ffffff; --surface:#f6f8fa; --surface2:#eaeef2; --border:#d0d7de;
+  --text:#1f2328; --dim:#59636e; --accent:#0969da; --green:#1a7f37;
+  --orange:#9a6700; --red:#cf222e;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:28px 16px 70px}
+h1{font-size:22px;margin:0 0 8px;line-height:1.3}
+h2{font-size:18px;margin:30px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;
+  font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
+.sub{color:var(--dim);font-size:13.5px;margin:0 0 14px}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);
+  border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;
+  font:13px/1 ui-monospace,Menlo,monospace;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.18)}
+.status{border:1px solid var(--border);border-radius:10px;background:var(--surface);
+  padding:2px 16px 10px;margin:0 0 18px}
+.status dl{display:grid;grid-template-columns:max-content 1fr;gap:4px 14px;margin:12px 0 0}
+.status dt{color:var(--dim);font-size:12px;text-transform:uppercase;letter-spacing:.04em;
+  white-space:nowrap;padding-top:2px}
+.status dd{margin:0;font-size:14px}
+.verdict{font-weight:700}
+.verdict.good{color:var(--green)}
+.bg{border-left:3px solid var(--dim);background:var(--surface);padding:8px 14px;margin:0 0 14px;
+  border-radius:0 8px 8px 0;font-size:14px}
+.hl{border-left:3px solid var(--green);background:var(--surface);
+  padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0}
+.where{border-left:4px solid var(--accent);background:var(--surface);padding:6px 12px;margin:6px 0 10px}
+.diff{font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--surface);
+  border:1px solid var(--border);border-radius:8px;padding:12px;overflow-x:auto;white-space:pre;margin:10px 0}
+.diff .add{color:var(--green)}
+.diff .del{color:var(--red)}
+.diff .hunk{color:var(--accent)}
+table{border-collapse:collapse;font-size:14px;margin:8px 0;width:100%}
+td,th{border:1px solid var(--border);padding:5px 9px;text-align:left;vertical-align:top}
+th{background:var(--surface)}
+.cref{margin:6px 0 0;font-size:13px}
+.cref a{display:inline-block;padding:4px 10px;border:1px solid var(--border);
+  border-radius:16px;background:var(--surface);font:12.5px ui-monospace,Menlo,monospace}
+.cref a:hover{background:var(--surface2);text-decoration:none}
+.tip{border-bottom:1px dotted var(--dim);cursor:help;position:relative;outline:none}
+.tip:hover::after,.tip:focus::after{content:attr(data-tip);position:absolute;left:0;top:1.7em;z-index:60;
+  width:max-content;max-width:min(340px,80vw);white-space:normal;background:var(--surface2);color:var(--text);
+  border:1px solid var(--border);border-radius:6px;padding:7px 10px;font:13px/1.45 -apple-system,sans-serif;
+  font-weight:400;box-shadow:0 4px 14px rgba(0,0,0,.3)}
+svg{max-width:100%;height:auto;display:block;margin:14px 0}
+svg .box{fill:var(--surface);stroke:var(--border);stroke-width:1.3}
+svg .same{fill:var(--surface);stroke:var(--green);stroke-width:1.6}
+svg .diffbox{fill:var(--surface);stroke:var(--red);stroke-width:2}
+svg .lbl{fill:var(--text);font:11.5px ui-monospace,Menlo,monospace}
+svg .lbl-b{fill:var(--text);font:bold 12.5px -apple-system,sans-serif}
+svg .note{fill:var(--dim);font:11px -apple-system,sans-serif}
+svg .hdr{fill:var(--accent);font:bold 13px -apple-system,sans-serif}
+svg .red{fill:var(--red);font:bold 11.5px ui-monospace,Menlo,monospace}
+svg .grn{fill:var(--green);font:bold 11.5px -apple-system,sans-serif}
+svg .arr{stroke:var(--dim);stroke-width:1.3}
+svg a text{text-decoration:underline;fill:var(--accent);font:11px ui-monospace,Menlo,monospace}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+  document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head>
+<body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+  function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+  function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
+    b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
+      else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+  document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+<div class="wrap">
+
+<h1>How captured chat responses skip building logprob objects that capture throws away</h1>
+<p class="sub">Explainer for <a href="https://github.com/NVIDIA-NeMo/RL/pull/4634">NVIDIA-NeMo/RL #4634</a>.
+RL permalinks pin the PR head <code>5b6fa89</code>; vLLM links pin v0.29.0, the version RL uses.</p>
+
+<div class="status">
+<dl>
+  <dt>Before</dt>
+  <dd>For every captured response, vLLM built one OpenAI logprob object per generated token, and RL then deleted all of them unread.</dd>
+  <dt>This PR</dt>
+  <dd>For captured, non-streaming requests, an override returns <code>None</code> instead of building those objects. Everything that is saved or sent stays the same.</dd>
+  <dt>Status</dt>
+  <dd><span class="verdict good">Proposed in this PR; the review found no correctness problem.</span> Two small follow-ups are in the review: a test that catches a vLLM upgrade turning the fast path off, and a corrected code comment.</dd>
+</dl>
+</div>
+
+<p class="bg"><b>Background.</b> During Gym rollouts, RL's vLLM server records the exact token IDs and
+log-probabilities of each model call. This is <span class="tip" tabindex="0" data-tip="RL's record of every model call's exact prompt tokens, output tokens and logprobs, so training uses exactly what the model produced, not a re-tokenized copy.">token capture</span>.
+It writes them to a shared store (it <span class="tip" tabindex="0" data-tip="Writes the call's token arrays to the shared store (TQ) before replying, and puts the store coordinates on the HTTP response.">stages</span> them), then removes them from the HTTP reply to Gym.
+Dotted words have a short explanation: hover or tap them.</p>
+
+<p>vLLM's chat handler formats the reply in <a href="https://github.com/vllm-project/vllm/blob/98dff2a81d747d1dba01a47f939f48c3526d4206/vllm/entrypoints/openai/chat_completion/serving.py#L912"><code>chat_completion_full_generator</code></a>.
+For each output it calls <a href="https://github.com/vllm-project/vllm/blob/98dff2a81d747d1dba01a47f939f48c3526d4206/vllm/entrypoints/openai/chat_completion/serving.py#L958"><code>self._create_chat_logprobs(...)</code></a>,
+which builds one object per generated token. For a 32k-token answer, that is 32k objects, built on the server's event loop.
+Capture never reads them. RL attaches the raw arrays from the engine output
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/5b6fa89b7bc96eaf21519e675a40424c8883c7c9/nemo_rl/models/generation/vllm/utils.py#L470"><code>utils.py:470</code></a>),
+and Gym's capture code reads those message fields first (<a href="https://github.com/NVIDIA-NeMo/Gym/blob/17abf2ddc76f74e40d0ba5a15b0401710a46db26/nemo_gym/token_id_capture/adapters/vllm.py#L34-L42">adapter L34-42</a>).
+Then RL deletes the objects (<a href="https://github.com/NVIDIA-NeMo/RL/blob/5b6fa89b7bc96eaf21519e675a40424c8883c7c9/nemo_rl/models/generation/vllm/vllm_worker_async.py#L880"><code>vllm_worker_async.py:880</code></a>).</p>
+
+<h2>One captured reply, both ways</h2>
+
+<svg viewBox="0 0 900 560" role="img" aria-label="Two columns trace one captured reply through six steps. Only the logprob-formatting step and the JSON payload differ; the staged data and the reply to Gym are identical.">
+  <text class="hdr" x="16" y="22">Same request, one generated token (the PR's own test values: token 7, logprob −0.5)</text>
+  <text class="lbl-b" x="170" y="48">Before (and every request that isn't captured)</text>
+  <text class="lbl-b" x="540" y="48">With this PR (captured request)</text>
+
+  <!-- row 1 -->
+  <text class="lbl-b" x="16" y="80">1 engine output</text>
+  <rect class="same" x="160" y="62" width="726" height="30" rx="6"/>
+  <text class="lbl" x="172" y="81">final_res.outputs[0]: token_ids [7], logprobs [{7: Logprob(-0.5)}]   — same in both</text>
+
+  <!-- row 2 -->
+  <text class="lbl-b" x="16" y="122">2 format logprobs</text>
+  <a href="https://github.com/vllm-project/vllm/blob/98dff2a81d747d1dba01a47f939f48c3526d4206/vllm/entrypoints/openai/chat_completion/serving.py#L1241"><text x="16" y="138">serving.py:1241</text></a>
+  <rect class="diffbox" x="160" y="104" width="360" height="62" rx="6"/>
+  <text class="lbl" x="172" y="122">content: [{token: "token_id:7",</text>
+  <text class="lbl" x="172" y="138">  logprob: -0.5, bytes: [120],</text>
+  <text class="lbl" x="172" y="154">  top_logprobs: []}]  ← 1 per token</text>
+  <rect class="diffbox" x="530" y="104" width="356" height="62" rx="6"/>
+  <text class="red" x="542" y="124">None</text>
+  <text class="note" x="542" y="142">the override returns before building anything</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/5b6fa89b7bc96eaf21519e675a40424c8883c7c9/nemo_rl/models/generation/vllm/captured_chat_logprobs.py#L52-L64"><text x="542" y="158">captured_chat_logprobs.py:52-64</text></a>
+
+  <!-- row 3 -->
+  <text class="lbl-b" x="16" y="196">3 attach raw arrays</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/5b6fa89b7bc96eaf21519e675a40424c8883c7c9/nemo_rl/models/generation/vllm/vllm_worker_async.py#L1270-L1274"><text x="16" y="212">worker:1270</text></a>
+  <rect class="same" x="160" y="178" width="726" height="40" rx="6"/>
+  <text class="lbl" x="172" y="196">message.generation_token_ids [7], message.generation_log_probs [-0.5]</text>
+  <text class="note" x="172" y="211">read from the engine output in step 1, not from step 2 — same in both</text>
+
+  <!-- row 4 -->
+  <text class="lbl-b" x="16" y="248">4 JSON payload</text>
+  <rect class="diffbox" x="160" y="230" width="360" height="30" rx="6"/>
+  <text class="lbl" x="172" y="249">choices[0].logprobs: {content: [ … ]}</text>
+  <rect class="diffbox" x="530" y="230" width="356" height="30" rx="6"/>
+  <text class="lbl" x="542" y="249">choices[0].logprobs: null</text>
+
+  <!-- row 5 -->
+  <text class="lbl-b" x="16" y="290">5 capture stages</text>
+  <a href="https://github.com/NVIDIA-NeMo/Gym/blob/17abf2ddc76f74e40d0ba5a15b0401710a46db26/nemo_gym/token_id_capture/adapters/vllm.py#L34-L36"><text x="16" y="306">Gym adapter:34</text></a>
+  <rect class="same" x="160" y="272" width="726" height="40" rx="6"/>
+  <text class="lbl" x="172" y="290">reads message fields → stages ids [7], logprobs [-0.5]</text>
+  <text class="note" x="172" y="305">choice.logprobs is only a fallback when the message fields are missing — never here</text>
+
+  <!-- row 6 -->
+  <text class="lbl-b" x="16" y="342">6 reply to Gym</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/5b6fa89b7bc96eaf21519e675a40424c8883c7c9/nemo_rl/models/generation/vllm/vllm_worker_async.py#L880"><text x="16" y="358">worker:880</text></a>
+  <rect class="same" x="160" y="324" width="726" height="40" rx="6"/>
+  <text class="lbl" x="172" y="342">choice.pop("logprobs") → {message, ng_commit_coords}</text>
+  <text class="note" x="172" y="357">before: deletes the objects from step 2 unread · after: deletes a null — reply is identical</text>
+
+  <!-- arrows -->
+  <line class="arr" x1="340" y1="92" x2="340" y2="104"/><line class="arr" x1="708" y1="92" x2="708" y2="104"/>
+  <line class="arr" x1="340" y1="166" x2="340" y2="178"/><line class="arr" x1="708" y1="166" x2="708" y2="178"/>
+  <line class="arr" x1="340" y1="218" x2="340" y2="230"/><line class="arr" x1="708" y1="218" x2="708" y2="230"/>
+  <line class="arr" x1="340" y1="260" x2="340" y2="272"/><line class="arr" x1="708" y1="260" x2="708" y2="272"/>
+  <line class="arr" x1="340" y1="312" x2="340" y2="324"/><line class="arr" x1="708" y1="312" x2="708" y2="324"/>
+
+  <!-- legend -->
+  <rect class="diffbox" x="160" y="392" width="18" height="14" rx="3"/>
+  <text class="note" x="186" y="404">the only steps that differ: step 2 skips the per-token objects, so step 4 carries null</text>
+  <rect class="same" x="160" y="416" width="18" height="14" rx="3"/>
+  <text class="note" x="186" y="428">identical in both — staged data (5) and the reply to Gym (6) do not change</text>
+
+  <text class="lbl-b" x="16" y="470">Cost of step 2 on the left</text>
+  <text class="note" x="16" y="490">One object, plus a bytes list and a top-logprobs list, for every generated token. It runs on the</text>
+  <text class="note" x="16" y="506">server's event loop, so a long answer delays every other request on that server while it is built and</text>
+  <text class="note" x="16" y="522">serialized. In the PR's earlier CPU benchmark, about 300 ms of CPU per response went here.</text>
+</svg>
+
+<p>The two paths join again at step 5. From there on, nothing differs: the same arrays are staged, and
+Gym gets the same reply. The only change a client could see is step 4. That payload never leaves the
+server, because step 6 removes <code>logprobs</code> before sending.</p>
+
+<h2>When the fast path turns on</h2>
+
+<p class="where"><b>Where it lands: RL only, one new module plus a gate in the worker.</b>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/5b6fa89b7bc96eaf21519e675a40424c8883c7c9/nemo_rl/models/generation/vllm/captured_chat_logprobs.py"><code>captured_chat_logprobs.py</code></a> overrides vLLM's
+<code>_create_chat_logprobs</code>; <a href="https://github.com/NVIDIA-NeMo/RL/blob/5b6fa89b7bc96eaf21519e675a40424c8883c7c9/nemo_rl/models/generation/vllm/vllm_worker_async.py#L1251-L1263"><code>vllm_worker_async.py</code></a> decides when.
+<b>No Gym or vLLM change:</b> Gym already reads the message fields first, and vLLM already accepts a <code>None</code> there (<a href="https://github.com/vllm-project/vllm/blob/98dff2a81d747d1dba01a47f939f48c3526d4206/vllm/entrypoints/openai/chat_completion/protocol.py#L106">protocol.py:106</a>).</p>
+
+<pre class="diff"><span class="hunk">@@ vllm_worker_async.py base L1245-L1250 → head L1251-L1263 · NeMoRLOpenAIServingChatMixin.chat_completion_full_generator</span>
+<span class="del">-                response = await super().chat_completion_full_generator(
+-                    request,
+-                    capture_result_generator(),
+-                    *args,
+-                    **kwargs,
+-                )
+</span><span class="add">+                bypass_logprobs = bool(
++                    not request.stream
++                    and request.logprobs
++                    and return_as_token_id
++                    and id(request) in worker_self._capture_calls
++                )
++                with self._bypass_chat_logprobs(enabled=bypass_logprobs):
++                    response = await super().chat_completion_full_generator(
++                        request,
++                        capture_result_generator(),
++                        *args,
++                        **kwargs,
++                    )</span>
+                 ...
+                 if request.logprobs and return_as_token_id:
+                     response = attach_token_information_to_chat_response_choices(</pre>
+
+<table>
+<tr><th>Condition</th><th>Why it is needed</th></tr>
+<tr><td><code>not request.stream</code></td><td>Streaming replies use a different vLLM function, so they are never touched.</td></tr>
+<tr><td><code>request.logprobs and return_as_token_id</code></td><td>The same test as the attach step below it, so the raw arrays are always attached when the objects are skipped.</td></tr>
+<tr><td><code>id(request) in _capture_calls</code></td><td>Only requests that capture accepted. Their logprobs are always deleted at step 6.</td></tr>
+</table>
+
+<p>The on/off value is kept per <span class="tip" tabindex="0" data-tip="A Python ContextVar holding (serving object, asyncio task, thread). The override only returns None when all three match the caller.">server object, asyncio task and thread</span>.
+So a second request on the same server, a child task, or a call from a worker thread still builds logprobs normally.
+The PR's tests check each of these.</p>
+<p class="cref">💬 <a href="#">review comment — vllm_worker_async.py:1248</a> the code comment here gives the wrong reason for not editing the request (vLLM fixes the sampling settings earlier)</p>
+
+<div class="hl">
+<b>So what.</b> Captured replies stop paying for per-token objects that nobody reads. In the PR's earlier
+CPU benchmark (simulated engine, 768 active sequences, measured once), p95 time to build a reply fell from
+1,420 ms to 17.7 ms, and finished replies in a 180 s window rose from 324 to 2,559. Saved data and replies
+to Gym do not change. The one risk is quiet: if a vLLM upgrade stops calling <code>_create_chat_logprobs</code>
+from the full generator, the speedup turns off with no error. The review asks for a one-line test to catch that.
+<p class="cref">💬 <a href="#">review comment — test_vllm_captured_chat_logprobs.py:122</a></p>
+</div>
+
+</div>
+</body>
+</html>
