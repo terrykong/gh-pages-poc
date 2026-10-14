@@ -47,6 +47,11 @@ code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;
 .where{border-left:4px solid var(--accent);background:var(--surface);padding:6px 12px;margin:6px 0 10px}
 .hl{border-left:3px solid var(--orange);background:var(--surface);
   padding:10px 16px;margin:16px 0;border-radius:0 8px 8px 0}
+table.paths{border-collapse:collapse;width:100%;font-size:13.5px;margin:8px 0;display:block;overflow-x:auto}
+table.paths th,table.paths td{border:1px solid var(--border);padding:5px 9px;text-align:left;vertical-align:top}
+table.paths th{background:var(--surface2)}
+table.paths td.y{color:var(--orange);font-weight:600}
+table.paths td.n{color:var(--dim)}
 .cref{margin:6px 0 0;font-size:13px}
 .cref a{display:inline-block;padding:4px 10px;border:1px solid var(--border);
   border-radius:16px;background:var(--surface);font:12.5px ui-monospace,Menlo,monospace}
@@ -110,14 +115,20 @@ lowers the reward of answers that run too long. With <code>max_response_length</
 Dotted words have a short explanation: hover or tap them.</div>
 
 <p>In a multi-turn rollout (tool use, agents, <code>max_rollout_turns &gt; 1</code>), one sample holds several
-assistant turns with tool or environment output between them. The length is read in two places:
-<a href="https://github.com/NVIDIA-NeMo/RL/blob/c16960064a3d8e6978317357e4d463efae84bac9/nemo_rl/algorithms/reward_functions.py#L144-L156"><code>apply_reward_shaping</code></a>
-scans the <span class="tip" tabindex="0" data-tip="The list of turns in one sample: each entry has a role (user, assistant, environment, tool) and its token ids.">message log</span>,
-and <a href="https://github.com/NVIDIA-NeMo/RL/blob/c16960064a3d8e6978317357e4d463efae84bac9/nemo_rl/data/llm_message_utils.py#L816-L817"><code>decompose_message_log</code></a>
-precomputes <code>response_token_lengths</code> for the
-<span class="tip" tabindex="0" data-tip="The newer synchronous GRPO path that keeps message logs in a separate data store and passes only small per-sample fields to the driver.">data-plane path</span>.
-Both used to stop at the first assistant turn. So an answer split into many short turns was never penalized,
-however long it was in total.</p>
+assistant turns with tool or environment output between them. Before this PR, the length came from two places,
+and both kept only the first assistant turn (links below point at the code <i>before</i> the PR):</p>
+<ul>
+<li><a href="https://github.com/NVIDIA-NeMo/RL/blob/f201e5b7c4be59b6030d1d185998193483c81887/nemo_rl/algorithms/reward_functions.py#L144-L155"><code>apply_reward_shaping</code></a>
+scans the <span class="tip" tabindex="0" data-tip="The list of turns in one sample: each entry has a role (user, assistant, environment, tool) and its token ids.">message log</span>
+and hits <code>break</code> at the first assistant turn.</li>
+<li><a href="https://github.com/NVIDIA-NeMo/RL/blob/f201e5b7c4be59b6030d1d185998193483c81887/nemo_rl/data/llm_message_utils.py#L816-L817"><code>decompose_message_log</code></a>
+walks every turn with no early exit, but it only <i>sets</i> the length while it is still 0:
+<code>if role == "assistant" and response_lengths[i] == 0: response_lengths[i] = length</code>.
+After the first assistant turn sets it, every later turn is skipped. It feeds
+<code>response_token_lengths</code> to the
+<span class="tip" tabindex="0" data-tip="The synchronous GRPO trainer in grpo_sync.py. It keeps message logs in a separate data store and sends only small per-sample fields, like this length, to the driver.">data-plane path</span>.</li>
+</ul>
+<p>So an answer split into many short turns was never penalized, however long it was in total.</p>
 
 <h2>One sample, measured two ways</h2>
 
@@ -210,6 +221,17 @@ The old code returns 1.0 and the new code returns 0.625. The data-plane path giv
 The second does the same for the precomputed field, so both paths agree. A new test runs the same two-turn sample
 through both paths and checks the same penalty
 (<a href="https://github.com/NVIDIA-NeMo/RL/blob/c16960064a3d8e6978317357e4d463efae84bac9/tests/unit/algorithms/test_reward_functions.py#L331-L370">test_reward_shaping_counts_all_assistant_turns</a>).</p>
+
+<h2>Which training paths are affected</h2>
+<table class="paths">
+<tr><th>Path</th><th>Where shaping runs</th><th>Length from</th><th>Affected?</th></tr>
+<tr><td>GRPO, sync (<code>grpo_train</code>)</td><td><a href="https://github.com/NVIDIA-NeMo/RL/blob/c16960064a3d8e6978317357e4d463efae84bac9/nemo_rl/algorithms/grpo.py#L3505">grpo.py:3505</a></td><td>message log scan</td><td class="y">Yes, fixed here</td></tr>
+<tr><td>PPO</td><td><a href="https://github.com/NVIDIA-NeMo/RL/blob/c16960064a3d8e6978317357e4d463efae84bac9/nemo_rl/algorithms/ppo.py#L1591">ppo.py:1591</a></td><td>message log scan</td><td class="y">Yes, fixed here</td></tr>
+<tr><td>GRPO, data-plane (<code>grpo_sync</code>)</td><td><a href="https://github.com/NVIDIA-NeMo/RL/blob/c16960064a3d8e6978317357e4d463efae84bac9/nemo_rl/algorithms/grpo_sync.py#L790">grpo_sync.py:790</a></td><td><code>response_token_lengths</code> from <a href="https://github.com/NVIDIA-NeMo/RL/blob/c16960064a3d8e6978317357e4d463efae84bac9/nemo_rl/experience/sync_rollout_actor.py#L340">decompose</a></td><td class="y">Yes, fixed here</td></tr>
+<tr><td>Async GRPO</td><td>none</td><td>n/a</td><td class="n">No: the launcher refuses shaping (<a href="https://github.com/NVIDIA-NeMo/RL/blob/c16960064a3d8e6978317357e4d463efae84bac9/examples/run_grpo.py#L193-L196">run_grpo.py:193</a>)</td></tr>
+<tr><td>Single controller</td><td>none</td><td>n/a</td><td class="n">No: config check refuses shaping (<a href="https://github.com/NVIDIA-NeMo/RL/blob/c16960064a3d8e6978317357e4d463efae84bac9/nemo_rl/algorithms/single_controller_utils/config.py#L1123">config.py:1123</a>)</td></tr>
+</table>
+<p>The open review ask below (assistant turns from the prompt history) applies to the same three "Yes" rows.</p>
 
 <div class="hl"><b>Who notices.</b> Only runs with reward shaping on <i>and</i> more than one assistant turn per sample.
 They will see more overlong penalties and may need to retune <code>max_response_length</code>.
