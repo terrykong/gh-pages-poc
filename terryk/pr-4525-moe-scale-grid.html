@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NVIDIA-NeMo/RL #4525 — why the vLLM blockwise-FP8 MoE receiver expects the wrong scale shape</title>
+<style>
+:root{
+  --bg:#0d1117; --surface:#161b22; --surface2:#1c2128; --border:#30363d;
+  --text:#e6edf3; --dim:#8b949e; --accent:#58a6ff; --green:#3fb950;
+  --orange:#d29922; --red:#f85149;
+}
+:root[data-theme="light"]{
+  --bg:#ffffff; --surface:#f6f8fa; --surface2:#eaeef2; --border:#d0d7de;
+  --text:#1f2328; --dim:#59636e; --accent:#0969da; --green:#1a7f37;
+  --orange:#9a6700; --red:#cf222e;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:28px 16px 70px}
+h1{font-size:22px;margin:0 0 8px;line-height:1.3}
+h2{font-size:18px;margin:30px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;
+  font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
+.sub{color:var(--dim);font-size:13.5px;margin:0 0 12px}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);
+  border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;
+  font:13px/1 ui-monospace,Menlo,monospace;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.18)}
+.status{border:1px solid var(--border);border-radius:10px;background:var(--surface);padding:2px 16px 10px;margin:0 0 16px}
+.status dl{display:grid;grid-template-columns:max-content 1fr;gap:4px 14px;margin:12px 0 0}
+.status dt{color:var(--dim);font-size:12px;text-transform:uppercase;letter-spacing:.04em;white-space:nowrap;padding-top:2px}
+.status dd{margin:0;font-size:14px}
+.verdict{font-weight:700}.verdict.good{color:var(--green)}.verdict.open{color:var(--red)}
+nav.chain{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 6px;padding:0}
+nav.chain a,nav.chain span{display:inline-block;padding:5px 11px;border:1px solid var(--border);
+  border-radius:20px;background:var(--surface);text-decoration:none;color:var(--accent);
+  font-size:12.5px;line-height:1.3;white-space:nowrap}
+nav.chain a:hover{background:var(--surface2)}
+nav.chain span.here{background:var(--accent);color:var(--bg);border-color:var(--accent);font-weight:600}
+p.chainnote{color:var(--dim);font-size:12px;margin:0 0 18px}
+.warn{border-left:3px solid var(--red);background:var(--surface);padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0}
+.where{border-left:4px solid var(--accent);background:var(--surface);padding:6px 12px;margin:6px 0 10px}
+.tip{border-bottom:1px dotted var(--dim);cursor:help;position:relative;outline:none}
+.tip:hover::after,.tip:focus::after{content:attr(data-tip);position:absolute;left:0;top:1.7em;z-index:60;
+  width:max-content;max-width:min(340px,80vw);white-space:normal;background:var(--surface2);color:var(--text);
+  border:1px solid var(--border);border-radius:6px;padding:7px 10px;font:13px/1.45 -apple-system,sans-serif;
+  font-weight:400;box-shadow:0 4px 14px rgba(0,0,0,.3)}
+.diff{font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--surface);
+  border:1px solid var(--border);border-radius:8px;padding:12px;overflow-x:auto;white-space:pre;margin:10px 0}
+.diff .add{color:var(--green)}.diff .del{color:var(--red)}.diff .hunk{color:var(--accent)}
+.cref{margin:6px 0 0;font-size:13px}
+.cref a{display:inline-block;padding:4px 10px;border:1px solid var(--border);border-radius:16px;background:var(--surface);font:12.5px ui-monospace,Menlo,monospace}
+svg{max-width:100%;height:auto;display:block;margin:14px 0}
+svg .box{fill:var(--surface);stroke:var(--border);stroke-width:1.4}
+svg .lbl{fill:var(--text);font:12px ui-monospace,Menlo,monospace}
+svg .lbl-b{fill:var(--text);font:bold 13px -apple-system,sans-serif}
+svg .note{fill:var(--dim);font:11.5px -apple-system,sans-serif}
+svg .hdr{fill:var(--accent);font:bold 13px -apple-system,sans-serif}
+svg .cg{fill:var(--green);opacity:.28;stroke:var(--green);stroke-width:.6}
+svg .cr{fill:var(--red);opacity:.28;stroke:var(--red);stroke-width:.6}
+svg .g{fill:var(--green);font:bold 12px ui-monospace,Menlo,monospace}
+svg .r{fill:var(--red);font:bold 12px ui-monospace,Menlo,monospace}
+svg a text{text-decoration:underline;fill:var(--accent);font:11px ui-monospace,Menlo,monospace}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+  document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head>
+<body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+  function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+  function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
+    b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
+      else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+  document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+<div class="wrap">
+
+<h1>Why the new vLLM blockwise-FP8 receiver expects the wrong scale shape on some MoE layers</h1>
+<p class="sub"><a href="https://github.com/NVIDIA-NeMo/RL/pull/4525">NVIDIA-NeMo/RL #4525</a>, head <code>74295f6</code>.
+vLLM links pin <code>v0.29.0</code>, the version in <code>uv.lock</code>.</p>
+
+<div class="status"><dl>
+  <dt>Before</dt><dd>FP8 values were copied in as-is. Scales went through vLLM's own loader, which adapts them to whatever grid vLLM chose.</dd>
+  <dt>This PR</dt><dd>The receiver quantizes the weight itself. It computes the scale shape from <code>weight_block_size</code> (128×128).</dd>
+  <dt>Status</dt><dd><span class="verdict open">Open — not fixed in this PR.</span> Setup raises a shape error; nothing is silently wrong. No shipped recipe uses this combination. Raised in the review with a one-line fix. Traced in source, not run on a GPU.</dd>
+</dl></div>
+
+<nav class="chain">
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4525-fp8-wire-path.html">1 · what changed on the wire</a>
+  <span class="here">2 · vLLM MoE scale-grid regression</span>
+</nav>
+<p class="chainnote">Two pages on this PR, one question each. This one: the setup failure on refined MoE grids.</p>
+
+<p>vLLM blockwise FP8 stores one float32 scale per square block of weights. For MoE layers, when the per-GPU
+<span class="tip" tabindex="0" data-tip="The MoE FFN width each tensor-parallel rank holds: moe_intermediate_size / TP.">expert width</span>
+is not a multiple of 128, vLLM picks a <b>smaller square block</b> (<a href="https://github.com/vllm-project/vllm/blob/v0.29.0/vllm/model_executor/layers/fused_moe/oracle/fp8.py#L295-L302"><code>refine_fp8_moe_block_shape</code></a>).
+It keeps that block in <code>quant_method.moe_block_shape</code> and sizes the scales with it
+(<a href="https://github.com/vllm-project/vllm/blob/v0.29.0/vllm/model_executor/layers/quantization/fp8.py#L500-L507">fp8.py:500</a>,
+<a href="https://github.com/vllm-project/vllm/blob/v0.29.0/vllm/model_executor/layers/quantization/fp8.py#L575">:575</a>).
+But it still sets <code>layer.weight_block_size</code> to the checkpoint's 128×128
+(<a href="https://github.com/vllm-project/vllm/blob/v0.29.0/vllm/model_executor/layers/quantization/fp8.py#L556">:556</a>).
+The new receiver reads <code>weight_block_size</code>
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/74295f6db4105dda20686eb68ef01b6e61a13c85/nemo_rl/models/generation/vllm/vllm_backend.py#L2015-L2017">vllm_backend.py:2015</a>).</p>
+
+<h2>The two grids for one w13 expert slice</h2>
+
+<svg viewBox="0 0 940 420" role="img" aria-label="Qwen3-30B-A3B at vLLM TP=8: per-rank w13 is 192 by 2048. vLLM allocates scales on a 32 grid, shape 6 by 64. The receiver expects a 128 grid, shape 2 by 16. Setup raises.">
+  <text class="hdr" x="14" y="22">Qwen3-30B-A3B at vLLM TP=8, no EP: one expert's w13 on one GPU = [192, 2048]  (gate 96 + up 96)</text>
+  <text class="note" x="14" y="42">expert width per GPU = 768 / 8 = 96 → 96 % 128 ≠ 0 → vLLM refines: gcd(128, 128, 96, 2048) = 32</text>
+
+  <text class="lbl-b" x="14" y="76">what vLLM allocated</text>
+  <text class="note" x="14" y="92">block 32×32 → scale [6, 64]</text>
+  <g transform="translate(14,102)">
+    <rect class="box" x="0" y="0" width="420" height="132"/>
+  </g>
+  <text class="lbl-b" x="486" y="76">what the PR's receiver expects</text>
+  <text class="note" x="486" y="92">block 128×128 → scale [2, 16]</text>
+  <g transform="translate(486,102)">
+    <rect class="box" x="0" y="0" width="420" height="132"/>
+  </g>
+  <a href="https://github.com/vllm-project/vllm/blob/v0.29.0/vllm/model_executor/layers/quantization/fp8.py#L575"><text x="14" y="256">scale sized with moe_block_shape (fp8.py:575)</text></a>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/74295f6db4105dda20686eb68ef01b6e61a13c85/nemo_rl/models/generation/vllm/vllm_backend.py#L2015-L2029"><text x="486" y="256">expected shape from weight_block_size (:2015-2029)</text></a>
+
+  <rect class="box" x="14" y="276" width="892" height="94" rx="8" style="stroke:var(--red)"/>
+  <text class="lbl-b" x="28" y="298">At setup (building the receive map):</text>
+  <text class="lbl" x="28" y="320">actual (E, 6, 64)  ≠  expected (E, 2, 16)</text>
+  <text class="r" x="28" y="342">ValueError: build_hf_to_local_param_map: FP8 scale target ... has shape (…, 6, 64), expected (…, 2, 16)</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/74295f6db4105dda20686eb68ef01b6e61a13c85/nemo_rl/models/generation/vllm/vllm_backend.py#L2050-L2055"><text x="28" y="362">shape check (:2050-2055)</text></a>
+
+  <rect class="cg" x="14" y="386" width="16" height="12"/><text class="note" x="36" y="397">one scale entry vLLM keeps</text>
+  <rect class="cr" x="250" y="386" width="16" height="12"/><text class="note" x="272" y="397">one scale entry the receiver would write</text>
+  <text class="note" x="560" y="397">TP=4 fails the same way (width 192 → block 64)</text>
+</svg>
+<script>(function(){var ns='http://www.w3.org/2000/svg';var gs=document.querySelectorAll('svg g[transform]');
+  function grid(g,rows,cols,cls){var w=420/cols,h=132/rows;for(var i=0;i<rows;i++)for(var j=0;j<cols;j++){
+    var r=document.createElementNS(ns,'rect');r.setAttribute('x',j*w);r.setAttribute('y',i*h);
+    r.setAttribute('width',w);r.setAttribute('height',h);r.setAttribute('class',cls);g.appendChild(r);}}
+  grid(gs[0],6,64,'cg');grid(gs[1],2,16,'cr');})();</script>
+
+<h2>The fix — proposed in the review, not in the PR</h2>
+
+<p class="where"><b>Where the fix lands: RL only, one function.</b>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/74295f6db4105dda20686eb68ef01b6e61a13c85/nemo_rl/models/generation/vllm/vllm_backend.py#L2015-L2017"><code>vllm_backend.py</code> build_hf_to_local_param_map</a>.
+<b>No vLLM change:</b> vLLM already publishes the block it used.</p>
+
+<pre class="diff"><span class="hunk">@@ vllm_backend.py L2015-L2017 · build_hf_to_local_param_map (blockwise FP8 branch)</span>
+<span class="del">-                    block_size = getattr(module, "weight_block_size", None)
+</span><span class="add">+                    # vLLM MoE layers may refine the scale grid when the per-rank
++                    # intermediate size is not a multiple of weight_block_size.
++                    block_size = getattr(module.quant_method, "moe_block_shape", None)
++                    if block_size is None:
++                        block_size = getattr(module, "weight_block_size", None)
+</span>                    if block_size is None:
+                        block_size = module.quant_method.quant_config.weight_block_size</pre>
+
+<p>What each piece does. <code>moe_block_shape</code> is the block vLLM's MoE kernel actually reads
+(<a href="https://github.com/vllm-project/vllm/blob/v0.29.0/vllm/model_executor/layers/quantization/fp8.py#L790">fp8.py:790</a>).
+It equals <code>weight_block_size</code> when nothing was refined
+(<a href="https://github.com/vllm-project/vllm/blob/v0.29.0/vllm/model_executor/layers/quantization/fp8.py#L485">:485</a>),
+so the cases that work today do not change. Linear layers have no <code>moe_block_shape</code> and fall through to the old lookup.
+The refined block is always square and divides the expert width, so the
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/74295f6db4105dda20686eb68ef01b6e61a13c85/nemo_rl/models/generation/vllm/vllm_backend.py#L1933">quantizer call</a>
+and the gate/up scale-row split still hold. Not run on a GPU.</p>
+
+<!--CREF-->
+
+<div class="warn"><b>So what.</b> No shipped recipe hits this: every shipped nccl_reshard FP8 recipe uses MXFP8 (<code>is_mx: true</code>).
+But the PR's design-doc table marks blockwise-FP8 → vLLM blockwise FP8 as supported. A user who tries it on a common MoE model at TP=4 or TP=8
+without expert parallel gets a setup error. On <code>main</code> it worked. The unit test cannot catch it, because its mock module only has
+<code>weight_block_size</code>; the review asks for a case with a different <code>moe_block_shape</code>.</div>
+
+</div>
+</body>
+</html>
