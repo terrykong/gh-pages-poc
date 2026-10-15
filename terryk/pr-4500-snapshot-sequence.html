@@ -1,0 +1,394 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Turn Snapshot Sequence</title>
+<style>
+:root{
+  --bg:#0d1117; --surface:#161b22; --surface2:#1c2128; --border:#30363d;
+  --text:#e6edf3; --dim:#8b949e; --accent:#58a6ff; --green:#3fb950;
+  --orange:#d29922; --red:#f85149;
+}
+:root[data-theme="light"]{
+  --bg:#ffffff; --surface:#f6f8fa; --surface2:#eaeef2; --border:#d0d7de;
+  --text:#1f2328; --dim:#59636e; --accent:#0969da; --green:#1a7f37;
+  --orange:#9a6700; --red:#cf222e;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:28px 16px 70px}
+h1{font-size:22px;margin:0 0 8px;line-height:1.3}
+h2{font-size:18px;margin:30px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;
+  font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
+.sub{color:var(--dim);font-size:13.5px;margin:0 0 14px}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);
+  border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;
+  font:13px/1 ui-monospace,Menlo,monospace;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.18)}
+.status{border:1px solid var(--border);border-radius:10px;background:var(--surface);
+  padding:2px 16px 10px;margin:0 0 16px}
+.status dl{display:grid;grid-template-columns:max-content 1fr;gap:4px 14px;margin:12px 0 0}
+.status dt{color:var(--dim);font-size:12px;text-transform:uppercase;letter-spacing:.04em;
+  white-space:nowrap;padding-top:2px}
+.status dd{margin:0;font-size:14px}
+.verdict{font-weight:700}
+.verdict.open{color:var(--orange)}
+nav.chain{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 6px;padding:0}
+nav.chain a,nav.chain span{display:inline-block;padding:5px 11px;border:1px solid var(--border);
+  border-radius:20px;background:var(--surface);text-decoration:none;color:var(--accent);
+  font-size:12.5px;line-height:1.3;white-space:nowrap}
+nav.chain a:hover{background:var(--surface2)}
+nav.chain span.here{background:var(--accent);color:var(--bg);border-color:var(--accent);font-weight:600}
+p.chainnote{color:var(--dim);font-size:12px;margin:0 0 18px}
+.bg{border-left:3px solid var(--accent);background:var(--surface);padding:10px 14px;
+  margin:0 0 16px;border-radius:0 8px 8px 0;font-size:14px}
+.warn{border-left:3px solid var(--orange);background:var(--surface);
+  padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0}
+.tip{border-bottom:1px dotted var(--dim);cursor:help;position:relative;outline:none}
+.tip:hover::after,.tip:focus::after{content:attr(data-tip);position:absolute;left:0;top:1.7em;z-index:60;
+  width:max-content;max-width:min(340px,80vw);white-space:normal;background:var(--surface2);color:var(--text);
+  border:1px solid var(--border);border-radius:6px;padding:7px 10px;font:13px/1.45 -apple-system,sans-serif;
+  font-weight:400;box-shadow:0 4px 14px rgba(0,0,0,.3)}
+ul{padding-left:20px;margin:8px 0}
+li{margin:4px 0}
+svg{max-width:100%;height:auto;display:block;margin:14px 0}
+svg .box{fill:var(--surface);stroke:var(--border);stroke-width:1.3}
+svg .same{fill:var(--surface);stroke:var(--green);stroke-width:1.6}
+svg .diff{fill:var(--surface);stroke:var(--orange);stroke-width:2}
+svg .cost{fill:var(--surface);stroke:var(--red);stroke-width:1.6;stroke-dasharray:5 3}
+svg .none{fill:none;stroke:var(--border);stroke-width:1;stroke-dasharray:3 4}
+svg .lbl{fill:var(--text);font:11.5px ui-monospace,Menlo,monospace}
+svg .lbl-b{fill:var(--text);font:bold 12.5px -apple-system,sans-serif}
+svg .note{fill:var(--dim);font:11.5px -apple-system,sans-serif}
+svg .hdr{fill:var(--accent);font:bold 13px -apple-system,sans-serif}
+svg .row{fill:var(--dim);font:bold 11px -apple-system,sans-serif;text-transform:uppercase}
+svg .g{fill:var(--green)} svg .o{fill:var(--orange)} svg .r{fill:var(--red)}
+svg .sw-g{fill:none;stroke:var(--green);stroke-width:1.6}
+svg .sw-o{fill:none;stroke:var(--orange);stroke-width:2}
+svg .sw-r{fill:none;stroke:var(--red);stroke-width:1.6;stroke-dasharray:5 3}
+svg .ln{stroke:var(--border);stroke-width:1}
+svg a text{text-decoration:underline;fill:var(--accent);font:11px ui-monospace,Menlo,monospace}
+.cref{margin:6px 0 0;font-size:13px}
+.cref a{display:inline-block;padding:4px 10px;border:1px solid var(--border);border-radius:16px;background:var(--surface);font:12.5px ui-monospace,Menlo,monospace}
+.cref a:hover{background:var(--surface2);text-decoration:none}
+svg .life{stroke:var(--border);stroke-width:1;stroke-dasharray:4 4}
+svg .bar-r{fill:var(--red);opacity:.35}
+svg .bar-o{fill:var(--orange);opacity:.45}
+svg .bar-a{fill:var(--accent);opacity:.35}
+svg .arr{stroke:var(--text);stroke-width:1.3;fill:none}
+svg .arr-ret{stroke:var(--dim);stroke-width:1.2;stroke-dasharray:5 3;fill:none}
+svg .ahd{fill:var(--dim)}
+svg .msg{fill:var(--text);font:11.5px -apple-system,sans-serif;paint-order:stroke;stroke:var(--bg);stroke-width:4px;stroke-linejoin:round}
+svg .num{fill:var(--dim);font:bold 11px ui-monospace,Menlo,monospace}
+svg .ref{fill:var(--accent);font:10.5px ui-monospace,Menlo,monospace;text-decoration:underline;paint-order:stroke;stroke:var(--bg);stroke-width:4px}
+svg .bdg{fill:var(--red)}
+svg .bdgt{fill:#fff;font:bold 9.5px ui-monospace,Menlo,monospace}
+svg .dia{fill:var(--orange)}
+.figwrap{overflow-x:auto}
+.figwrap svg{min-width:720px}
+table{border-collapse:collapse;width:100%;font-size:13.5px;margin:10px 0}
+th,td{border-bottom:1px solid var(--border);padding:6px 8px;text-align:left;vertical-align:top}
+th{color:var(--dim);font-weight:600;font-size:12px}
+td.n{white-space:nowrap;font:12.5px ui-monospace,Menlo,monospace}
+td a{font:12.5px ui-monospace,Menlo,monospace;white-space:nowrap}
+.dmark{color:var(--orange)}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+  document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head>
+<body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+  function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+  function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
+    b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
+      else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+  document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+<div class="wrap">
+
+<h1>What happens, step by step, when RL saves and restores a turn snapshot</h1>
+<p class="sub"><a href="https://github.com/NVIDIA-NeMo/RL/pull/4500">NVIDIA-NeMo/RL #4500</a>
+(Gym turn-level rollout recovery). Drawn from the code at head <code>341b9ad</code>, not from the PR
+description. Every step links to its line.</p>
+
+<div class="status">
+<dl>
+  <dt>Before</dt>
+  <dd>A rollout snapshot saved only RL's own data. RL never paused Gym, and an unfinished rollout always restarted from its prompt.</dd>
+  <dt>This PR</dt>
+  <dd>With <code>target_level: turn</code>, each snapshot also pauses Gym and saves where every unfinished run is. A restart picks those runs up mid-conversation.</dd>
+  <dt>Status</dt>
+  <dd><span class="verdict open">Proposed in this PR, with open review findings.</span> Red numbered badges mark the step each finding hits. The review is still pending, so the badge links work only for its author until it is published.</dd>
+</dl>
+</div>
+
+<nav class="chain">
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4500-turn-recovery.html">1 · turn vs sibling</a>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4500-restart-only-stall.html">2 · restart-only agents stall</a>
+  <span class="here">3 · step by step</span>
+</nav>
+<p class="chainnote">Three pages on this PR. This one: the exact order of a save and a restore, read from the code.</p>
+
+<div class="bg"><b>Background.</b> Gym runs each rollout as a <span class="tip" tabindex="0" data-tip="One /run call to a Gym agent: the multi-turn conversation that makes one rollout.">run</span>.
+<code>r7#0</code> means rollout <code>r7</code>, Gym attempt 0. <code>gA</code> and <code>gB</code> are two copies of the Gym servers.
+The <span class="tip" tabindex="0" data-tip="RL's record of every unfinished prompt group: which runs are in flight, on which Gym copy, at which attempt. It is saved inside the snapshot.">recovery ledger</span> is RL's list of which runs each copy holds.
+<span class="tip" tabindex="0" data-tip="TransferQueue: where finished rollout data waits until the trainer takes it.">TQ</span> holds finished rollout data until training uses it.
+Dotted words have a short explanation: hover or tap them.</div>
+
+<p>The PR description has its own 15-step version of this diagram. I rebuilt it from the code to check
+it. <b>The order matches.</b> But six steps are missing or drawn differently (marked <span class="dmark">◆</span>),
+and most of them are where a snapshot can be lost. The example: copy <code>gA</code> has two runs in flight.
+<code>r7</code> is mid-turn, and <code>r9</code>'s last reply is already on its way back. Copy <code>gB</code> still runs
+<code>r4</code>, which RL already dropped.</p>
+
+<h2>Save: one snapshot</h2>
+<div class="figwrap"><svg viewBox="0 0 980 876" role="img" aria-label="Save sequence of one turn snapshot"><defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" class="ahd"/></marker></defs><line x1="846" y1="50" x2="846" y2="834" class="life"/>
+<line x1="696" y1="50" x2="696" y2="834" class="life"/>
+<line x1="540" y1="50" x2="540" y2="834" class="life"/>
+<line x1="384" y1="50" x2="384" y2="834" class="life"/>
+<line x1="238" y1="50" x2="238" y2="834" class="life"/>
+<line x1="92" y1="50" x2="92" y2="834" class="life"/>
+<rect x="690" y="566" width="12" height="132" rx="3" class="bar-a"/>
+<rect x="534" y="246" width="12" height="492" rx="3" class="bar-o"/>
+<rect x="232" y="86" width="12" height="692" rx="3" class="bar-r"/>
+<rect x="30" y="12" width="124" height="38" rx="7" class="box"/>
+<text x="92" y="28" class="lbl-b" text-anchor="middle">Snapshot task</text>
+<text x="92" y="43" class="note" text-anchor="middle">RL controller</text>
+<rect x="176" y="12" width="124" height="38" rx="7" class="box"/>
+<text x="238" y="28" class="lbl-b" text-anchor="middle">Dispatch gate</text>
+<text x="238" y="43" class="note" text-anchor="middle">new Gym /run calls</text>
+<rect x="322" y="12" width="124" height="38" rx="7" class="box"/>
+<text x="384" y="28" class="lbl-b" text-anchor="middle">Recovery ledger</text>
+<text x="384" y="43" class="note" text-anchor="middle">who owns which run</text>
+<rect x="478" y="12" width="124" height="38" rx="7" class="box"/>
+<text x="540" y="28" class="lbl-b" text-anchor="middle">Gym servers</text>
+<text x="540" y="43" class="note" text-anchor="middle">copies gA, gB</text>
+<rect x="634" y="12" width="124" height="38" rx="7" class="box"/>
+<text x="696" y="28" class="lbl-b" text-anchor="middle">TransferQueue</text>
+<text x="696" y="43" class="note" text-anchor="middle">rollout data</text>
+<rect x="784" y="12" width="124" height="38" rx="7" class="box"/>
+<text x="846" y="28" class="lbl-b" text-anchor="middle">Snapshot dir</text>
+<text x="846" y="43" class="note" text-anchor="middle">tmp → final</text>
+<text x="14" y="96" class="num" text-anchor="start">1</text>
+<line x1="99" y1="92" x2="229" y2="92" class="arr" marker-end="url(#ah)"/>
+<text x="106" y="87" class="msg" text-anchor="start">close; wait for calls already sent</text>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/341b9ad7e28e608385c327c5092133b54b7567b7/nemo_rl/algorithms/single_controller.py#L4727"><text x="106" y="105" class="ref" text-anchor="start">SC L4727</text></a>
+<a href="https://github.com/NVIDIA-NeMo/RL/pull/4500#discussion_r4262413129"><title>review comment #4: nothing measures how long each snapshot pauses rollouts</title><circle cx="918" cy="92" r="12.5" class="bdg"/><text x="918" y="96" class="bdgt" text-anchor="middle">#4</text></a>
+<text x="14" y="136" class="num" text-anchor="start">2</text>
+<path d="M36 126 L42 132 L36 138 L30 132 Z" class="dia"><title>differs from the PR description's diagram</title></path>
+<path d="M98 124 h26 v14 h-24" class="arr" marker-end="url(#ah)"/>
+<text x="132" y="128" class="msg" text-anchor="start">pause rollout time limits</text>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/341b9ad7e28e608385c327c5092133b54b7567b7/nemo_rl/algorithms/single_controller.py#L4731-L4733"><text x="132" y="142" class="ref" text-anchor="start">SC L4731</text></a>
+<text x="14" y="176" class="num" text-anchor="start">3</text>
+<line x1="99" y1="172" x2="375" y2="172" class="arr" marker-end="url(#ah)"/>
+<text x="106" y="167" class="msg" text-anchor="start">dropped runs? → gB: [r4#0]</text>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/341b9ad7e28e608385c327c5092133b54b7567b7/nemo_rl/algorithms/single_controller.py#L4586"><text x="106" y="185" class="ref" text-anchor="start">SC L4586</text></a>
+<text x="14" y="216" class="num" text-anchor="start">4</text>
+<line x1="99" y1="212" x2="531" y2="212" class="arr" marker-end="url(#ah)"/>
+<text x="106" y="207" class="msg" text-anchor="start">retire gB: [r4#0]  (skipped if none)</text>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/341b9ad7e28e608385c327c5092133b54b7567b7/nemo_rl/algorithms/single_controller.py#L4589-L4591"><text x="106" y="225" class="ref" text-anchor="start">SC L4589</text></a>
+<a href="https://github.com/NVIDIA-NeMo/RL/pull/4500#discussion_r4262413248"><title>review comment #11: no test notices if retired episodes are never marked retired</title><circle cx="918" cy="212" r="12.5" class="bdg"/><text x="918" y="216" class="bdgt" text-anchor="middle">#11</text></a>
+<text x="14" y="256" class="num" text-anchor="start">5</text>
+<path d="M36 246 L42 252 L36 258 L30 252 Z" class="dia"><title>differs from the PR description's diagram</title></path>
+<line x1="99" y1="252" x2="531" y2="252" class="arr" marker-end="url(#ah)"/>
+<text x="106" y="247" class="msg" text-anchor="start">prepare: park every run (≤ 300 s)</text>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/341b9ad7e28e608385c327c5092133b54b7567b7/nemo_rl/environments/gym_checkpoint_coordinator.py#L356-L382"><text x="106" y="265" class="ref" text-anchor="start">coordinator L356</text></a>
+<a href="https://github.com/NVIDIA-NeMo/RL/pull/4500#discussion_r4262413097"><title>review comment #1: a restart-only Gym agent never parks, so prepare times out; 3 timeouts stop the run</title><circle cx="890" cy="252" r="12.5" class="bdg"/><text x="890" y="256" class="bdgt" text-anchor="middle">#1</text></a>
+<a href="https://github.com/NVIDIA-NeMo/RL/pull/4500#discussion_r4262413190"><title>review comment #8: the stall watchdog keeps counting while Gym is parked</title><circle cx="918" cy="252" r="12.5" class="bdg"/><text x="918" y="256" class="bdgt" text-anchor="middle">#8</text></a>
+<text x="14" y="296" class="num" text-anchor="start">6</text>
+<line x1="533" y1="292" x2="101" y2="292" class="arr-ret" marker-end="url(#ah)"/>
+<text x="526" y="287" class="msg" text-anchor="end">all parked</text>
+<text x="14" y="336" class="num" text-anchor="start">7</text>
+<path d="M36 326 L42 332 L36 338 L30 332 Z" class="dia"><title>differs from the PR description's diagram</title></path>
+<line x1="99" y1="332" x2="531" y2="332" class="arr" marker-end="url(#ah)"/>
+<text x="106" y="327" class="msg" text-anchor="start">renew lease now, then every ≤ 10 s</text>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/341b9ad7e28e608385c327c5092133b54b7567b7/nemo_rl/environments/gym_checkpoint_coordinator.py#L611-L618"><text x="106" y="345" class="ref" text-anchor="start">coordinator L613</text></a>
+<text x="14" y="376" class="num" text-anchor="start">8</text>
+<line x1="99" y1="372" x2="375" y2="372" class="arr" marker-end="url(#ah)"/>
+<text x="106" y="367" class="msg" text-anchor="start">runs RL owns → gA: [r7#0, r9#0]</text>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/341b9ad7e28e608385c327c5092133b54b7567b7/nemo_rl/algorithms/single_controller.py#L4740"><text x="106" y="385" class="ref" text-anchor="start">SC L4740</text></a>
+<text x="14" y="416" class="num" text-anchor="start">9</text>
+<line x1="99" y1="412" x2="531" y2="412" class="arr" marker-end="url(#ah)"/>
+<text x="106" y="407" class="msg" text-anchor="start">commit gA: [r7#0, r9#0]</text>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/341b9ad7e28e608385c327c5092133b54b7567b7/nemo_rl/algorithms/single_controller.py#L4750-L4754"><text x="106" y="425" class="ref" text-anchor="start">SC L4750</text></a>
+<text x="14" y="456" class="num" text-anchor="start">10</text>
+<line x1="533" y1="452" x2="101" y2="452" class="arr-ret" marker-end="url(#ah)"/>
+<text x="526" y="447" class="msg" text-anchor="end">saved gA: [r7#0]  (r9 already answered)</text>
+<text x="14" y="496" class="num" text-anchor="start">11</text>
+<path d="M36 486 L42 492 L36 498 L30 492 Z" class="dia"><title>differs from the PR description's diagram</title></path>
+<line x1="99" y1="492" x2="837" y2="492" class="arr" marker-end="url(#ah)"/>
+<text x="106" y="487" class="msg" text-anchor="start">write gym_checkpoint.json now</text>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/341b9ad7e28e608385c327c5092133b54b7567b7/nemo_rl/environments/gym_checkpoint_coordinator.py#L469-L473"><text x="106" y="505" class="ref" text-anchor="start">coordinator L469</text></a>
+<text x="14" y="536" class="num" text-anchor="start">12</text>
+<line x1="99" y1="532" x2="375" y2="532" class="arr" marker-end="url(#ah)"/>
+<text x="106" y="527" class="msg" text-anchor="start">drain: wait until r9#0 is done (≤ 60 s)</text>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/341b9ad7e28e608385c327c5092133b54b7567b7/nemo_rl/algorithms/single_controller.py#L4593-L4636"><text x="106" y="545" class="ref" text-anchor="start">SC L4593</text></a>
+<a href="https://github.com/NVIDIA-NeMo/RL/pull/4500#discussion_r4262413110"><title>review comment #2: one failed row ends the whole stream for its group</title><circle cx="890" cy="532" r="12.5" class="bdg"/><text x="890" y="536" class="bdgt" text-anchor="middle">#2</text></a>
+<a href="https://github.com/NVIDIA-NeMo/RL/pull/4500#discussion_r4262413118"><title>review comment #3: a re-sent row waits behind the closed gate but still counts as running, so the drain times out</title><circle cx="918" cy="532" r="12.5" class="bdg"/><text x="918" y="536" class="bdgt" text-anchor="middle">#3</text></a>
+<text x="14" y="576" class="num" text-anchor="start">13</text>
+<line x1="99" y1="572" x2="687" y2="572" class="arr" marker-end="url(#ah)"/>
+<text x="106" y="567" class="msg" text-anchor="start">take the exclusive barrier</text>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/341b9ad7e28e608385c327c5092133b54b7567b7/nemo_rl/algorithms/single_controller.py#L4902"><text x="106" y="585" class="ref" text-anchor="start">SC L4902</text></a>
+<text x="14" y="616" class="num" text-anchor="start">14</text>
+<path d="M36 606 L42 612 L36 618 L30 612 Z" class="dia"><title>differs from the PR description's diagram</title></path>
+<path d="M98 604 h26 v14 h-24" class="arr" marker-end="url(#ah)"/>
+<text x="132" y="608" class="msg" text-anchor="start">train step moved? → throw snapshot away</text>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/341b9ad7e28e608385c327c5092133b54b7567b7/nemo_rl/algorithms/single_controller.py#L4903-L4913"><text x="132" y="622" class="ref" text-anchor="start">SC L4903</text></a>
+<a href="https://github.com/NVIDIA-NeMo/RL/pull/4500#discussion_r4262413168"><title>review comment #6: a train step that ends during the Gym phase throws the snapshot away after the full pause</title><circle cx="918" cy="612" r="12.5" class="bdg"/><text x="918" y="616" class="bdgt" text-anchor="middle">#6</text></a>
+<text x="14" y="656" class="num" text-anchor="start">15</text>
+<path d="M98 644 h26 v14 h-24" class="arr" marker-end="url(#ah)"/>
+<text x="132" y="648" class="msg" text-anchor="start">Gym saved == ledger? its rows in TQ?</text>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/341b9ad7e28e608385c327c5092133b54b7567b7/nemo_rl/algorithms/single_controller.py#L4639-L4707"><text x="132" y="662" class="ref" text-anchor="start">SC L4639</text></a>
+<text x="14" y="696" class="num" text-anchor="start">16</text>
+<line x1="99" y1="692" x2="837" y2="692" class="arr" marker-end="url(#ah)"/>
+<text x="106" y="687" class="msg" text-anchor="start">save TQ + ledger</text>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/341b9ad7e28e608385c327c5092133b54b7567b7/nemo_rl/algorithms/single_controller.py#L4549"><text x="106" y="705" class="ref" text-anchor="start">SC L4549</text></a>
+<text x="14" y="736" class="num" text-anchor="start">17</text>
+<line x1="99" y1="732" x2="531" y2="732" class="arr" marker-end="url(#ah)"/>
+<text x="106" y="727" class="msg" text-anchor="start">resume (once, no retry)</text>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/341b9ad7e28e608385c327c5092133b54b7567b7/nemo_rl/environments/gym_checkpoint_coordinator.py#L647"><text x="106" y="745" class="ref" text-anchor="start">coordinator L647</text></a>
+<a href="https://github.com/NVIDIA-NeMo/RL/pull/4500#discussion_r4262413180"><title>review comment #7: if one resume is lost, Gym stays closed for the 600 s lease</title><circle cx="918" cy="732" r="12.5" class="bdg"/><text x="918" y="736" class="bdgt" text-anchor="middle">#7</text></a>
+<text x="14" y="776" class="num" text-anchor="start">18</text>
+<line x1="99" y1="772" x2="229" y2="772" class="arr" marker-end="url(#ah)"/>
+<text x="106" y="767" class="msg" text-anchor="start">reopen; restart time limits</text>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/341b9ad7e28e608385c327c5092133b54b7567b7/nemo_rl/algorithms/single_controller.py#L4762-L4764"><text x="106" y="785" class="ref" text-anchor="start">SC L4762</text></a>
+<text x="14" y="816" class="num" text-anchor="start">19</text>
+<path d="M36 806 L42 812 L36 818 L30 812 Z" class="dia"><title>differs from the PR description's diagram</title></path>
+<line x1="99" y1="812" x2="837" y2="812" class="arr" marker-end="url(#ah)"/>
+<text x="106" y="807" class="msg" text-anchor="start">write sidecars, rename tmp → final</text>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/341b9ad7e28e608385c327c5092133b54b7567b7/nemo_rl/algorithms/single_controller.py#L4926-L4958"><text x="106" y="825" class="ref" text-anchor="start">SC L4926</text></a>
+<rect x="232" y="851" width="12" height="12" rx="3" class="bar-r"/>
+<text x="250" y="861" class="note" text-anchor="start">no new Gym runs start</text>
+<rect x="400" y="851" width="12" height="12" rx="3" class="bar-o"/>
+<text x="418" y="861" class="note" text-anchor="start">Gym parked</text>
+<rect x="510" y="851" width="12" height="12" rx="3" class="bar-a"/>
+<text x="528" y="861" class="note" text-anchor="start">TQ writes blocked</text>
+<path d="M20 851 L26 857 L20 863 L14 857 Z" class="dia"><title>differs from the PR description's diagram</title></path>
+<text x="32" y="861" class="note" text-anchor="start">not in the PR&#x27;s diagram</text>
+<a href="https://github.com/NVIDIA-NeMo/RL/pull/4500#discussion_r4262413129"><title>review comment #4: nothing measures how long each snapshot pauses rollouts</title><circle cx="700" cy="857" r="12.5" class="bdg"/><text x="700" y="861" class="bdgt" text-anchor="middle">#4</text></a>
+<text x="716" y="861" class="note" text-anchor="start">review comment (tap)</text></svg></div>
+
+<p><b>Where the PR's diagram differs from the code</b> <span class="dmark">◆</span></p>
+<ul>
+<li><b>Step 5.</b> The PR says every participant parks at a turn boundary. That is true only when every Gym agent
+and tool server can save a run mid-way. Any other agent blocks prepare until the 300 s limit, and three failed
+snapshots in a row stop the run. <a href="https://github.com/NVIDIA-NeMo/RL/pull/4500#discussion_r4262413097">#1 · gym_checkpoint_adapter.py:208</a></li>
+<li><b>Step 14 is missing.</b> The check for a finished train step runs <i>after</i> the whole Gym phase. A step
+that ends while Gym is parked throws the snapshot away after the full pause. <a href="https://github.com/NVIDIA-NeMo/RL/pull/4500#discussion_r4262413168">#6 · single_controller.py:4906</a></li>
+<li><b>Step 19 is missing.</b> The PR's diagram ends at "reopen the gate", but the snapshot only counts once the
+temp folder is renamed, after Gym has already resumed. If that last write fails, the previous snapshot stays the
+latest one, which is safe.</li>
+<li><b>Step 11.</b> <code>gym_checkpoint.json</code> is written at commit, not with the TQ save. Step 15
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/341b9ad7e28e608385c327c5092133b54b7567b7/nemo_rl/algorithms/single_controller.py#L4686-L4691">rewrites it</a> only when a dropped run has
+to be left out.</li>
+<li><b>Steps 2 and 7 are missing.</b> Pausing the rollout time limits and renewing Gym's lease are what stop a long
+pause from timing runs out, or letting Gym reopen by itself.</li>
+</ul>
+<p>How a save fails: a prepare timeout (step 5) or a drain timeout (step 12) counts as one failed snapshot,
+and three in a row stop the run. A parked run that Gym did not save stops the run
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/341b9ad7e28e608385c327c5092133b54b7567b7/nemo_rl/algorithms/single_controller.py#L4609-L4620">at once</a>.</p>
+
+<h2>Restore: at startup</h2>
+<div class="figwrap"><svg viewBox="0 0 980 486" role="img" aria-label="Restore sequence of one turn snapshot"><defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" class="ahd"/></marker></defs><line x1="846" y1="50" x2="846" y2="474" class="life"/>
+<line x1="690" y1="50" x2="690" y2="474" class="life"/>
+<line x1="508" y1="50" x2="508" y2="474" class="life"/>
+<line x1="300" y1="50" x2="300" y2="474" class="life"/>
+<line x1="92" y1="50" x2="92" y2="474" class="life"/>
+<rect x="684" y="86" width="12" height="332" rx="3" class="bar-a"/>
+<rect x="30" y="12" width="124" height="38" rx="7" class="box"/>
+<text x="92" y="28" class="lbl-b" text-anchor="middle">Restore (startup)</text>
+<text x="92" y="43" class="note" text-anchor="middle">RL controller</text>
+<rect x="238" y="12" width="124" height="38" rx="7" class="box"/>
+<text x="300" y="28" class="lbl-b" text-anchor="middle">Recovery ledger</text>
+<text x="300" y="43" class="note" text-anchor="middle">loaded from disk</text>
+<rect x="446" y="12" width="124" height="38" rx="7" class="box"/>
+<text x="508" y="28" class="lbl-b" text-anchor="middle">Gym servers</text>
+<text x="508" y="43" class="note" text-anchor="middle">copies gA, gB</text>
+<rect x="628" y="12" width="124" height="38" rx="7" class="box"/>
+<text x="690" y="28" class="lbl-b" text-anchor="middle">TransferQueue</text>
+<text x="690" y="43" class="note" text-anchor="middle">rollout data</text>
+<rect x="784" y="12" width="124" height="38" rx="7" class="box"/>
+<text x="846" y="28" class="lbl-b" text-anchor="middle">Snapshot dir</text>
+<text x="846" y="43" class="note" text-anchor="middle">final</text>
+<text x="14" y="96" class="num" text-anchor="start">1</text>
+<line x1="99" y1="92" x2="681" y2="92" class="arr" marker-end="url(#ah)"/>
+<text x="106" y="87" class="msg" text-anchor="start">block TQ writes for the whole restore</text>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/341b9ad7e28e608385c327c5092133b54b7567b7/nemo_rl/algorithms/single_controller.py#L1255-L1257"><text x="106" y="105" class="ref" text-anchor="start">SC L1255</text></a>
+<text x="14" y="136" class="num" text-anchor="start">2</text>
+<line x1="99" y1="132" x2="291" y2="132" class="arr" marker-end="url(#ah)"/>
+<text x="106" y="127" class="msg" text-anchor="start">load: r7 on gA, Gym attempt 0</text>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/341b9ad7e28e608385c327c5092133b54b7567b7/nemo_rl/algorithms/single_controller.py#L1258"><text x="106" y="145" class="ref" text-anchor="start">SC L1258</text></a>
+<text x="14" y="176" class="num" text-anchor="start">3</text>
+<path d="M36 166 L42 172 L36 178 L30 172 Z" class="dia"><title>differs from the PR description's diagram</title></path>
+<line x1="99" y1="172" x2="837" y2="172" class="arr" marker-end="url(#ah)"/>
+<text x="106" y="167" class="msg" text-anchor="start">gym_checkpoint.json there? (no → r7 starts over)</text>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/341b9ad7e28e608385c327c5092133b54b7567b7/nemo_rl/algorithms/single_controller.py#L1273-L1291"><text x="106" y="185" class="ref" text-anchor="start">SC L1273</text></a>
+<text x="14" y="216" class="num" text-anchor="start">4</text>
+<path d="M98 204 h26 v14 h-24" class="arr" marker-end="url(#ah)"/>
+<text x="132" y="208" class="msg" text-anchor="start">saved runs == ledger&#x27;s runs?</text>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/341b9ad7e28e608385c327c5092133b54b7567b7/nemo_rl/algorithms/single_controller.py#L1304-L1308"><text x="132" y="222" class="ref" text-anchor="start">SC L1304</text></a>
+<a href="https://github.com/NVIDIA-NeMo/RL/pull/4500#discussion_r4262413470"><title>review comment #28: the mismatch error does not say which episodes differ</title><circle cx="918" cy="212" r="12.5" class="bdg"/><text x="918" y="216" class="bdgt" text-anchor="middle">#28</text></a>
+<text x="14" y="256" class="num" text-anchor="start">5</text>
+<line x1="99" y1="252" x2="499" y2="252" class="arr" marker-end="url(#ah)"/>
+<text x="106" y="247" class="msg" text-anchor="start">restore gA: [r7#0] → Gym sets up r7#1</text>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/341b9ad7e28e608385c327c5092133b54b7567b7/nemo_rl/algorithms/single_controller.py#L1312-L1316"><text x="106" y="265" class="ref" text-anchor="start">SC L1312</text></a>
+<a href="https://github.com/NVIDIA-NeMo/RL/pull/4500#discussion_r4262413355"><title>review comment #19: a failed Gym restore calls resume twice (cleanup is written in two places)</title><circle cx="918" cy="252" r="12.5" class="bdg"/><text x="918" y="256" class="bdgt" text-anchor="middle">#19</text></a>
+<text x="14" y="296" class="num" text-anchor="start">6</text>
+<line x1="99" y1="292" x2="291" y2="292" class="arr" marker-end="url(#ah)"/>
+<text x="106" y="287" class="msg" text-anchor="start">r7: Gym attempt 0 → 1, stays on gA</text>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/341b9ad7e28e608385c327c5092133b54b7567b7/nemo_rl/experience/rollout_recovery.py#L535-L539"><text x="106" y="305" class="ref" text-anchor="start">recovery L537</text></a>
+<text x="14" y="336" class="num" text-anchor="start">7</text>
+<line x1="99" y1="332" x2="681" y2="332" class="arr" marker-end="url(#ah)"/>
+<text x="106" y="327" class="msg" text-anchor="start">check staging rows; drop unused ones</text>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/341b9ad7e28e608385c327c5092133b54b7567b7/nemo_rl/algorithms/single_controller.py#L1349-L1356"><text x="106" y="345" class="ref" text-anchor="start">SC L1349</text></a>
+<text x="14" y="376" class="num" text-anchor="start">8</text>
+<path d="M36 366 L42 372 L36 378 L30 372 Z" class="dia"><title>differs from the PR description's diagram</title></path>
+<path d="M98 364 h26 v14 h-24" class="arr" marker-end="url(#ah)"/>
+<text x="132" y="368" class="msg" text-anchor="start">a later step fails? → retire r7#1, resume</text>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/341b9ad7e28e608385c327c5092133b54b7567b7/nemo_rl/algorithms/single_controller.py#L1358-L1376"><text x="132" y="382" class="ref" text-anchor="start">SC L1358</text></a>
+<text x="14" y="416" class="num" text-anchor="start">9</text>
+<line x1="99" y1="412" x2="499" y2="412" class="arr" marker-end="url(#ah)"/>
+<text x="106" y="407" class="msg" text-anchor="start">resume</text>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/341b9ad7e28e608385c327c5092133b54b7567b7/nemo_rl/algorithms/single_controller.py#L1381"><text x="106" y="425" class="ref" text-anchor="start">SC L1381</text></a>
+<text x="14" y="456" class="num" text-anchor="start">10</text>
+<line x1="99" y1="452" x2="499" y2="452" class="arr" marker-end="url(#ah)"/>
+<text x="106" y="447" class="msg" text-anchor="start">send r7#1 to gA → goes on from its turn</text>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/341b9ad7e28e608385c327c5092133b54b7567b7/nemo_rl/experience/rollout_manager.py#L2584-L2586"><text x="106" y="465" class="ref" text-anchor="start">manager L2586</text></a>
+<a href="https://github.com/NVIDIA-NeMo/RL/pull/4500#discussion_r4262413263"><title>review comment #12: the functional test passes even if the episode started over</title><circle cx="918" cy="452" r="12.5" class="bdg"/><text x="918" y="456" class="bdgt" text-anchor="middle">#12</text></a></svg></div>
+<p>This matches the PR's flowchart on the main points. The saved runs must equal the ledger's runs. Each restored run
+moves to Gym attempt 1 and goes back to the same Gym copy. Two paths are missing from the flowchart <span class="dmark">◆</span>:</p>
+<ul>
+<li><b>Step 3.</b> When there is no Gym file (restoring from a trainer checkpoint), <code>turn</code> runs start over
+from their prompt. This needs the <code>gym_restart_fallback.json</code> marker; without it, the restore fails.</li>
+<li><b>Step 8.</b> The flowchart cleans up only when Gym's restore fails. The code also retires <code>r7#1</code>
+when a <i>later</i> RL step fails, which is right. When Gym's restore itself fails, Gym gets resumed twice. <a href="https://github.com/NVIDIA-NeMo/RL/pull/4500#discussion_r4262413355">#19 · gym_checkpoint_coordinator.py:537</a></li>
+</ul>
+
+<h2>Review findings on this path</h2>
+<table>
+<tr><th>Step</th><th>Comment</th><th>What goes wrong</th></tr>
+<tr><td class="n">save 1</td><td><a href="https://github.com/NVIDIA-NeMo/RL/pull/4500#discussion_r4262413129">#4 · single_controller.py:4727</a></td><td>nothing measures how long each snapshot pauses rollouts</td></tr>
+<tr><td class="n">save 4</td><td><a href="https://github.com/NVIDIA-NeMo/RL/pull/4500#discussion_r4262413248">#11 · test_checkpoint_dispatch_races.py:1244</a></td><td>no test notices if retired episodes are never marked retired</td></tr>
+<tr><td class="n">save 5</td><td><a href="https://github.com/NVIDIA-NeMo/RL/pull/4500#discussion_r4262413097">#1 · gym_checkpoint_adapter.py:208</a></td><td>a restart-only Gym agent never parks, so prepare times out; 3 timeouts stop the run</td></tr>
+<tr><td class="n">save 5</td><td><a href="https://github.com/NVIDIA-NeMo/RL/pull/4500#discussion_r4262413190">#8 · config.py:719</a></td><td>the stall watchdog keeps counting while Gym is parked</td></tr>
+<tr><td class="n">save 12</td><td><a href="https://github.com/NVIDIA-NeMo/RL/pull/4500#discussion_r4262413110">#2 · nemo_gym.py:1182</a></td><td>one failed row ends the whole stream for its group</td></tr>
+<tr><td class="n">save 12</td><td><a href="https://github.com/NVIDIA-NeMo/RL/pull/4500#discussion_r4262413118">#3 · rollout_manager.py:1864</a></td><td>a re-sent row waits behind the closed gate but still counts as running, so the drain times out</td></tr>
+<tr><td class="n">save 14</td><td><a href="https://github.com/NVIDIA-NeMo/RL/pull/4500#discussion_r4262413168">#6 · single_controller.py:4906</a></td><td>a train step that ends during the Gym phase throws the snapshot away after the full pause</td></tr>
+<tr><td class="n">save 17</td><td><a href="https://github.com/NVIDIA-NeMo/RL/pull/4500#discussion_r4262413180">#7 · nemo_gym.py:1961</a></td><td>if one resume is lost, Gym stays closed for the 600 s lease</td></tr>
+<tr><td class="n">restore 4</td><td><a href="https://github.com/NVIDIA-NeMo/RL/pull/4500#discussion_r4262413470">#28 · single_controller.py:1308</a></td><td>the mismatch error does not say which episodes differ</td></tr>
+<tr><td class="n">restore 5</td><td><a href="https://github.com/NVIDIA-NeMo/RL/pull/4500#discussion_r4262413355">#19 · gym_checkpoint_coordinator.py:537</a></td><td>a failed Gym restore calls resume twice (cleanup is written in two places)</td></tr>
+<tr><td class="n">restore 10</td><td><a href="https://github.com/NVIDIA-NeMo/RL/pull/4500#discussion_r4262413263">#12 · turn_recovery.sh:432</a></td><td>the functional test passes even if the episode started over</td></tr>
+</table>
+
+<div class="warn"><b>So what.</b> The PR's diagram gets the order right, but it leaves out the four places where a
+snapshot is lost or the run stops: the prepare timeout (step 5), the drain timeout (step 12), the train-step check
+(step 14) and a lost resume (step 17). Those are review comments #1, #2&ndash;3, #6 and #7. The PR's diagram
+should show them, so readers can see where a snapshot can fail.</div>
+
+</div>
+</body>
+</html>
