@@ -77,6 +77,11 @@ svg .arr{stroke:var(--dim);stroke-width:1.4;fill:none}
 svg .arr-r{stroke:var(--red);stroke-width:1.8;fill:none}
 svg .sw-g{fill:var(--green)} svg .sw-r{fill:var(--red)} svg .sw-o{fill:var(--orange)}
 svg a text{text-decoration:underline;fill:var(--accent);font:11px ui-monospace,Menlo,monospace}
+table.parks{border-collapse:collapse;width:100%;font-size:13.5px;margin:10px 0}
+table.parks th,table.parks td{border-bottom:1px solid var(--border);padding:7px 8px;text-align:left;vertical-align:top}
+table.parks th{color:var(--dim);font-weight:600;font-size:12px}
+table.parks td:first-child{font-weight:600}
+.tablewrap{overflow-x:auto}
 </style>
 <script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
   document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
@@ -138,17 +143,18 @@ RL treats that "not ready" as a passing problem
 and tries again at the next snapshot.</p>
 
 <h2>One snapshot attempt, two Gym setups</h2>
+<p>Example: rollout <code>s1</code> has finished turn 1 and is in the middle of turn 2 when the snapshot starts.</p>
 
 <svg viewBox="0 0 900 470" role="img" aria-label="Top lane: simple_agent with an exported resources server prepares, commits and resumes. Bottom lane: a restart-only agent waits on replies the prepared model holds, prepare times out after 300 seconds, the snapshot is skipped, and after three such attempts the run stops.">
   <text class="lbl-b" x="16" y="24">Works: simple_agent + exported resources server (the setup the functional test uses)</text>
   <rect class="ok" x="16" y="38" width="128" height="46" rx="7"/>
   <text class="lbl" x="26" y="58">/run gate</text><text class="lbl" x="26" y="74">closes</text>
   <rect class="ok" x="164" y="38" width="150" height="46" rx="7"/>
-  <text class="lbl" x="174" y="58">model: holds</text><text class="lbl" x="174" y="74">replies</text>
+  <text class="lbl" x="174" y="58">model: closes,</text><text class="lbl" x="174" y="74">holds s1's reply</text>
   <rect class="ok" x="334" y="38" width="170" height="46" rx="7"/>
-  <text class="lbl" x="344" y="58">agent: parks each</text><text class="lbl" x="344" y="74">rollout at its turn</text>
+  <text class="lbl" x="344" y="58">agent: parks s1 at</text><text class="lbl" x="344" y="74">nearest boundary</text>
   <rect class="ok" x="524" y="38" width="160" height="46" rx="7"/>
-  <text class="lbl" x="534" y="58">resources:</text><text class="lbl" x="534" y="74">exports sessions</text>
+  <text class="lbl" x="534" y="58">resources: saves</text><text class="lbl" x="534" y="74">s1's tool state</text>
   <rect class="ok" x="704" y="38" width="180" height="46" rx="7"/>
   <text class="g" x="714" y="58">commit → resume</text><text class="note" x="714" y="74">snapshot saved</text>
   <path class="arr" d="M144 61 H162 M314 61 H332 M504 61 H522 M684 61 H702"/>
@@ -159,9 +165,9 @@ and tries again at the next snapshot.</p>
   <rect class="ok" x="16" y="156" width="128" height="46" rx="7"/>
   <text class="lbl" x="26" y="176">/run gate</text><text class="lbl" x="26" y="192">closes</text>
   <rect class="hold" x="164" y="156" width="150" height="46" rx="7"/>
-  <text class="lbl" x="174" y="176">model: holds</text><text class="lbl" x="174" y="192">replies</text>
+  <text class="lbl" x="174" y="176">model: holds</text><text class="lbl" x="174" y="192">s1's turn-2 reply</text>
   <rect class="bad" x="334" y="156" width="170" height="46" rx="7"/>
-  <text class="lbl" x="344" y="176">agent: each /run</text><text class="lbl" x="344" y="192">is a blocker</text>
+  <text class="lbl" x="344" y="176">agent: s1's /run</text><text class="lbl" x="344" y="192">is a blocker</text>
   <rect class="bad" x="524" y="156" width="160" height="46" rx="7"/>
   <text class="lbl" x="534" y="176">wait up to</text><text class="lbl" x="534" y="192">300 s</text>
   <rect class="bad" x="704" y="156" width="180" height="46" rx="7"/>
@@ -169,7 +175,7 @@ and tries again at the next snapshot.</p>
   <path class="arr" d="M144 179 H162 M504 179 H522 M684 179 H702"/>
   <path class="arr-r" d="M334 172 C 322 172, 322 172, 316 172 M316 172 l7 -4 M316 172 l7 4"/>
   <path class="arr-r" d="M314 188 C 322 188, 326 188, 332 188 M332 188 l-7 -4 M332 188 l-7 4"/>
-  <text class="r" x="230" y="226">waits on a held reply ↔ blocks prepare</text>
+  <text class="r" x="164" y="226">s1 waits on its held turn-2 reply, so s1 blocks prepare</text>
   <a href="https://github.com/NVIDIA-NeMo/Gym/blob/120d516f09cfd0377dbed6828247ab1606e9e686/nemo_gym/_checkpoint/model.py#L309-L314" target="_blank" rel="noopener"><text x="164" y="244">model.py:309-314</text></a>
   <a href="https://github.com/NVIDIA-NeMo/Gym/blob/120d516f09cfd0377dbed6828247ab1606e9e686/nemo_gym/_checkpoint/agent.py#L417-L419" target="_blank" rel="noopener"><text x="334" y="244">agent.py:417-419</text></a>
   <a href="https://github.com/NVIDIA-NeMo/RL/blob/341b9ad7e28e608385c327c5092133b54b7567b7/nemo_rl/algorithms/single_controller_utils/config.py#L719" target="_blank" rel="noopener"><text x="524" y="244">gym_prepare_timeout_s</text></a>
@@ -186,8 +192,8 @@ and tries again at the next snapshot.</p>
   <a href="https://github.com/NVIDIA-NeMo/RL/blob/341b9ad7e28e608385c327c5092133b54b7567b7/nemo_rl/algorithms/single_controller_utils/config.py#L854" target="_blank" rel="noopener"><text x="16" y="368">max_consecutive_failures = 3</text></a>
   <text class="note" x="16" y="392">During each attempt, RL sends no new /run and every live rollout sits parked.</text>
   <text class="note" x="16" y="410">Before the first train step, a required snapshot fails the run on attempt 1 (</text>
-  <a href="https://github.com/NVIDIA-NeMo/RL/blob/341b9ad7e28e608385c327c5092133b54b7567b7/nemo_rl/algorithms/single_controller.py#L5088-L5091" target="_blank" rel="noopener"><text x="514" y="410">L5088</text></a>
-  <text class="note" x="551" y="410">).</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/341b9ad7e28e608385c327c5092133b54b7567b7/nemo_rl/algorithms/single_controller.py#L5088-L5091" target="_blank" rel="noopener"><text x="396" y="410">L5088</text></a>
+  <text class="note" x="434" y="410">).</text>
 
   <rect class="sw-g" x="16" y="436" width="14" height="12"/><text class="note" x="36" y="447">can save its sessions</text>
   <rect class="sw-o" x="196" y="436" width="14" height="12"/><text class="note" x="216" y="447">prepared, holding work</text>
@@ -203,6 +209,36 @@ and 8 of 146 opt out. A restart-only resources session is live from seed to veri
 same way. The functional test passes because Workplace is one of the setups that works. Nothing at
 startup or in the docs warns about the others. </p>
 <p class="cref">🔴 <a href="https://github.com/NVIDIA-NeMo/RL/pull/4500#discussion_r4262413097">review comment — gym_checkpoint_adapter.py:208</a></p>
+
+<h2>In the setup that works: where s1 parks, and what the snapshot keeps</h2>
+<p><code>simple_agent</code> has two park points (Gym calls them boundaries) in every turn: right after the model's
+reply (<a href="https://github.com/NVIDIA-NeMo/Gym/blob/120d516f09cfd0377dbed6828247ab1606e9e686/responses_api_agents/simple_agent/app.py#L397-L398">app.py:398</a>) and after that turn's tools
+return (<a href="https://github.com/NVIDIA-NeMo/Gym/blob/120d516f09cfd0377dbed6828247ab1606e9e686/responses_api_agents/simple_agent/app.py#L482">app.py:482</a>). There is none in the middle of a
+tool call. So where <code>s1</code> parks depends on what it is doing in turn 2:</p>
+<div class="tablewrap"><table class="parks">
+<tr><th>s1 in turn 2 is…</th><th>Where it parks</th><th>What commit saves for s1</th><th>After resume, no crash</th><th>After a crash and restore</th></tr>
+<tr><td>waiting on the model (the usual case)</td>
+<td><b>End of turn 1.</b> Gym does not wait: the call keeps running on vLLM, and its reply is held
+(<a href="https://github.com/NVIDIA-NeMo/Gym/blob/120d516f09cfd0377dbed6828247ab1606e9e686/nemo_gym/_checkpoint/model.py#L8-L13">model.py:8-13</a>)</td>
+<td>Turn 1, model reply and tools. The turn-2 call's tokens are left out.</td>
+<td>Gets the held reply and runs turn 2's tools. Nothing is redone.</td>
+<td>Turn 2's model call is sent again and generated from scratch.*</td></tr>
+<tr><td>receiving the model's reply (already streaming)</td>
+<td><b>Turn 2, after the reply, before its tools.</b> A reply that started sending is allowed to finish.</td>
+<td>Turn 1, plus turn 2's reply. Tools not run yet.</td>
+<td>Runs turn 2's tools.</td>
+<td>Runs turn 2's tools from the saved reply.</td></tr>
+<tr><td>running a tool</td>
+<td><b>End of turn 2.</b> Gym waits for every tool in that turn to return, inside the 300 s prepare limit.</td>
+<td>Turns 1 and 2, model replies and tools.</td>
+<td>Goes on to turn 3.</td>
+<td>Goes on to turn 3.</td></tr>
+</table></div>
+<p style="font-size:13px;color:var(--dim)">The tool server saves its state at commit, after every agent has parked, so no
+tool call is in flight when it saves. Its saved state always matches the turn the agent parked at.
+The second row happens only if Gym has already asked agents to park when the reply arrives; otherwise s1
+starts its tools and ends up in the third row.
+* Gym can keep a call's partly generated tokens (a "generation cut"), but RL does not hook that up in this PR.</p>
 
 <h2>What would fix it — proposed, not in the PR</h2>
 
