@@ -231,14 +231,17 @@ through both paths and checks the same penalty
 <tr><td>Async GRPO</td><td>none</td><td>n/a</td><td class="n">No: the launcher refuses shaping (<a href="https://github.com/NVIDIA-NeMo/RL/blob/c16960064a3d8e6978317357e4d463efae84bac9/examples/run_grpo.py#L193-L196">run_grpo.py:193</a>)</td></tr>
 <tr><td>Single controller</td><td>none</td><td>n/a</td><td class="n">No: config check refuses shaping (<a href="https://github.com/NVIDIA-NeMo/RL/blob/c16960064a3d8e6978317357e4d463efae84bac9/nemo_rl/algorithms/single_controller_utils/config.py#L1123">config.py:1123</a>)</td></tr>
 </table>
-<p>The open review ask below (assistant turns from the prompt history) applies to the same three "Yes" rows.</p>
+<p>The open review ask below (assistant turns the policy did not generate) applies to the same three "Yes" rows.</p>
 
 <div class="hl"><b>Who notices.</b> Only runs with reward shaping on <i>and</i> more than one assistant turn per sample.
 They will see more overlong penalties and may need to retune <code>max_response_length</code>.
 No shipped example config has both, so no shipped recipe changes.
-<b>Open in review:</b> the sum also counts assistant turns that arrive as part of the prompt history, which the
-policy never wrote. The review asks to count only turns that carry <code>generation_logprobs</code>, the same marker the
-<a href="https://github.com/NVIDIA-NeMo/RL/blob/c16960064a3d8e6978317357e4d463efae84bac9/nemo_rl/algorithms/grpo.py#L2262-L2264">loss mask</a> uses.
+<b>Open in review:</b> count the same tokens the loss trains on. The
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/c16960064a3d8e6978317357e4d463efae84bac9/nemo_rl/algorithms/grpo.py#L2301-L2304">GRPO loss mask</a>
+trains only on assistant turns that carry <code>generation_logprobs</code>. The new sum counts every assistant turn,
+including ones the policy did not generate in this rollout: assistant turns in the prompt history, or another
+agent's text that an environment returns as <code>role: "assistant"</code>. Every generation backend sets the key, so the
+check is not vLLM-only. Gym is safe from both cases: it puts history and other-model text into <code>user</code> messages.
 <p class="cref">🟠 <a href="https://github.com/NVIDIA-NeMo/RL/pull/4487#discussion_r4268178743">review comment — reward_functions.py:152</a>
 <a href="https://github.com/NVIDIA-NeMo/RL/pull/4487#discussion_r4268178764">review comment — llm_message_utils.py:817</a></p></div>
 
