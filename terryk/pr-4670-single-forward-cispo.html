@@ -21,6 +21,7 @@ body{margin:0;background:var(--bg);color:var(--text);
 .wrap{max-width:980px;margin:0 auto;padding:28px 16px 70px}
 h1{font-size:22px;margin:0 0 8px;line-height:1.3}
 h2{font-size:18px;margin:32px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+h3{font-size:16px;margin:24px 0 8px}
 a{color:var(--accent);text-decoration:none}
 a:hover{text-decoration:underline}
 code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;
@@ -53,6 +54,12 @@ th,td{border:1px solid var(--border);padding:6px 9px;text-align:left;vertical-al
 th{background:var(--surface);font-size:12.5px;color:var(--dim);text-transform:uppercase;letter-spacing:.03em}
 tr.saved td{background:var(--surface);border-left:3px solid var(--red)}
 .tblscroll,.figscroll{overflow-x:auto}
+.tex{overflow-x:auto;overflow-y:hidden;background:var(--surface);border:1px solid var(--border);
+  border-radius:8px;padding:6px 12px;margin:10px 0;font-family:ui-monospace,Menlo,monospace;font-size:12px}
+.tex .katex{font-size:1.12em}
+.t1{color:var(--orange)} .t2{color:var(--accent)} .t3{color:var(--green)}
+ul.terms{margin:6px 0 10px;padding-left:20px;font-size:14px}
+td.ok{color:var(--green);font-weight:600} td.no{color:var(--red);font-weight:600}
 svg{min-width:720px;width:100%;height:auto;display:block;margin:16px 0}
 svg .box{fill:var(--surface);stroke:var(--border);stroke-width:1.4}
 svg .box-red{fill:var(--surface);stroke:var(--red);stroke-width:2.2}
@@ -70,6 +77,11 @@ svg .arr{stroke:var(--dim);stroke-width:1.4;fill:none;marker-end:url(#ah)}
 svg .ahf{fill:var(--dim)}
 svg a text{text-decoration:underline;fill:var(--accent);font:11px ui-monospace,Menlo,monospace}
 </style>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+<script>window.addEventListener('load',function(){if(!window.katex)return;
+  document.querySelectorAll('.tex').forEach(function(e){try{katex.render(e.textContent,e,
+    {displayMode:true,trust:true,strict:false,throwOnError:false});}catch(x){}});});</script>
 <script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
   document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
 </head>
@@ -98,11 +110,67 @@ svg a text{text-decoration:underline;fill:var(--accent);font:11px ui-monospace,M
 </dl>
 </div>
 
-<h2>Three logprobs, two ratios</h2>
+<h2>The CISPO loss, one term at a time</h2>
 
-<p>Every generated token gets a log-probability from three places. The loss divides them in two
-pairs, and each pair answers a different question. The figure uses an async run where the rollout
-engine is one weight version behind the trainer.</p>
+<p>This is what NeMo-RL computes today for CISPO with IS correction and TIS on. Each token
+<i>o<sub>t</sub></i> gets a probability from three policies:</p>
+<ul class="terms">
+<li><b>π<sub>gen</sub></b> (<code>gen</code>): vLLM's probability when it sampled the token. Comes free with the sample.</li>
+<li><b>π<sub>prev</sub></b> (<code>prev</code>): the trainer's weights before this step's update. Costs one extra forward pass, with no gradient.</li>
+<li><b>π<sub>θ</sub></b> (<code>curr</code>): the trainer's weights inside the training forward. The only one with a gradient.</li>
+</ul>
+
+<div class="tex">\mathcal{L}(\theta)=-\frac{1}{N}\sum_{t}\;
+\htmlClass{t1}{\underbrace{\mathrm{TIS}\!\left(\frac{\pi_{\text{prev}}(o_t)}{\pi_{\text{gen}}(o_t)}\right)}_{\text{(1) IS weight}}}
+\cdot
+\htmlClass{t2}{\underbrace{\mathrm{sg}\!\left[\mathrm{clip}\!\left(\frac{\pi_\theta(o_t)}{\pi_{\text{prev}}(o_t)},\;1-\varepsilon_{\text{low}},\;1+\varepsilon_{\text{high}}\right)\right]}_{\text{(2) CISPO trust-region weight}}}
+\cdot
+\htmlClass{t3}{\underbrace{A_t\,\log\pi_\theta(o_t)}_{\text{(3) gradient flows here}}}</div>
+
+<ul class="terms">
+<li><span class="t1"><b>(1) IS weight</b></span>: how far vLLM's sample is from the trainer. In async runs this holds the
+lag (vLLM used older weights). In sync runs it holds only small number differences between vLLM and the trainer.
+<code>TIS(x)</code> clamps it to <code>[truncated_importance_sampling_ratio_min, truncated_importance_sampling_ratio]</code>
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/a67cc3e441e1f6c84d1e868ece12049341cd5b9c/nemo_rl/algorithms/loss/loss_functions.py#L741-L780">code</a>).</li>
+<li><span class="t2"><b>(2) trust-region weight</b></span>: how far this optimizer update has moved from the weights at the
+start of the step. ε comes from <code>ratio_clip_min</code> / <code>ratio_clip_max</code>. <code>sg[…]</code> means no
+gradient goes through it (<a href="https://github.com/NVIDIA-NeMo/RL/blob/a67cc3e441e1f6c84d1e868ece12049341cd5b9c/nemo_rl/algorithms/loss/clipped_pg.py#L144-L159">code</a>).</li>
+<li><span class="t3"><b>(3)</b></span>: advantage times log-probability. <i>N</i> is the number of valid tokens
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/a67cc3e441e1f6c84d1e868ece12049341cd5b9c/nemo_rl/algorithms/loss/clipped_pg.py#L171-L183">code</a>).</li>
+</ul>
+
+<p><b>The one assumption this PR uses:</b> in the <i>first</i> optimizer update on a batch, π<sub>θ</sub> and
+π<sub>prev</sub> are the same weights. So <span class="t2">(2)</span> is exactly 1, and π<sub>prev</sub> can be
+replaced by a copy of π<sub>θ</sub> with no gradient. That is what <code>force_on_policy_ratio: true</code> does
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/a67cc3e441e1f6c84d1e868ece12049341cd5b9c/nemo_rl/algorithms/loss/loss_functions.py#L637-L638">code</a>):</p>
+
+<div class="tex">\mathcal{L}_{\text{1-fwd}}(\theta)=-\frac{1}{N}\sum_{t}\;
+\htmlClass{t1}{\mathrm{TIS}\!\left(\frac{\mathrm{sg}[\pi_\theta(o_t)]}{\pi_{\text{gen}}(o_t)}\right)}
+\cdot\htmlClass{t2}{1}\cdot
+\htmlClass{t3}{A_t\,\log\pi_\theta(o_t)}
+\qquad\text{(no }\pi_{\text{prev}}\text{, so no extra forward)}</div>
+
+<p>Same value, same gradient. This is also the CISPO paper's own formula with π<sub>old</sub> = the policy that
+sampled the tokens, using the TIS bounds as its clip. When does the assumption hold?</p>
+
+<div class="tblscroll">
+<table>
+<tr><th></th><th>sync: vLLM has the trainer's current weights</th><th>async: vLLM can be some versions behind</th></tr>
+<tr><td><b>one optimizer update per batch</b></td>
+<td class="ok"><span class="t2">(2)</span> = 1, <span class="t1">(1)</span> ≈ 1 (only small number differences).<br>Single-forward OK.</td>
+<td class="ok"><span class="t2">(2)</span> = 1, <span class="t1">(1)</span> ≠ 1 (lag), and TIS clamps it.<br>Single-forward OK.</td></tr>
+<tr><td><b>several updates per batch</b></td>
+<td class="no"><span class="t2">(2)</span> ≠ 1 from update 2 on.<br>Needs π<sub>prev</sub>: not allowed.</td>
+<td class="no">Same: (2) ≠ 1 from update 2 on.<br>Not allowed.</td></tr>
+</table>
+</div>
+
+<p>So the row decides, not the column. The saving is the same in sync and async. Async is where
+<span class="t1">(1)</span> is far from 1, so that is where the TIS bounds matter most.</p>
+
+<h2>Where the three logprobs come from</h2>
+
+<p>The figure follows one token through an async run where vLLM is one weight version behind the trainer.</p>
 
 <div class="figscroll">
 <svg viewBox="0 0 940 400" role="img" aria-label="Where gen, prev and curr logprobs come from, and the two ratios">
@@ -157,16 +225,7 @@ engine is one weight version behind the trainer.</p>
 </svg>
 </div>
 
-<div class="tblscroll">
-<table>
-<tr><th>logprob</th><th>whose weights</th><th>who computes it</th><th>gradient</th><th>needed with one update per batch?</th></tr>
-<tr><td><code>gen</code></td><td>vLLM's copy when it sampled (can be older in async)</td><td>rollout engine, free</td><td>no</td><td>yes: the IS ratio needs it</td></tr>
-<tr class="saved"><td><code>prev</code></td><td>trainer, before this step's update</td><td>an extra forward pass</td><td>no</td><td><b>no: it equals <code>curr</code>, so this PR skips it</b></td></tr>
-<tr><td><code>curr</code></td><td>trainer, during the update</td><td>the training forward</td><td>yes</td><td>yes: it is what gets trained</td></tr>
-</table>
-</div>
-
-<h2>What <code>force_on_policy_ratio</code> means, and why async still works</h2>
+<h3>What <code>force_on_policy_ratio</code> means, and why async still works</h3>
 
 <p><b>It does not mean "sync".</b> It means: "each rollout batch gets exactly one optimizer update, so
 <code>curr / prev</code> is 1; use <code>curr.detach()</code> wherever <code>prev</code> is needed"
