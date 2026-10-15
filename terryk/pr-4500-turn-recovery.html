@@ -132,7 +132,7 @@ Under <code>sibling</code> the same rollout is thrown away and started over
 
 <h2>One prompt group, three rollouts, through save and restart</h2>
 
-<svg viewBox="0 0 960 640" role="img" aria-label="Two columns, sibling on the left and turn on the right. Both start with the same group: s0 finished, s1 in turn 2, s2 not sent. Turn adds Gym steps before the shared barrier, and on restart s1 continues instead of starting over.">
+<svg viewBox="0 0 960 692" role="img" aria-label="Two columns, sibling on the left and turn on the right. Both start with the same group: s0 finished, s1 in turn 2, s2 not sent. Turn adds Gym steps before the shared barrier, and on restart s1 continues instead of starting over.">
   <text class="hdr" x="16" y="22">Group g7 at the moment a rollout snapshot starts: s0 finished · s1 in turn 2 of 3 · s2 not sent yet</text>
 
   <!-- legend -->
@@ -147,15 +147,19 @@ Under <code>sibling</code> the same rollout is thrown away and started over
   <!-- SAVE -->
   <text class="row" x="16" y="104">save</text>
 
-  <rect class="none" x="70" y="96" width="400" height="76" rx="6"/>
-  <text class="note" x="86" y="138">no Gym step: Gym keeps running s1</text>
+  <rect class="none" x="70" y="96" width="400" height="128" rx="6"/>
+  <text class="note" x="86" y="164">no Gym step: Gym keeps running s1</text>
 
-  <rect class="cost" x="490" y="96" width="454" height="76" rx="6"/>
-  <text class="lbl" x="504" y="114">1. close the /run gate; retire rollouts RL dropped</text>
-  <text class="lbl" x="504" y="130">2. Gym prepare: park s1 at the end of turn 1</text>
-  <text class="lbl" x="504" y="146">3. Gym commit → gym-instances/tools/replica-0/</text>
-  <text class="lbl" x="504" y="162">   {"tools/replica-0": [("…_g1_a0", attempt 0)]}</text>
-  <a href="https://github.com/NVIDIA-NeMo/RL/blob/341b9ad7e28e608385c327c5092133b54b7567b7/nemo_rl/algorithms/single_controller.py#L4727-L4758" target="_blank" rel="noopener"><text x="850" y="130">:4727-4758</text></a>
+  <rect class="cost" x="490" y="96" width="454" height="128" rx="6"/>
+  <text class="lbl" x="504" y="114">1. close the /run gate: no new sends; s1 goes on</text>
+  <text class="lbl" x="525" y="130">retire runs RL gave up on earlier (usually none)</text>
+  <text class="lbl" x="504" y="146">2. Gym prepare parks s1 at its nearest boundary:</text>
+  <a href="https://github.com/NVIDIA-NeMo/Gym/blob/120d516f09cfd0377dbed6828247ab1606e9e686/nemo_gym/_checkpoint/agent.py#L246-L253" target="_blank" rel="noopener"><text x="525" y="162">waiting on the model → end of turn 1 (reply held)</text></a>
+  <a href="https://github.com/NVIDIA-NeMo/Gym/blob/120d516f09cfd0377dbed6828247ab1606e9e686/responses_api_agents/simple_agent/app.py#L482" target="_blank" rel="noopener"><text x="525" y="178">running a tool → waits for it, then end of turn 2</text></a>
+  <text class="lbl" x="504" y="198">3. Gym commit → gym-instances/tools/replica-0/</text>
+  <text class="lbl" x="525" y="214">{"tools/replica-0": [("…_g1_a0", attempt 0)]}</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/341b9ad7e28e608385c327c5092133b54b7567b7/nemo_rl/algorithms/single_controller.py#L4727-L4758" target="_blank" rel="noopener"><text x="864" y="214">:4727-4758</text></a>
+<g transform="translate(0,52)">
 
   <rect class="same" x="70" y="184" width="874" height="62" rx="6"/>
   <text class="lbl" x="86" y="204">TQ barrier → capture TQ rows + ledger {s0: SEALED, s1: DISPATCHED, s2: RESERVED}</text>
@@ -185,13 +189,13 @@ Under <code>sibling</code> the same rollout is thrown away and started over
   <rect class="diff" x="70" y="398" width="400" height="92" rx="6"/>
   <text class="lbl" x="86" y="418">DISPATCHED → ABANDONED</text>
   <text class="lbl" x="86" y="436">new attempt a1, any Gym copy</text>
-  <text class="lbl" x="86" y="454">turn 1 is generated again</text>
+  <text class="lbl" x="86" y="454">every finished turn is generated again</text>
   <a href="https://github.com/NVIDIA-NeMo/RL/blob/341b9ad7e28e608385c327c5092133b54b7567b7/nemo_rl/experience/rollout_recovery.py#L548" target="_blank" rel="noopener"><text x="86" y="478">rollout_recovery.py:548</text></a>
 
   <rect class="diff" x="490" y="398" width="454" height="92" rx="6"/>
   <text class="lbl" x="504" y="418">DISPATCHED → RESERVED, gym_attempt 0 → 1</text>
   <text class="lbl" x="504" y="436">same id, key "…_g1_a0-a1", sent to replica-0</text>
-  <text class="lbl" x="504" y="454">Gym continues at turn 2; turn 1 kept</text>
+  <text class="lbl" x="504" y="454">Gym continues where it parked; turns kept</text>
   <a href="https://github.com/NVIDIA-NeMo/RL/blob/341b9ad7e28e608385c327c5092133b54b7567b7/nemo_rl/experience/rollout_recovery.py#L527-L540" target="_blank" rel="noopener"><text x="504" y="478">rollout_recovery.py:527-540</text></a>
   <a href="https://github.com/NVIDIA-NeMo/RL/blob/341b9ad7e28e608385c327c5092133b54b7567b7/nemo_rl/experience/rollout_manager.py#L2584-L2596" target="_blank" rel="noopener"><text x="700" y="478">owner pick :2584</text></a>
 
@@ -203,6 +207,7 @@ Under <code>sibling</code> the same rollout is thrown away and started over
   <text class="note" x="16" y="566">Everything outside the dashed red boxes is shared code: one ledger, one TQ capture, one restart function, one dispatch path.</text>
   <text class="note" x="16" y="584">The split is one branch in prepare_for_restart: a rollout Gym restored continues; any other unfinished rollout starts over.</text>
   <text class="note" x="16" y="602">Gym copy "tools/replica-0" and the ids are shapes from the PR's own tests; the turn count is illustrative.</text>
+</g>
 </svg>
 
 <h2>What <code>turn</code> costs</h2>
@@ -211,6 +216,7 @@ Under <code>sibling</code> the same rollout is thrown away and started over
 <code>/run</code> and Gym holds every rollout at its turn boundary. Training keeps going on data already
 buffered. Gym gets up to <code>gym_prepare_timeout_s</code> (300 s by default) to park
 (<a href="https://github.com/NVIDIA-NeMo/RL/blob/341b9ad7e28e608385c327c5092133b54b7567b7/nemo_rl/algorithms/single_controller_utils/config.py#L719">config.py:719</a>).
+A rollout in the middle of a tool call is waited for, since a sandbox cannot be saved mid-call, so one long tool call can use up those 300 s.
 Nothing measures how long the pause lasts yet, and the PR has no number for it. <span class="cref"><a href="https://github.com/NVIDIA-NeMo/RL/pull/4500#discussion_r4262413129">review comment — single_controller.py:4727</a></span></li>
 <li><b>It needs Gym servers that can save a rollout mid-way.</b> At the Gym pin only
 <code>simple_agent</code> can
