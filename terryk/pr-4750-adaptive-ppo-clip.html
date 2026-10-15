@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NVIDIA-NeMo/RL #4750 — adaptive-ppo-clip vs icepop</title>
+<style>
+:root{
+  --bg:#0d1117; --surface:#161b22; --surface2:#1c2128; --border:#30363d;
+  --text:#e6edf3; --dim:#8b949e; --accent:#58a6ff; --green:#3fb950;
+  --orange:#d29922; --red:#f85149;
+}
+:root[data-theme="light"]{
+  --bg:#ffffff; --surface:#f6f8fa; --surface2:#eaeef2; --border:#d0d7de;
+  --text:#1f2328; --dim:#59636e; --accent:#0969da; --green:#1a7f37;
+  --orange:#9a6700; --red:#cf222e;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:28px 16px 70px}
+h1{font-size:22px;margin:0 0 8px;line-height:1.3}
+h2{font-size:18px;margin:32px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;
+  font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
+.sub{color:var(--dim);font-size:13.5px;margin:0 0 16px}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);
+  border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;
+  font:13px/1 ui-monospace,Menlo,monospace;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.18)}
+.status{border:1px solid var(--border);border-radius:10px;background:var(--surface);
+  padding:2px 16px 10px;margin:0 0 20px}
+.status dl{display:grid;grid-template-columns:max-content 1fr;gap:4px 14px;margin:12px 0 0}
+.status dt{color:var(--dim);font-size:12px;text-transform:uppercase;letter-spacing:.04em;
+  white-space:nowrap;padding-top:2px}
+.status dd{margin:0;font-size:14px}
+.verdict{font-weight:700}
+.verdict.good{color:var(--green)}
+.hl{border-left:3px solid var(--green);background:var(--surface);padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0}
+.where{border-left:4px solid var(--accent);background:var(--surface);padding:6px 12px;margin:6px 0 10px}
+.diff{font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--surface);
+  border:1px solid var(--border);border-radius:8px;padding:12px;overflow-x:auto;white-space:pre;margin:10px 0}
+.diff .add{color:var(--green)}
+.diff .hunk{color:var(--accent)}
+.cref{margin:6px 0 0;font-size:13px}
+.cref a{display:inline-block;padding:4px 10px;border:1px solid var(--border);
+  border-radius:16px;background:var(--surface);font:12.5px ui-monospace,Menlo,monospace;margin:2px 4px 2px 0}
+.cref a:hover{background:var(--surface2);text-decoration:none}
+.figscroll{overflow-x:auto}
+.tex{overflow-x:auto;overflow-y:hidden;background:var(--surface);border:1px solid var(--border);
+  border-radius:8px;padding:6px 12px;margin:10px 0;font-family:ui-monospace,Menlo,monospace;font-size:12px}
+.tex .katex{font-size:1.08em}
+.t1{color:var(--orange)} .t2{color:var(--accent)} .t3{color:var(--green)}
+ul.terms{margin:6px 0 10px;padding-left:20px;font-size:14px}
+.tip{border-bottom:1px dotted var(--dim);cursor:help;position:relative;outline:none}
+.tip:hover::after,.tip:focus::after{content:attr(data-tip);position:absolute;left:0;top:1.7em;z-index:60;
+  width:max-content;max-width:min(340px,80vw);white-space:normal;background:var(--surface2);color:var(--text);
+  border:1px solid var(--border);border-radius:6px;padding:7px 10px;font:13px/1.45 -apple-system,sans-serif;
+  font-weight:400;box-shadow:0 4px 14px rgba(0,0,0,.3)}
+svg{min-width:720px;width:100%;height:auto;display:block;margin:16px 0}
+svg .keep{fill:var(--surface);stroke:var(--green);stroke-width:2}
+svg .drop{fill:var(--surface);stroke:var(--red);stroke-width:2;stroke-dasharray:5 3}
+svg .box{fill:var(--surface);stroke:var(--border);stroke-width:1.4}
+svg .t{fill:var(--text);font:bold 12.5px -apple-system,sans-serif}
+svg .d{fill:var(--text);font:12px ui-monospace,Menlo,monospace}
+svg .dim{fill:var(--dim);font:11px -apple-system,sans-serif}
+svg .red{fill:var(--red);font:bold 11.5px -apple-system,sans-serif}
+svg .grn{fill:var(--green);font:bold 11.5px -apple-system,sans-serif}
+svg .acc{fill:var(--accent);font:bold 11.5px ui-monospace,Menlo,monospace}
+svg .lane{fill:var(--accent);font:bold 13px -apple-system,sans-serif}
+svg .sep{stroke:var(--border);stroke-width:1}
+svg a text{text-decoration:underline;fill:var(--accent);font:11px ui-monospace,Menlo,monospace}
+</style>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+<script>window.addEventListener('load',function(){if(!window.katex)return;
+  document.querySelectorAll('.tex').forEach(function(e){try{katex.render(e.textContent,e,
+    {displayMode:true,trust:true,strict:false,throwOnError:false});}catch(x){}});});</script>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+  document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head>
+<body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+  function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+  function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
+    b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
+      else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+  document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+<div class="wrap">
+
+<h1>Adaptive PPO clip: which tokens it trains on, compared with icepop</h1>
+<p class="sub"><a href="https://github.com/NVIDIA-NeMo/RL/pull/4750">NVIDIA-NeMo/RL #4750</a>
+· feat(grpo): add adaptive-ppo-clip · method from <a href="https://microsoft.ai/pdf/mai-thinking-1.pdf">MAI-1, §3.1.1</a>
+· permalinks pin the PR head <code>e4e546b</code></p>
+
+<div class="status">
+<dl>
+  <dt>Before</dt>
+  <dd>For stale tokens in async RL, the closest option was <code>icepop</code>. It drops every token whose importance weight is outside a fixed <code>[min, max]</code>, whatever the sign of its advantage.</dd>
+  <dt>This PR</dt>
+  <dd>Adds <code>truncated_importance_sampling_type: adaptive-ppo-clip</code>. It drops a token only on the side that matters for its advantage. Its upper bound grows or shrinks each step to steer entropy toward a target, and it saves that bound in checkpoints.</dd>
+  <dt>Status</dt>
+  <dd><span class="verdict good">New feature, in review. The filter matches the paper, and the review found no correctness bug.</span> The review asks for cleanups, more tests and training curves (end of page).</dd>
+</dl>
+</div>
+
+<h2>The math: one keep-mask, two rules</h2>
+
+<p>Both modes need <code>force_on_policy_ratio: true</code>. Then the loss sets π<sub>prev</sub> to a
+no-gradient copy of π<sub>θ</sub>
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/e4e546b29dfef5254b3135651a89399b2719ae8e/nemo_rl/algorithms/loss/loss_functions.py#L724-L725">code</a>),
+so the PPO ratio is 1 and the only thing left to clip is the importance weight:</p>
+<ul class="terms">
+<li><b>π<sub>gen</sub></b> (<code>generation_logprobs</code>): the probability vLLM gave the token when it sampled it, often with older weights.</li>
+<li><b>π<sub>θ</sub></b> (<code>curr_logprobs</code>): the trainer's probability now, with a gradient.</li>
+<li><b>w = sg[π<sub>θ</sub>] / π<sub>gen</sub></b>: the <span class="tip" tabindex="0" data-tip="How much more (or less) likely the trainer now finds the token than vLLM did when it sampled it. sg[…] means no gradient flows through it.">importance weight</span>. Far from 1 means the token is stale. A is the token's advantage.</li>
+</ul>
+
+<div class="tex">\mathcal{L}(\theta)=-\frac{1}{N}\sum_t\;\htmlClass{t1}{m_t}\cdot w_t\cdot A_t\,\log\pi_\theta(o_t)
+\qquad\begin{aligned}
+\text{icepop:}\quad & \htmlClass{t1}{m_t}=[\,\text{min}\le w_t\le\text{max}\,]\\
+\text{adaptive:}\quad & \htmlClass{t1}{m_t}=[\,w_t\le 50\,]\cdot[\,A_t\ge 0\ \lor\ w_t\ge\text{min}\,]\cdot[\,A_t\le 0\ \lor\ w_t\le\text{max}+\htmlClass{t2}{k}\,]
+\end{aligned}</div>
+
+<p>The <span class="t1">keep-mask m</span> is 1 to train on the token and 0 to drop it. Read the adaptive rule as:
+a token that the update would make <i>less</i> likely (A&lt;0) needs only a lower bound. A token it would make <i>more</i>
+likely (A&gt;0) needs only an upper bound. Any token with w above 50 is dropped. This is the paper's Eq. 6 and Eq. 9 written as
+a mask, with ε = 0.6 giving min = 0.4 and max = 2.5.</p>
+
+<p>The <span class="t2">offset k</span> starts at 0 and moves once per training step
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/e4e546b29dfef5254b3135651a89399b2719ae8e/nemo_rl/algorithms/loss/loss_functions.py#L620-L639">code</a>, paper Eq. 8):</p>
+
+<div class="tex">\htmlClass{t2}{k}\leftarrow\mathrm{clip}\!\left(\htmlClass{t2}{k}+0.25\cdot\mathrm{sign}\big(H^\star-\hat H\big),\;0,\;1\right),
+\qquad \hat H=-\frac{1}{N}\sum_t w_t\,\log\pi_\theta(o_t)</div>
+
+<p>H* is <code>tis_adaptive_ppo_clip_target_entropy</code> (default 0.3). Ĥ is the step's
+<code>approx_entropy</code>, which the loss already logs
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/e4e546b29dfef5254b3135651a89399b2719ae8e/nemo_rl/algorithms/loss/clipped_pg.py#L87-L91">code</a>).
+Low entropy means the policy is getting too sure of itself, so k rises and more A&gt;0 tokens with a high w are kept.
+High entropy lowers k again.</p>
+
+<h2>Same 6 tokens through both filters</h2>
+
+<p>min = 0.4, max = 2.5 (the PR's suggested values). Each column is one token. Values come from running the real
+<code>ClippedPGLossFn</code> at <code>e4e546b</code> on CPU.</p>
+
+<div class="figscroll">
+<svg viewBox="0 0 940 400" role="img" aria-label="Six tokens: which ones icepop keeps and which adaptive-ppo-clip keeps at k=0 and k=0.5">
+<text class="dim" x="10" y="26">importance weight w</text>
+<text class="dim" x="10" y="48">advantage A</text>
+<g>
+<text class="d" x="250" y="26" text-anchor="middle">0.2</text><text class="d" x="250" y="48" text-anchor="middle">−1</text>
+<text class="d" x="365" y="26" text-anchor="middle">0.2</text><text class="d" x="365" y="48" text-anchor="middle">+1</text>
+<text class="d" x="480" y="26" text-anchor="middle">2.8</text><text class="d" x="480" y="48" text-anchor="middle">−1</text>
+<text class="d" x="595" y="26" text-anchor="middle">2.8</text><text class="d" x="595" y="48" text-anchor="middle">+1</text>
+<text class="d" x="710" y="26" text-anchor="middle">60</text><text class="d" x="710" y="48" text-anchor="middle">−1</text>
+<text class="d" x="825" y="26" text-anchor="middle">1.1</text><text class="d" x="825" y="48" text-anchor="middle">+1</text>
+</g>
+<line class="sep" x1="10" y1="60" x2="930" y2="60"/>
+
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/e4e546b29dfef5254b3135651a89399b2719ae8e/nemo_rl/algorithms/loss/loss_functions.py#L906-L913"><text x="10" y="88">icepop (existing)</text></a>
+<text class="dim" x="10" y="106">keep 0.4 ≤ w ≤ 2.5</text>
+<text class="red" x="10" y="122">1 of 6 kept</text>
+<rect class="drop" x="198" y="72" width="104" height="54" rx="6"/><text class="red" x="250" y="96" text-anchor="middle">drop</text><text class="dim" x="250" y="114" text-anchor="middle">w &lt; 0.4</text>
+<rect class="drop" x="313" y="72" width="104" height="54" rx="6"/><text class="red" x="365" y="96" text-anchor="middle">drop</text><text class="dim" x="365" y="114" text-anchor="middle">w &lt; 0.4</text>
+<rect class="drop" x="428" y="72" width="104" height="54" rx="6"/><text class="red" x="480" y="96" text-anchor="middle">drop</text><text class="dim" x="480" y="114" text-anchor="middle">w &gt; 2.5</text>
+<rect class="drop" x="543" y="72" width="104" height="54" rx="6"/><text class="red" x="595" y="96" text-anchor="middle">drop</text><text class="dim" x="595" y="114" text-anchor="middle">w &gt; 2.5</text>
+<rect class="drop" x="658" y="72" width="104" height="54" rx="6"/><text class="red" x="710" y="96" text-anchor="middle">drop</text><text class="dim" x="710" y="114" text-anchor="middle">w &gt; 2.5</text>
+<rect class="keep" x="773" y="72" width="104" height="54" rx="6"/><text class="grn" x="825" y="96" text-anchor="middle">keep</text><text class="dim" x="825" y="114" text-anchor="middle">in range</text>
+
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/e4e546b29dfef5254b3135651a89399b2719ae8e/nemo_rl/algorithms/loss/loss_functions.py#L926-L945"><text x="10" y="158">adaptive, k = 0</text></a>
+<text class="dim" x="10" y="176">upper bound 2.5</text>
+<text class="grn" x="10" y="192">3 of 6 kept</text>
+<rect class="drop" x="198" y="142" width="104" height="54" rx="6"/><text class="red" x="250" y="166" text-anchor="middle">drop</text><text class="dim" x="250" y="184" text-anchor="middle">A&lt;0, w &lt; 0.4</text>
+<rect class="keep" x="313" y="142" width="104" height="54" rx="6"/><text class="grn" x="365" y="166" text-anchor="middle">keep</text><text class="dim" x="365" y="184" text-anchor="middle">A&gt;0: no min</text>
+<rect class="keep" x="428" y="142" width="104" height="54" rx="6"/><text class="grn" x="480" y="166" text-anchor="middle">keep</text><text class="dim" x="480" y="184" text-anchor="middle">A&lt;0: no max</text>
+<rect class="drop" x="543" y="142" width="104" height="54" rx="6"/><text class="red" x="595" y="166" text-anchor="middle">drop</text><text class="dim" x="595" y="184" text-anchor="middle">A&gt;0, w &gt; 2.5</text>
+<rect class="drop" x="658" y="142" width="104" height="54" rx="6"/><text class="red" x="710" y="166" text-anchor="middle">drop</text><text class="dim" x="710" y="184" text-anchor="middle">w &gt; 50, any A</text>
+<rect class="keep" x="773" y="142" width="104" height="54" rx="6"/><text class="grn" x="825" y="166" text-anchor="middle">keep</text><text class="dim" x="825" y="184" text-anchor="middle">in range</text>
+
+<text class="acc" x="10" y="228">adaptive, k = 0.5</text>
+<text class="dim" x="10" y="246">upper bound 3.0</text>
+<text class="grn" x="10" y="262">4 of 6 kept</text>
+<rect class="drop" x="198" y="212" width="104" height="54" rx="6"/><text class="red" x="250" y="236" text-anchor="middle">drop</text>
+<rect class="keep" x="313" y="212" width="104" height="54" rx="6"/><text class="grn" x="365" y="236" text-anchor="middle">keep</text>
+<rect class="keep" x="428" y="212" width="104" height="54" rx="6"/><text class="grn" x="480" y="236" text-anchor="middle">keep</text>
+<rect class="keep" x="543" y="212" width="104" height="54" rx="6"/><text class="grn" x="595" y="236" text-anchor="middle">keep</text><text class="acc" x="595" y="254" text-anchor="middle">2.8 ≤ 3.0</text>
+<rect class="drop" x="658" y="212" width="104" height="54" rx="6"/><text class="red" x="710" y="236" text-anchor="middle">drop</text>
+<rect class="keep" x="773" y="212" width="104" height="54" rx="6"/><text class="grn" x="825" y="236" text-anchor="middle">keep</text>
+
+<line class="sep" x1="10" y1="282" x2="930" y2="282"/>
+<text class="lane" x="10" y="304">How k gets to 0.5: one move per training step, target entropy 0.3</text>
+<rect class="box" x="10" y="314" width="220" height="48" rx="6"/><text class="t" x="20" y="333">step 1 · entropy 0.12</text><text class="d" x="20" y="352">below target: k 0 → 0.25</text>
+<rect class="box" x="240" y="314" width="220" height="48" rx="6"/><text class="t" x="250" y="333">step 2 · entropy 0.18</text><text class="d" x="250" y="352">below: k 0.25 → 0.5</text>
+<rect class="box" x="470" y="314" width="220" height="48" rx="6"/><text class="t" x="480" y="333">step 3 · entropy 0.41</text><text class="d" x="480" y="352">above: k 0.5 → 0.25</text>
+<rect class="box" x="700" y="314" width="230" height="48" rx="6"/><text class="t" x="710" y="333">step 4 · entropy 0.22</text><text class="d" x="710" y="352">below: k 0.25 → 0.5</text>
+
+<rect class="keep" x="10" y="378" width="18" height="12" rx="2"/><text class="dim" x="34" y="388">kept: trains with weight w·A</text>
+<rect class="drop" x="230" y="378" width="18" height="12" rx="2"/><text class="dim" x="254" y="388">dropped: weight set to 0, counted in is_oob_ratio</text>
+<text class="dim" x="600" y="388">k values from real update calls.</text>
+</svg>
+</div>
+
+<p>The two middle columns are the point. icepop throws away the 0.2-weight token with A&gt;0 and the 2.8-weight token
+with A&lt;0. The adaptive rule keeps both, because clipping them would not stop an over-large update in the direction
+the advantage pushes. The 2.8-weight token with A&gt;0 is the one k decides: dropped at k = 0, kept once k reaches 0.5.</p>
+
+<h2>Where the code lives, and what the review asks</h2>
+
+<p class="where"><b>Where it lands: RL only.</b> The mask is a new branch in
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/e4e546b29dfef5254b3135651a89399b2719ae8e/nemo_rl/algorithms/loss/loss_functions.py#L926-L958"><code>ClippedPGLossFn.__call__</code></a>,
+next to icepop. k lives on the loss object. The trainer moves it after each step and copies it into the checkpoint, in
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/e4e546b29dfef5254b3135651a89399b2719ae8e/nemo_rl/algorithms/grpo.py#L4136"><code>grpo_train</code></a>,
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/e4e546b29dfef5254b3135651a89399b2719ae8e/nemo_rl/algorithms/grpo.py#L6047"><code>async_grpo_train</code></a>,
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/e4e546b29dfef5254b3135651a89399b2719ae8e/nemo_rl/algorithms/grpo_sync.py#L1271"><code>grpo_train_sync</code></a> and the
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/e4e546b29dfef5254b3135651a89399b2719ae8e/nemo_rl/algorithms/single_controller.py#L3572">single controller</a>.
+The workers get the new k because every trainer sends the loss object to them again on each step. The legacy PPO trainer rejects the mode.</p>
+
+<pre class="diff"><span class="hunk">@@ loss_functions.py L926-L945 · ClippedPGLossFn.__call__ (new branch, next to icepop)</span>
+<span class="add">+            elif self.truncated_importance_sampling_type == "adaptive-ppo-clip":
++                tis_min = self.truncated_importance_sampling_ratio_min
++                assert tis_min is not None
++                cur_k = self.cur_adaptive_ppo_clip_k
++                assert cur_k is not None
++                tis_max = self.truncated_importance_sampling_ratio + cur_k
++
++                within_outer_bound = (
++                    actor_importance_weights_expanded
++                    &lt;= self.ADAPTIVE_PPO_CLIP_OUTER_BOUND
++                )
++                negative_adv_kept = (advantages &gt;= 0) | (
++                    actor_importance_weights_expanded &gt;= tis_min
++                )
++                positive_adv_kept = (advantages &lt;= 0) | (
++                    actor_importance_weights_expanded &lt;= tis_max
++                )
++                token_kept_mask = (
++                    within_outer_bound &amp; negative_adv_kept &amp; positive_adv_kept
++                )</span>
+<span class="hunk">@@ grpo.py L4136 · grpo_train, after the step's metrics are summed</span>
+<span class="add">+                _update_adaptive_loss_state(loss_fn, metrics)</span></pre>
+
+<p>The review asks the author to:</p>
+<ul class="terms">
+<li>Raise an error instead of silently leaving k at 0 when <code>approx_entropy</code> is missing, and log the k the step actually used.</li>
+<li>Drop <code>last_entropy</code>. It is saved and restored but nothing reads it. That leaves one plain checkpoint field for k.</li>
+<li>Make the step size, k's maximum and the outer bound config keys. The paper's own recipe uses a maximum of 2.5, and the code fixes it at 1.0.</li>
+<li>Test the wiring in the three older GRPO trainers, the resume path and the PPO rejection. Today, deleting any of those lines leaves all tests green.</li>
+<li>Share training curves: reward, entropy against the target, k over time, and one resume.</li>
+</ul>
+<!--CREFS-->
+
+<div class="hl"><b>So what.</b> If you run async GRPO and want to keep stale tokens that are still safe to train on,
+this mode keeps more of the batch than icepop with the same min and max. It also adjusts itself to hold entropy near a
+target. It needs <code>force_on_policy_ratio: true</code>, so one optimizer update per rollout batch, and it does not
+work with the single controller's <code>ready_first</code> sampler. No training curves yet, so the benefit is the
+paper's claim, not measured in NeMo-RL.</div>
+
+</div>
+</body>
+</html>
