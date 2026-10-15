@@ -103,7 +103,7 @@ All permalinks pin the PR head <code>c169600</code>.</p>
   <dt>This PR</dt>
   <dd>Adds up the tokens of <b>all</b> assistant turns, on both places that measure length.</dd>
   <dt>Status</dt>
-  <dd><span class="verdict good">Fixed by this PR.</span> Single-turn runs get the same numbers as before. The review asks for one more change (see the end).</dd>
+  <dd><span class="verdict good">Fixed by this PR.</span> Single-turn runs get the same numbers as before.</dd>
 </dl>
 </div>
 
@@ -231,19 +231,15 @@ through both paths and checks the same penalty
 <tr><td>Async GRPO</td><td>none</td><td>n/a</td><td class="n">No: the launcher refuses shaping (<a href="https://github.com/NVIDIA-NeMo/RL/blob/c16960064a3d8e6978317357e4d463efae84bac9/examples/run_grpo.py#L193-L196">run_grpo.py:193</a>)</td></tr>
 <tr><td>Single controller</td><td>none</td><td>n/a</td><td class="n">No: config check refuses shaping (<a href="https://github.com/NVIDIA-NeMo/RL/blob/c16960064a3d8e6978317357e4d463efae84bac9/nemo_rl/algorithms/single_controller_utils/config.py#L1123">config.py:1123</a>)</td></tr>
 </table>
-<p>The open review ask below (assistant turns the policy did not generate) applies to the same three "Yes" rows.</p>
+<p>The rows marked "No" never run reward shaping, so this PR does not change them.</p>
 
 <div class="hl"><b>Who notices.</b> Only runs with reward shaping on <i>and</i> more than one assistant turn per sample.
 They will see more overlong penalties and may need to retune <code>max_response_length</code>.
 No shipped example config has both, so no shipped recipe changes.
-<b>Open in review:</b> count the same tokens the loss trains on. The
-<a href="https://github.com/NVIDIA-NeMo/RL/blob/c16960064a3d8e6978317357e4d463efae84bac9/nemo_rl/algorithms/grpo.py#L2301-L2304">GRPO loss mask</a>
-trains only on assistant turns that carry <code>generation_logprobs</code>. The new sum counts every assistant turn,
-including ones the policy did not generate in this rollout: assistant turns in the prompt history, or another
-agent's text that an environment returns as <code>role: "assistant"</code>. Every generation backend sets the key, so the
-check is not vLLM-only. Gym is safe from both cases: it puts history and other-model text into <code>user</code> messages.
-<p class="cref">🟠 <a href="https://github.com/NVIDIA-NeMo/RL/pull/4487#discussion_r4268178743">review comment — reward_functions.py:152</a>
-<a href="https://github.com/NVIDIA-NeMo/RL/pull/4487#discussion_r4268178764">review comment — llm_message_utils.py:817</a></p></div>
+<b>History turns:</b> the sum counts every <code>role: "assistant"</code> message. On Gym, including PivotRL,
+earlier turns from the dataset arrive inside a <code>user</code> message
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/c16960064a3d8e6978317357e4d463efae84bac9/nemo_rl/environments/nemo_gym.py#L1470-L1521">nemo_gym.py</a>),
+so only the turns the policy generated count.</div>
 
 </div>
 </body>
