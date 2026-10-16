@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NVIDIA-NeMo/RL #4507 — a restored row can differ outside its prefix and still pass</title>
+<style>
+:root{
+  --bg:#0d1117; --surface:#161b22; --surface2:#1c2128; --border:#30363d;
+  --text:#e6edf3; --dim:#8b949e; --accent:#58a6ff; --green:#3fb950;
+  --orange:#d29922; --red:#f85149;
+}
+:root[data-theme="light"]{
+  --bg:#ffffff; --surface:#f6f8fa; --surface2:#eaeef2; --border:#d0d7de;
+  --text:#1f2328; --dim:#59636e; --accent:#0969da; --green:#1a7f37;
+  --orange:#9a6700; --red:#cf222e;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:28px 16px 70px}
+h1{font-size:22px;margin:0 0 8px;line-height:1.3}
+h2{font-size:18px;margin:32px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;
+  font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
+.sub{color:var(--dim);font-size:13.5px;margin:0 0 16px}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);
+  border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;
+  font:13px/1 ui-monospace,Menlo,monospace;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.18)}
+.status{border:1px solid var(--border);border-radius:10px;background:var(--surface);
+  padding:2px 16px 10px;margin:0 0 20px}
+.status dl{display:grid;grid-template-columns:max-content 1fr;gap:4px 14px;margin:12px 0 0}
+.status dt{color:var(--dim);font-size:12px;text-transform:uppercase;letter-spacing:.04em;
+  white-space:nowrap;padding-top:2px}
+.status dd{margin:0;font-size:14px}
+.verdict{font-weight:700}
+.verdict.open{color:var(--red)}
+.warn{border-left:3px solid var(--orange);background:var(--surface);
+  padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0}
+.where{border-left:4px solid var(--accent);background:var(--surface);padding:6px 12px;margin:6px 0 10px}
+.diff{font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--surface);
+  border:1px solid var(--border);border-radius:8px;padding:12px;overflow-x:auto;white-space:pre;margin:10px 0}
+.diff .add{color:var(--green)}
+.diff .del{color:var(--red)}
+.diff .hunk{color:var(--accent)}
+.diff .skip{color:var(--dim);font-style:italic}
+.tip{border-bottom:1px dotted var(--dim);cursor:help;position:relative;outline:none}
+.tip:hover::after,.tip:focus::after{content:attr(data-tip);position:absolute;left:0;top:1.7em;z-index:60;
+  width:max-content;max-width:min(340px,80vw);white-space:normal;background:var(--surface2);color:var(--text);
+  border:1px solid var(--border);border-radius:6px;padding:7px 10px;font:13px/1.45 -apple-system,sans-serif;
+  font-weight:400;box-shadow:0 4px 14px rgba(0,0,0,.3)}
+svg{max-width:100%;height:auto;display:block;margin:16px 0}
+svg .t{fill:var(--text);font:bold 12.5px -apple-system,sans-serif}
+svg .lbl{fill:var(--dim);font:12px -apple-system,sans-serif}
+svg .note{fill:var(--dim);font:11.5px -apple-system,sans-serif}
+svg .tok{fill:var(--surface2);stroke:var(--border);stroke-width:1}
+svg .tokp{fill:var(--surface);stroke:var(--border);stroke-width:1}
+svg .tokbad{fill:var(--surface2);stroke:var(--red);stroke-width:2.5}
+svg .v{fill:var(--text);font:13px ui-monospace,Menlo,monospace}
+svg .vbad{fill:var(--red);font:bold 13px ui-monospace,Menlo,monospace}
+svg .m{fill:var(--dim);font:11px ui-monospace,Menlo,monospace}
+svg .seg{stroke:var(--dim);stroke-width:1;fill:none}
+svg .exc{stroke:var(--orange);stroke-width:3;fill:none}
+svg .pre{stroke:var(--green);stroke-width:3;fill:none}
+svg .exct{fill:var(--orange);font:bold 12px -apple-system,sans-serif}
+svg .pret{fill:var(--green);font:bold 12px -apple-system,sans-serif}
+svg .badt{fill:var(--red);font:bold 12px -apple-system,sans-serif}
+svg a text{text-decoration:underline}
+.cref{margin:6px 0 0;font-size:13px}
+.cref a{display:inline-block;padding:4px 10px;border:1px solid var(--border);
+  border-radius:16px;background:var(--surface);font:12.5px ui-monospace,Menlo,monospace;margin:2px 4px 2px 0}
+.cref a:hover{background:var(--surface2);text-decoration:none}
+nav.chain{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 6px;padding:0}
+nav.chain a,nav.chain span{display:inline-block;padding:5px 11px;border:1px solid var(--border);
+  border-radius:20px;background:var(--surface);text-decoration:none;color:var(--accent);
+  font-size:12.5px;line-height:1.3;white-space:nowrap}
+nav.chain a:hover{background:var(--surface2)}
+nav.chain span.here{background:var(--accent);color:var(--bg);border-color:var(--accent);font-weight:600}
+p.chainnote{color:var(--dim);font-size:12px;margin:0 0 18px}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+  document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head>
+<body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+  function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+  function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
+    b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
+      else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+  document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+<div class="wrap">
+
+<h1>A restored row can differ outside its restored prefix and still pass the parity test</h1>
+<p class="sub">Finding on <a href="https://github.com/NVIDIA-NeMo/RL/pull/4507">NVIDIA-NeMo/RL #4507</a>. All permalinks pin the PR head <code>deb0e146</code>. The review comment is in a pending review; its link works once it is published.</p>
+
+<div class="status">
+<dl>
+  <dt>Before</dt>
+  <dd>No parity test existed. The base PR only checked that the restored run trained.</dd>
+  <dt>This PR</dt>
+  <dd>Requires each trained row to match an uninterrupted run, but excuses some rows of restored runs as "sampling noise" — and the excused range is wider than the restored tokens.</dd>
+  <dt>Status</dt>
+  <dd><span class="verdict open">Open — not fixed in this PR.</span> Shown on a small hand-built case (CPU, the PR's own function). Raised as a review comment.</dd>
+</dl>
+</div>
+
+<nav class="chain">
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4507-size-and-reuse.html">size and reuse</a>
+  <span class="here">rows the test excuses</span>
+</nav>
+<p class="chainnote">Two pages on this PR — this one: which differences the test lets through.</p>
+
+<p>After a crash, the restored run resumes a half-finished model reply: the tokens saved before the crash (the <span class="tip" tabindex="0" data-tip="The tokens the model had already produced in the closing turn when the checkpoint was taken. After the restore they are fed back in, and only the rest of the reply is generated.">restored prefix</span>) are replayed, and the model generates the rest.
+The test then compares each trained row with the same row from a run that never crashed.
+When a row differs, <a href="https://github.com/NVIDIA-NeMo/RL/blob/deb0e146906f49044a0405697bed022fd54170ec/tests/functional/_gym_prefix_recovery_parity.py#L455"><code>_classify_token_divergence</code></a> decides whether to excuse it. It excuses the row (<code>pre_cut</code>) when the first difference sits before the end of the restored prefix — but it starts counting at the row's <a href="https://github.com/NVIDIA-NeMo/RL/blob/deb0e146906f49044a0405697bed022fd54170ec/tests/functional/_gym_prefix_recovery_parity.py#L495">first generated token</a>, which is in turn 1, not at the start of the restored prefix.</p>
+
+<h2>One row, ten tokens</h2>
+
+<svg viewBox="0 0 900 300" role="img" aria-label="Two rows of ten tokens. The restored run differs from the baseline at index 4, the tool result. The code's excused range covers indexes 2 to 6, while only indexes 5 and 6 were restored. The row is excused and passes.">
+  <!-- token i at x = 120 + i*76, width 66 -->
+  <text class="lbl" x="120" y="22">prompt</text>
+  <text class="lbl" x="272" y="22">turn 1: tool call</text>
+  <text class="lbl" x="424" y="22">tool result</text>
+  <text class="lbl" x="500" y="22">closing turn: list of numbers</text>
+  <path class="seg" d="M120 28 H262 M272 28 H414 M424 28 H490 M500 28 H870"/>
+
+  <text class="lbl" x="16" y="58">baseline</text>
+  <g>
+    <rect class="tokp" x="120" y="38" width="66" height="30" rx="4"/><text class="v" x="153" y="58" text-anchor="middle">10</text>
+    <rect class="tokp" x="196" y="38" width="66" height="30" rx="4"/><text class="v" x="229" y="58" text-anchor="middle">11</text>
+    <rect class="tok" x="272" y="38" width="66" height="30" rx="4"/><text class="v" x="305" y="58" text-anchor="middle">20</text>
+    <rect class="tok" x="348" y="38" width="66" height="30" rx="4"/><text class="v" x="381" y="58" text-anchor="middle">21</text>
+    <rect class="tokp" x="424" y="38" width="66" height="30" rx="4"/><text class="v" x="457" y="58" text-anchor="middle">30</text>
+    <rect class="tok" x="500" y="38" width="66" height="30" rx="4"/><text class="v" x="533" y="58" text-anchor="middle">40</text>
+    <rect class="tok" x="576" y="38" width="66" height="30" rx="4"/><text class="v" x="609" y="58" text-anchor="middle">41</text>
+    <rect class="tok" x="652" y="38" width="66" height="30" rx="4"/><text class="v" x="685" y="58" text-anchor="middle">42</text>
+    <rect class="tok" x="728" y="38" width="66" height="30" rx="4"/><text class="v" x="761" y="58" text-anchor="middle">43</text>
+    <rect class="tok" x="804" y="38" width="66" height="30" rx="4"/><text class="v" x="837" y="58" text-anchor="middle">44</text>
+  </g>
+  <text class="lbl" x="16" y="98">restored run</text>
+  <g>
+    <rect class="tokp" x="120" y="78" width="66" height="30" rx="4"/><text class="v" x="153" y="98" text-anchor="middle">10</text>
+    <rect class="tokp" x="196" y="78" width="66" height="30" rx="4"/><text class="v" x="229" y="98" text-anchor="middle">11</text>
+    <rect class="tok" x="272" y="78" width="66" height="30" rx="4"/><text class="v" x="305" y="98" text-anchor="middle">20</text>
+    <rect class="tok" x="348" y="78" width="66" height="30" rx="4"/><text class="v" x="381" y="98" text-anchor="middle">21</text>
+    <rect class="tokbad" x="424" y="78" width="66" height="30" rx="4"/><text class="vbad" x="457" y="98" text-anchor="middle">77</text>
+    <rect class="tok" x="500" y="78" width="66" height="30" rx="4"/><text class="v" x="533" y="98" text-anchor="middle">40</text>
+    <rect class="tok" x="576" y="78" width="66" height="30" rx="4"/><text class="v" x="609" y="98" text-anchor="middle">41</text>
+    <rect class="tok" x="652" y="78" width="66" height="30" rx="4"/><text class="v" x="685" y="98" text-anchor="middle">42</text>
+    <rect class="tok" x="728" y="78" width="66" height="30" rx="4"/><text class="v" x="761" y="98" text-anchor="middle">43</text>
+    <rect class="tok" x="804" y="78" width="66" height="30" rx="4"/><text class="v" x="837" y="98" text-anchor="middle">44</text>
+  </g>
+  <text class="lbl" x="16" y="128">index</text>
+  <text class="m" x="153" y="128" text-anchor="middle">0</text><text class="m" x="229" y="128" text-anchor="middle">1</text>
+  <text class="m" x="305" y="128" text-anchor="middle">2</text><text class="m" x="381" y="128" text-anchor="middle">3</text>
+  <text class="m" x="457" y="128" text-anchor="middle">4</text><text class="m" x="533" y="128" text-anchor="middle">5</text>
+  <text class="m" x="609" y="128" text-anchor="middle">6</text><text class="m" x="685" y="128" text-anchor="middle">7</text>
+  <text class="m" x="761" y="128" text-anchor="middle">8</text><text class="m" x="837" y="128" text-anchor="middle">9</text>
+  <text class="lbl" x="16" y="146">loss mask</text>
+  <text class="m" x="153" y="146" text-anchor="middle">0</text><text class="m" x="229" y="146" text-anchor="middle">0</text>
+  <text class="m" x="305" y="146" text-anchor="middle">1</text><text class="m" x="381" y="146" text-anchor="middle">1</text>
+  <text class="m" x="457" y="146" text-anchor="middle">0</text><text class="m" x="533" y="146" text-anchor="middle">1</text>
+  <text class="m" x="609" y="146" text-anchor="middle">1</text><text class="m" x="685" y="146" text-anchor="middle">1</text>
+  <text class="m" x="761" y="146" text-anchor="middle">1</text><text class="m" x="837" y="146" text-anchor="middle">1</text>
+
+  <path class="exc" d="M272 166 V176 H642 V166"/>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/deb0e146906f49044a0405697bed022fd54170ec/tests/functional/_gym_prefix_recovery_parity.py#L507-L516"><text class="exct" x="272" y="194">excused by the code: index 2 up to 7 (first generated token … end of prefix)</text></a>
+  <path class="pre" d="M500 210 V220 H642 V210"/>
+  <text class="pret" x="500" y="238">really restored: 2 tokens (5, 6)</text>
+
+  <path d="M457 112 V120" stroke="var(--red)" stroke-width="2"/>
+  <text class="badt" x="16" y="268">first difference: index 4, the tool result (30 → 77). It is inside the orange range, so the row is <tspan font-family="ui-monospace,Menlo,monospace">pre_cut</tspan>.</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/deb0e146906f49044a0405697bed022fd54170ec/tests/functional/_gym_prefix_recovery_parity.py#L256-L262"><text class="note" x="16" y="290">pre_cut rows compare only reward and sample mask — tokens, loss mask, advantages and log-probs are skipped. The test passes.</text></a>
+</svg>
+
+<p>This is the PR's own function run on that row: <code>{'kind': 'pre_cut', 'first_diff': 4, 'restored_prefix_end': 7, 'restored_prefix_hash_matches': True}</code>.
+A changed turn-1 tool call (index 2 or 3) is excused the same way.
+A tool result is never sampled, so a difference there is a restore bug — for example Gym handing back the wrong state. The test lets it through as long as the reward still matches.</p>
+<p class="cref" id="cref-X1"></p>
+
+<h2>The fix: drop the excuse — proposed, not in the PR</h2>
+
+<p>Nothing below is implemented, and it has not been run.</p>
+<p class="where"><b>Where the fix lands: RL test files only.</b>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/deb0e146906f49044a0405697bed022fd54170ec/tests/functional/_gym_prefix_recovery_parity.py#L203"><code>_compare_training_rows</code></a> and its caller, plus the unit tests for the classifier.
+<b>No product change.</b></p>
+
+<p>Narrowing the range to the restored prefix would still excuse a noise source that no other row gets.
+Rows that finished before the crash, and the tail regenerated after it, face the same small bf16 rounding differences, and both must already match exactly. The author's run matched all 24 rows. So the simpler test is also the stricter one: every row must match.</p>
+
+<pre class="diff"><span class="hunk">@@ _gym_prefix_recovery_parity.py L212 · _compare_training_rows signature</span>
+     atol: float,
+<span class="del">-    excused: frozenset[tuple[int, int, int]] = frozenset(),
+</span> ) -&gt; None:
+
+<span class="hunk">@@ _gym_prefix_recovery_parity.py L256-L265 · _compare_training_rows</span>
+         left, right = baseline[identity], recovery[identity]
+<span class="del">-        if identity in excused:
+-            # Tokens differ by phase-one sampling noise, but the verifier and
+-            # the row's admission must still agree.
+-            for field in _EXCUSED_ROW_EXACT_FIELDS:
+-                if left.get(field) != right.get(field):
+-                    raise AssertionError(f"row {identity!r} field {field!r} differs")
+-            continue
+</span>         for field in _EXACT_FIELDS:
+             if left.get(field) != right.get(field):
+<span class="del">-                raise AssertionError(f"row {identity!r} field {field!r} differs")
+</span><span class="add">+                # Say where, so a real token flip is quick to find.
++                raise AssertionError(
++                    f"row {identity!r} field {field!r} differs at index "
++                    f"{_first_difference(left.get(field), right.get(field))}"
++                )
+</span>
+<span class="hunk">@@ _gym_prefix_recovery_parity.py L975 · compare()</span>
+         atol=args.atol,
+<span class="del">-        excused=frozenset(
+-            identity
+-            for identity, classification in divergence.items()
+-            if classification["kind"] == "pre_cut"
+-        ),
+</span>     )
+<span class="skip">   … also delete the divergence report in compare() and _classify_token_divergence, _restored_prefix_hashes, _token_ids_sha256 (L440-L523),
+       _EXCUSED_ROW_EXACT_FIELDS (L37) and their unit tests: ~70 script + ~115 test lines …</span></pre>
+
+<p>What still catches a bad restore after this change: a dropped or swapped prefix token makes the row differ from the baseline (exact match), and the check that the trained closing turn has exactly prefix + tail tokens stays (<a href="https://github.com/NVIDIA-NeMo/RL/blob/deb0e146906f49044a0405697bed022fd54170ec/tests/functional/_gym_prefix_recovery_parity.py#L356-L364">:356-364</a>). <code>_first_difference</code> is a new 3-line helper.</p>
+
+<div class="warn"><b>So what.</b> The excuse exists for noise that the passing run never showed, and it opens a gap exactly where a restore bug would land: in what Gym hands back between turns. Deleting it makes the test both smaller and stricter. If a real run then fails on a single flipped token, the error message says where, and that is the moment to decide whether an excuse is needed.</div>
+
+</div>
+</body>
+</html>

@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NVIDIA-NeMo/RL #4507 — which half of the 2,098-line parity test does the checking</title>
+<style>
+:root{
+  --bg:#0d1117; --surface:#161b22; --surface2:#1c2128; --border:#30363d;
+  --text:#e6edf3; --dim:#8b949e; --accent:#58a6ff; --green:#3fb950;
+  --orange:#d29922; --red:#f85149;
+}
+:root[data-theme="light"]{
+  --bg:#ffffff; --surface:#f6f8fa; --surface2:#eaeef2; --border:#d0d7de;
+  --text:#1f2328; --dim:#59636e; --accent:#0969da; --green:#1a7f37;
+  --orange:#9a6700; --red:#cf222e;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:28px 16px 70px}
+h1{font-size:22px;margin:0 0 8px;line-height:1.3}
+h2{font-size:18px;margin:32px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;
+  font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
+.sub{color:var(--dim);font-size:13.5px;margin:0 0 16px}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);
+  border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;
+  font:13px/1 ui-monospace,Menlo,monospace;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.18)}
+.status{border:1px solid var(--border);border-radius:10px;background:var(--surface);
+  padding:2px 16px 10px;margin:0 0 20px}
+.status dl{display:grid;grid-template-columns:max-content 1fr;gap:4px 14px;margin:12px 0 0}
+.status dt{color:var(--dim);font-size:12px;text-transform:uppercase;letter-spacing:.04em;
+  white-space:nowrap;padding-top:2px}
+.status dd{margin:0;font-size:14px}
+.verdict{font-weight:700}
+.verdict.open{color:var(--orange)}
+.warn{border-left:3px solid var(--orange);background:var(--surface);
+  padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0}
+.where{border-left:4px solid var(--accent);background:var(--surface);padding:6px 12px;margin:6px 0 10px}
+.diff{font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--surface);
+  border:1px solid var(--border);border-radius:8px;padding:12px;overflow-x:auto;white-space:pre;margin:10px 0}
+.diff .add{color:var(--green)}
+.diff .del{color:var(--red)}
+.diff .hunk{color:var(--accent)}
+.diff .skip{color:var(--dim);font-style:italic}
+table{border-collapse:collapse;width:100%;font-size:13.5px;margin:10px 0}
+th,td{border-bottom:1px solid var(--border);padding:5px 8px;text-align:left;vertical-align:top}
+th{color:var(--dim);font-weight:600;font-size:12px}
+td.n{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
+.tbl{overflow-x:auto}
+.tip{border-bottom:1px dotted var(--dim);cursor:help;position:relative;outline:none}
+.tip:hover::after,.tip:focus::after{content:attr(data-tip);position:absolute;left:0;top:1.7em;z-index:60;
+  width:max-content;max-width:min(340px,80vw);white-space:normal;background:var(--surface2);color:var(--text);
+  border:1px solid var(--border);border-radius:6px;padding:7px 10px;font:13px/1.45 -apple-system,sans-serif;
+  font-weight:400;box-shadow:0 4px 14px rgba(0,0,0,.3)}
+svg{max-width:100%;height:auto;display:block;margin:16px 0}
+svg .t{fill:var(--text);font:bold 12.5px -apple-system,sans-serif}
+svg .note{fill:var(--dim);font:11.5px -apple-system,sans-serif}
+svg .in{fill:var(--bg);font:bold 11.5px -apple-system,sans-serif}
+svg .in-d{fill:var(--text);font:11px -apple-system,sans-serif}
+svg .cut{fill:var(--orange);font:bold 11.5px -apple-system,sans-serif}
+svg .other{fill:var(--surface2);stroke:var(--border);stroke-width:1}
+svg .this{fill:var(--accent)}
+svg .keep{fill:var(--green)}
+svg .keepu{fill:var(--green);fill-opacity:.6}
+svg .hatched{fill:url(#hatch);stroke:var(--orange);stroke-width:1.2}
+svg .hatch-bar{fill:var(--orange)}
+svg .zoom{stroke:var(--dim);stroke-width:1;stroke-dasharray:4 4;fill:none}
+svg .sep{stroke:var(--bg);stroke-width:2}
+.cref{margin:6px 0 0;font-size:13px}
+.cref a{display:inline-block;padding:4px 10px;border:1px solid var(--border);
+  border-radius:16px;background:var(--surface);font:12.5px ui-monospace,Menlo,monospace;margin:2px 4px 2px 0}
+.cref a:hover{background:var(--surface2);text-decoration:none}
+td .cref{margin:4px 0 0}
+td .cref a{font-size:11.5px;padding:2px 8px}
+nav.chain{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 6px;padding:0}
+nav.chain a,nav.chain span{display:inline-block;padding:5px 11px;border:1px solid var(--border);
+  border-radius:20px;background:var(--surface);text-decoration:none;color:var(--accent);
+  font-size:12.5px;line-height:1.3;white-space:nowrap}
+nav.chain a:hover{background:var(--surface2)}
+nav.chain span.here{background:var(--accent);color:var(--bg);border-color:var(--accent);font-weight:600}
+p.chainnote{color:var(--dim);font-size:12px;margin:0 0 18px}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+  document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head>
+<body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+  function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+  function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
+    b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
+      else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+  document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+<div class="wrap">
+
+<h1>The parity test is 2,098 lines; about half of them check something</h1>
+<p class="sub">Size review of <a href="https://github.com/NVIDIA-NeMo/RL/pull/4507">NVIDIA-NeMo/RL #4507</a>, stacked on <a href="https://github.com/NVIDIA-NeMo/RL/pull/4506">#4506</a>.
+Line counts are from <code>git diff 834241af deb0e146</code>. All permalinks pin the PR head <code>deb0e146</code>. Review comments are in a pending review; the links work once it is published.</p>
+
+<div class="status">
+<dl>
+  <dt>Before</dt>
+  <dd>The base PR's prefix-recovery test killed one run and checked that the restored run trained. It never compared against a run that was not interrupted.</dd>
+  <dt>This PR</dt>
+  <dd>Adds that comparison: an uninterrupted run, then a killed-and-restored run, and a 1,037-line script that compares what they trained. Test files only.</dd>
+  <dt>Status</dt>
+  <dd><span class="verdict open">Proposed — not implemented.</span> The test is the right idea. About 1,040 of its lines can go without dropping a check; each cut is a review comment, none applied yet.</dd>
+</dl>
+</div>
+
+<nav class="chain">
+  <span class="here">size and reuse</span>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4507-excused-rows.html">rows the test excuses</a>
+</nav>
+<p class="chainnote">Two pages on this PR — this one: which lines do the checking, and which repeat code that already exists.</p>
+
+<p>The test runs the same small <span class="tip" tabindex="0" data-tip="A Gym environment where the model makes calendar tool calls. Here each prompt asks for one tool call, then a list of the numbers 1 to N.">Workplace</span> workload twice and requires every trained row to match token for token.
+The checks that can fail the run are a short list: rows match, each restored prefix trained exactly once with the right length, no old prefix keys left behind, rewards are not all the same, and generation log-probs agree.
+Most of the remaining code prints reports, re-checks something already checked, or rebuilds a training-data dump that NeMo-RL already writes.</p>
+
+<h2>Where the lines go</h2>
+
+<svg viewBox="0 0 940 250" role="img" aria-label="Top bar: the prefix-recovery stack of about 21,100 lines with #4507 at 2,098. Bottom bar: #4507's 2,098 lines split into about 1,060 kept and about 1,040 that can go, by reason.">
+  <defs><pattern id="hatch" patternUnits="userSpaceOnUse" width="6" height="6" patternTransform="rotate(45)">
+    <rect class="hatch-bar" width="3" height="6"/></pattern></defs>
+
+  <text class="t" x="16" y="20">The prefix-recovery stack, in stack order: ~21,100 added lines</text>
+  <rect class="other" x="16" y="30" width="348" height="26"/>
+  <rect class="other" x="364" y="30" width="58" height="26"/>
+  <rect class="other" x="422" y="30" width="160" height="26"/>
+  <rect class="this" x="582" y="30" width="89" height="26"/>
+  <rect class="other" x="671" y="30" width="119" height="26"/>
+  <rect class="other" x="790" y="30" width="126" height="26"/>
+  <text class="in-d" x="190" y="47" text-anchor="middle">#4500 · 8,171 (turn recovery)</text>
+  <text class="in-d" x="393" y="47" text-anchor="middle">#4501</text>
+  <text class="in-d" x="502" y="47" text-anchor="middle">#4506 · 3,752</text>
+  <text class="in" x="626" y="47" text-anchor="middle">#4507</text>
+  <text class="in-d" x="730" y="47" text-anchor="middle">#4508</text>
+  <text class="in-d" x="853" y="47" text-anchor="middle">#4583 #4612 #4655</text>
+
+  <path class="zoom" d="M582 56 L16 104 M671 56 L916 104"/>
+
+  <text class="t" x="16" y="98">#4507: 2,098 lines (1,436 test-script + 662 unit-test)</text>
+  <!-- scale: 900px / 2098 lines = 0.429 px/line -->
+  <rect class="keep" x="16" y="108" width="316" height="34"/>
+  <rect class="keepu" x="332" y="108" width="138" height="34"/>
+  <rect class="hatched" x="470" y="108" width="66" height="34"/>
+  <rect class="hatched" x="536" y="108" width="147" height="34"/>
+  <rect class="hatched" x="683" y="108" width="84" height="34"/>
+  <rect class="hatched" x="767" y="108" width="79" height="34"/>
+  <rect class="hatched" x="846" y="108" width="70" height="34"/>
+  <line class="sep" x1="536" y1="108" x2="536" y2="142"/>
+  <line class="sep" x1="683" y1="108" x2="683" y2="142"/>
+  <line class="sep" x1="767" y1="108" x2="767" y2="142"/>
+  <line class="sep" x1="846" y1="108" x2="846" y2="142"/>
+  <text class="in" x="174" y="130" text-anchor="middle">keep: script ~740</text>
+  <text class="in" x="401" y="130" text-anchor="middle">tests ~320</text>
+  <text class="cut" x="504" y="160" text-anchor="middle">A −153</text>
+  <text class="cut" x="610" y="160" text-anchor="middle">B −342</text>
+  <text class="cut" x="726" y="160" text-anchor="middle">C −195</text>
+  <text class="cut" x="807" y="160" text-anchor="middle">D −185</text>
+  <text class="cut" x="881" y="160" text-anchor="middle">E −165</text>
+
+  <rect class="keep" x="16" y="180" width="14" height="12"/>
+  <text class="note" x="36" y="190">kept: checks that can fail the run (light: their unit tests)</text>
+  <rect class="hatched" x="16" y="202" width="14" height="12"/>
+  <text class="note" x="36" y="212">can go without dropping a check: ~1,040 lines (A–E, table below)</text>
+  <text class="note" x="16" y="238">A smaller test with the same checks: ~330 script lines + ~260 unit-test lines.</text>
+</svg>
+
+<div class="tbl"><table>
+<tr><th></th><th>What the PR writes</th><th>Why it can go</th><th class="n">lines</th></tr>
+<tr><td>A</td><td>A wrapper around the trainer that saves every trained row to JSONL (<a href="https://github.com/NVIDIA-NeMo/RL/blob/deb0e146906f49044a0405697bed022fd54170ec/tests/functional/_single_controller_turn_recovery_hook.py#L57">turn_recovery_hook.py:57</a>, <a href="https://github.com/NVIDIA-NeMo/RL/blob/deb0e146906f49044a0405697bed022fd54170ec/tests/functional/_gym_prefix_recovery_parity.py#L65-L141">parity.py:65-141</a>)<p class="cref" id="cref-A"></p></td><td>NeMo-RL already writes this file with <a href="https://github.com/NVIDIA-NeMo/RL/blob/deb0e146906f49044a0405697bed022fd54170ec/nemo_rl/algorithms/single_controller_utils/config.py#L476-L479"><code>async_rl.log_full_train_data</code></a>. A ~20-line probe for staging keys stays. Diff below.</td><td class="n">~125 + 28 test</td></tr>
+<tr><td>B</td><td>Row order, per-rollout timelines, Kendall tau (<a href="https://github.com/NVIDIA-NeMo/RL/blob/deb0e146906f49044a0405697bed022fd54170ec/tests/functional/_gym_prefix_recovery_parity.py#L691-L884">parity.py:691-884</a>)<p class="cref" id="cref-B"></p></td><td>Reports only. Its one check, group order inside a step, cannot change what trains: each step trains as one chunk of 4 groups.</td><td class="n">~215 + 127 test</td></tr>
+<tr><td>C</td><td>Hand-written Spearman, Pearson, percentiles (<a href="https://github.com/NVIDIA-NeMo/RL/blob/deb0e146906f49044a0405697bed022fd54170ec/tests/functional/_gym_prefix_recovery_parity.py#L548-L661">parity.py:548-661</a>)<p class="cref" id="cref-C"></p></td><td>The check reads 3 numbers. With ≥99% of log-probs identical, Spearman is ~1 whatever happens. Two numbers in ~15 lines of torch do the job.</td><td class="n">~125 + 70 test</td></tr>
+<tr><td>D</td><td>A 5-way sorting of token differences that excuses some rows (<a href="https://github.com/NVIDIA-NeMo/RL/blob/deb0e146906f49044a0405697bed022fd54170ec/tests/functional/_gym_prefix_recovery_parity.py#L455-L523">parity.py:455-523</a>)<p class="cref" id="cref-D"></p></td><td>It also lets real restore bugs pass — see <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4507-excused-rows.html">the other page</a>. Every other row already has to match exactly.</td><td class="n">~70 + 115 test</td></tr>
+<tr><td>E</td><td>Smaller items: a check that can never fail (<a href="https://github.com/NVIDIA-NeMo/RL/blob/deb0e146906f49044a0405697bed022fd54170ec/tests/functional/_gym_prefix_recovery_parity.py#L346-L350">:346</a>), two checks that repeat others (<a href="https://github.com/NVIDIA-NeMo/RL/blob/deb0e146906f49044a0405697bed022fd54170ec/tests/functional/_gym_prefix_recovery_parity.py#L285">:285</a>, <a href="https://github.com/NVIDIA-NeMo/RL/blob/deb0e146906f49044a0405697bed022fd54170ec/tests/functional/_gym_prefix_recovery_parity.py#L367">:367</a>), a fallback for a file format that cannot appear (<a href="https://github.com/NVIDIA-NeMo/RL/blob/deb0e146906f49044a0405697bed022fd54170ec/tests/functional/_gym_prefix_recovery_parity.py#L304">:304</a>), copied readers and log parsers, report printing<p class="cref" id="cref-E"></p></td><td>Each repeats a check or a helper that already exists in the same stack.</td><td class="n">~165</td></tr>
+</table></div>
+
+<h2>The biggest reuse, as a diff — proposed, not in the PR</h2>
+
+<p>Nothing below is implemented, and it has not been run.</p>
+<p class="where"><b>Where the fix lands: RL test files only.</b>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/deb0e146906f49044a0405697bed022fd54170ec/tests/functional/grpo_async_gym_single_controller_prefix_recovery.sh"><code>prefix_recovery.sh</code></a>, the hook, and the parity script.
+<b>No product change:</b> the dump already exists. It is written at the <a href="https://github.com/NVIDIA-NeMo/RL/blob/deb0e146906f49044a0405697bed022fd54170ec/nemo_rl/algorithms/single_controller_utils/advantage_stage.py#L511-L544">advantage stage</a> with token ids, loss mask, advantages, generation log-probs, rewards and sample mask, and a retried step replaces its own file (<a href="https://github.com/NVIDIA-NeMo/RL/blob/deb0e146906f49044a0405697bed022fd54170ec/nemo_rl/utils/train_data_dump.py#L104-L108">train_data_dump.py:104</a>).
+The author's earlier version of this harness (<a href="https://github.com/NVIDIA-NeMo/RL/pull/4320">#4320</a>) read these same files.</p>
+
+<pre class="diff"><span class="hunk">@@ grpo_async_gym_single_controller_prefix_recovery.sh L162 · COMMON_OVERRIDES</span>
+ COMMON_OVERRIDES=(
+     policy.model_name="$MODEL_NAME"
+<span class="add">+    # Built-in per-step dump of every trained row: what the parity check compares.
++    ++async_rl.log_full_train_data=true
+</span>
+<span class="hunk">@@ _single_controller_turn_recovery_hook.py L57-L139 · _TrainingPayloadRecorder</span>
+<span class="del">-class _TrainingPayloadRecorder:
+-    """Test-only TQPolicy wrapper that records the rows sent to training."""
+</span><span class="skip">   … 81 lines: read rows back from the data plane, serialize, append …</span>
+<span class="add">+class _StagingKeyProbe:
++    """Record the live staging keys per train step; the dump has everything else."""
+</span><span class="skip">   … ~20 lines: wrap begin_train_step, append list_sample_ids(staging) …</span>
+
+<span class="hunk">@@ _gym_prefix_recovery_parity.py L65-L141 · serialize / append / _tensor / _generation_identity</span>
+<span class="del">-def serialize_training_batch(
+</span><span class="skip">   … 76 more deleted lines …</span>
+<span class="add">+def _load_dump(log_dir: Path) -> list[dict[str, Any]]:
++    # One file per optimizer step, written only after the step finished.
++    return [row for path in sorted(log_dir.rglob("train_data_step*.jsonl"))
++            for row in _read_jsonl(path)]</span></pre>
+
+<p>Each run (reference, phase 1, phase 2) gets its own log folder, so phase 1's files never mix with phase 2's. Today phase 1 and phase 2 share one (<a href="https://github.com/NVIDIA-NeMo/RL/blob/deb0e146906f49044a0405697bed022fd54170ec/tests/functional/grpo_async_gym_single_controller_prefix_recovery.sh#L234">:234</a>, <a href="https://github.com/NVIDIA-NeMo/RL/blob/deb0e146906f49044a0405697bed022fd54170ec/tests/functional/grpo_async_gym_single_controller_prefix_recovery.sh#L285">:285</a>).</p>
+<p class="cref" id="cref-A2"></p>
+
+<div class="warn"><b>So what.</b> The check this PR adds is worth having, and earlier reviews asked for it. But the prefix-recovery stack is already ~21,100 lines, and the size asks on <a href="https://github.com/NVIDIA-NeMo/RL/pull/4506">#4506</a> are still open. Cutting this PR to its checks (about 1,060 lines instead of 2,098) keeps a test that is easy to read when it fails.
+Separately, <code>top_p=0.000001</code> means rewards never reach the weights, so steps 2 and 3 cost GPU time without testing learning. That is a review comment, not on this page.</div>
+
+</div>
+</body>
+</html>
