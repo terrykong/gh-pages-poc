@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NVIDIA-NeMo/RL #4124 — did the redesign make Gym return the whole forest and let RL pick the paths?</title>
+<style>
+:root{
+  --bg:#0d1117; --surface:#161b22; --surface2:#1c2128; --border:#30363d;
+  --text:#e6edf3; --dim:#8b949e; --accent:#58a6ff; --green:#3fb950;
+  --orange:#d29922; --red:#f85149; --purple:#bc8cff;
+}
+:root[data-theme="light"]{
+  --bg:#ffffff; --surface:#f6f8fa; --surface2:#eaeef2; --border:#d0d7de;
+  --text:#1f2328; --dim:#59636e; --accent:#0969da; --green:#1a7f37;
+  --orange:#9a6700; --red:#cf222e; --purple:#8250df;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:28px 20px 70px}
+h1{font-size:22px;margin:0 0 8px;line-height:1.3}
+h2{font-size:18px;margin:32px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;
+  font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
+.sub{color:var(--dim);font-size:13.5px;margin:0 0 16px}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);
+  border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;
+  font:13px/1 ui-monospace,Menlo,monospace;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.18)}
+.status{border:1px solid var(--border);border-radius:10px;background:var(--surface);
+  padding:2px 16px 10px;margin:0 0 20px}
+.status dl{display:grid;grid-template-columns:max-content 1fr;gap:4px 14px;margin:12px 0 0}
+.status dt{color:var(--dim);font-size:12px;text-transform:uppercase;letter-spacing:.04em;
+  white-space:nowrap;padding-top:2px}
+.status dd{margin:0;font-size:14px}
+.verdict{font-weight:700;color:var(--orange)}
+nav.chain{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 6px;padding:0}
+nav.chain a,nav.chain span{display:inline-block;padding:5px 11px;border:1px solid var(--border);
+  border-radius:20px;background:var(--surface);text-decoration:none;color:var(--accent);
+  font-size:12.5px;line-height:1.3;white-space:nowrap}
+nav.chain a:hover{background:var(--surface2)}
+nav.chain span.here{background:var(--accent);color:var(--bg);border-color:var(--accent);font-weight:600}
+p.chainnote{color:var(--dim);font-size:12px;margin:0 0 18px}
+.bg{border-left:3px solid var(--accent);background:var(--surface);padding:10px 14px;
+  margin:0 0 16px;border-radius:0 8px 8px 0;font-size:14px}
+.hl{border-left:3px solid var(--orange);background:var(--surface);
+  padding:12px 16px;margin:18px 0;border-radius:0 8px 8px 0}
+.mono{font:12.5px/1.55 ui-monospace,SFMono-Regular,Menlo,monospace;
+  background:var(--surface);border:1px solid var(--border);border-radius:8px;
+  padding:12px;overflow-x:auto;white-space:pre;margin:10px 0}
+.mono .g{color:var(--green)} .mono .r{color:var(--red)} .mono .d{color:var(--dim)} .mono .a{color:var(--accent)}
+.tip{border-bottom:1px dotted var(--dim);cursor:help;position:relative;outline:none}
+.tip:hover::after,.tip:focus::after{content:attr(data-tip);position:absolute;left:0;top:1.7em;z-index:60;
+  width:max-content;max-width:min(340px,80vw);white-space:normal;background:var(--surface2);color:var(--text);
+  border:1px solid var(--border);border-radius:6px;padding:7px 10px;font:13px/1.45 -apple-system,sans-serif;
+  font-weight:400;box-shadow:0 4px 14px rgba(0,0,0,.3)}
+svg{max-width:100%;height:auto;display:block;margin:16px 0}
+svg .kept{fill:var(--accent);fill-opacity:.18;stroke:var(--accent);stroke-width:1.6}
+svg .drop{fill:var(--surface);stroke:var(--dim);stroke-width:1.3;stroke-dasharray:4 3}
+svg .edge{stroke:var(--accent);stroke-width:1.5;fill:none;marker-end:url(#ah)}
+svg .edge-d{stroke:var(--dim);stroke-width:1.2;fill:none;stroke-dasharray:4 3;marker-end:url(#ad)}
+svg .ah{fill:var(--accent)} svg .ad{fill:var(--dim)}
+svg .row{fill:var(--purple);fill-opacity:.14;stroke:var(--purple);stroke-width:1.3}
+svg .err{fill:var(--red);fill-opacity:.12;stroke:var(--red);stroke-width:1.3}
+svg .sep{stroke:var(--border);stroke-width:1}
+svg .cid{fill:var(--text);font:bold 12px ui-monospace,Menlo,monospace}
+svg .cid-d{fill:var(--dim);font:bold 12px ui-monospace,Menlo,monospace}
+svg .m{fill:var(--text);font:12px ui-monospace,Menlo,monospace}
+svg .m-r{fill:var(--red);font:bold 11.5px ui-monospace,Menlo,monospace}
+svg .m-g{fill:var(--green);font:11px -apple-system,sans-serif}
+svg .note{fill:var(--dim);font:11.5px -apple-system,sans-serif}
+svg .case{fill:var(--text);font:bold 12.5px -apple-system,sans-serif}
+svg .hdr{fill:var(--accent);font:bold 13px -apple-system,sans-serif}
+svg a text{text-decoration:underline;fill:var(--accent);font:11px ui-monospace,Menlo,monospace}
+table{border-collapse:collapse;width:100%;font-size:14px;margin:10px 0}
+th,td{border:1px solid var(--border);padding:6px 9px;text-align:left;vertical-align:top}
+th{background:var(--surface2)}
+.yes{color:var(--green);font-weight:700} .no{color:var(--red);font-weight:700} .part{color:var(--orange);font-weight:700}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+  document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head>
+<body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+  function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+  function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
+    b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
+      else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+  document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+<div class="wrap">
+
+<h1>Did the redesign make Gym return the whole forest and let RL pick the paths?</h1>
+<p class="sub"><a href="https://github.com/NVIDIA-NeMo/RL/pull/4124">NVIDIA-NeMo/RL #4124</a> (paired with
+<a href="https://github.com/NVIDIA-NeMo/Gym/pull/3368">NVIDIA-NeMo/Gym #3368</a>). Old RL links pin <code>c617a2c</code>, the reviewed head;
+new RL links pin <code>1fe217ce</code>, the current head; Gym links pin <code>507d15c</code>.</p>
+
+<div class="status">
+<dl>
+  <dt>Before</dt>
+  <dd>At the reviewed head, RL read the agent's kept calls as one list, in order. Each call had to continue the one before it, unless it started a new tree. A branch was an error.</dd>
+  <dt>This PR now</dt>
+  <dd>RL builds a graph from the kept calls, finds every call with no kept child, and walks each one back to its root. That gives one row per end call. A call shared by two rows trains in the first row only.</dd>
+  <dt>Status</dt>
+  <dd><span class="verdict">Partly done.</span> The whole forest from Gym and the leaf-to-root walk are in.
+  The option in RL to choose which paths to train is <b>not</b> in. Which calls the harness puts in its output decides which paths train.</dd>
+</dl>
+</div>
+
+<nav class="chain">
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4124-cc-old-vs-new.html">1 · old vs new</a>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4124-data-flow.html">2 · data flow</a>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4124-calls-to-rows.html">3 · calls → rows</a>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4124-tree-vs-forest.html">4 · tree vs forest</a>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4124-reward-to-rows.html">5 · reward → rows</a>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4124-dropped-group.html">6 · dropped group</a>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4124-cc-batch-size.html">7 · batch size</a>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4124-subagents.html">8 · subagents (proposal)</a>
+  <span class="here">9 · forest redesign</span>
+</nav>
+<p class="chainnote">Nine pages on this PR, one question each. This one: what the author's redesign changed in how calls become rows.</p>
+
+<div class="bg"><b>Background.</b> Each time the agent calls the model, Gym saves one <i>call record</i>: an ID and the ID of the call it continues (its <i>parent</i>), or none if the call starts fresh.
+Compaction makes a fresh start, so one rollout becomes several trees: a <i>forest</i>.
+The agent also returns its normal output, which lists the answers it <i>kept</i>. A rejected retry is not in that list.
+RL joins the two and builds training rows. Dotted words have a short explanation: hover or tap them.</div>
+
+<p>Gym already sent the whole forest at the reviewed head. Its <span class="tip" tabindex="0" data-tip="RolloutReceipt.manifest: the list of every call record in the attempt, rejected calls included, each with its parent ID.">call list</span> holds every call, rejected ones included, with parent links. That part did not change.
+What changed is the RL step that turns kept calls into rows, <code>_plan_selected_calls</code>.
+The old code <a href="https://github.com/NVIDIA-NeMo/RL/blob/c617a2c01fb4b848991b2cc245a861985045ed14/nemo_rl/experience/rollout_reassembler.py#L1151-L1162">walked the kept list top-down</a> and required one straight line per tree.
+The new code <a href="https://github.com/NVIDIA-NeMo/RL/blob/1fe217cea16d157f8775c8ea2fbd0ff8b0e42d8d/nemo_rl/experience/rollout_reassembler.py#L1300-L1322">sorts the end calls and walks each one back to its root</a>.
+The rows below are the real output of each commit's <code>_plan_selected_calls</code>, run on the same four small graphs.</p>
+
+<h2>Same calls, old planner vs new planner</h2>
+
+<svg viewBox="0 0 940 520" role="img" aria-label="Four call graphs and the rows the old and new planners make from each">
+<defs>
+  <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="ah" d="M0,0L10,5L0,10z"/></marker>
+  <marker id="ad" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="ad" d="M0,0L10,5L0,10z"/></marker>
+</defs>
+<!-- headers -->
+<text class="hdr" x="20" y="22">What Gym sends: every call + its parent</text>
+<text class="hdr" x="350" y="22">Old planner (c617a2c)</text>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/c617a2c01fb4b848991b2cc245a861985045ed14/nemo_rl/experience/rollout_reassembler.py#L1151-L1162"><text x="350" y="38">walk kept list top-down</text></a>
+<text class="hdr" x="645" y="22">New planner (1fe217ce)</text>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/1fe217cea16d157f8775c8ea2fbd0ff8b0e42d8d/nemo_rl/experience/rollout_reassembler.py#L1300-L1322"><text x="645" y="38">walk each end call back</text></a>
+<line class="sep" x1="335" y1="8" x2="335" y2="460"/><line class="sep" x1="630" y1="8" x2="630" y2="460"/>
+
+<!-- case 1 -->
+<line class="sep" x1="10" y1="50" x2="930" y2="50"/>
+<text class="case" x="20" y="70">1 · no compaction</text>
+<rect class="kept" x="30" y="80" width="44" height="22" rx="5"/><text class="cid" x="40" y="96">c1</text>
+<rect class="kept" x="110" y="80" width="44" height="22" rx="5"/><text class="cid" x="120" y="96">c2</text>
+<rect class="kept" x="190" y="80" width="44" height="22" rx="5"/><text class="cid" x="200" y="96">c3</text>
+<path class="edge" d="M74,91H108"/><path class="edge" d="M154,91H188"/>
+<text class="note" x="30" y="120">kept by agent: c1 c2 c3</text>
+<rect class="row" x="350" y="78" width="200" height="24" rx="5"/><text class="m" x="360" y="95">row 0: c1 → c2 → c3</text>
+<rect class="row" x="645" y="78" width="200" height="24" rx="5"/><text class="m" x="655" y="95">row 0: c1 → c2 → c3</text>
+<text class="m-g" x="645" y="120">same</text>
+
+<!-- case 2 -->
+<line class="sep" x1="10" y1="132" x2="930" y2="132"/>
+<text class="case" x="20" y="152">2 · compaction + a retried call</text>
+<rect class="kept" x="30" y="162" width="44" height="22" rx="5"/><text class="cid" x="40" y="178">c1</text>
+<rect class="kept" x="110" y="162" width="44" height="22" rx="5"/><text class="cid" x="120" y="178">c2</text>
+<path class="edge" d="M74,173H108"/>
+<text class="note" x="170" y="178">compaction ↓</text>
+<rect class="kept" x="30" y="206" width="44" height="22" rx="5"/><text class="cid" x="40" y="222">c3</text>
+<rect class="drop" x="110" y="194" width="44" height="22" rx="5"/><text class="cid-d" x="120" y="210">c4</text>
+<rect class="kept" x="110" y="222" width="44" height="22" rx="5"/><text class="cid" x="120" y="238">c5</text>
+<path class="edge-d" d="M74,213L108,206"/><path class="edge" d="M74,221L108,231"/>
+<text class="note" x="170" y="210">c4 rejected</text><text class="note" x="170" y="238">c5 = retry, kept</text>
+<text class="note" x="30" y="262">kept by agent: c1 c2 c3 c5</text>
+<rect class="row" x="350" y="170" width="150" height="24" rx="5"/><text class="m" x="360" y="187">row 0: c1 → c2</text>
+<rect class="row" x="350" y="202" width="150" height="24" rx="5"/><text class="m" x="360" y="219">row 1: c3 → c5</text>
+<rect class="row" x="645" y="170" width="150" height="24" rx="5"/><text class="m" x="655" y="187">row 0: c1 → c2</text>
+<rect class="row" x="645" y="202" width="150" height="24" rx="5"/><text class="m" x="655" y="219">row 1: c3 → c5</text>
+<text class="m-g" x="645" y="246">same</text>
+
+<!-- case 3 -->
+<line class="sep" x1="10" y1="274" x2="930" y2="274"/>
+<text class="case" x="20" y="294">3 · branch, agent keeps both</text>
+<rect class="kept" x="30" y="318" width="44" height="22" rx="5"/><text class="cid" x="40" y="334">c1</text>
+<rect class="kept" x="110" y="304" width="44" height="22" rx="5"/><text class="cid" x="120" y="320">c2</text>
+<rect class="kept" x="110" y="334" width="44" height="22" rx="5"/><text class="cid" x="120" y="350">c3</text>
+<path class="edge" d="M74,325L108,316"/><path class="edge" d="M74,333L108,343"/>
+<text class="note" x="170" y="334">e.g. two subagents</text>
+<text class="note" x="30" y="374">kept by agent: c1 c2 c3</text>
+<rect class="err" x="350" y="302" width="268" height="40" rx="5"/>
+<text class="m-r" x="360" y="318">ValueError: continuation must</text>
+<text class="m-r" x="360" y="334">follow its selected predecessor</text>
+<rect class="row" x="645" y="302" width="150" height="24" rx="5"/><text class="m" x="655" y="319">row 0: c1 → c2</text>
+<rect class="row" x="645" y="334" width="150" height="24" rx="5"/><text class="m" x="655" y="351">row 1: c1 → c3</text>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/1fe217cea16d157f8775c8ea2fbd0ff8b0e42d8d/nemo_rl/experience/rollout_reassembler.py#L1397-L1475"><text x="645" y="376">c1 trains in row 0 only</text></a>
+
+<!-- case 4 -->
+<line class="sep" x1="10" y1="388" x2="930" y2="388"/>
+<text class="case" x="20" y="408">4 · same branch, agent keeps only c1, c3</text>
+<rect class="kept" x="30" y="428" width="44" height="22" rx="5"/><text class="cid" x="40" y="444">c1</text>
+<rect class="drop" x="110" y="414" width="44" height="22" rx="5"/><text class="cid-d" x="120" y="430">c2</text>
+<rect class="kept" x="110" y="442" width="44" height="22" rx="5"/><text class="cid" x="120" y="458">c3</text>
+<path class="edge-d" d="M74,435L108,427"/><path class="edge" d="M74,443L108,452"/>
+<text class="note" x="170" y="444">not in agent output</text>
+<rect class="row" x="350" y="420" width="150" height="24" rx="5"/><text class="m" x="360" y="437">row 0: c1 → c3</text>
+<rect class="row" x="645" y="420" width="150" height="24" rx="5"/><text class="m" x="655" y="437">row 0: c1 → c3</text>
+<text class="m-g" x="645" y="460">same: agent output picked the path</text>
+
+<!-- legend -->
+<line class="sep" x1="10" y1="474" x2="930" y2="474"/>
+<rect class="kept" x="20" y="488" width="30" height="16" rx="4"/><text class="note" x="58" y="500">kept by the agent</text>
+<rect class="drop" x="180" y="488" width="30" height="16" rx="4"/><text class="note" x="218" y="500">in Gym's list, not kept</text>
+<rect class="row" x="370" y="488" width="30" height="16" rx="4"/><text class="note" x="408" y="500">training row (root first)</text>
+<rect class="err" x="570" y="488" width="30" height="16" rx="4"/><text class="note" x="608" y="500">rollout fails to build</text>
+</svg>
+
+<p>Cases 1, 2 and 4 come out the same in both versions. The new planner only changes case 3: a branch with both sides kept. That is the case subagents and summary calls create.
+The script is <code>plan_old_vs_new.py</code>: it pulls <code>_plan_selected_calls</code> out of each commit and runs it on Gym's own record types.</p>
+
+<h2>Where the two paths meet</h2>
+<p>Without compaction, RL still uses the older code, not the new planner. Both paths end in the same Gym function, <a href="https://github.com/NVIDIA-NeMo/Gym/blob/507d15c30fd3eb23fb1527640d1d30bada68cb19/nemo_gym/token_id_capture/staging/rebuild.py#L238"><code>verify_and_linearize</code></a>. It takes one end call and walks back to the root.
+The only difference is <b>who picks the end calls</b>:</p>
+<div class="mono"><span class="d"># both: Gym's list of every call + parent       (RolloutReceipt.manifest)</span>
+<span class="a">no compaction</span>  end call = the scored answer           → 1 row
+               <a href="https://github.com/NVIDIA-NeMo/RL/blob/1fe217cea16d157f8775c8ea2fbd0ff8b0e42d8d/nemo_rl/experience/rollout_reassembler.py#L742-L750">finalize_group L742</a> → finalize_rollout → verify_and_linearize
+<span class="a">compaction</span>     kept calls = matched from agent output  <a href="https://github.com/NVIDIA-NeMo/RL/blob/1fe217cea16d157f8775c8ea2fbd0ff8b0e42d8d/nemo_rl/environments/gym_selection.py#L93-L260">select_captured_calls</a>
+               end calls  = kept calls with no kept child  <a href="https://github.com/NVIDIA-NeMo/RL/blob/1fe217cea16d157f8775c8ea2fbd0ff8b0e42d8d/nemo_rl/experience/rollout_reassembler.py#L1300-L1311">L1300</a>
+               one small call list per end call         → N rows
+               <a href="https://github.com/NVIDIA-NeMo/RL/blob/1fe217cea16d157f8775c8ea2fbd0ff8b0e42d8d/nemo_rl/experience/rollout_reassembler.py#L1427-L1436">finalize_rollout L1427</a> → verify_and_linearize    <span class="d"># same walk, once per row</span></div>
+<p>So the walk is shared. What is <i>not</i> shared is the choice of end calls. That choice is fixed inside each path, and there is no setting for it.</p>
+
+<h2>Your proposal vs what landed</h2>
+<table>
+<tr><th>Proposal</th><th>At 1fe217ce</th></tr>
+<tr><td>Gym always returns the whole forest</td>
+<td><span class="yes">Yes</span>, and it already did at the reviewed head. Gym's call list holds every call, rejected ones too, with its parent. The new head also needs two Gym changes that are not public yet, a new <code>close</code> route and an admission field (separate finding).</td></tr>
+<tr><td>RL walks from each leaf back to the root</td>
+<td><span class="yes">Yes</span>. One row per end call, through the same walk as the path without compaction. A shared call trains once (<a href="https://github.com/NVIDIA-NeMo/RL/blob/1fe217cea16d157f8775c8ea2fbd0ff8b0e42d8d/nemo_rl/experience/rollout_reassembler.py#L536-L565">loss off in later rows</a>).</td></tr>
+<tr><td>Several RL options for which paths to train: main path, whole tree, subagents</td>
+<td><span class="no">No</span>. There is one planner. It trains every path to every end call that the agent's output kept, so the harness decides (case 4). The only plug-in point is <a href="https://github.com/NVIDIA-NeMo/RL/blob/1fe217cea16d157f8775c8ea2fbd0ff8b0e42d8d/nemo_rl/experience/rollout_reassembler.py#L126-L138"><code>RolloutSelection</code></a>: any source can pass in its own list of kept calls.</td></tr>
+<tr><td>Simple agent and compaction use the same reassembler</td>
+<td><span class="part">Partly</span>. They share the walk, but not the step that picks end calls (previous section). On a graph with no compaction, the new planner gives the same single row (case 1).</td></tr>
+<tr><td>Subagents</td>
+<td><span class="no">Not yet</span>. More than one session in the output <a href="https://github.com/NVIDIA-NeMo/RL/blob/1fe217cea16d157f8775c8ea2fbd0ff8b0e42d8d/nemo_rl/environments/gym_selection.py#L36">raises an error</a>. The guide says live multi-agent harnesses still need separate testing.</td></tr>
+</table>
+
+<div class="hl"><b>Bottom line.</b> The redesign gives you the forest walk you asked for, and Gym's side was already the full forest.
+The open design question is <b>where "which paths to train" is decided</b>. Today the harness decides it through the calls it returns, not an RL setting.
+If you want that choice in RL, the place for it is the end-call list in <a href="https://github.com/NVIDIA-NeMo/RL/blob/1fe217cea16d157f8775c8ea2fbd0ff8b0e42d8d/nemo_rl/experience/rollout_reassembler.py#L1300-L1311"><code>_plan_selected_calls</code></a> (proposed, not in the PR).
+A small rule there would take the graph of kept calls and return which end calls get rows. Everything after it already works one end call at a time.</div>
+
+</div>
+</body>
+</html>
