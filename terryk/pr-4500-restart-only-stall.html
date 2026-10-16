@@ -109,7 +109,8 @@ submodule commit <code>120d516f</code>.</p>
   <dd>Adds <code>rollout_recovery.target_level: turn</code>: each periodic snapshot parks Gym at a turn boundary and saves it.</dd>
   <dt>Status</dt>
   <dd><span class="verdict open">Open — not fixed in this PR.</span> It works only when every Gym agent and
-  resources server can save its sessions. Tracked in the PR review.</dd>
+  resources server can save its sessions. The proposed fix is a setting: fail at setup, or warn and run
+  without turn recovery. Tracked in the PR review.</dd>
 </dl>
 </div>
 
@@ -242,15 +243,25 @@ starts its tools and ends up in the third row.
 
 <h2>What would fix it — proposed, not in the PR</h2>
 
-<p class="where"><b>Where the fix lands: Gym (one method) and RL (one check).</b>
+<p class="where"><b>Where the fix lands: Gym (one method) and RL (one setting, one setup check).</b>
 Gym: <a href="https://github.com/NVIDIA-NeMo/Gym/blob/120d516f09cfd0377dbed6828247ab1606e9e686/nemo_gym/_checkpoint/agent.py#L417-L419"><code>RestartOnlyAgentParticipant</code></a>
 says it is restart-only in its status, the way resources servers already report their
 <a href="https://github.com/NVIDIA-NeMo/Gym/blob/120d516f09cfd0377dbed6828247ab1606e9e686/nemo_gym/_checkpoint/resources.py#L242-L243"><code>mode</code></a>.
 That fits in the unmerged Gym branch this PR already pins.
-RL: <a href="https://github.com/NVIDIA-NeMo/RL/blob/341b9ad7e28e608385c327c5092133b54b7567b7/nemo_rl/environments/gym_checkpoint_adapter.py#L208-L221"><code>GymCheckpointAdapter.discover</code></a>,
-which already runs once at setup, refuses <code>turn</code> when any server is restart-only.</p>
+RL: a new <code>rollout_recovery.allow_restart_only_servers</code> setting,
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/341b9ad7e28e608385c327c5092133b54b7567b7/nemo_rl/environments/gym_checkpoint_adapter.py#L208-L221"><code>GymCheckpointAdapter.discover</code></a>
+finds the restart-only servers, and
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/341b9ad7e28e608385c327c5092133b54b7567b7/nemo_rl/algorithms/single_controller_utils/setup.py#L764-L801"><code>_spinup_gym</code></a> decides.</p>
 
-<p>Nothing below is implemented or run. The RL part is a sketch.</p>
+<p>Nothing below is implemented or run. The RL part is a sketch. The two modes:</p>
+<ul>
+<li><code>false</code> (the default): setup fails if any Gym agent or resources server is restart-only, and
+the error names them. You find out before the run starts, not after 15 minutes of failed snapshots.</li>
+<li><code>true</code> (best effort): setup prints a warning naming those servers, and the run uses
+<code>sibling</code>. Snapshots skip the Gym phase, so nothing stalls. A crashed rollout restarts from its
+prompt, and the finished rollouts in its group are kept. A Gym checkpoint covers the whole deployment today,
+so this turns <code>turn</code> off for every environment in the run.</li>
+</ul>
 
 <pre class="diff"><span class="hunk">@@ Gym nemo_gym/_checkpoint/agent.py L417-L419 · RestartOnlyAgentParticipant</span>
      def readiness(self) -&gt; PrepareReport:
@@ -258,43 +269,86 @@ which already runs once at setup, refuses <code>turn</code> when any server is r
          return PrepareReport(ready=not blockers, blockers=blockers, counts={"inflight": len(blockers)})
 <span class="add">+
 +    def status_extra(self) -&gt; dict[str, Any]:
-+        # Lets a controller refuse turn-level checkpoints up front.
++        # Lets a controller find restart-only servers at setup.
 +        return {"restart_only": True}</span>
 
-<span class="hunk">@@ RL nemo_rl/environments/gym_checkpoint_adapter.py L215 · GymCheckpointAdapter.discover</span>
+<span class="hunk">@@ RL nemo_rl/algorithms/single_controller_utils/config.py L718-L719 · RolloutRecoveryConfig</span>
+     # Seconds Gym gets to park its in-flight steps; see the exemplar YAML.
+     gym_prepare_timeout_s: Annotated[float, Field(gt=0)] = 300.0
+<span class="add">+    # With target_level='turn' and a restart-only Gym server: false fails at
++    # setup; true warns and runs with sibling-level recovery instead.
++    allow_restart_only_servers: bool = False</span>
+
+<span class="hunk">@@ RL nemo_rl/environments/gym_checkpoint_adapter.py L215-L221 · GymCheckpointAdapter.discover</span>
          participants = self._participants
-<span class="add">+        # A restart-only server blocks every prepare, so each snapshot would
-+        # wait gym_prepare_timeout_s and fail until the run stops.
-+        restart_only = [
+<span class="add">+        restart_only = tuple([
 +            member.server_name
 +            for member in participants.members
 +            if _is_restart_only(await self._status(member.server_name))
-+        ]
-+        if restart_only:
++        ])</span>
+         return GymCheckpointParticipantSummary(
+             instance_id=self._instance.instance_id,
+             members=tuple(
+                 (member.server_name, member.kind) for member in participants.members
+             ),
+<span class="add">+            restart_only=restart_only,</span>
+         )
+
+<span class="hunk">@@ RL nemo_rl/algorithms/single_controller_utils/setup.py L801 · _spinup_gym</span>
+<span class="add">+    recovery = master_config.rollout_recovery
++    restart_only = shard_set.restart_only_servers  # from each replica's discover()
++    if recovery.turn_checkpointing_enabled and restart_only:
++        if not recovery.allow_restart_only_servers:
 +            raise ValueError(
-+                "rollout_recovery.target_level='turn' needs Gym servers that save "
-+                f"their sessions; these restart from scratch: {restart_only}. "
-+                "Use target_level='sibling' with this environment."
-+            )</span>
-         return GymCheckpointParticipantSummary(</pre>
++                "rollout_recovery.target_level='turn' needs every Gym agent and "
++                f"resources server to save its rollouts; these are restart-only: {restart_only}. "
++                "Set rollout_recovery.allow_restart_only_servers=true to run with "
++                "sibling-level recovery instead."
++            )
++        warnings.warn(
++            f"Gym servers {restart_only} are restart-only, so turn-level recovery is off "
++            "for this run: after a crash, unfinished rollouts restart from their prompt.",
++            UserWarning,
++            stacklevel=2,
++        )
++        # Before the controller and ledger exist, so every group records sibling.
++        master_config.rollout_recovery = recovery.model_copy(
++            update={"target_level": RecoveryTargetLevel.SIBLING}
++        )</span>
+     return shard_set, time.perf_counter() - t0</pre>
 
-<p><code>_status(name)</code> reads the same <code>/ng-control/v1/checkpoint/status</code> route Gym's own
-<a href="https://github.com/NVIDIA-NeMo/Gym/blob/120d516f09cfd0377dbed6828247ab1606e9e686/nemo_gym/_checkpoint/coordination.py#L116-L127"><code>discover</code></a>
-already calls. <code>_is_restart_only</code> is true for <code>{"restart_only": True}</code> or
-<code>{"mode": "restart_only"}</code>. The run then fails at setup with a message that names the servers,
-before any GPU work.</p>
+<p>In order: the Gym agent reports itself in <code>/status</code>. <code>_status(name)</code> reads the same
+<code>/ng-control/v1/checkpoint/status</code> route Gym's own
+<a href="https://github.com/NVIDIA-NeMo/Gym/blob/120d516f09cfd0377dbed6828247ab1606e9e686/nemo_gym/_checkpoint/coordination.py#L116-L127"><code>discover</code></a> already calls, and
+<code>_is_restart_only</code> is true for <code>{"restart_only": True}</code> or <code>{"mode": "restart_only"}</code>.
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/341b9ad7e28e608385c327c5092133b54b7567b7/nemo_rl/environments/nemo_gym.py#L2532-L2534"><code>_initialize_checkpoint_adapters_concurrently</code></a>
+already gets every replica's summary from <code>ray.get</code> and drops it; it passes the names up instead.
+<code>_spinup_gym</code> decides before the controller and the ledger are built, so no group is recorded as
+<code>turn</code> and no restore looks for Gym state that was never saved
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/341b9ad7e28e608385c327c5092133b54b7567b7/nemo_rl/algorithms/single_controller.py#L1273-L1285">single_controller.py:1273-1285</a>).</p>
 
-<p><b>The wrong fix.</b> Gym's docs say the controller should resume, retire the blockers and prepare again
+<p><b>Later: skip only the rollouts that can't be saved.</b> This is what "best effort" should mean in the end,
+and it needs Gym and RL changes together. In Gym, a rollout that uses a restart-only agent or resources server
+does not block prepare and is not saved by any server; all servers together, or a restored rollout would go on
+without its tool state. In RL, the drain
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/341b9ad7e28e608385c327c5092133b54b7567b7/nemo_rl/algorithms/single_controller.py#L4622-L4636">L4622-4636</a>) and the ownership check
+before the TQ save (<a href="https://github.com/NVIDIA-NeMo/RL/blob/341b9ad7e28e608385c327c5092133b54b7567b7/nemo_rl/algorithms/single_controller.py#L4666-L4676">L4666-4676</a>) accept
+those rollouts. Restore already restarts any rollout Gym did not save from its prompt
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/341b9ad7e28e608385c327c5092133b54b7567b7/nemo_rl/experience/rollout_recovery.py#L543-L548">rollout_recovery.py:543-548</a>).
+Then <code>true</code> keeps <code>turn</code> for the environments that support it.</p>
+
+<p><b>Not this.</b> Gym's docs say the controller can resume, retire the blockers and prepare again
 (<a href="https://github.com/NVIDIA-NeMo/Gym/blob/120d516f09cfd0377dbed6828247ab1606e9e686/nemo_gym/_checkpoint/coordination.py#L22-L23">coordination.py:22-23</a>).
-With a restart-only agent, every running rollout is a blocker. So each snapshot would cancel every
-rollout in flight, and when the snapshot interval is shorter than a rollout, no rollout ever finishes.</p>
+With a restart-only agent, every running rollout is a blocker, so each snapshot would cancel every
+rollout in flight. When the snapshot interval is shorter than a rollout, no rollout ever finishes.</p>
 
 <div class="warn">
-<strong>So what.</strong> With <code>target_level: turn</code>, any Gym environment other than
+<strong>So what.</strong> Today, with <code>target_level: turn</code>, any Gym environment other than
 <code>simple_agent</code> plus a session-saving resources server does not recover at turns. Each snapshot
-pauses <code>/run</code> dispatch for up to 300 s and then fails. After 3 failures in a row, the run stops,
-and before the first step it stops at the first failure. Until the setup check lands, use
-<code>target_level: sibling</code> for those environments.
+pauses <code>/run</code> dispatch for up to 300 s and then fails. After 3 failures in a row the run stops,
+and before the first step it stops at the first failure. Until the setting lands, use
+<code>target_level: sibling</code> for the whole run when any such environment is in it: per-environment
+overrides are not allowed with <code>turn</code>.
 </div>
 
 </div>
