@@ -137,7 +137,7 @@ Once prepared, the model holds every reply until resume
 and RL never turns on Gym's generation cuts, so nothing lets a call finish early
 (<a href="https://github.com/NVIDIA-NeMo/Gym/blob/120d516f09cfd0377dbed6828247ab1606e9e686/nemo_gym/base_responses_api_model.py#L256"><code>checkpoint_generation_cuts: False</code></a>).
 A restart-only agent counts every running <code>/run</code> as a blocker
-(<a href="https://github.com/NVIDIA-NeMo/Gym/blob/120d516f09cfd0377dbed6828247ab1606e9e686/nemo_gym/_checkpoint/agent.py#L417-L419"><code>readiness</code></a>),
+(<a href="https://github.com/NVIDIA-NeMo/Gym/blob/120d516f09cfd0377dbed6828247ab1606e9e686/nemo_gym/_checkpoint/agent.py#L421-L423"><code>readiness</code></a>),
 and those runs are waiting for the model's held replies. So the agent can never become ready.
 RL treats that "not ready" as a passing problem
 (<a href="https://github.com/NVIDIA-NeMo/RL/blob/341b9ad7e28e608385c327c5092133b54b7567b7/nemo_rl/environments/gym_checkpoint_coordinator.py#L89">coordinator L89</a>)
@@ -178,7 +178,7 @@ and tries again at the next snapshot.</p>
   <path class="arr-r" d="M314 188 C 322 188, 326 188, 332 188 M332 188 l-7 -4 M332 188 l-7 4"/>
   <text class="r" x="164" y="226">s1 waits on its held turn-2 reply, so s1 blocks prepare</text>
   <a href="https://github.com/NVIDIA-NeMo/Gym/blob/120d516f09cfd0377dbed6828247ab1606e9e686/nemo_gym/_checkpoint/model.py#L309-L314" target="_blank" rel="noopener"><text x="164" y="244">model.py:309-314</text></a>
-  <a href="https://github.com/NVIDIA-NeMo/Gym/blob/120d516f09cfd0377dbed6828247ab1606e9e686/nemo_gym/_checkpoint/agent.py#L417-L419" target="_blank" rel="noopener"><text x="334" y="244">agent.py:417-419</text></a>
+  <a href="https://github.com/NVIDIA-NeMo/Gym/blob/120d516f09cfd0377dbed6828247ab1606e9e686/nemo_gym/_checkpoint/agent.py#L421-L423" target="_blank" rel="noopener"><text x="334" y="244">agent.py:421-423</text></a>
   <a href="https://github.com/NVIDIA-NeMo/RL/blob/341b9ad7e28e608385c327c5092133b54b7567b7/nemo_rl/algorithms/single_controller_utils/config.py#L719" target="_blank" rel="noopener"><text x="524" y="244">gym_prepare_timeout_s</text></a>
   <a href="https://github.com/NVIDIA-NeMo/RL/blob/341b9ad7e28e608385c327c5092133b54b7567b7/nemo_rl/algorithms/single_controller.py#L5075-L5078" target="_blank" rel="noopener"><text x="704" y="244">single_controller.py:5075</text></a>
 
@@ -244,7 +244,7 @@ starts its tools and ends up in the third row.
 <h2>What would fix it — proposed, not in the PR</h2>
 
 <p class="where"><b>Where the fix lands: Gym (one method) and RL (one setting, one setup check).</b>
-Gym: <a href="https://github.com/NVIDIA-NeMo/Gym/blob/120d516f09cfd0377dbed6828247ab1606e9e686/nemo_gym/_checkpoint/agent.py#L417-L419"><code>RestartOnlyAgentParticipant</code></a>
+Gym: <a href="https://github.com/NVIDIA-NeMo/Gym/blob/120d516f09cfd0377dbed6828247ab1606e9e686/nemo_gym/_checkpoint/agent.py#L421-L423"><code>RestartOnlyAgentParticipant</code></a>
 says it is restart-only in its status, the way resources servers already report their
 <a href="https://github.com/NVIDIA-NeMo/Gym/blob/120d516f09cfd0377dbed6828247ab1606e9e686/nemo_gym/_checkpoint/resources.py#L242-L243"><code>mode</code></a>.
 That fits in the unmerged Gym branch this PR already pins.
@@ -263,7 +263,7 @@ prompt, and the finished rollouts in its group are kept. A Gym checkpoint covers
 so this turns <code>turn</code> off for every environment in the run.</li>
 </ul>
 
-<pre class="diff"><span class="hunk">@@ Gym nemo_gym/_checkpoint/agent.py L417-L419 · RestartOnlyAgentParticipant</span>
+<pre class="diff"><span class="hunk">@@ Gym nemo_gym/_checkpoint/agent.py L421-L423 · RestartOnlyAgentParticipant</span>
      def readiness(self) -&gt; PrepareReport:
          blockers = sorted(self._tasks)
          return PrepareReport(ready=not blockers, blockers=blockers, counts={"inflight": len(blockers)})
@@ -279,20 +279,23 @@ so this turns <code>turn</code> off for every environment in the run.</li>
 +    # setup; true warns and runs with sibling-level recovery instead.
 +    allow_restart_only_servers: bool = False</span>
 
-<span class="hunk">@@ RL nemo_rl/environments/gym_checkpoint_adapter.py L215-L221 · GymCheckpointAdapter.discover</span>
+<span class="hunk">@@ RL nemo_rl/environments/gym_checkpoint_adapter.py L208-L221 · GymCheckpointAdapter.discover</span>
+<span class="del">-    async def discover(self) -&gt; GymCheckpointParticipantSummary:
+</span><span class="add">+    async def discover(self) -&gt; tuple[str, ...]:</span>
+         ...
          participants = self._participants
-<span class="add">+        restart_only = tuple([
+<span class="del">-        return GymCheckpointParticipantSummary(
+-            instance_id=self._instance.instance_id,
+-            members=tuple(
+-                (member.server_name, member.kind) for member in participants.members
+-            ),
+-        )
+</span><span class="add">+        # The summary class goes (another review comment); return what setup needs.
++        return tuple([
 +            member.server_name
 +            for member in participants.members
 +            if _is_restart_only(await self._status(member.server_name))
 +        ])</span>
-         return GymCheckpointParticipantSummary(
-             instance_id=self._instance.instance_id,
-             members=tuple(
-                 (member.server_name, member.kind) for member in participants.members
-             ),
-<span class="add">+            restart_only=restart_only,</span>
-         )
 
 <span class="hunk">@@ RL nemo_rl/algorithms/single_controller_utils/setup.py L801 · _spinup_gym</span>
 <span class="add">+    recovery = master_config.rollout_recovery
@@ -334,7 +337,7 @@ without its tool state. In RL, the drain
 (<a href="https://github.com/NVIDIA-NeMo/RL/blob/341b9ad7e28e608385c327c5092133b54b7567b7/nemo_rl/algorithms/single_controller.py#L4622-L4636">L4622-4636</a>) and the ownership check
 before the TQ save (<a href="https://github.com/NVIDIA-NeMo/RL/blob/341b9ad7e28e608385c327c5092133b54b7567b7/nemo_rl/algorithms/single_controller.py#L4666-L4676">L4666-4676</a>) accept
 those rollouts. Restore already restarts any rollout Gym did not save from its prompt
-(<a href="https://github.com/NVIDIA-NeMo/RL/blob/341b9ad7e28e608385c327c5092133b54b7567b7/nemo_rl/experience/rollout_recovery.py#L543-L548">rollout_recovery.py:543-548</a>).
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/341b9ad7e28e608385c327c5092133b54b7567b7/nemo_rl/experience/rollout_recovery.py#L527-L548">rollout_recovery.py:527-548</a>).
 Then <code>true</code> keeps <code>turn</code> for the environments that support it.</p>
 
 <p><b>Not this.</b> Gym's docs say the controller can resume, retire the blockers and prepare again
