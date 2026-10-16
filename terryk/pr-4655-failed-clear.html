@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PR 4655: One Failed CLEAR</title>
+<style>
+:root{
+  --bg:#0d1117; --surface:#161b22; --surface2:#1c2128; --border:#30363d;
+  --text:#e6edf3; --dim:#8b949e; --accent:#58a6ff; --green:#3fb950;
+  --orange:#d29922; --red:#f85149;
+}
+:root[data-theme="light"]{
+  --bg:#ffffff; --surface:#f6f8fa; --surface2:#eaeef2; --border:#d0d7de;
+  --text:#1f2328; --dim:#59636e; --accent:#0969da; --green:#1a7f37;
+  --orange:#9a6700; --red:#cf222e;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:28px 16px 70px}
+h1{font-size:22px;margin:0 0 8px;line-height:1.3}
+h2{font-size:18px;margin:32px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;
+  font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
+.sub{color:var(--dim);font-size:13.5px;margin:0 0 16px}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);
+  border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;
+  font:13px/1 ui-monospace,Menlo,monospace;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.18)}
+.status{border:1px solid var(--border);border-radius:10px;background:var(--surface);
+  padding:2px 16px 10px;margin:0 0 20px}
+.status dl{display:grid;grid-template-columns:max-content 1fr;gap:4px 14px;margin:12px 0 0}
+.status dt{color:var(--dim);font-size:12px;text-transform:uppercase;letter-spacing:.04em;
+  white-space:nowrap;padding-top:2px}
+.status dd{margin:0;font-size:14px}
+.verdict{font-weight:700}
+.verdict.open{color:var(--orange)}
+.warn{border-left:3px solid var(--orange);background:var(--surface);
+  padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0}
+.where{border-left:4px solid var(--accent);background:var(--surface);padding:6px 12px;margin:6px 0 10px}
+.diff{font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--surface);
+  border:1px solid var(--border);border-radius:8px;padding:12px;overflow-x:auto;white-space:pre;margin:10px 0}
+.diff .add{color:var(--green)}
+.diff .del{color:var(--red)}
+.diff .hunk{color:var(--accent)}
+.diff .skip{color:var(--dim);font-style:italic}
+table{border-collapse:collapse;width:100%;font-size:13.5px;margin:10px 0}
+th,td{border-bottom:1px solid var(--border);padding:5px 8px;text-align:left;vertical-align:top}
+th{color:var(--dim);font-weight:600;font-size:12px}
+td.n{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
+.tbl{overflow-x:auto}
+.tip{border-bottom:1px dotted var(--dim);cursor:help;position:relative;outline:none}
+.tip:hover::after,.tip:focus::after{content:attr(data-tip);position:absolute;left:0;top:1.7em;z-index:60;
+  width:max-content;max-width:min(340px,80vw);white-space:normal;background:var(--surface2);color:var(--text);
+  border:1px solid var(--border);border-radius:6px;padding:7px 10px;font:13px/1.45 -apple-system,sans-serif;
+  font-weight:400;box-shadow:0 4px 14px rgba(0,0,0,.3)}
+svg{max-width:100%;height:auto;display:block;margin:16px 0}
+svg .t{fill:var(--text);font:bold 12.5px -apple-system,sans-serif}
+svg .note{fill:var(--dim);font:11.5px -apple-system,sans-serif}
+svg .in{fill:var(--bg);font:bold 11.5px -apple-system,sans-serif}
+svg .in-d{fill:var(--text);font:11px -apple-system,sans-serif}
+svg .cut{fill:var(--orange);font:bold 11.5px -apple-system,sans-serif}
+svg .other{fill:var(--surface2);stroke:var(--border);stroke-width:1}
+svg .this{fill:var(--accent)}
+svg .src{fill:var(--accent)}
+svg .src2{fill:var(--accent);fill-opacity:.72}
+svg .src3{fill:var(--accent);fill-opacity:.5}
+svg .ut{fill:var(--green)}
+svg .fn{fill:var(--dim)}
+svg .doc{fill:var(--border)}
+svg .sep{stroke:var(--bg);stroke-width:1.5}
+svg .hatch-bar{fill:var(--orange)}
+svg .hatched{fill:url(#hatch);stroke:var(--orange);stroke-width:1.2}
+svg .zoom{stroke:var(--dim);stroke-width:1;stroke-dasharray:4 4;fill:none}
+.cref{margin:6px 0 0;font-size:13px}
+.cref a{display:inline-block;padding:4px 10px;border:1px solid var(--border);
+  border-radius:16px;background:var(--surface);font:12.5px ui-monospace,Menlo,monospace;margin:2px 4px 2px 0}
+.cref a:hover{background:var(--surface2);text-decoration:none}
+td .cref{margin:4px 0 0}
+td .cref a{font-size:11.5px;padding:2px 8px}
+nav.chain{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 6px;padding:0}
+nav.chain a,nav.chain span{display:inline-block;padding:5px 11px;border:1px solid var(--border);
+  border-radius:20px;background:var(--surface);text-decoration:none;color:var(--accent);
+  font-size:12.5px;line-height:1.3;white-space:nowrap}
+nav.chain a:hover{background:var(--surface2)}
+nav.chain span.here{background:var(--accent);color:var(--bg);border-color:var(--accent);font-weight:600}
+p.chainnote{color:var(--dim);font-size:12px;margin:0 0 18px}
+
+.verdict.bad{color:var(--red)}
+.bg{border:1px solid var(--border);border-radius:8px;background:var(--surface);padding:10px 14px;margin:0 0 14px;font-size:14px}
+.out{font:12px/1.5 ui-monospace,Menlo,monospace;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:10px 12px;overflow-x:auto;white-space:pre;margin:10px 0 4px}
+.note2{color:var(--dim);font-size:13px;margin:0}
+svg .bt{fill:var(--text);font:bold 11.5px -apple-system,sans-serif}
+svg .rl{fill:var(--text);font:bold 12px -apple-system,sans-serif}
+svg .lt{fill:var(--text);font:bold 13px -apple-system,sans-serif}
+svg .ch{fill:var(--text);font:bold 12px -apple-system,sans-serif}
+svg a text{text-decoration:underline}
+svg .plain{fill:var(--surface2);stroke:var(--border)}
+svg .wait{fill:var(--orange);fill-opacity:.28;stroke:var(--orange)}
+svg .new{fill:var(--red);fill-opacity:.22;stroke:var(--red)}
+svg .reuse{fill:var(--green);fill-opacity:.25;stroke:var(--green)}
+svg .gate{fill:var(--accent);fill-opacity:.18;stroke:var(--accent)}
+svg .ok{fill:var(--green);fill-opacity:.2;stroke:var(--green)}
+svg .bad{fill:var(--red);fill-opacity:.22;stroke:var(--red)}
+svg .ar{stroke:var(--dim);stroke-width:1.3;fill:none}
+svg .arh{fill:var(--dim)}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+  document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head>
+<body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+  function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+  function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
+    b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
+      else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+  document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+<div class="wrap">
+<h1>With the flag on, one failed delete breaks the vLLM worker for the rest of the run</h1>
+<p class="sub">Bug in <a href="https://github.com/NVIDIA-NeMo/RL/pull/4655">NVIDIA-NeMo/RL #4655</a>. All permalinks pin the PR head <code>495ce13</code>. Review comments are in a pending review; their links work once it is published.</p>
+
+<div class="status">
+<dl>
+  <dt>Before</dt>
+  <dd>A failed delete of old chunk rows is logged, and the call still gets its reply. The only cost is a few extra rows in TQ.</dd>
+  <dt>This PR</dt>
+  <dd>With <code>generation_prefix_cleanup.enabled</code>, the background thread stores the first delete error and exits. From then on, every finishing call and every checkpoint on that worker raises.</dd>
+  <dt>Status</dt>
+  <dd><span class="verdict bad">Open — not fixed in this PR.</span> Only when the flag is on (it is off by default). Raised in the review; reproduced with the real module.</dd>
+</dl>
+</div>
+
+<nav class="chain">
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4655-size-and-reuse.html">size and reuse</a>
+  <span class="here">one failed CLEAR</span>
+</nav>
+<p class="chainnote">Two pages on this PR — this one: what one failed delete does with the flag on.</p>
+
+<p>Every finishing call first asks the cleanup thread for a slot with <a href="https://github.com/NVIDIA-NeMo/RL/blob/495ce13048300fc47077daf301d04e34bef5168a/nemo_rl/models/generation/vllm/vllm_worker_async.py#L1508"><code>reserve()</code></a>, even a call that was never cut and has nothing to delete.
+When a <span class="tip" tabindex="0" data-tip="The TQ call that deletes rows by key. Here it removes the chunk rows a call left behind at a checkpoint, once its final row is written.">CLEAR</span> fails, the thread stores the error and returns (<a href="https://github.com/NVIDIA-NeMo/RL/blob/495ce13048300fc47077daf301d04e34bef5168a/nemo_rl/data_plane/background_prefix_cleanup.py#L206-L215">L206-L215</a>), and <code>reserve()</code> checks that error first (<a href="https://github.com/NVIDIA-NeMo/RL/blob/495ce13048300fc47077daf301d04e34bef5168a/nemo_rl/data_plane/background_prefix_cleanup.py#L146-L152">L146-L152</a>).
+That check sits outside the handler that says <em>"completion is already durable"</em> (<a href="https://github.com/NVIDIA-NeMo/RL/blob/495ce13048300fc47077daf301d04e34bef5168a/nemo_rl/models/generation/vllm/vllm_worker_async.py#L1563">L1563</a>), and after the try that cleans up a failed call (<a href="https://github.com/NVIDIA-NeMo/RL/blob/495ce13048300fc47077daf301d04e34bef5168a/nemo_rl/models/generation/vllm/vllm_worker_async.py#L2558-L2560">L2558-L2560</a>). So the client gets HTTP 500, and the call's capture state stays registered.</p>
+
+<svg viewBox="0 0 940 200" role="img" aria-label="Same five events with the flag off and on. Off: one failed CLEAR is logged and everything keeps working. On: the error is stored, every later reply is HTTP 500 and the next checkpoint fails."><text class="ch" x="204" y="18" text-anchor="middle">call A finishes</text>
+<text class="note" x="204" y="33" text-anchor="middle">2 old chunk rows</text>
+<text class="ch" x="362" y="18" text-anchor="middle">CLEAR of A&#x27;s rows</text>
+<text class="note" x="362" y="33" text-anchor="middle">TQ times out once</text>
+<text class="ch" x="520" y="18" text-anchor="middle">call B finishes</text>
+<text class="note" x="520" y="33" text-anchor="middle">never cut: 0 rows</text>
+<text class="ch" x="678" y="18" text-anchor="middle">call C finishes</text>
+<text class="note" x="678" y="33" text-anchor="middle">never cut: 0 rows</text>
+<text class="ch" x="836" y="18" text-anchor="middle">next checkpoint</text>
+<text class="note" x="836" y="33" text-anchor="middle">save TQ</text>
+<text class="rl" x="16" y="68">flag off</text>
+<text class="note" x="16" y="84">today&#x27;s default</text>
+<rect class="ok" x="128" y="44" width="152" height="52" rx="6"/>
+<text class="bt" x="204" y="66" text-anchor="middle">reply 200</text>
+<text class="note" x="204" y="84" text-anchor="middle">CLEAR inline</text>
+<rect class="ok" x="286" y="44" width="152" height="52" rx="6"/>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/495ce13048300fc47077daf301d04e34bef5168a/nemo_rl/models/generation/vllm/vllm_worker_async.py#L1563"><text class="bt" x="362" y="66" text-anchor="middle">error logged</text></a>
+<text class="note" x="362" y="84" text-anchor="middle">keeps serving</text>
+<rect class="ok" x="444" y="44" width="152" height="52" rx="6"/>
+<text class="bt" x="520" y="66" text-anchor="middle">reply 200</text>
+<rect class="ok" x="602" y="44" width="152" height="52" rx="6"/>
+<text class="bt" x="678" y="66" text-anchor="middle">reply 200</text>
+<rect class="ok" x="760" y="44" width="152" height="52" rx="6"/>
+<text class="bt" x="836" y="66" text-anchor="middle">saved</text>
+<text class="rl" x="16" y="132">flag on</text>
+<text class="note" x="16" y="148">this PR</text>
+<rect class="ok" x="128" y="108" width="152" height="52" rx="6"/>
+<text class="bt" x="204" y="130" text-anchor="middle">reply 200</text>
+<text class="note" x="204" y="148" text-anchor="middle">CLEAR queued</text>
+<rect class="bad" x="286" y="108" width="152" height="52" rx="6"/>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/495ce13048300fc47077daf301d04e34bef5168a/nemo_rl/data_plane/background_prefix_cleanup.py#L206-L215"><text class="bt" x="362" y="130" text-anchor="middle">error stored</text></a>
+<text class="note" x="362" y="148" text-anchor="middle">thread exits</text>
+<rect class="bad" x="444" y="108" width="152" height="52" rx="6"/>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/495ce13048300fc47077daf301d04e34bef5168a/nemo_rl/models/generation/vllm/vllm_worker_async.py#L1508"><text class="bt" x="520" y="130" text-anchor="middle">HTTP 500</text></a>
+<text class="note" x="520" y="148" text-anchor="middle">reserve() raises</text>
+<rect class="bad" x="602" y="108" width="152" height="52" rx="6"/>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/495ce13048300fc47077daf301d04e34bef5168a/nemo_rl/models/generation/vllm/vllm_worker_async.py#L1508"><text class="bt" x="678" y="130" text-anchor="middle">HTTP 500</text></a>
+<text class="note" x="678" y="148" text-anchor="middle">and every call after</text>
+<rect class="bad" x="760" y="108" width="152" height="52" rx="6"/>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/495ce13048300fc47077daf301d04e34bef5168a/nemo_rl/models/generation/vllm/vllm_worker_async.py#L3394-L3397"><text class="bt" x="836" y="130" text-anchor="middle">checkpoint fails</text></a>
+<text class="note" x="836" y="148" text-anchor="middle">wait_paused raises</text>
+<rect class="ok" x="16" y="178" width="16" height="12" rx="3"/><text class="note" x="38" y="188">worker keeps working</text>
+<rect class="bad" x="190" y="178" width="16" height="12" rx="3"/><text class="note" x="212" y="188">broken until the actor restarts — B and C had nothing to delete</text></svg>
+
+<pre class="out">thread alive after failure: False / pending after failure: 1
+reserve raised: RuntimeError('background prefix cleanup failed; no automatic retry')   (every call)
+fence wait_paused raised: RuntimeError('background prefix cleanup failed; no automatic retry')</pre>
+<p class="note2">Output of a repro with the real module and a <code>clear</code> that fails once. Only an actor restart clears the stored error.</p>
+
+<h2>The fix — proposed, not in the PR</h2>
+<p>Nothing below is implemented, and it has not been run.</p>
+<p class="where"><b>Where the fix lands: RL only, one file.</b>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/495ce13048300fc47077daf301d04e34bef5168a/nemo_rl/data_plane/background_prefix_cleanup.py#L204-L219"><code>BackgroundPrefixCleanup._drain</code></a>, plus dropping the error check from <code>reserve()</code> and <code>wait_paused()</code>. <b>No Gym change.</b></p>
+
+<pre class="diff"><span class="hunk">@@ background_prefix_cleanup.py L206-L216 · _drain</span>
+             try:
+                 self._clear(keys)
+<span class="del">-            except Exception as error:  # noqa: BLE001 - surface arbitrary transport failures
+-                with self._condition:
+-                    self._error = error
+-                    self._failed_keys = keys
+-                    self._active = False
+-                    self._condition.notify_all()
+-                LOGGER.exception(
+-                    "background prefix cleanup failed for %d keys", len(keys)
+-                )
+-                return
+</span><span class="add">+            except Exception:  # noqa: BLE001 - a lost delete only leaves extra rows
++                # Never retry: a CLEAR may have partly succeeded. Keep serving.
++                LOGGER.exception(
++                    "background prefix cleanup failed for %d keys", len(keys)
++                )
+</span>             with self._condition:
+                 self._active = False
+                 self._pending -= len(batch)
+                 self._condition.notify_all()</pre>
+
+<p>What it does: a failed batch is logged and dropped, the slot count goes back down, and the thread keeps going, exactly like the flag-off path. It never retries, because a CLEAR can partly succeed. A broken TQ still fails loudly at the next final-row write, so nothing is hidden.
+If the module is rewritten to take a permit on the existing checkpoint gate (<a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4655-size-and-reuse.html">previous page</a>), this bug goes away with it.</p>
+
+<div class="warn"><b>So what.</b> One transient TQ error turns a perf option into an outage of that generation worker: its rollouts fail with HTTP 500 and no checkpoint can be saved until the actor restarts. The PR's own limits section says a lost delete "leaves extra obsolete rows", so the flag-on path should be no stricter than flag off. The review also asks for a worker-level test: one failed CLEAR, then a second call that must succeed.</div>
+</div>
+</body>
+</html>

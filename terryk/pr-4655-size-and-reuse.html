@@ -1,0 +1,357 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PR 4655: Reuse the Gate</title>
+<style>
+:root{
+  --bg:#0d1117; --surface:#161b22; --surface2:#1c2128; --border:#30363d;
+  --text:#e6edf3; --dim:#8b949e; --accent:#58a6ff; --green:#3fb950;
+  --orange:#d29922; --red:#f85149;
+}
+:root[data-theme="light"]{
+  --bg:#ffffff; --surface:#f6f8fa; --surface2:#eaeef2; --border:#d0d7de;
+  --text:#1f2328; --dim:#59636e; --accent:#0969da; --green:#1a7f37;
+  --orange:#9a6700; --red:#cf222e;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:28px 16px 70px}
+h1{font-size:22px;margin:0 0 8px;line-height:1.3}
+h2{font-size:18px;margin:32px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;
+  font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
+.sub{color:var(--dim);font-size:13.5px;margin:0 0 16px}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);
+  border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;
+  font:13px/1 ui-monospace,Menlo,monospace;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.18)}
+.status{border:1px solid var(--border);border-radius:10px;background:var(--surface);
+  padding:2px 16px 10px;margin:0 0 20px}
+.status dl{display:grid;grid-template-columns:max-content 1fr;gap:4px 14px;margin:12px 0 0}
+.status dt{color:var(--dim);font-size:12px;text-transform:uppercase;letter-spacing:.04em;
+  white-space:nowrap;padding-top:2px}
+.status dd{margin:0;font-size:14px}
+.verdict{font-weight:700}
+.verdict.open{color:var(--orange)}
+.warn{border-left:3px solid var(--orange);background:var(--surface);
+  padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0}
+.where{border-left:4px solid var(--accent);background:var(--surface);padding:6px 12px;margin:6px 0 10px}
+.diff{font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--surface);
+  border:1px solid var(--border);border-radius:8px;padding:12px;overflow-x:auto;white-space:pre;margin:10px 0}
+.diff .add{color:var(--green)}
+.diff .del{color:var(--red)}
+.diff .hunk{color:var(--accent)}
+.diff .skip{color:var(--dim);font-style:italic}
+table{border-collapse:collapse;width:100%;font-size:13.5px;margin:10px 0}
+th,td{border-bottom:1px solid var(--border);padding:5px 8px;text-align:left;vertical-align:top}
+th{color:var(--dim);font-weight:600;font-size:12px}
+td.n{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
+.tbl{overflow-x:auto}
+.tip{border-bottom:1px dotted var(--dim);cursor:help;position:relative;outline:none}
+.tip:hover::after,.tip:focus::after{content:attr(data-tip);position:absolute;left:0;top:1.7em;z-index:60;
+  width:max-content;max-width:min(340px,80vw);white-space:normal;background:var(--surface2);color:var(--text);
+  border:1px solid var(--border);border-radius:6px;padding:7px 10px;font:13px/1.45 -apple-system,sans-serif;
+  font-weight:400;box-shadow:0 4px 14px rgba(0,0,0,.3)}
+svg{max-width:100%;height:auto;display:block;margin:16px 0}
+svg .t{fill:var(--text);font:bold 12.5px -apple-system,sans-serif}
+svg .note{fill:var(--dim);font:11.5px -apple-system,sans-serif}
+svg .in{fill:var(--bg);font:bold 11.5px -apple-system,sans-serif}
+svg .in-d{fill:var(--text);font:11px -apple-system,sans-serif}
+svg .cut{fill:var(--orange);font:bold 11.5px -apple-system,sans-serif}
+svg .other{fill:var(--surface2);stroke:var(--border);stroke-width:1}
+svg .this{fill:var(--accent)}
+svg .src{fill:var(--accent)}
+svg .src2{fill:var(--accent);fill-opacity:.72}
+svg .src3{fill:var(--accent);fill-opacity:.5}
+svg .ut{fill:var(--green)}
+svg .fn{fill:var(--dim)}
+svg .doc{fill:var(--border)}
+svg .sep{stroke:var(--bg);stroke-width:1.5}
+svg .hatch-bar{fill:var(--orange)}
+svg .hatched{fill:url(#hatch);stroke:var(--orange);stroke-width:1.2}
+svg .zoom{stroke:var(--dim);stroke-width:1;stroke-dasharray:4 4;fill:none}
+.cref{margin:6px 0 0;font-size:13px}
+.cref a{display:inline-block;padding:4px 10px;border:1px solid var(--border);
+  border-radius:16px;background:var(--surface);font:12.5px ui-monospace,Menlo,monospace;margin:2px 4px 2px 0}
+.cref a:hover{background:var(--surface2);text-decoration:none}
+td .cref{margin:4px 0 0}
+td .cref a{font-size:11.5px;padding:2px 8px}
+nav.chain{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 6px;padding:0}
+nav.chain a,nav.chain span{display:inline-block;padding:5px 11px;border:1px solid var(--border);
+  border-radius:20px;background:var(--surface);text-decoration:none;color:var(--accent);
+  font-size:12.5px;line-height:1.3;white-space:nowrap}
+nav.chain a:hover{background:var(--surface2)}
+nav.chain span.here{background:var(--accent);color:var(--bg);border-color:var(--accent);font-weight:600}
+p.chainnote{color:var(--dim);font-size:12px;margin:0 0 18px}
+
+.verdict.bad{color:var(--red)}
+.bg{border:1px solid var(--border);border-radius:8px;background:var(--surface);padding:10px 14px;margin:0 0 14px;font-size:14px}
+.out{font:12px/1.5 ui-monospace,Menlo,monospace;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:10px 12px;overflow-x:auto;white-space:pre;margin:10px 0 4px}
+.note2{color:var(--dim);font-size:13px;margin:0}
+svg .bt{fill:var(--text);font:bold 11.5px -apple-system,sans-serif}
+svg .rl{fill:var(--text);font:bold 12px -apple-system,sans-serif}
+svg .lt{fill:var(--text);font:bold 13px -apple-system,sans-serif}
+svg .ch{fill:var(--text);font:bold 12px -apple-system,sans-serif}
+svg a text{text-decoration:underline}
+svg .plain{fill:var(--surface2);stroke:var(--border)}
+svg .wait{fill:var(--orange);fill-opacity:.28;stroke:var(--orange)}
+svg .new{fill:var(--red);fill-opacity:.22;stroke:var(--red)}
+svg .reuse{fill:var(--green);fill-opacity:.25;stroke:var(--green)}
+svg .gate{fill:var(--accent);fill-opacity:.18;stroke:var(--accent)}
+svg .ok{fill:var(--green);fill-opacity:.2;stroke:var(--green)}
+svg .bad{fill:var(--red);fill-opacity:.22;stroke:var(--red)}
+svg .ar{stroke:var(--dim);stroke-width:1.3;fill:none}
+svg .arh{fill:var(--dim)}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+  document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head>
+<body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+  function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+  function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
+    b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
+      else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+  document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+<div class="wrap">
+<h1>The background delete can reuse the checkpoint gate that already exists</h1>
+<p class="sub">Size review of <a href="https://github.com/NVIDIA-NeMo/RL/pull/4655">NVIDIA-NeMo/RL #4655</a>, stacked on <a href="https://github.com/NVIDIA-NeMo/RL/pull/4508">#4508</a>. All permalinks pin the PR head <code>495ce13</code>. Review comments are in a pending review; their links work once it is published.</p>
+
+<div class="status">
+<dl>
+  <dt>Before</dt>
+  <dd>When a call that was cut at a checkpoint finishes, its reply waits for a synchronous delete (a TQ <code>CLEAR</code>) of the old chunk rows.</dd>
+  <dt>This PR</dt>
+  <dd>Behind an opt-in flag, moves that delete to a background thread. To do it, it adds a 253-line module with its own slot reservation and its own checkpoint pause/resume, wired into the worker at 4 places.</dd>
+  <dt>Status</dt>
+  <dd><span class="verdict open">Proposed — not implemented.</span> The smaller version below is a review suggestion. A prototype passed 5 checks against the real gate class; it has not been run inside NeMo-RL.</dd>
+</dl>
+</div>
+
+<nav class="chain">
+  <span class="here">size and reuse</span>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4655-failed-clear.html">one failed CLEAR</a>
+</nav>
+<p class="chainnote">Two pages on this PR — this one: what the new module repeats, and what can go.</p>
+
+<div class="bg"><b>Background.</b> During a rollout checkpoint, a call that is still generating is <span class="tip" tabindex="0" data-tip="Its tokens so far are saved as chunk rows, so a restore can resume the call instead of starting it over.">cut</span>: its tokens so far are saved as chunk rows in <span class="tip" tabindex="0" data-tip="TransferQueue: the key-value store where captured tokens live until training reads them.">TQ</span>. When the call later finishes, its final row is written and the old chunk rows are deleted.
+A checkpoint must not save TQ while a final-row write is half done, so the worker has a <a href="https://github.com/NVIDIA-NeMo/RL/blob/495ce13048300fc47077daf301d04e34bef5168a/nemo_rl/models/generation/generation_cut_capture.py#L449"><code>_TokenCaptureSnapshotGate</code></a>: writers <code>enter()</code> and <code>exit()</code> it, and a checkpoint closes it and waits until no one is inside. Dotted words have a short explanation: hover or tap them.</div>
+
+<p>The PR's background thread needs one rule: no delete may run while a checkpoint saves TQ. The gate already enforces exactly that for anything that holds a permit. Instead of taking one, the new class (<a href="https://github.com/NVIDIA-NeMo/RL/blob/495ce13048300fc47077daf301d04e34bef5168a/nemo_rl/data_plane/background_prefix_cleanup.py#L92"><code>BackgroundPrefixCleanup</code></a>) keeps a second copy of the gate's epoch bookkeeping and adds <a href="https://github.com/NVIDIA-NeMo/RL/blob/495ce13048300fc47077daf301d04e34bef5168a/nemo_rl/data_plane/background_prefix_cleanup.py#L157"><code>pause</code></a>, <a href="https://github.com/NVIDIA-NeMo/RL/blob/495ce13048300fc47077daf301d04e34bef5168a/nemo_rl/data_plane/background_prefix_cleanup.py#L163"><code>wait_paused</code></a> and <a href="https://github.com/NVIDIA-NeMo/RL/blob/495ce13048300fc47077daf301d04e34bef5168a/nemo_rl/data_plane/background_prefix_cleanup.py#L170"><code>resume</code></a>, which the checkpoint code must now call next to the gate's own calls.</p>
+
+<svg viewBox="0 0 940 462" role="img" aria-label="Three lanes: today the reply waits for CLEAR; this PR adds a reservation and its own pause/resume fence; the proposed version has the cleanup thread take a permit on the existing gate."><defs><marker id="ah" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path class="arh" d="M0 0 L8 4 L0 8 z"/></marker></defs><text class="lt" x="16" y="22">1 · Today, flag off (the #4508 path)</text>
+<text class="note" x="16" y="37">The reply waits for the CLEAR. The checkpoint already waits for anything inside the gate.</text>
+<text class="rl" x="16" y="64">finishing call</text>
+<rect class="plain" x="150" y="48" width="80" height="24" rx="5"/>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/495ce13048300fc47077daf301d04e34bef5168a/nemo_rl/models/generation/generation_cut_capture.py#L464"><text class="bt" x="190" y="64" text-anchor="middle">enter gate</text></a>
+<path class="ar" d="M232 60 L244 60" marker-end="url(#ah)"/>
+<rect class="plain" x="248" y="48" width="99" height="24" rx="5"/>
+<text class="bt" x="298" y="64" text-anchor="middle">PUT final row</text>
+<path class="ar" d="M349 60 L361 60" marker-end="url(#ah)"/>
+<rect class="wait" x="365" y="48" width="118" height="24" rx="5"/>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/495ce13048300fc47077daf301d04e34bef5168a/nemo_rl/models/generation/vllm/vllm_worker_async.py#L1562"><text class="bt" x="424" y="64" text-anchor="middle">CLEAR old chunks</text></a>
+<path class="ar" d="M485 60 L497 60" marker-end="url(#ah)"/>
+<rect class="plain" x="501" y="48" width="73" height="24" rx="5"/>
+<text class="bt" x="538" y="64" text-anchor="middle">exit gate</text>
+<path class="ar" d="M576 60 L588 60" marker-end="url(#ah)"/>
+<rect class="plain" x="592" y="48" width="48" height="24" rx="5"/>
+<text class="bt" x="616" y="64" text-anchor="middle">reply</text>
+<text class="rl" x="16" y="96">checkpoint</text>
+<rect class="gate" x="150" y="80" width="80" height="24" rx="5"/>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/495ce13048300fc47077daf301d04e34bef5168a/nemo_rl/models/generation/generation_cut_capture.py#L481"><text class="bt" x="190" y="96" text-anchor="middle">close gate</text></a>
+<path class="ar" d="M232 92 L244 92" marker-end="url(#ah)"/>
+<rect class="gate" x="248" y="80" width="188" height="24" rx="5"/>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/495ce13048300fc47077daf301d04e34bef5168a/nemo_rl/models/generation/generation_cut_capture.py#L481"><text class="bt" x="342" y="96" text-anchor="middle">wait until no one is inside</text></a>
+<path class="ar" d="M438 92 L450 92" marker-end="url(#ah)"/>
+<rect class="plain" x="454" y="80" width="60" height="24" rx="5"/>
+<text class="bt" x="484" y="96" text-anchor="middle">save TQ</text>
+<path class="ar" d="M516 92 L528 92" marker-end="url(#ah)"/>
+<rect class="gate" x="532" y="80" width="54" height="24" rx="5"/>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/495ce13048300fc47077daf301d04e34bef5168a/nemo_rl/models/generation/generation_cut_capture.py#L489"><text class="bt" x="559" y="96" text-anchor="middle">reopen</text></a>
+<text class="lt" x="16" y="140">2 · This PR, flag on</text>
+<text class="note" x="16" y="155">The reply no longer waits — but the cleanup thread gets its own pause/resume, and every call takes a slot.</text>
+<text class="rl" x="16" y="182">finishing call</text>
+<rect class="new" x="150" y="166" width="92" height="24" rx="5"/>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/495ce13048300fc47077daf301d04e34bef5168a/nemo_rl/models/generation/vllm/vllm_worker_async.py#L1508"><text class="bt" x="196" y="182" text-anchor="middle">reserve slot</text></a>
+<path class="ar" d="M244 178 L256 178" marker-end="url(#ah)"/>
+<rect class="plain" x="260" y="166" width="80" height="24" rx="5"/>
+<text class="bt" x="300" y="182" text-anchor="middle">enter gate</text>
+<path class="ar" d="M342 178 L354 178" marker-end="url(#ah)"/>
+<rect class="plain" x="358" y="166" width="99" height="24" rx="5"/>
+<text class="bt" x="408" y="182" text-anchor="middle">PUT final row</text>
+<path class="ar" d="M459 178 L471 178" marker-end="url(#ah)"/>
+<rect class="plain" x="475" y="166" width="80" height="24" rx="5"/>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/495ce13048300fc47077daf301d04e34bef5168a/nemo_rl/models/generation/vllm/vllm_worker_async.py#L1560"><text class="bt" x="515" y="182" text-anchor="middle">queue keys</text></a>
+<path class="ar" d="M557 178 L569 178" marker-end="url(#ah)"/>
+<rect class="plain" x="573" y="166" width="73" height="24" rx="5"/>
+<text class="bt" x="610" y="182" text-anchor="middle">exit gate</text>
+<path class="ar" d="M648 178 L660 178" marker-end="url(#ah)"/>
+<rect class="plain" x="664" y="166" width="48" height="24" rx="5"/>
+<text class="bt" x="688" y="182" text-anchor="middle">reply</text>
+<text class="rl" x="16" y="214">cleanup thread</text>
+<rect class="plain" x="150" y="198" width="124" height="24" rx="5"/>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/495ce13048300fc47077daf301d04e34bef5168a/nemo_rl/data_plane/background_prefix_cleanup.py#L183"><text class="bt" x="212" y="214" text-anchor="middle">collect ≤32 calls</text></a>
+<path class="ar" d="M276 210 L288 210" marker-end="url(#ah)"/>
+<rect class="new" x="292" y="198" width="112" height="24" rx="5"/>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/495ce13048300fc47077daf301d04e34bef5168a/nemo_rl/data_plane/background_prefix_cleanup.py#L193"><text class="bt" x="348" y="214" text-anchor="middle">own epoch check</text></a>
+<path class="ar" d="M406 210 L418 210" marker-end="url(#ah)"/>
+<rect class="plain" x="422" y="198" width="48" height="24" rx="5"/>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/495ce13048300fc47077daf301d04e34bef5168a/nemo_rl/data_plane/background_prefix_cleanup.py#L205"><text class="bt" x="446" y="214" text-anchor="middle">CLEAR</text></a>
+<text class="rl" x="16" y="246">checkpoint</text>
+<rect class="gate" x="150" y="230" width="80" height="24" rx="5"/>
+<text class="bt" x="190" y="246" text-anchor="middle">close gate</text>
+<path class="ar" d="M232 242 L244 242" marker-end="url(#ah)"/>
+<rect class="new" x="248" y="230" width="92" height="24" rx="5"/>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/495ce13048300fc47077daf301d04e34bef5168a/nemo_rl/models/generation/vllm/vllm_worker_async.py#L3390"><text class="bt" x="294" y="246" text-anchor="middle">pause(epoch)</text></a>
+<path class="ar" d="M342 242 L354 242" marker-end="url(#ah)"/>
+<rect class="gate" x="358" y="230" width="73" height="24" rx="5"/>
+<text class="bt" x="394" y="246" text-anchor="middle">wait gate</text>
+<path class="ar" d="M433 242 L445 242" marker-end="url(#ah)"/>
+<rect class="new" x="449" y="230" width="86" height="24" rx="5"/>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/495ce13048300fc47077daf301d04e34bef5168a/nemo_rl/models/generation/vllm/vllm_worker_async.py#L3396"><text class="bt" x="492" y="246" text-anchor="middle">wait_paused</text></a>
+<path class="ar" d="M537 242 L549 242" marker-end="url(#ah)"/>
+<rect class="plain" x="553" y="230" width="60" height="24" rx="5"/>
+<text class="bt" x="583" y="246" text-anchor="middle">save TQ</text>
+<path class="ar" d="M615 242 L627 242" marker-end="url(#ah)"/>
+<rect class="gate" x="631" y="230" width="54" height="24" rx="5"/>
+<text class="bt" x="658" y="246" text-anchor="middle">reopen</text>
+<path class="ar" d="M687 242 L699 242" marker-end="url(#ah)"/>
+<rect class="new" x="703" y="230" width="67" height="24" rx="5"/>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/495ce13048300fc47077daf301d04e34bef5168a/nemo_rl/models/generation/vllm/vllm_worker_async.py#L3422"><text class="bt" x="736" y="246" text-anchor="middle">resume()</text></a>
+<text class="lt" x="16" y="290">3 · Proposed, flag on</text>
+<text class="note" x="16" y="305">Same reply time. The cleanup thread takes a gate permit, so the checkpoint is exactly today&#x27;s.</text>
+<text class="rl" x="16" y="332">finishing call</text>
+<rect class="plain" x="150" y="316" width="80" height="24" rx="5"/>
+<text class="bt" x="190" y="332" text-anchor="middle">enter gate</text>
+<path class="ar" d="M232 328 L244 328" marker-end="url(#ah)"/>
+<rect class="plain" x="248" y="316" width="99" height="24" rx="5"/>
+<text class="bt" x="298" y="332" text-anchor="middle">PUT final row</text>
+<path class="ar" d="M349 328 L361 328" marker-end="url(#ah)"/>
+<rect class="plain" x="365" y="316" width="73" height="24" rx="5"/>
+<text class="bt" x="402" y="332" text-anchor="middle">exit gate</text>
+<path class="ar" d="M440 328 L452 328" marker-end="url(#ah)"/>
+<rect class="reuse" x="456" y="316" width="112" height="24" rx="5"/>
+<text class="bt" x="512" y="332" text-anchor="middle">queue.put(keys)</text>
+<path class="ar" d="M570 328 L582 328" marker-end="url(#ah)"/>
+<rect class="plain" x="586" y="316" width="48" height="24" rx="5"/>
+<text class="bt" x="610" y="332" text-anchor="middle">reply</text>
+<text class="rl" x="16" y="364">cleanup thread</text>
+<rect class="plain" x="150" y="348" width="124" height="24" rx="5"/>
+<text class="bt" x="212" y="364" text-anchor="middle">collect ≤32 calls</text>
+<path class="ar" d="M276 360 L288 360" marker-end="url(#ah)"/>
+<rect class="reuse" x="292" y="348" width="80" height="24" rx="5"/>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/495ce13048300fc47077daf301d04e34bef5168a/nemo_rl/models/generation/generation_cut_capture.py#L464"><text class="bt" x="332" y="364" text-anchor="middle">enter gate</text></a>
+<path class="ar" d="M374 360 L386 360" marker-end="url(#ah)"/>
+<rect class="plain" x="390" y="348" width="48" height="24" rx="5"/>
+<text class="bt" x="414" y="364" text-anchor="middle">CLEAR</text>
+<path class="ar" d="M440 360 L452 360" marker-end="url(#ah)"/>
+<rect class="reuse" x="456" y="348" width="73" height="24" rx="5"/>
+<text class="bt" x="492" y="364" text-anchor="middle">exit gate</text>
+<text class="rl" x="16" y="396">checkpoint</text>
+<rect class="gate" x="150" y="380" width="80" height="24" rx="5"/>
+<text class="bt" x="190" y="396" text-anchor="middle">close gate</text>
+<path class="ar" d="M232 392 L244 392" marker-end="url(#ah)"/>
+<rect class="gate" x="248" y="380" width="188" height="24" rx="5"/>
+<text class="bt" x="342" y="396" text-anchor="middle">wait until no one is inside</text>
+<path class="ar" d="M438 392 L450 392" marker-end="url(#ah)"/>
+<rect class="plain" x="454" y="380" width="60" height="24" rx="5"/>
+<text class="bt" x="484" y="396" text-anchor="middle">save TQ</text>
+<path class="ar" d="M516 392 L528 392" marker-end="url(#ah)"/>
+<rect class="gate" x="532" y="380" width="54" height="24" rx="5"/>
+<text class="bt" x="559" y="396" text-anchor="middle">reopen</text>
+<rect class="wait" x="16" y="440" width="16" height="12" rx="3"/>
+<text class="note" x="38" y="450">reply waits on this</text>
+<rect class="new" x="181" y="440" width="16" height="12" rx="3"/>
+<text class="note" x="203" y="450">new fence code in this PR</text>
+<rect class="reuse" x="384" y="440" width="16" height="12" rx="3"/>
+<text class="note" x="406" y="450">reuses the existing gate</text>
+<rect class="gate" x="580" y="440" width="16" height="12" rx="3"/>
+<text class="note" x="602" y="450">existing gate (unchanged)</text></svg>
+
+<h2>What goes away</h2>
+<div class="tbl"><table>
+<tr><th>Piece in this PR</th><th>In the proposed version</th></tr>
+<tr><td><code>_epoch</code>/<code>_released_epoch</code>, <code>pause</code>, <code>wait_paused</code>, <code>resume</code> (<a href="https://github.com/NVIDIA-NeMo/RL/blob/495ce13048300fc47077daf301d04e34bef5168a/nemo_rl/data_plane/background_prefix_cleanup.py#L157-L174">L157-L174</a>)</td><td>Gone: the gate's own epochs already cover them.</td></tr>
+<tr><td>4 hooks in the worker: pause, wait, resume, shutdown resume (<a href="https://github.com/NVIDIA-NeMo/RL/blob/495ce13048300fc47077daf301d04e34bef5168a/nemo_rl/models/generation/vllm/vllm_worker_async.py#L3388-L3397">L3388</a>, <a href="https://github.com/NVIDIA-NeMo/RL/blob/495ce13048300fc47077daf301d04e34bef5168a/nemo_rl/models/generation/vllm/vllm_worker_async.py#L3421-L3422">L3421</a>, <a href="https://github.com/NVIDIA-NeMo/RL/blob/495ce13048300fc47077daf301d04e34bef5168a/nemo_rl/models/generation/vllm/vllm_worker_async.py#L3483-L3485">L3483</a>, <a href="https://github.com/NVIDIA-NeMo/RL/blob/495ce13048300fc47077daf301d04e34bef5168a/nemo_rl/models/generation/vllm/vllm_worker_async.py#L3497-L3498">L3497</a>)</td><td>Gone: checkpoint code stays as it is today.</td></tr>
+<tr><td><code>CleanupReservation</code> and a slot taken by every finishing call (<a href="https://github.com/NVIDIA-NeMo/RL/blob/495ce13048300fc47077daf301d04e34bef5168a/nemo_rl/models/generation/vllm/vllm_worker_async.py#L1508">L1508</a>)</td><td>A stdlib <code>queue.Queue(maxsize=max_pending)</code>, filled after the call leaves the gate, only when it has keys.</td></tr>
+<tr><td><code>close()</code>, its paused check, <code>stats()</code> and 5 counters only tests read</td><td>Gone. The thread is a daemon; the PR already accepts that lost deletes only leave extra rows.</td></tr>
+<tr><td>253-line module; 19 unit tests, mostly for the fence above</td><td>About 25 lines; tests for the removed fence go with it.</td></tr>
+</table></div>
+
+<h2>The change — proposed, not in the PR</h2>
+<p>Nothing below is implemented in NeMo-RL. The same design ran as a stand-alone prototype against the real gate class.</p>
+<p class="where"><b>Where the fix lands: RL only, two files.</b>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/495ce13048300fc47077daf301d04e34bef5168a/nemo_rl/data_plane/background_prefix_cleanup.py"><code>background_prefix_cleanup.py</code></a> shrinks to a queue and a thread;
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/495ce13048300fc47077daf301d04e34bef5168a/nemo_rl/models/generation/vllm/vllm_worker_async.py"><code>vllm_worker_async.py</code></a> loses the reservation and the 4 hooks.
+<b>No Gym change.</b></p>
+
+<pre class="diff"><span class="hunk">@@ background_prefix_cleanup.py · the cleanup thread, whole loop</span>
+<span class="add">+    def _drain(self):
++        while True:
++            batch = [self._queue.get()]
++            # ... collect up to batch_size calls within wait_seconds ...
++            keys = list(dict.fromkeys(k for rows in batch for k in rows))
++            self._gate.enter()  # a checkpoint waits for this CLEAR, and blocks the next one
++            try:
++                self._clear(keys)
++            except Exception:  # a lost delete only leaves extra rows
++                LOGGER.exception("background prefix cleanup failed for %d keys", len(keys))
++            finally:
++                self._gate.exit()</span>
+
+<span class="hunk">@@ vllm_worker_async.py L1505-L1519 · _finish_request_capture</span>
+<span class="del">-        # Reserve outside the terminal gate: a paused, full cleanup queue must
+-        # never hold a permit that the snapshot fence is trying to drain.
+-        cleanup = self._prefix_cleanup
+-        reservation = cleanup.reserve() if cleanup is not None else None
+-        try:
+-            self._token_capture_snapshot_gate.enter()
+-            try:
+-                return self._finish_request_capture_after_snapshot_fence(
+-                    request, content, cleanup_reservation=reservation
+-                )
+-            finally:
+-                self._token_capture_snapshot_gate.exit()
+-        finally:
+-            if reservation is not None:
+-                reservation.close()
+</span><span class="add">+        self._token_capture_snapshot_gate.enter()
++        try:
++            content, keys = self._finish_request_capture_after_snapshot_fence(
++                request, content
++            )
++        finally:
++            self._token_capture_snapshot_gate.exit()
++        # After exit, so a full queue never holds a permit a checkpoint is draining.
++        if keys and self._prefix_cleanup is not None:
++            self._prefix_cleanup.submit(keys)
++        return content</span>
+
+<span class="hunk">@@ vllm_worker_async.py L3388-L3397 · begin_token_capture_snapshot_fence_async</span>
+<span class="del">-        cleanup = self._prefix_cleanup
+-        if cleanup is not None:
+-            cleanup.pause(epoch)
+</span>         await asyncio.get_running_loop().run_in_executor(
+             self._token_capture_fence_executor, gate.close_and_wait, epoch
+         )
+<span class="del">-        if cleanup is not None:
+-            await asyncio.get_running_loop().run_in_executor(
+-                self._token_capture_fence_executor, cleanup.wait_paused, epoch
+-            )
+</span><span class="skip">   … same for resume() at L3421-L3422 and the shutdown hooks at L3483-L3485, L3497-L3498</span></pre>
+
+<p>What each piece does, in order: (1) the thread takes a gate permit around each CLEAR, so <a href="https://github.com/NVIDIA-NeMo/RL/blob/495ce13048300fc47077daf301d04e34bef5168a/nemo_rl/models/generation/generation_cut_capture.py#L481"><code>close_and_wait</code></a> waits for a running delete and <a href="https://github.com/NVIDIA-NeMo/RL/blob/495ce13048300fc47077daf301d04e34bef5168a/nemo_rl/models/generation/generation_cut_capture.py#L464"><code>enter()</code></a> holds the next one until the checkpoint reopens the gate;
+(2) the finishing call queues its keys only after it leaves the gate, the same reason the PR reserves outside it today;
+(3) the checkpoint code goes back to what <a href="https://github.com/NVIDIA-NeMo/RL/pull/4508">#4508</a> has.
+The prototype checked: a reply returns while a CLEAR is still running; a checkpoint waits for that CLEAR; no CLEAR starts while the gate is closed; 1,024 calls blocked on a full queue plus a second checkpoint do not deadlock; 2,048 keys clear in 34–36 calls at batch size 32 (the PR's test gets 32).
+Do not reuse <a href="https://github.com/NVIDIA-NeMo/RL/blob/495ce13048300fc47077daf301d04e34bef5168a/nemo_rl/models/generation/prefix_read_batcher.py#L23"><code>PrefixReadBatcher</code></a> from #4508 instead: it returns awaited results on one event loop, while this delete is fire-and-forget from a worker thread.</p>
+
+<div class="warn"><b>So what.</b> The feature stack is already about 20k lines, and this PR adds a second checkpoint fence for one thread. Taking a permit on the gate that exists keeps the reply-time gain and drops the module to about 25 lines, with no checkpoint changes. It also removes the bug on the <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4655-failed-clear.html">next page</a>. The PR still shows no latency number for the gain; the review asks for one.</div>
+</div>
+</body>
+</html>
