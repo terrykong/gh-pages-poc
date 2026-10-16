@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NVIDIA-NeMo/RL #4612 — read the routes once per cut, not on every token</title>
+<style>
+:root{
+  --bg:#0d1117; --surface:#161b22; --surface2:#1c2128; --border:#30363d;
+  --text:#e6edf3; --dim:#8b949e; --accent:#58a6ff; --green:#3fb950;
+  --orange:#d29922; --red:#f85149;
+}
+:root[data-theme="light"]{
+  --bg:#ffffff; --surface:#f6f8fa; --surface2:#eaeef2; --border:#d0d7de;
+  --text:#1f2328; --dim:#59636e; --accent:#0969da; --green:#1a7f37;
+  --orange:#9a6700; --red:#cf222e;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:28px 16px 70px}
+h1{font-size:22px;margin:0 0 8px;line-height:1.3}
+h2{font-size:18px;margin:32px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;
+  font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
+.sub{color:var(--dim);font-size:13.5px;margin:0 0 16px}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);
+  border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;
+  font:13px/1 ui-monospace,Menlo,monospace;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.18)}
+.status{border:1px solid var(--border);border-radius:10px;background:var(--surface);
+  padding:2px 16px 10px;margin:0 0 20px}
+.status dl{display:grid;grid-template-columns:max-content 1fr;gap:4px 14px;margin:12px 0 0}
+.status dt{color:var(--dim);font-size:12px;text-transform:uppercase;letter-spacing:.04em;
+  white-space:nowrap;padding-top:2px}
+.status dd{margin:0;font-size:14px}
+.verdict{font-weight:700}
+.verdict.open{color:var(--orange)}
+.warn{border-left:3px solid var(--orange);background:var(--surface);
+  padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0}
+.where{border-left:4px solid var(--accent);background:var(--surface);padding:6px 12px;margin:6px 0 10px}
+.diff{font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--surface);
+  border:1px solid var(--border);border-radius:8px;padding:12px;overflow-x:auto;white-space:pre;margin:10px 0}
+.diff .add{color:var(--green)}
+.diff .del{color:var(--red)}
+.diff .hunk{color:var(--accent)}
+.diff .skip{color:var(--dim);font-style:italic}
+table{border-collapse:collapse;width:100%;font-size:13.5px;margin:10px 0}
+th,td{border-bottom:1px solid var(--border);padding:5px 8px;text-align:left;vertical-align:top}
+th{color:var(--dim);font-weight:600;font-size:12px}
+td.n{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
+.tbl{overflow-x:auto}
+.tip{border-bottom:1px dotted var(--dim);cursor:help;position:relative;outline:none}
+.tip:hover::after,.tip:focus::after{content:attr(data-tip);position:absolute;left:0;top:1.7em;z-index:60;
+  width:max-content;max-width:min(340px,80vw);white-space:normal;background:var(--surface2);color:var(--text);
+  border:1px solid var(--border);border-radius:6px;padding:7px 10px;font:13px/1.45 -apple-system,sans-serif;
+  font-weight:400;box-shadow:0 4px 14px rgba(0,0,0,.3)}
+svg{max-width:100%;height:auto;display:block;margin:16px 0}
+svg .box{fill:var(--surface);stroke:var(--border);stroke-width:1.2}
+svg .cut{fill:var(--surface);stroke:var(--orange);stroke-width:1.6;stroke-dasharray:5 3}
+svg .keep{fill:var(--surface);stroke:var(--green);stroke-width:1.6}
+svg .t{fill:var(--text);font:bold 12.5px -apple-system,sans-serif}
+svg .h{fill:var(--text);font:bold 13.5px -apple-system,sans-serif}
+svg .c{fill:var(--accent);font:11.5px ui-monospace,Menlo,monospace}
+svg .d{fill:var(--text);font:11px ui-monospace,Menlo,monospace}
+svg .g{fill:var(--dim);font:11.5px -apple-system,sans-serif}
+svg .o{fill:var(--orange);font:bold 11.5px -apple-system,sans-serif}
+svg .gr{fill:var(--green);font:bold 11.5px -apple-system,sans-serif}
+svg .ar{stroke:var(--text);stroke-width:1.2;fill:none;marker-end:url(#a)}
+svg a text{text-decoration:underline}
+.cref{margin:6px 0 0;font-size:13px}
+.cref a{display:inline-block;padding:4px 10px;border:1px solid var(--border);
+  border-radius:16px;background:var(--surface);font:12.5px ui-monospace,Menlo,monospace;margin:2px 4px 2px 0}
+.cref a:hover{background:var(--surface2);text-decoration:none}
+td .cref{margin:4px 0 0}
+td .cref a{font-size:11.5px;padding:2px 8px}
+nav.chain{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 6px;padding:0}
+nav.chain a,nav.chain span{display:inline-block;padding:5px 11px;border:1px solid var(--border);
+  border-radius:20px;background:var(--surface);text-decoration:none;color:var(--accent);
+  font-size:12.5px;line-height:1.3;white-space:nowrap}
+nav.chain a:hover{background:var(--surface2)}
+nav.chain span.here{background:var(--accent);color:var(--bg);border-color:var(--accent);font-weight:600}
+p.chainnote{color:var(--dim);font-size:12px;margin:0 0 18px}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+  document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head>
+<body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+  function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+  function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
+    b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
+      else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+  document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+<div class="wrap">
+
+<h1>Read the routes once per cut, not on every token: about a quarter of the source can go</h1>
+<p class="sub">Size review of <a href="https://github.com/NVIDIA-NeMo/RL/pull/4612">NVIDIA-NeMo/RL #4612</a>. Line counts are from <code>git diff 0bf5789 2548c67</code> (the PR against its real base, <a href="https://github.com/NVIDIA-NeMo/RL/pull/4583">#4583</a>). Permalinks pin the head <code>2548c679</code>. Review comments are in a pending review; their links work once it is published.</p>
+
+<div class="status">
+<dl>
+  <dt>Before</dt>
+  <dd>The prefix-recovery feature is a stack of open PRs, over 20,000 added lines. This PR adds about 1,080 of them: ~610 source, ~470 test.</dd>
+  <dt>This PR</dt>
+  <dd>Copies new route rows out of vLLM on every generated token of every request, so that a checkpoint, which is rare, has them ready.</dd>
+  <dt>Status</dt>
+  <dd><span class="verdict open">Proposed — not implemented.</span> Each cut below is a review comment; none is applied. The diff on this page has not been run.</dd>
+</dl>
+</div>
+
+<nav class="chain">
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4612-what-routes-train.html">1 · which routes a resumed row trains with</a>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4612-finished-prefix-crash.html">2 · finished-prefix crash</a>
+  <span class="here">3 · size</span>
+</nav>
+<p class="chainnote">Three pages on this PR — this one: how big it is, and what can go.</p>
+
+<p>vLLM 0.29 keeps each running request's routes in a private list, <code>routed_experts_chunks</code>, and only hands them out when the request ends. That list <a href="https://github.com/vllm-project/vllm/blob/v0.29.0/vllm/v1/engine/output_processor.py#L669-L671">is only ever appended to</a>. Rows already in it never change. So the rows a cut needs are simply the first <i>N</i> rows of that list at the moment of the cut. The PR instead copies every new piece as it arrives, carries it through the HTTP layer, and keeps it in buffers that a cut swaps, saves, or rolls back.</p>
+
+<h2>Two ways to get the same rows</h2>
+
+<svg viewBox="0 0 940 332" role="img" aria-label="Top lane: on every token, a hop to the engine loop, a copy, three extra fields on the vLLM output, a cursor check, and buffers. Bottom lane: at a cut only, one hop to the engine loop and one slice.">
+  <defs><marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10z" fill="var(--text)"/></marker></defs>
+  <text class="h" x="16" y="20">This PR: on every token of every request, once route capture is on</text>
+
+  <rect class="cut" x="16" y="32" width="208" height="92" rx="8"/>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/2548c6793465bbe79f50b25202e85f10d1a60592/nemo_rl/models/generation/vllm/vllm_worker_async.py#L384-L406"><text class="c" x="26" y="52">next_output</text></a>
+  <text class="g" x="26" y="70">copy the new pieces of</text>
+  <text class="g" x="26" y="86">vLLM's private route list</text>
+  <text class="d" x="26" y="108">+1 row [1, L, K] per token</text>
+
+  <rect class="cut" x="246" y="32" width="208" height="92" rx="8"/>
+  <text class="t" x="256" y="52">3 extra fields on</text>
+  <text class="t" x="256" y="68">vLLM's output object</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/2548c6793465bbe79f50b25202e85f10d1a60592/nemo_rl/models/generation/vllm/vllm_worker_async.py#L2158-L2181"><text class="c" x="256" y="90">read back in the HTTP layer</text></a>
+  <text class="d" x="256" y="108">count, pieces, error</text>
+
+  <rect class="cut" x="476" y="32" width="208" height="92" rx="8"/>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/2548c6793465bbe79f50b25202e85f10d1a60592/nemo_rl/models/generation/generation_cut_capture.py#L138-L203"><text class="c" x="486" y="52">_observe_routed_experts</text></a>
+  <text class="g" x="486" y="70">checks a piece counter,</text>
+  <text class="g" x="486" y="86">skips old rows, keeps a list</text>
+  <text class="d" x="486" y="108">counters + lists per call</text>
+
+  <rect class="cut" x="706" y="32" width="218" height="92" rx="8"/>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/2548c6793465bbe79f50b25202e85f10d1a60592/nemo_rl/models/generation/generation_cut_capture.py#L296-L373"><text class="c" x="716" y="52">freeze / seal / rollback</text></a>
+  <text class="g" x="716" y="70">swap the route lists next</text>
+  <text class="g" x="716" y="86">to the token lists</text>
+  <text class="d" x="716" y="108">at a cut: join the pieces</text>
+
+  <path class="ar" d="M224 78 H242"/><path class="ar" d="M454 78 H472"/><path class="ar" d="M684 78 H702"/>
+  <text class="o" x="16" y="146">runs ~every token · logs an ERROR on every token if a vLLM upgrade renames a private field</text>
+
+  <text class="h" x="16" y="190">Proposed: only when a cut is taken</text>
+  <rect class="keep" x="16" y="202" width="270" height="92" rx="8"/>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/2548c6793465bbe79f50b25202e85f10d1a60592/nemo_rl/models/generation/generation_cut_capture.py#L986"><text class="c" x="26" y="222">freeze_for_checkpoint</text></a>
+  <text class="g" x="26" y="240">freeze the tokens, as today</text>
+  <text class="d" x="26" y="262">tokens [12, 13] → N = 3 rows</text>
+  <text class="g" x="26" y="282">(prompt 10, 11 + 12; 13 has no row yet)</text>
+
+  <rect class="keep" x="316" y="202" width="290" height="92" rx="8"/>
+  <text class="t" x="326" y="222">One hop to vLLM's loop (timeout)</text>
+  <text class="d" x="326" y="244">cat(routed_experts_chunks)[:N]</text>
+  <text class="d" x="326" y="262">→ [1, 2, 3]  shape [3, L, K]</text>
+  <text class="g" x="326" y="282">finished already? use its final routes</text>
+
+  <rect class="keep" x="636" y="202" width="288" height="92" rx="8"/>
+  <text class="t" x="646" y="222">Save, as today</text>
+  <text class="d" x="646" y="244">rows [1, 2, 3, ph] next to the tokens</text>
+  <text class="g" x="646" y="264">resume join and final merge</text>
+  <text class="g" x="646" y="280">stay exactly as in the PR</text>
+
+  <path class="ar" d="M286 248 H312"/><path class="ar" d="M606 248 H632"/>
+  <text class="gr" x="16" y="316">runs once per cut · nothing added to the token path · route fields on each call: 8 → 3</text>
+</svg>
+
+<p>Same tiny example as <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4612-what-routes-train.html">page 1</a>: prompt <code>10, 11</code>, tokens <code>12, 13</code> at the first cut. <i>L</i> = MoE layers, <i>K</i> = experts per token. Both ways give the rows <code>[1, 2, 3]</code>. Two reviewers checked the vLLM source: the scheduler never re-sends rows for a position, and a finished request's list is dropped in the same step as its final output, which is why a cut that races the end must use the final routes.</p>
+
+<h2>What can go</h2>
+<div class="tbl"><table>
+<tr><th>What the PR writes</th><th>Replace with</th><th class="n">source lines</th></tr>
+<tr><td>Per-token route copies, the 3 extra output fields, the piece counter, route buffers in freeze/seal/rollback, the unused public <a href="https://github.com/NVIDIA-NeMo/RL/blob/2548c6793465bbe79f50b25202e85f10d1a60592/nemo_rl/models/generation/vllm/vllm_worker_async.py#L449-L466"><code>snapshot_new_routed_expert_chunks</code></a><!--CREF-C2--></td><td>One read at cut time (above). Removes ~190, adds ~40.</td><td class="n">~150</td></tr>
+<tr><td>A third copy of the "which int type is this route string" lookup (<a href="https://github.com/NVIDIA-NeMo/RL/blob/2548c6793465bbe79f50b25202e85f10d1a60592/nemo_rl/models/generation/vllm/vllm_worker_async.py#L1442-L1449">:1442</a>)<!--CREF-C7--></td><td>Let <a href="https://github.com/NVIDIA-NeMo/RL/blob/2548c6793465bbe79f50b25202e85f10d1a60592/nemo_rl/utils/routed_experts_codec.py#L37-L42"><code>decode_routed_experts</code></a> keep the type written in the string</td><td class="n">~7</td></tr>
+<tr><td>The placeholder row, built twice (<a href="https://github.com/NVIDIA-NeMo/RL/blob/2548c6793465bbe79f50b25202e85f10d1a60592/nemo_rl/models/generation/generation_cut_capture.py#L231-L238">:231</a>, <a href="https://github.com/NVIDIA-NeMo/RL/blob/2548c6793465bbe79f50b25202e85f10d1a60592/nemo_rl/models/generation/generation_cut_capture.py#L622-L627">:622</a>). The two must match byte for byte or every resume fails its check.<!--CREF-C8--></td><td>One helper used in both places</td><td class="n">~6</td></tr>
+<tr><td>Checks that cannot fire: two "changed model dimensions" checks, one length check, and a fetch branch no source reaches (<a href="https://github.com/NVIDIA-NeMo/RL/blob/2548c6793465bbe79f50b25202e85f10d1a60592/nemo_rl/models/generation/generation_cut_capture.py#L558-L561">:558</a>)<!--CREF-C4C12--></td><td>Delete</td><td class="n">~14</td></tr>
+<tr><td>Tests: the two large router-replay tests repeat ~17-line fake vLLM outputs and inventories by hand<!--CREF-C14--></td><td>A small <code>_observe</code> helper, the file's existing <a href="https://github.com/NVIDIA-NeMo/RL/blob/2548c6793465bbe79f50b25202e85f10d1a60592/tests/unit/models/generation/test_vllm_token_capture_hosting.py#L929"><code>_single_generation_cut_inventory</code></a>, <code>dataclasses.replace</code></td><td class="n">~125 test</td></tr>
+</table></div>
+<p>Not worth changing: the resume join and the final merge. A reviewer tried to reuse the existing route assembler, <a href="https://github.com/NVIDIA-NeMo/RL/blob/2548c6793465bbe79f50b25202e85f10d1a60592/nemo_rl/experience/route_assembly.py#L120"><code>execute_route_plan</code></a>, there. The saved pieces have a different row layout, so it would need a new mode in shared training code.</p>
+
+<div class="warn"><b>So what.</b> About 160 of ~610 source lines (~26%) and ~125 test lines can go. That leaves roughly 450 source and 300 test lines, including the ~45 lines of tests the review asks for. The per-token copy is also the part that breaks quietly on a vLLM upgrade. Asking now matters because <a href="https://github.com/NVIDIA-NeMo/RL/pull/4508">#4508</a> will be rebased on top of these files.</div>
+
+</div>
+</body>
+</html>

@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NVIDIA-NeMo/RL #4612 — which expert routes a resumed call trains with</title>
+<style>
+:root{
+  --bg:#0d1117; --surface:#161b22; --surface2:#1c2128; --border:#30363d;
+  --text:#e6edf3; --dim:#8b949e; --accent:#58a6ff; --green:#3fb950;
+  --orange:#d29922; --red:#f85149;
+}
+:root[data-theme="light"]{
+  --bg:#ffffff; --surface:#f6f8fa; --surface2:#eaeef2; --border:#d0d7de;
+  --text:#1f2328; --dim:#59636e; --accent:#0969da; --green:#1a7f37;
+  --orange:#9a6700; --red:#cf222e;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:28px 16px 70px}
+h1{font-size:22px;margin:0 0 8px;line-height:1.3}
+h2{font-size:18px;margin:32px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;
+  font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
+.sub{color:var(--dim);font-size:13.5px;margin:0 0 16px}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);
+  border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;
+  font:13px/1 ui-monospace,Menlo,monospace;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.18)}
+.status{border:1px solid var(--border);border-radius:10px;background:var(--surface);
+  padding:2px 16px 10px;margin:0 0 20px}
+.status dl{display:grid;grid-template-columns:max-content 1fr;gap:4px 14px;margin:12px 0 0}
+.status dt{color:var(--dim);font-size:12px;text-transform:uppercase;letter-spacing:.04em;
+  white-space:nowrap;padding-top:2px}
+.status dd{margin:0;font-size:14px}
+.verdict{font-weight:700}
+.verdict.prop{color:var(--accent)}
+.bg{border:1px solid var(--border);border-radius:8px;background:var(--surface);padding:8px 14px;margin:0 0 16px;font-size:14px}
+.hl{border-left:3px solid var(--accent);background:var(--surface);
+  padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0}
+.tip{border-bottom:1px dotted var(--dim);cursor:help;position:relative;outline:none}
+.tip:hover::after,.tip:focus::after{content:attr(data-tip);position:absolute;left:0;top:1.7em;z-index:60;
+  width:max-content;max-width:min(340px,80vw);white-space:normal;background:var(--surface2);color:var(--text);
+  border:1px solid var(--border);border-radius:6px;padding:7px 10px;font:13px/1.45 -apple-system,sans-serif;
+  font-weight:400;box-shadow:0 4px 14px rgba(0,0,0,.3)}
+svg{max-width:100%;height:auto;display:block;margin:16px 0}
+svg .old{fill:var(--accent)}
+svg .new{fill:var(--orange)}
+svg .none{fill:var(--surface2);stroke:var(--border);stroke-width:1}
+svg .v{fill:var(--bg);font:bold 13px ui-monospace,Menlo,monospace}
+svg .vd{fill:var(--dim);font:bold 13px ui-monospace,Menlo,monospace}
+svg .t{fill:var(--text);font:bold 12.5px -apple-system,sans-serif}
+svg .g{fill:var(--dim);font:11.5px -apple-system,sans-serif}
+svg .ok{fill:var(--green);font:bold 12.5px -apple-system,sans-serif}
+svg .c{fill:var(--accent);font:11.5px ui-monospace,Menlo,monospace}
+svg .d{fill:var(--text);font:11.5px ui-monospace,Menlo,monospace}
+svg .frame{fill:none;stroke:var(--green);stroke-width:2}
+svg a text{text-decoration:underline}
+.cref{margin:6px 0 0;font-size:13px}
+.cref a{display:inline-block;padding:4px 10px;border:1px solid var(--border);
+  border-radius:16px;background:var(--surface);font:12.5px ui-monospace,Menlo,monospace}
+.cref a:hover{background:var(--surface2);text-decoration:none}
+nav.chain{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 6px;padding:0}
+nav.chain a,nav.chain span{display:inline-block;padding:5px 11px;border:1px solid var(--border);
+  border-radius:20px;background:var(--surface);text-decoration:none;color:var(--accent);
+  font-size:12.5px;line-height:1.3;white-space:nowrap}
+nav.chain a:hover{background:var(--surface2)}
+nav.chain span.here{background:var(--accent);color:var(--bg);border-color:var(--accent);font-weight:600}
+p.chainnote{color:var(--dim);font-size:12px;margin:0 0 18px}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+  document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head>
+<body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+  function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+  function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
+    b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
+      else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+  document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+<div class="wrap">
+
+<h1>When a call resumes from a saved prefix, which expert routes does it train with?</h1>
+<p class="sub"><a href="https://github.com/NVIDIA-NeMo/RL/pull/4612">NVIDIA-NeMo/RL #4612</a> · stacked on <a href="https://github.com/NVIDIA-NeMo/RL/pull/4583">#4583</a> · permalinks pin head <code>2548c679</code>. Review comments are in a pending review; their links work once it is published.</p>
+
+<div class="status">
+<dl>
+  <dt>Before</dt>
+  <dd>Setup refused to run prefix recovery and router replay together (<a href="https://github.com/NVIDIA-NeMo/RL/blob/0bf5789ee65522df74f3c22e52bc88002b82955a/nemo_rl/algorithms/single_controller_utils/setup.py#L1264-L1267">the check, at the base</a>). MoE runs with router replay had to restart a cut call from scratch.</dd>
+  <dt>This PR</dt>
+  <dd>Saves each call's expert routes with every prefix it saves. On resume, it keeps the saved routes for the old tokens and takes the rest from the resumed call.</dd>
+  <dt>Status</dt>
+  <dd><span class="verdict prop">The design is sound — implemented in this PR, with open review asks.</span> The mix matches what an uninterrupted run produces with default settings. The review asks the PR to write that down, and to fix <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4612-finished-prefix-crash.html">one crash</a>.</dd>
+</dl>
+</div>
+
+<nav class="chain">
+  <span class="here">1 · which routes a resumed row trains with</span>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4612-finished-prefix-crash.html">2 · finished-prefix crash</a>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4612-size.html">3 · size</a>
+</nav>
+<p class="chainnote">Three pages on this PR — this one: what the feature does, compared with a run that never restarted.</p>
+
+<div class="bg">Background. In an MoE model each token goes to a few <b>experts</b>. <span class="tip" tabindex="0" data-tip="NeMo-RL saves which experts vLLM picked for each position, then forces training to use the same ones, so training computes the same probabilities vLLM sampled with.">Router replay</span> saves vLLM's choice for every position as one <b>route row</b>. Row <i>t</i> is the experts used when token <i>t</i> was the input (<a href="https://github.com/NVIDIA-NeMo/RL/blob/2548c6793465bbe79f50b25202e85f10d1a60592/nemo_rl/models/megatron/router_replay.py#L450-L460">trainer</a>). <span class="tip" tabindex="0" data-tip="At a checkpoint, each running call saves the tokens it has generated so far (a cut). After a restart the call resumes from them: vLLM re-reads them as prompt, then keeps generating.">Prefix recovery</span> saves a running call's tokens at each checkpoint, so after a restart it resumes instead of starting over. Dotted words have a short explanation: hover or tap them.</div>
+
+<p>At each cut, <a href="https://github.com/NVIDIA-NeMo/RL/blob/2548c6793465bbe79f50b25202e85f10d1a60592/nemo_rl/models/generation/generation_cut_capture.py#L296"><code>freeze_for_checkpoint</code></a> stores the route rows for the new tokens next to them in the saved row. On resume, <a href="https://github.com/NVIDIA-NeMo/RL/blob/2548c6793465bbe79f50b25202e85f10d1a60592/nemo_rl/models/generation/generation_cut_capture.py#L570"><code>_generation_cut_route_extras</code></a> checks and joins those pieces. vLLM then re-reads the saved tokens with the <b>new</b> weights, so it computes new routes for them too. When the call ends, <a href="https://github.com/NVIDIA-NeMo/RL/blob/2548c6793465bbe79f50b25202e85f10d1a60592/nemo_rl/models/generation/vllm/vllm_worker_async.py#L1412-L1463"><code>_merge_generation_cut_routed_experts</code></a> keeps the saved rows for the old tokens and the new rows for everything after them. From there the row goes through the <a href="https://github.com/NVIDIA-NeMo/RL/blob/2548c6793465bbe79f50b25202e85f10d1a60592/nemo_rl/models/generation/vllm/vllm_worker_async.py#L1539">same final save as any call</a>.</p>
+
+<h2>Same call, three ways</h2>
+
+<svg viewBox="0 0 940 372" role="img" aria-label="Route rows for six positions in three cases. An uninterrupted run and the PR's resumed row both have old routes for the first four positions and a new route for the fifth. The resumed call's own routes are all new.">
+  <text class="g" x="16" y="18">position</text>
+  <text class="g" x="16" y="36">input token</text>
+  <g class="g" text-anchor="middle">
+    <text x="261" y="18">0</text><text x="327" y="18">1</text><text x="393" y="18">2</text><text x="459" y="18">3</text><text x="525" y="18">4</text><text x="591" y="18">5</text>
+    <text x="261" y="36">10</text><text x="327" y="36">11</text><text x="393" y="36">12</text><text x="459" y="36">13</text><text x="525" y="36">14</text><text x="591" y="36">15</text>
+    <text x="294" y="56">prompt</text><text x="459" y="56">generated before the cut</text><text x="591" y="56">after</text>
+  </g>
+
+  <!-- lane A -->
+  <text class="t" x="16" y="84">Uninterrupted run</text>
+  <text class="g" x="16" y="100">weights updated at the cut,</text>
+  <text class="g" x="16" y="114">KV cache kept (the default)</text>
+  <rect class="old" x="232" y="70" width="58" height="34" rx="4"/><text class="v" x="261" y="92" text-anchor="middle">1</text>
+  <rect class="old" x="298" y="70" width="58" height="34" rx="4"/><text class="v" x="327" y="92" text-anchor="middle">2</text>
+  <rect class="old" x="364" y="70" width="58" height="34" rx="4"/><text class="v" x="393" y="92" text-anchor="middle">3</text>
+  <rect class="old" x="430" y="70" width="58" height="34" rx="4"/><text class="v" x="459" y="92" text-anchor="middle">4</text>
+  <rect class="new" x="496" y="70" width="58" height="34" rx="4"/><text class="v" x="525" y="92" text-anchor="middle">5</text>
+  <rect class="none" x="562" y="70" width="58" height="34" rx="4"/><text class="vd" x="591" y="92" text-anchor="middle">–</text>
+
+  <!-- lane B -->
+  <text class="t" x="16" y="160">Resumed call's own routes</text>
+  <text class="g" x="16" y="176">vLLM re-reads 10…14</text>
+  <text class="g" x="16" y="190">with the new weights</text>
+  <rect class="new" x="232" y="146" width="58" height="34" rx="4"/><text class="v" x="261" y="168" text-anchor="middle">90</text>
+  <rect class="new" x="298" y="146" width="58" height="34" rx="4"/><text class="v" x="327" y="168" text-anchor="middle">91</text>
+  <rect class="new" x="364" y="146" width="58" height="34" rx="4"/><text class="v" x="393" y="168" text-anchor="middle">92</text>
+  <rect class="new" x="430" y="146" width="58" height="34" rx="4"/><text class="v" x="459" y="168" text-anchor="middle">93</text>
+  <rect class="new" x="496" y="146" width="58" height="34" rx="4"/><text class="v" x="525" y="168" text-anchor="middle">5</text>
+  <rect class="none" x="562" y="146" width="58" height="34" rx="4"/><text class="vd" x="591" y="168" text-anchor="middle">–</text>
+
+  <!-- lane C -->
+  <text class="t" x="16" y="236">What this PR trains with</text>
+  <text class="g" x="16" y="252">saved rows for 0…3,</text>
+  <text class="g" x="16" y="266">resumed rows from 4 on</text>
+  <rect class="old" x="232" y="222" width="58" height="34" rx="4"/><text class="v" x="261" y="244" text-anchor="middle">1</text>
+  <rect class="old" x="298" y="222" width="58" height="34" rx="4"/><text class="v" x="327" y="244" text-anchor="middle">2</text>
+  <rect class="old" x="364" y="222" width="58" height="34" rx="4"/><text class="v" x="393" y="244" text-anchor="middle">3</text>
+  <rect class="old" x="430" y="222" width="58" height="34" rx="4"/><text class="v" x="459" y="244" text-anchor="middle">4</text>
+  <rect class="new" x="496" y="222" width="58" height="34" rx="4"/><text class="v" x="525" y="244" text-anchor="middle">5</text>
+  <rect class="none" x="562" y="222" width="58" height="34" rx="4"/><text class="vd" x="591" y="244" text-anchor="middle">–</text>
+  <rect class="frame" x="226" y="64" width="400" height="46" rx="6"/>
+  <rect class="frame" x="226" y="216" width="400" height="46" rx="6"/>
+  <text class="ok" x="640" y="92">same rows</text>
+  <text class="ok" x="640" y="244">= uninterrupted run</text>
+
+  <!-- data path -->
+  <text class="t" x="16" y="300">How lane 3 is built</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/2548c6793465bbe79f50b25202e85f10d1a60592/nemo_rl/models/generation/generation_cut_capture.py#L296"><text class="c" x="16" y="322">cut 1</text></a>
+  <text class="d" x="62" y="322">[1,2,3,ph]</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/2548c6793465bbe79f50b25202e85f10d1a60592/nemo_rl/models/generation/generation_cut_capture.py#L296"><text class="c" x="170" y="322">cut 2</text></a>
+  <text class="d" x="216" y="322">[4]</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/2548c6793465bbe79f50b25202e85f10d1a60592/nemo_rl/models/generation/generation_cut_capture.py#L570"><text class="c" x="270" y="322">join on resume</text></a>
+  <text class="d" x="386" y="322">[1,2,3,4,ph]</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/2548c6793465bbe79f50b25202e85f10d1a60592/nemo_rl/models/generation/vllm/vllm_worker_async.py#L1412"><text class="c" x="500" y="322">merge at the end</text></a>
+  <text class="d" x="630" y="322">[1,2,3,4,5,–]</text>
+  <text class="g" x="16" y="346">ph = a placeholder row for the last position (it has no route yet); each new piece replaces it and adds a new one.</text>
+
+  <rect class="old" x="16" y="356" width="14" height="12"/><text class="g" x="36" y="366">route from the weights that sampled the token</text>
+  <rect class="new" x="330" y="356" width="14" height="12"/><text class="g" x="350" y="366">route from the new weights</text>
+  <rect class="none" x="530" y="356" width="14" height="12"/><text class="g" x="550" y="366">no route (last position)</text>
+</svg>
+
+<p>The numbers come from the PR's own test, <a href="https://github.com/NVIDIA-NeMo/RL/blob/2548c6793465bbe79f50b25202e85f10d1a60592/tests/unit/models/generation/test_vllm_token_capture_hosting.py#L1376"><code>test_router_replay_survives_repeated_prefix_cuts_and_resume</code></a>. It cuts after 12, 13, cuts again after 14, resumes, and generates 15. It asserts the final rows are <code>[1, 2, 3, 4, 5, …]</code>.</p>
+
+<h2>Why keep the old rows instead of the resumed call's own</h2>
+<p>Using the resumed call's own routes (lane 2) would delete almost all of this PR. But tokens 12–14 were sampled with the old weights and routes, and their saved sampling probabilities come from that run. Training them with routes 92, 93 would make training's probabilities differ from the saved ones. Also, by default <a href="https://github.com/NVIDIA-NeMo/RL/blob/2548c6793465bbe79f50b25202e85f10d1a60592/nemo_rl/algorithms/single_controller_utils/config.py#L499"><code>recompute_kv_cache_after_weight_updates</code> is <code>False</code></a>. So a run that never restarts also keeps the old routes for tokens it already read, and uses new routes only after a weight update (lane 1). The PR reproduces that.</p>
+<p>One thing does differ: after a restart, token 15 is sampled while reading 10…14 with the new weights, not from the old cache. Neither choice avoids that; it is the cost of resuming without a saved cache.</p>
+<!--CREF-C15-->
+
+<div class="hl"><b>So what.</b> The design choice is right, but the PR never says it. The review asks for one sentence in the merge's docstring and in <a href="https://github.com/NVIDIA-NeMo/RL/blob/2548c6793465bbe79f50b25202e85f10d1a60592/docs/guides/single-controller.md#L549-L560">the prefix-recovery docs</a>: a resumed row trains with the saved routes for its old tokens, and this matches a run without a restart when the KV cache is kept. With <code>recompute_kv_cache_after_weight_updates: true</code> it does not match, so say that too. The open problems are elsewhere: <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4612-finished-prefix-crash.html">a crash on one resume path</a> and <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4612-size.html">how the routes are collected</a>.</div>
+
+</div>
+</body>
+</html>
