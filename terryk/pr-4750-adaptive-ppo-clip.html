@@ -121,13 +121,20 @@ so the PPO ratio is 1 and the only thing left to clip is the importance weight:<
 <div class="tex">\mathcal{L}(\theta)=-\frac{1}{N}\sum_t\;\htmlClass{t1}{m_t}\cdot w_t\cdot A_t\,\log\pi_\theta(o_t)
 \qquad\begin{aligned}
 \text{icepop:}\quad & \htmlClass{t1}{m_t}=[\,\text{min}\le w_t\le\text{max}\,]\\
-\text{adaptive:}\quad & \htmlClass{t1}{m_t}=[\,w_t\le 50\,]\cdot[\,A_t\ge 0\ \lor\ w_t\ge\text{min}\,]\cdot[\,A_t\le 0\ \lor\ w_t\le\text{max}+\htmlClass{t2}{k}\,]
+\text{adaptive:}\quad & \htmlClass{t1}{m_t}=[\,w_t\le 50\,]\cdot[\,w_t\ge\text{min}\ \text{ if } A_t<0\,]\cdot[\,w_t\le\text{max}+\htmlClass{t2}{k}\ \text{ if } A_t>0\,]
 \end{aligned}</div>
 
-<p>The <span class="t1">keep-mask m</span> is 1 to train on the token and 0 to drop it. Read the adaptive rule as:
-a token that the update would make <i>less</i> likely (A&lt;0) needs only a lower bound. A token it would make <i>more</i>
-likely (A&gt;0) needs only an upper bound. Any token with w above 50 is dropped. This is the paper's Eq. 6 and Eq. 9 written as
-a mask, with ε = 0.6 giving min = 0.4 and max = 2.5.</p>
+<p><b>How to read it.</b> Each <code>[ … ]</code> is 1 if the test inside is true and 0 if it is false. A bracket whose
+"if" does not apply to the token counts as 1. Multiplying them means all must hold: the <span class="t1">keep-mask m</span>
+is 1 (train on the token) only when every bracket is 1, and one 0 drops the token. The code does the same with <code>&amp;</code>
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/e4e546b29dfef5254b3135651a89399b2719ae8e/nemo_rl/algorithms/loss/loss_functions.py#L943-L945">code</a>).
+So the adaptive rule is:</p>
+<ul class="terms">
+<li>Every token: drop it if w &gt; 50.</li>
+<li>A &lt; 0 (a bad token the update pushes <i>down</i>): drop it if w &lt; min.</li>
+<li>A &gt; 0 (a good token the update pushes <i>up</i>): drop it if w &gt; max + k.</li>
+</ul>
+<p>This is the paper's Eq. 6 and Eq. 9 written as a mask, with ε = 0.6 giving min = 0.4 and max = 2.5.</p>
 
 <p>The <span class="t2">offset k</span> starts at 0 and moves once per training step
 (<a href="https://github.com/NVIDIA-NeMo/RL/blob/e4e546b29dfef5254b3135651a89399b2719ae8e/nemo_rl/algorithms/loss/loss_functions.py#L620-L639">code</a>, paper Eq. 8):</p>
@@ -203,9 +210,17 @@ High entropy lowers k again.</p>
 </svg>
 </div>
 
-<p>The two middle columns are the point. icepop throws away the 0.2-weight token with A&gt;0 and the 2.8-weight token
-with A&lt;0. The adaptive rule keeps both, because clipping them would not stop an over-large update in the direction
-the advantage pushes. The 2.8-weight token with A&gt;0 is the one k decides: dropped at k = 0, kept once k reaches 0.5.</p>
+<p><b>Why the sign of A matters.</b> w says how far the trainer has already moved from vLLM on this token, and in which
+direction: w &gt; 1 means it now likes the token more, w &lt; 1 means less. A says which way this update pushes. The rule:
+stop pushing a token further in a direction it has already gone too far, but never stop a push that brings it back.</p>
+<ul class="terms">
+<li>Good token, w = 2.8: already liked 2.8× more. Pushing it up again could overshoot, so drop it (until k raises the cap).</li>
+<li>Good token, w = 0.2: the trainer now dislikes a token that turned out good. Pushing it up moves it back, so keep it. icepop drops it.</li>
+<li>Bad token, w = 0.2: already pushed far down. More could overshoot, so drop it.</li>
+<li>Bad token, w = 2.8: the trainer now likes a bad token more. That is exactly what to penalize, so keep it. icepop drops it.</li>
+</ul>
+<p>This is the same one-sided rule as PPO's clip, <code>min(r·A, clip(r)·A)</code>, which for A &gt; 0 caps only from above and
+for A &lt; 0 only from below. With <code>force_on_policy_ratio</code> the PPO ratio is 1, so the rule moves onto w.</p>
 
 <h2>Where the code lives, and what the review asks</h2>
 
