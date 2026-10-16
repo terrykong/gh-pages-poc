@@ -222,6 +222,16 @@ stop pushing a token further in a direction it has already gone too far, but nev
 <p>This is the same one-sided rule as PPO's clip, <code>min(r·A, clip(r)·A)</code>, which for A &gt; 0 caps only from above and
 for A &lt; 0 only from below. With <code>force_on_policy_ratio</code> the PPO ratio is 1, so the rule moves onto w.</p>
 
+<p><b>Why there is still an outer bound of 50.</b> The two "keep" cases above have no cap of their own, and each token's
+gradient grows with w. One token with w = 1000 would outweigh the rest of the batch. The outer bound drops those spikes
+whatever the sign of A (the paper's Eq. 9).</p>
+
+<p><b>Why k moves only the upper cap.</b> This is the same idea as DAPO's
+<a href="https://arxiv.org/abs/2503.14476">clip-higher</a>. A rare good token (small π<sub>gen</sub>) reaches a large w
+quickly when it is pushed up, so a tight upper cap stops rare tokens from growing, and entropy collapses. When entropy is
+below the target, k raises the cap and lets them grow. When entropy is above the target, k lowers the cap again. The lower
+cap only limits how far bad tokens are pushed down, so it has no such effect on entropy and stays fixed.</p>
+
 <h2>Where the code lives, and what the review asks</h2>
 
 <p class="where"><b>Where it lands: RL only.</b> The mask is a new branch in
