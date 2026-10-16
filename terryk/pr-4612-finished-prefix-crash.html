@@ -153,8 +153,8 @@ p.chainnote{color:var(--dim);font-size:12px;margin:0 0 18px}
   <rect class="box" x="262" y="168" width="250" height="96" rx="8"/>
   <text class="t" x="274" y="190">5. The call fails</text>
   <text class="d" x="274" y="212">HTTP 500, capture aborted</text>
-  <text class="g" x="274" y="232">The saved prefix does not change,</text>
-  <text class="g" x="274" y="250">so a retry from it should fail the same way.</text>
+  <text class="g" x="274" y="232">The saved prefix is lost; a retry</text>
+  <text class="g" x="274" y="250">regenerates the call from scratch.</text>
   <path class="ar" d="M548 216 H516"/>
 
   <path class="ar2" d="M120 130 V216 H258"/>
@@ -218,7 +218,7 @@ p.chainnote{color:var(--dim);font-size:12px;margin:0 0 18px}
 <p>On the example: the fake output now carries <code>[1, 2, 3, 4]</code>. The route-attach step adds a <code>-1</code> for the last position (<a href="https://github.com/NVIDIA-NeMo/RL/blob/2548c6793465bbe79f50b25202e85f10d1a60592/nemo_rl/models/generation/vllm/utils.py#L371-L380">same as every normal reply</a>), giving <code>[1, 2, 3, 4, -1]</code>. That is exactly what the call would have saved if no restart had happened. The merge then has no special case left. A simpler fallback is to refuse the cut, so the call regenerates, when routes are on and the call is already finished. That works today only because the last token and its finish signal are recorded under one lock.</p>
 <!--CREF-C1-->
 
-<div class="warn"><b>So what.</b> This PR removes the setup check that kept these two features apart. Any MoE run with both on can now fail a resumed call this way, and a retry from the same checkpoint should fail the same way. The fix is about 15 lines plus one test, and it removes a special case from the merge.</div>
+<div class="warn"><b>So what.</b> This PR removes the setup check that kept these two features apart. Any MoE run with both on can now fail a resumed call this way. Gym uses a saved prefix only once (<a href="https://github.com/NVIDIA-NeMo/Gym/blob/34ac4533a139f4823919ae9f0f54b2146306edc6/nemo_gym/_checkpoint/model_workers.py#L487-L497">a used cut is not handed back</a>), so nothing loops: the episode fails, and the prefix the checkpoint saved is wasted. The fix is about 15 lines plus one test, and it removes a special case from the merge.</div>
 
 </div>
 </body>
