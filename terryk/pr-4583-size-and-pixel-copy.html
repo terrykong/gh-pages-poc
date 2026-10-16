@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NVIDIA-NeMo/RL #4583 — where the 1,135 lines go, and the pixel copy a hash could replace</title>
+<style>
+:root{
+  --bg:#0d1117; --surface:#161b22; --surface2:#1c2128; --border:#30363d;
+  --text:#e6edf3; --dim:#8b949e; --accent:#58a6ff; --green:#3fb950;
+  --orange:#d29922; --red:#f85149;
+}
+:root[data-theme="light"]{
+  --bg:#ffffff; --surface:#f6f8fa; --surface2:#eaeef2; --border:#d0d7de;
+  --text:#1f2328; --dim:#59636e; --accent:#0969da; --green:#1a7f37;
+  --orange:#9a6700; --red:#cf222e;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:28px 16px 70px}
+h1{font-size:22px;margin:0 0 8px;line-height:1.3}
+h2{font-size:18px;margin:32px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;
+  font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
+.sub{color:var(--dim);font-size:13.5px;margin:0 0 16px}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);
+  border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;
+  font:13px/1 ui-monospace,Menlo,monospace;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.18)}
+.status{border:1px solid var(--border);border-radius:10px;background:var(--surface);
+  padding:2px 16px 10px;margin:0 0 20px}
+.status dl{display:grid;grid-template-columns:max-content 1fr;gap:4px 14px;margin:12px 0 0}
+.status dt{color:var(--dim);font-size:12px;text-transform:uppercase;letter-spacing:.04em;
+  white-space:nowrap;padding-top:2px}
+.status dd{margin:0;font-size:14px}
+.verdict{font-weight:700}
+.verdict.open{color:var(--orange)}
+.warn{border-left:3px solid var(--orange);background:var(--surface);
+  padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0}
+.where{border-left:4px solid var(--accent);background:var(--surface);padding:6px 12px;margin:6px 0 10px}
+.diff{font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--surface);
+  border:1px solid var(--border);border-radius:8px;padding:12px;overflow-x:auto;white-space:pre;margin:10px 0}
+.diff .add{color:var(--green)}
+.diff .del{color:var(--red)}
+.diff .hunk{color:var(--accent)}
+.diff .skip{color:var(--dim);font-style:italic}
+table{border-collapse:collapse;width:100%;font-size:13.5px;margin:10px 0}
+th,td{border-bottom:1px solid var(--border);padding:5px 8px;text-align:left;vertical-align:top}
+th{color:var(--dim);font-weight:600;font-size:12px}
+td.n{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
+.tbl{overflow-x:auto}
+.tip{border-bottom:1px dotted var(--dim);cursor:help;position:relative;outline:none}
+.tip:hover::after,.tip:focus::after{content:attr(data-tip);position:absolute;left:0;top:1.7em;z-index:60;
+  width:max-content;max-width:min(340px,80vw);white-space:normal;background:var(--surface2);color:var(--text);
+  border:1px solid var(--border);border-radius:6px;padding:7px 10px;font:13px/1.45 -apple-system,sans-serif;
+  font-weight:400;box-shadow:0 4px 14px rgba(0,0,0,.3)}
+svg{max-width:100%;height:auto;display:block;margin:16px 0}
+svg .t{fill:var(--text);font:bold 12.5px -apple-system,sans-serif}
+svg .note{fill:var(--dim);font:11.5px -apple-system,sans-serif}
+svg .in{fill:var(--bg);font:bold 11.5px -apple-system,sans-serif}
+svg .other{fill:var(--surface2);stroke:var(--border);stroke-width:1}
+svg .this{fill:var(--accent)}
+svg .src{fill:var(--accent)}
+svg .ut{fill:var(--green)}
+svg .doc{fill:var(--border)}
+svg .sep{stroke:var(--bg);stroke-width:1.5}
+svg .hatched{fill:url(#hatch);stroke:var(--orange);stroke-width:1.2}
+svg .zoom{stroke:var(--dim);stroke-width:1;stroke-dasharray:4 4;fill:none}
+svg .hatch-bar{fill:var(--orange)}
+.cref{margin:6px 0 0;font-size:13px}
+.cref a{display:inline-block;padding:4px 10px;border:1px solid var(--border);
+  border-radius:16px;background:var(--surface);font:12.5px ui-monospace,Menlo,monospace;margin:2px 4px 2px 0}
+.cref a:hover{background:var(--surface2);text-decoration:none}
+td .cref{margin:4px 0 0}
+td .cref a{font-size:11.5px;padding:2px 8px}
+nav.chain{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 6px;padding:0}
+nav.chain a,nav.chain span{display:inline-block;padding:5px 11px;border:1px solid var(--border);
+  border-radius:20px;background:var(--surface);text-decoration:none;color:var(--accent);
+  font-size:12.5px;line-height:1.3;white-space:nowrap}
+nav.chain a:hover{background:var(--surface2)}
+nav.chain span.here{background:var(--accent);color:var(--bg);border-color:var(--accent);font-weight:600}
+p.chainnote{color:var(--dim);font-size:12px;margin:0 0 18px}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+  document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head>
+<body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+  function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+  function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
+    b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
+      else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+  document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+<div class="wrap">
+
+<h1>Where #4583's 1,135 lines go, and the pixel copy a hash could replace</h1>
+<p class="sub"><a href="https://github.com/NVIDIA-NeMo/RL/pull/4583">NVIDIA-NeMo/RL #4583</a>.
+Line counts are added lines from the GitHub diff against the parent branch. Permalinks pin <code>0bf5789</code>.</p>
+
+<div class="status">
+<dl>
+  <dt>Before</dt>
+  <dd>The partial-checkpointing stack this PR sits in is about 21,000 added lines across 8 open PRs.</dd>
+  <dt>This PR</dt>
+  <dd>Adds 1,135 lines. Only 192 are source. The rest is tests (436) and a GPU functional test with its helper (497) that no CI job runs.</dd>
+  <dt>Status</dt>
+  <dd><span class="verdict open">Proposed — not implemented.</span> The review asks to move the 497 functional lines to the PR that can run them, and to replace the saved pixel copy with a hash (about 55 source lines).</dd>
+</dl>
+</div>
+
+<nav class="chain">
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4583-text-vs-media.html">text vs image restore</a>
+  <span class="here">size, and the pixel copy</span>
+</nav>
+<p class="chainnote">Two pages on this PR, one question each. This one: what could be smaller.</p>
+
+<h2>Where the lines go</h2>
+
+<svg viewBox="0 0 900 250" role="img" aria-label="Top bar: the 8-PR stack, 21,283 lines, with this PR's 1,135 highlighted. Bottom bar: this PR split into 192 source, 10 docs, 436 unit test and 497 functional test lines; 497 functional and about 68 source lines are marked as removable.">
+  <defs><pattern id="hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+    <rect width="3" height="6" class="hatch-bar"/></pattern></defs>
+  <text class="t" x="10" y="20">The stack: 21,283 added lines in 8 open PRs</text>
+  <!-- scale 860/21283 -->
+  <rect class="other" x="10" y="30" width="330" height="26"/><text class="note" x="16" y="47">#4500 8,164</text>
+  <rect class="other" x="340" y="30" width="55" height="26"/>
+  <rect class="other" x="395" y="30" width="152" height="26"/><text class="note" x="400" y="47">#4506 3,751</text>
+  <rect class="other" x="547" y="30" width="85" height="26"/>
+  <rect class="this" x="632" y="30" width="46" height="26"/>
+  <rect class="other" x="678" y="30" width="44" height="26"/>
+  <rect class="other" x="722" y="30" width="113" height="26"/>
+  <rect class="other" x="835" y="30" width="35" height="26"/>
+  <text class="note" x="560" y="72">#4501, #4507 below it; #4612, #4508, #4655 above it</text>
+  <path class="zoom" d="M632 56 L10 100 M678 56 L870 100"/>
+
+  <text class="t" x="10" y="118">This PR: 1,135 lines</text>
+  <!-- scale 860/1135: src 192→145, docs 10→8, unit 436→330, func 497→377 -->
+  <rect class="src" x="10" y="128" width="145" height="34"/>
+  <rect class="hatched" x="10" y="128" width="51" height="34"/>
+  <rect class="doc" x="155" y="128" width="8" height="34"/>
+  <rect class="ut" x="163" y="128" width="330" height="34"/>
+  <rect class="hatched" x="493" y="128" width="377" height="34"/>
+  <text class="in" x="66" y="150">source 192</text>
+  <text class="in" x="240" y="150">unit tests 436</text>
+  <text class="t" x="560" y="150">functional test + helper 497</text>
+  <rect class="hatched" x="10" y="184" width="16" height="14"/>
+  <text class="note" x="32" y="196">could go: ~68 source lines (pixel hash ~55, getattr hooks ~7, shared items helper ~6)</text>
+  <text class="note" x="32" y="214">and 497 functional lines move to the PR that bumps Gym, where CI can run them</text>
+  <text class="note" x="10" y="240">Source: tq_token_sink.py +33, generation_cut_capture.py +39, vllm_worker_async.py +120. Docs +10.</text>
+</svg>
+
+<p>The source is not the problem here: 192 lines for a new media path is fair, and most of it reuses the parent PR's code.
+The weight is in tests. The functional script
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/0bf5789ee65522df74f3c22e52bc88002b82955a/tests/functional/nemotron_omni_clevr_vllm_prefix_recovery_single_controller_1n2g.sh#L187">nemotron_omni_clevr_vllm_prefix_recovery_single_controller_1n2g.sh</a>)
+cannot pass until a Gym change lands, so no CI job runs it. Its new completion check
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/0bf5789ee65522df74f3c22e52bc88002b82955a/tests/functional/_gym_prefix_recovery_snapshot.py#L440"><code>assert_restored_prefixes_completed</code></a>)
+repeats the parent's
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/0bf5789ee65522df74f3c22e52bc88002b82955a/tests/functional/_gym_prefix_recovery_parity.py#L309"><code>_assert_prefix_boundary</code></a>).
+The 436 unit-test lines are a fair size, but they test the save side. About 10 of the new reject paths have no test.</p>
+<p class="cref" id="cref-c6">⏳ review comment links are added once the review is staged</p>
+
+<h2>The pixel copy is only used to compare — proposed, not in the PR</h2>
+<p>At the first cut, the call's pixels are written to TQ
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/0bf5789ee65522df74f3c22e52bc88002b82955a/nemo_rl/models/generation/vllm/vllm_worker_async.py#L1179-L1182">:1179-1182</a>).
+On restore they are read back, compared byte for byte with the freshly processed image, and returned in place of the fresh copy
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/0bf5789ee65522df74f3c22e52bc88002b82955a/nemo_rl/models/generation/vllm/vllm_worker_async.py#L1156-L1169">:1156-1169</a>).
+By then the two are equal, so returning either one gives the same result. The final row writes the pixels again anyway
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/0bf5789ee65522df74f3c22e52bc88002b82955a/nemo_rl/models/generation/vllm/vllm_worker_async.py#L1361-L1365">:1361-1365</a>),
+and training reads media only from final rows
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/0bf5789ee65522df74f3c22e52bc88002b82955a/nemo_rl/experience/rollout_reassembler.py#L512-L531">rollout_reassembler.py:512</a>).
+A hash of the pixels does the same check without the copy.</p>
+
+<p class="where"><b>Where the fix lands: RL only.</b> <code>vllm_worker_async.py</code> (write the hash, compare it),
+<code>captured_media.py</code> (one pure hash helper, next to <code>CapturedMedia</code>), and deletions in
+<code>tq_token_sink.py</code> and <code>generation_cut_capture.py</code>. <b>No Gym change:</b> the hash rides in the same
+digest-covered extras dict that already carries <code>media_spans</code>.</p>
+
+<pre class="diff"><span class="hunk">@@ captured_media.py · new function, next to CapturedMedia (L137)</span>
+<span class="add">+def media_tensor_sha256(tensors: dict[str, torch.Tensor] | None) -> str:
++    # Covers name, dtype and shape too, so it checks as much as torch.equal did.
++    h = hashlib.sha256()
++    for name in sorted(tensors or {}):
++        t = tensors[name].detach().cpu().contiguous()
++        h.update(f"{name}|{t.dtype}|{tuple(t.shape)}|".encode())
++        h.update(t.view(torch.uint8).numpy().tobytes())
++    return h.hexdigest()</span>
+
+<span class="hunk">@@ vllm_worker_async.py L1179-L1182 · _generation_cut_record_payload</span>
+         return (
+<span class="del">-            {MEDIA_SPANS_FIELD: [item.to_dict() for item in state.media.items]},
+-            state.media.tensors,
+</span><span class="add">+            {
++                MEDIA_SPANS_FIELD: [item.to_dict() for item in state.media.items],
++                "media_tensor_sha256": media_tensor_sha256(state.media.tensors),
++            },
++            None,  # no pixel copy on the prefix row
+</span>         )
+
+<span class="hunk">@@ vllm_worker_async.py L1156-L1169 · _capture_request_media</span>
+<span class="del">-        captured_tensors = captured.tensors or {}
+-        restored_tensors = restored.tensors or {}
+-        if set(captured_tensors) != set(restored_tensors) or any(
+-            ...
+-        ):
+</span><span class="add">+        if media_tensor_sha256(captured.tensors) != restored_sha256:
+</span>             raise MediaCaptureRejected(
+                 "Restored generation media tensors differ from reprocessed input",
+                 code="retained_media_changed",
+             )
+<span class="del">-        # Keep the durable TQ-owned tensors for the eventual canonical row.
+-        return restored
+</span><span class="add">+        # Equal by hash, so the fresh tensors are the ones the cut saw.
++        return captured</span>
+<span class="skip">  … plus deletions: the media half of fetch_generation_cut (tq_token_sink.py L914-941),
+    FetchedStagedCall.media (L401-403), the tensor rebuild (vllm_worker_async.py L1213-1221),
+    and the first-row attachments (generation_cut_capture.py L722-726).</span></pre>
+<p style="font-size:13px;color:var(--dim)">A sketch, not run. <code>restored_sha256</code> is read from the first row's extras in place of today's pixel read.</p>
+<p class="cref" id="cref-c1">⏳ review comment links are added once the review is staged</p>
+
+<div class="warn"><b>So what.</b> Each checkpoint writes every in-flight image call's pixels to TQ one extra time, one call after another, under the checkpoint's time limit.
+Calls the cut does not reach in time are thrown away and generated again, with only a warning in the log
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/0bf5789ee65522df74f3c22e52bc88002b82955a/nemo_rl/models/generation/generation_cut_capture.py#L803-L815">generation_cut_capture.py:803-815</a>).
+A hash removes that write, the second read on restore, and about 55 source lines. The check stays exactly as strict. In a stack this size, every step that stays small makes the next review easier.</div>
+
+</div>
+</body>
+</html>

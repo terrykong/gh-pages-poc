@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NVIDIA-NeMo/RL #4583 — how a cut image call is restored, next to a cut text call</title>
+<style>
+:root{
+  --bg:#0d1117; --surface:#161b22; --surface2:#1c2128; --border:#30363d;
+  --text:#e6edf3; --dim:#8b949e; --accent:#58a6ff; --green:#3fb950;
+  --orange:#d29922; --red:#f85149;
+}
+:root[data-theme="light"]{
+  --bg:#ffffff; --surface:#f6f8fa; --surface2:#eaeef2; --border:#d0d7de;
+  --text:#1f2328; --dim:#59636e; --accent:#0969da; --green:#1a7f37;
+  --orange:#9a6700; --red:#cf222e;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:28px 16px 70px}
+h1{font-size:22px;margin:0 0 8px;line-height:1.3}
+h2{font-size:18px;margin:32px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;
+  font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
+.sub{color:var(--dim);font-size:13.5px;margin:0 0 16px}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);
+  border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;
+  font:13px/1 ui-monospace,Menlo,monospace;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.18)}
+.status{border:1px solid var(--border);border-radius:10px;background:var(--surface);
+  padding:2px 16px 10px;margin:0 0 20px}
+.status dl{display:grid;grid-template-columns:max-content 1fr;gap:4px 14px;margin:12px 0 0}
+.status dt{color:var(--dim);font-size:12px;text-transform:uppercase;letter-spacing:.04em;
+  white-space:nowrap;padding-top:2px}
+.status dd{margin:0;font-size:14px}
+.verdict{font-weight:700}
+.verdict.good{color:var(--green)}
+.bg{border:1px solid var(--border);border-radius:8px;background:var(--surface);padding:8px 14px;margin:0 0 16px;font-size:14px}
+.hl{border-left:3px solid var(--accent);background:var(--surface);
+  padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0}
+.tip{border-bottom:1px dotted var(--dim);cursor:help;position:relative;outline:none}
+.tip:hover::after,.tip:focus::after{content:attr(data-tip);position:absolute;left:0;top:1.7em;z-index:60;
+  width:max-content;max-width:min(340px,80vw);white-space:normal;background:var(--surface2);color:var(--text);
+  border:1px solid var(--border);border-radius:6px;padding:7px 10px;font:13px/1.45 -apple-system,sans-serif;
+  font-weight:400;box-shadow:0 4px 14px rgba(0,0,0,.3)}
+svg{max-width:100%;height:auto;display:block;margin:16px 0}
+svg .box{fill:var(--surface);stroke:var(--border);stroke-width:1.2}
+svg .same{fill:var(--surface);stroke:var(--green);stroke-width:1.4}
+svg .diffb{fill:var(--surface);stroke:var(--orange);stroke-width:2}
+svg .step{fill:var(--text);font:bold 12px -apple-system,sans-serif}
+svg .stepn{fill:var(--dim);font:11px -apple-system,sans-serif}
+svg .hdr{fill:var(--accent);font:bold 13px -apple-system,sans-serif}
+svg .d{fill:var(--text);font:11px ui-monospace,Menlo,monospace}
+svg .o{fill:var(--orange);font:bold 11px ui-monospace,Menlo,monospace}
+svg .note{fill:var(--dim);font:11px -apple-system,sans-serif}
+svg .g{fill:var(--green);font:bold 11px -apple-system,sans-serif}
+svg .og{fill:var(--orange);font:bold 11px -apple-system,sans-serif}
+svg .merge{stroke:var(--green);stroke-width:1.6;stroke-dasharray:5 4;fill:none}
+svg a text{text-decoration:underline;fill:var(--accent);font:11px ui-monospace,Menlo,monospace}
+.cref{margin:6px 0 0;font-size:13px}
+.cref a{display:inline-block;padding:4px 10px;border:1px solid var(--border);
+  border-radius:16px;background:var(--surface);font:12.5px ui-monospace,Menlo,monospace;margin:2px 4px 2px 0}
+.cref a:hover{background:var(--surface2);text-decoration:none}
+nav.chain{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 6px;padding:0}
+nav.chain a,nav.chain span{display:inline-block;padding:5px 11px;border:1px solid var(--border);
+  border-radius:20px;background:var(--surface);text-decoration:none;color:var(--accent);
+  font-size:12.5px;line-height:1.3;white-space:nowrap}
+nav.chain a:hover{background:var(--surface2)}
+nav.chain span.here{background:var(--accent);color:var(--bg);border-color:var(--accent);font-weight:600}
+p.chainnote{color:var(--dim);font-size:12px;margin:0 0 18px}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+  document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head>
+<body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+  function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+  function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
+    b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
+      else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+  document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+<div class="wrap">
+
+<h1>How a model call with an image is saved mid-generation and resumed, next to a text-only call</h1>
+<p class="sub"><a href="https://github.com/NVIDIA-NeMo/RL/pull/4583">NVIDIA-NeMo/RL #4583</a>,
+stacked on <a href="https://github.com/NVIDIA-NeMo/RL/pull/4506">#4506</a> (text prefix recovery).
+All permalinks pin the PR head <code>0bf5789</code>.</p>
+
+<div class="status">
+<dl>
+  <dt>Before</dt>
+  <dd>A checkpoint could save a half-finished text generation and resume it later. Setup refused to turn this on when the run captured images or video.</dd>
+  <dt>This PR</dt>
+  <dd>Removes that refusal for Omni image and video. The first saved row for a call also stores the call's image metadata and pixels; on resume the image is processed again and checked against them.</dd>
+  <dt>Status</dt>
+  <dd><span class="verdict good">New feature. The review found no bug.</span> It asks for a smaller design (see “size” page) and for tests of the reject paths.</dd>
+</dl>
+</div>
+
+<nav class="chain">
+  <span class="here">text vs image restore</span>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4583-size-and-pixel-copy.html">size, and the pixel copy</a>
+</nav>
+<p class="chainnote">Two pages on this PR, one question each. This one: what changes when the cut call has an image.</p>
+
+<div class="bg"><b>Background.</b> In a long rollout, a checkpoint can land while vLLM is still generating a model call.
+Instead of throwing those tokens away, the parent PR saves them as <span class="tip" tabindex="0" data-tip="A saved row in the TransferQueue (TQ), the data store RL uses between workers. Each cut adds one row with the tokens produced since the last cut.">prefix rows</span>,
+one per checkpoint. After a restart, Gym sends the same request again with the list of saved rows, and vLLM continues from the saved tokens.
+This PR makes that work when the prompt has an image. Dotted words have a short explanation: hover or tap them.</div>
+
+<p>Both kinds of call share the same save and resume code. The only extra work for an image call is at three points:
+the first saved row stores the image's place in the prompt and its pixels
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/0bf5789ee65522df74f3c22e52bc88002b82955a/nemo_rl/models/generation/generation_cut_capture.py#L717-L726">generation_cut_capture.py:717-726</a>);
+resume reads those pixels back in a second read
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/0bf5789ee65522df74f3c22e52bc88002b82955a/nemo_rl/data_plane/tq_token_sink.py#L914-L941"><code>fetch_generation_cut</code></a>);
+and resume processes the image again and requires the same prompt tokens and the same pixels
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/0bf5789ee65522df74f3c22e52bc88002b82955a/nemo_rl/models/generation/vllm/vllm_worker_async.py#L1753-L1784">vllm_worker_async.py:1753-1784</a>,
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/0bf5789ee65522df74f3c22e52bc88002b82955a/nemo_rl/models/generation/vllm/vllm_worker_async.py#L1149-L1169">:1149-1169</a>).
+Any mismatch rejects the restore, and the call is generated again from the start of the turn.</p>
+
+<h2>One call, cut twice, then resumed</h2>
+
+<svg viewBox="0 0 900 560" role="img" aria-label="Two lanes, text call and image call, through two cuts, a restore, and the final row. Orange marks the steps that only the image call has.">
+  <text class="hdr" x="190" y="20">text call</text>
+  <text class="hdr" x="545" y="20">image call  (18 = image placeholder token)</text>
+
+  <!-- legend -->
+  <rect x="190" y="30" width="12" height="12" class="same"/><text class="note" x="207" y="40">same in both lanes</text>
+  <rect x="330" y="30" width="12" height="12" class="diffb"/><text class="note" x="347" y="40">only the image call</text>
+
+  <!-- step 1 -->
+  <text class="step" x="12" y="76">1 · cut #1</text>
+  <text class="stepn" x="12" y="92">writes row 0</text>
+  <rect class="same" x="190" y="58" width="340" height="56" rx="6"/>
+  <text class="d" x="200" y="78">tokens [10,12,11, 41,42]</text>
+  <text class="d" x="200" y="96">extras: none</text>
+  <rect class="diffb" x="545" y="58" width="345" height="56" rx="6"/>
+  <text class="d" x="555" y="78">tokens [10,18,18,11, 41,42]</text>
+  <text class="o" x="555" y="96">+ media_spans [{1..3}]  + imgs f32[3,2,3]</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/0bf5789ee65522df74f3c22e52bc88002b82955a/nemo_rl/models/generation/generation_cut_capture.py#L717-L726"><text x="555" y="129">generation_cut_capture.py:717-726</text></a>
+
+  <!-- step 2 -->
+  <text class="step" x="12" y="164">2 · cut #2</text>
+  <text class="stepn" x="12" y="180">writes row 1</text>
+  <rect class="same" x="190" y="146" width="340" height="44" rx="6"/>
+  <text class="d" x="200" y="172">tokens [43]   extras: none</text>
+  <rect class="same" x="545" y="146" width="345" height="44" rx="6"/>
+  <text class="d" x="555" y="172">tokens [43]   extras: none (no pixels again)</text>
+
+  <!-- step 3 -->
+  <text class="step" x="12" y="232">3 · restore</text>
+  <text class="stepn" x="12" y="248">read rows from TQ</text>
+  <rect class="same" x="190" y="214" width="340" height="56" rx="6"/>
+  <text class="d" x="200" y="236">1 read: rows 0,1 → tokens</text>
+  <text class="d" x="200" y="254">check digest (same code)</text>
+  <rect class="diffb" x="545" y="214" width="345" height="56" rx="6"/>
+  <text class="d" x="555" y="236">read 1: rows 0,1 → tokens + media_spans</text>
+  <text class="o" x="555" y="254">read 2: imgs f32[3,2,3]</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/0bf5789ee65522df74f3c22e52bc88002b82955a/nemo_rl/data_plane/tq_token_sink.py#L914-L941"><text x="555" y="285">tq_token_sink.py:914 fetch_generation_cut</text></a>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/0bf5789ee65522df74f3c22e52bc88002b82955a/nemo_rl/models/generation/generation_cut_capture.py#L321-L330"><text x="200" y="285">generation_cut_capture.py:321</text></a>
+
+  <!-- step 4 -->
+  <text class="step" x="12" y="324">4 · check</text>
+  <text class="stepn" x="12" y="340">before continuing</text>
+  <rect class="same" x="190" y="306" width="340" height="62" rx="6"/>
+  <text class="d" x="200" y="328">nothing more: the saved tokens</text>
+  <text class="d" x="200" y="346">are the prompt, no re-render</text>
+  <rect class="diffb" x="545" y="306" width="345" height="62" rx="6"/>
+  <text class="o" x="555" y="326">process image again → [10,18,18,11]</text>
+  <text class="o" x="555" y="342">must equal saved prompt tokens</text>
+  <text class="o" x="555" y="358">new pixels must equal saved imgs</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/0bf5789ee65522df74f3c22e52bc88002b82955a/nemo_rl/models/generation/vllm/vllm_worker_async.py#L1149-L1169"><text x="555" y="383">vllm_worker_async.py:1149-1169</text></a>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/0bf5789ee65522df74f3c22e52bc88002b82955a/nemo_rl/models/generation/vllm/vllm_worker_async.py#L1753-L1777"><text x="740" y="383">:1753-1777</text></a>
+
+  <!-- merge -->
+  <path class="merge" d="M190 402 H890"/>
+  <text class="g" x="190" y="420">both lanes meet here: engine prompt = saved tokens</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/0bf5789ee65522df74f3c22e52bc88002b82955a/nemo_rl/models/generation/vllm/vllm_worker_async.py#L1751"><text x="545" y="420">vllm_worker_async.py:1751</text></a>
+
+  <!-- step 5 -->
+  <text class="step" x="12" y="452">5 · decode</text>
+  <text class="stepn" x="12" y="468">the rest</text>
+  <rect class="same" x="190" y="434" width="340" height="40" rx="6"/>
+  <text class="d" x="200" y="458">prefill [10,12,11,41,42,43] → [44,45]</text>
+  <rect class="same" x="545" y="434" width="345" height="40" rx="6"/>
+  <text class="d" x="555" y="458">prefill [10,18,18,11,41,42,43] → [44,45]</text>
+
+  <!-- step 6 -->
+  <text class="step" x="12" y="508">6 · final row</text>
+  <text class="stepn" x="12" y="524">for training</text>
+  <rect class="same" x="190" y="490" width="340" height="44" rx="6"/>
+  <text class="d" x="200" y="516">all tokens, then prefix rows cleared</text>
+  <rect class="diffb" x="545" y="490" width="345" height="44" rx="6"/>
+  <text class="d" x="555" y="510">all tokens + media_spans</text>
+  <text class="o" x="555" y="526">+ imgs f32[3,2,3] written again</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/0bf5789ee65522df74f3c22e52bc88002b82955a/nemo_rl/models/generation/vllm/vllm_worker_async.py#L1361-L1365"><text x="555" y="550">vllm_worker_async.py:1361-1365</text></a>
+</svg>
+
+<p style="font-size:13px;color:var(--dim)">Token ids and the pixel shape come from the PR's unit test
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/0bf5789ee65522df74f3c22e52bc88002b82955a/tests/unit/data/test_captured_media.py#L680-L683"><code>test_generation_prefix_fetch_restores_and_verifies_media</code></a>; the generated ids 41–45 are illustrative.</p>
+
+<h2>Where the two paths meet, and what still differs</h2>
+<p>They share one function for the hard part:
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/0bf5789ee65522df74f3c22e52bc88002b82955a/nemo_rl/models/generation/generation_cut_capture.py#L321"><code>_rebuild_generation_cut_snapshot</code></a>
+joins the rows and checks their digest for both. The digest now also covers the image metadata
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/0bf5789ee65522df74f3c22e52bc88002b82955a/nemo_rl/models/generation/generation_cut_capture.py#L383">:383</a>).
+After the extra checks in step 4, both paths use the saved tokens as the engine prompt
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/0bf5789ee65522df74f3c22e52bc88002b82955a/nemo_rl/models/generation/vllm/vllm_worker_async.py#L1751">vllm_worker_async.py:1751</a>).
+Only two things still differ after that point: vLLM needs the original image again to prefill, because the saved pixels are not in the form vLLM takes as input, and the final row carries the pixels.</p>
+
+<div class="hl"><b>So what.</b> The design reuses the text path well. Only three steps are new, and every mismatch fails closed.
+The cost is in step 1: each saved image call writes its pixels to TQ one extra time at every checkpoint, under the checkpoint's time limit.
+Those saved pixels are only ever compared in step 4, never used, and the final row writes them again. The second page shows how a hash would replace them.
+<p class="cref">🔵 review comments are linked on the <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4583-size-and-pixel-copy.html">size page</a></p></div>
+
+</div>
+</body>
+</html>
