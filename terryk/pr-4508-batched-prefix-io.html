@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PR #4508: batched prefix saves and restores, old vs new path</title>
+<style>
+:root{
+  --bg:#0d1117; --surface:#161b22; --surface2:#1c2128; --border:#30363d;
+  --text:#e6edf3; --dim:#8b949e; --accent:#58a6ff; --green:#3fb950;
+  --orange:#d29922; --red:#f85149;
+}
+:root[data-theme="light"]{
+  --bg:#ffffff; --surface:#f6f8fa; --surface2:#eaeef2; --border:#d0d7de;
+  --text:#1f2328; --dim:#59636e; --accent:#0969da; --green:#1a7f37;
+  --orange:#9a6700; --red:#cf222e;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:28px 16px 70px}
+h1{font-size:22px;margin:0 0 8px;line-height:1.3}
+h2{font-size:18px;margin:32px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;
+  font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
+.sub{color:var(--dim);font-size:13.5px;margin:0 0 16px}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);
+  border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;
+  font:13px/1 ui-monospace,Menlo,monospace;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.18)}
+.status{border:1px solid var(--border);border-radius:10px;background:var(--surface);
+  padding:2px 16px 10px;margin:0 0 20px}
+.status dl{display:grid;grid-template-columns:max-content 1fr;gap:4px 14px;margin:12px 0 0}
+.status dt{color:var(--dim);font-size:12px;text-transform:uppercase;letter-spacing:.04em;
+  white-space:nowrap;padding-top:2px}
+.status dd{margin:0;font-size:14px}
+.verdict{font-weight:700}
+.verdict.open{color:var(--orange)}
+.warn{border-left:3px solid var(--orange);background:var(--surface);
+  padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0}
+.where{border-left:4px solid var(--accent);background:var(--surface);padding:6px 12px;margin:6px 0 10px}
+.diff{font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--surface);
+  border:1px solid var(--border);border-radius:8px;padding:12px;overflow-x:auto;white-space:pre;margin:10px 0}
+.diff .add{color:var(--green)}
+.diff .del{color:var(--red)}
+.diff .hunk{color:var(--accent)}
+.diff .skip{color:var(--dim);font-style:italic}
+table{border-collapse:collapse;width:100%;font-size:13.5px;margin:10px 0}
+th,td{border-bottom:1px solid var(--border);padding:5px 8px;text-align:left;vertical-align:top}
+th{color:var(--dim);font-weight:600;font-size:12px}
+td.n{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
+.tbl{overflow-x:auto}
+.tip{border-bottom:1px dotted var(--dim);cursor:help;position:relative;outline:none}
+.tip:hover::after,.tip:focus::after{content:attr(data-tip);position:absolute;left:0;top:1.7em;z-index:60;
+  width:max-content;max-width:min(340px,80vw);white-space:normal;background:var(--surface2);color:var(--text);
+  border:1px solid var(--border);border-radius:6px;padding:7px 10px;font:13px/1.45 -apple-system,sans-serif;
+  font-weight:400;box-shadow:0 4px 14px rgba(0,0,0,.3)}
+svg{max-width:100%;height:auto;display:block;margin:16px 0}
+svg .t{fill:var(--text);font:bold 12.5px -apple-system,sans-serif}
+svg .note{fill:var(--dim);font:11.5px -apple-system,sans-serif}
+svg .in{fill:var(--bg);font:bold 11.5px -apple-system,sans-serif}
+svg .in-d{fill:var(--text);font:11px -apple-system,sans-serif}
+svg .cut{fill:var(--orange);font:bold 11.5px -apple-system,sans-serif}
+svg .other{fill:var(--surface2);stroke:var(--border);stroke-width:1}
+svg .this{fill:var(--accent)}
+svg .src{fill:var(--accent)}
+svg .src2{fill:var(--accent);fill-opacity:.72}
+svg .src3{fill:var(--accent);fill-opacity:.5}
+svg .ut{fill:var(--green)}
+svg .fn{fill:var(--dim)}
+svg .doc{fill:var(--border)}
+svg .sep{stroke:var(--bg);stroke-width:1.5}
+svg .hatch-bar{fill:var(--orange)}
+svg .hatched{fill:url(#hatch);stroke:var(--orange);stroke-width:1.2}
+svg .zoom{stroke:var(--dim);stroke-width:1;stroke-dasharray:4 4;fill:none}
+.cref{margin:6px 0 0;font-size:13px}
+.cref a{display:inline-block;padding:4px 10px;border:1px solid var(--border);
+  border-radius:16px;background:var(--surface);font:12.5px ui-monospace,Menlo,monospace;margin:2px 4px 2px 0}
+.cref a:hover{background:var(--surface2);text-decoration:none}
+td .cref{margin:4px 0 0}
+td .cref a{font-size:11.5px;padding:2px 8px}
+nav.chain{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 6px;padding:0}
+nav.chain a,nav.chain span{display:inline-block;padding:5px 11px;border:1px solid var(--border);
+  border-radius:20px;background:var(--surface);text-decoration:none;color:var(--accent);
+  font-size:12.5px;line-height:1.3;white-space:nowrap}
+nav.chain a:hover{background:var(--surface2)}
+nav.chain span.here{background:var(--accent);color:var(--bg);border-color:var(--accent);font-weight:600}
+p.chainnote{color:var(--dim);font-size:12px;margin:0 0 18px}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+  document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head>
+<body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+  function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+  function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
+    b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
+      else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+  document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+
+<div class="wrap">
+
+<h1>What changes when prefix saves and restores go to TransferQueue in batches</h1>
+<p class="sub">Explains <a href="https://github.com/NVIDIA-NeMo/RL/pull/4508">NVIDIA-NeMo/RL #4508</a> (stacked on the prefix-recovery PRs, real base <a href="https://github.com/NVIDIA-NeMo/RL/pull/4612">#4612</a>). All permalinks pin the PR head <code>5498a0a</code>; "before" links pin the base <code>2548c67</code>. The review comments are in a pending review; their links work once it is published.</p>
+
+<div class="status">
+<dl>
+  <dt>Before</dt>
+  <dd>At a checkpoint, each unfinished model call saved its tokens with its own TransferQueue write. After a restore, each resumed request read its own saved rows, on its own thread.</dd>
+  <dt>This PR</dt>
+  <dd>Groups the saves into a few large writes (up to 256 rows each). It also merges the reads of requests that resume at the same time into one shared read. Two new config keys set the batch limits.</dd>
+  <dt>Status</dt>
+  <dd><span class="verdict open">Proposed: the speed-up is not measured yet.</span> The PR has no timing numbers. The review asks for two, and for a fix to one shared-read bug (below).</dd>
+</dl>
+</div>
+
+<nav class="chain">
+  <span class="here">old vs new path</span>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4508-size-and-reuse.html">size and reuse</a>
+</nav>
+<p class="chainnote">Two pages on this PR. This one: how the batched path differs from the old one.</p>
+
+<div class="warn" style="border-left-color:var(--accent)"><b>Background.</b> When RL saves a checkpoint in the middle of generation, every <span class="tip" tabindex="0" data-tip="One request from a Gym environment to the vLLM server that is still producing tokens when the checkpoint starts.">unfinished model call</span> has its tokens so far written to <span class="tip" tabindex="0" data-tip="NeMo-RL's in-memory key/value store for training data. Writes and reads go to it over Ray.">TransferQueue</span> (TQ), one row per call. After a restart, the call resumes from that row instead of starting over. Dotted words have a short explanation: hover or tap them.</div>
+
+<p>Before this PR the save loop called <a href="https://github.com/NVIDIA-NeMo/RL/blob/2548c6793465bbe79f50b25202e85f10d1a60592/nemo_rl/models/generation/generation_cut_capture.py#L1071"><code>sink.stage_generation_prefix</code></a> once per call.
+Now <a href="https://github.com/NVIDIA-NeMo/RL/blob/5498a0a3239909cbead3d8def19d4482a196974e/nemo_rl/models/generation/generation_cut_capture.py#L1206"><code>_checkpoint_generation_cut_batched</code></a> collects rows and sends each group with one <a href="https://github.com/NVIDIA-NeMo/RL/blob/5498a0a3239909cbead3d8def19d4482a196974e/nemo_rl/models/generation/generation_cut_capture.py#L1261"><code>stage_generation_prefix_batch</code></a> call.
+Each call stays locked until the whole group's write is back, so no row is marked saved until every row in its group checks out.
+On restore, the new <a href="https://github.com/NVIDIA-NeMo/RL/blob/5498a0a3239909cbead3d8def19d4482a196974e/nemo_rl/models/generation/prefix_read_batcher.py#L23"><code>PrefixReadBatcher</code></a> waits 2 ms, merges the keys of every request that asked, and runs one read.</p>
+
+<h2>The two paths, on the same small example</h2>
+
+<svg viewBox="0 0 940 452" role="img" aria-label="Left column: before the PR. 11 unfinished calls make 11 writes; 2 resumed requests make 2 reads side by side. Right column: this PR. The 11 calls go out in 2 writes of 6 and 5 rows; the 2 requests share 1 read of 7 keys.">
+  <style>
+    .box{fill:var(--surface);stroke:var(--border);stroke-width:1.2}
+    .call{fill:var(--green)}
+    .callo{fill:var(--orange)}
+    .ok{stroke:var(--green);stroke-width:1.6;fill:none}
+    .arr{stroke:var(--dim);stroke-width:1.3;fill:none;marker-end:url(#ah)}
+    .bad{fill:var(--red);font:bold 11.5px -apple-system,sans-serif}
+    .warnt{fill:var(--orange);font:bold 11.5px -apple-system,sans-serif}
+    .code{fill:var(--text);font:11px ui-monospace,Menlo,monospace}
+    .hdr{fill:var(--accent);font:bold 13px -apple-system,sans-serif}
+    svg a text{text-decoration:underline}
+  </style>
+  <defs><marker id="ah" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L8 4 L0 8 z" fill="var(--dim)"/></marker></defs>
+
+  <text class="hdr" x="16" y="20">Before this PR: one call at a time</text>
+  <text class="hdr" x="486" y="20">This PR: batched</text>
+  <line x1="471" y1="8" x2="471" y2="372" stroke="var(--border)"/>
+
+  <!-- Row 1: save -->
+  <text class="t" x="16" y="46">Save: 11 calls are still generating</text>
+  <text class="t" x="486" y="46">Save: same 11 calls, batch size 6</text>
+
+  <g>
+    <rect class="call" x="16" y="58" width="22" height="22" rx="3"/><rect class="call" x="44" y="58" width="22" height="22" rx="3"/><rect class="call" x="72" y="58" width="22" height="22" rx="3"/><rect class="call" x="100" y="58" width="22" height="22" rx="3"/><rect class="call" x="128" y="58" width="22" height="22" rx="3"/><rect class="call" x="156" y="58" width="22" height="22" rx="3"/><rect class="call" x="184" y="58" width="22" height="22" rx="3"/><rect class="call" x="212" y="58" width="22" height="22" rx="3"/><rect class="call" x="240" y="58" width="22" height="22" rx="3"/><rect class="call" x="268" y="58" width="22" height="22" rx="3"/><rect class="call" x="296" y="58" width="22" height="22" rx="3"/>
+  </g>
+  <path class="arr" d="M167 84 L167 104"/>
+  <rect class="box" x="16" y="108" width="440" height="50" rx="6"/>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/2548c6793465bbe79f50b25202e85f10d1a60592/nemo_rl/models/generation/generation_cut_capture.py#L1071"><text class="code" x="26" y="128">11 × stage_generation_prefix(row)</text></a>
+  <text class="note" x="26" y="148">11 writes. Each call is locked only during its own write.</text>
+
+  <g>
+    <rect class="callo" x="486" y="58" width="22" height="22" rx="3"/><rect class="callo" x="514" y="58" width="22" height="22" rx="3"/><rect class="callo" x="542" y="58" width="22" height="22" rx="3"/><rect class="callo" x="570" y="58" width="22" height="22" rx="3"/><rect class="callo" x="598" y="58" width="22" height="22" rx="3"/><rect class="callo" x="626" y="58" width="22" height="22" rx="3"/>
+    <rect class="call" x="666" y="58" width="22" height="22" rx="3"/><rect class="call" x="694" y="58" width="22" height="22" rx="3"/><rect class="call" x="722" y="58" width="22" height="22" rx="3"/><rect class="call" x="750" y="58" width="22" height="22" rx="3"/><rect class="call" x="778" y="58" width="22" height="22" rx="3"/>
+  </g>
+  <path class="arr" d="M567 84 L567 104"/><path class="arr" d="M733 84 L733 104"/>
+  <rect class="box" x="486" y="108" width="160" height="50" rx="6"/>
+  <rect class="box" x="656" y="108" width="160" height="50" rx="6"/>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/5498a0a3239909cbead3d8def19d4482a196974e/nemo_rl/models/generation/generation_cut_capture.py#L1261"><text class="code" x="496" y="128">write #1: 6 rows</text></a>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/5498a0a3239909cbead3d8def19d4482a196974e/nemo_rl/models/generation/generation_cut_capture.py#L1261"><text class="code" x="666" y="128">write #2: 5 rows</text></a>
+  <text class="note" x="496" y="148">one put_many</text>
+  <text class="note" x="666" y="148">one put_many</text>
+  <text class="warnt" x="486" y="178">All 6 stay locked until write #1 returns and passes.</text>
+  <text class="note" x="486" y="194">2 writes instead of 11.</text>
+
+  <!-- Row 2: restore -->
+  <text class="t" x="16" y="232">Restore: request A needs 3 saved rows, B needs 4</text>
+  <text class="t" x="486" y="232">Restore: same A and B</text>
+
+  <rect class="box" x="16" y="246" width="60" height="30" rx="6"/><text class="t" x="40" y="266">A</text>
+  <rect class="box" x="16" y="290" width="60" height="30" rx="6"/><text class="t" x="40" y="310">B</text>
+  <path class="arr" d="M76 261 L126 261"/><path class="arr" d="M76 305 L126 305"/>
+  <rect class="box" x="130" y="246" width="326" height="30" rx="6"/>
+  <rect class="box" x="130" y="290" width="326" height="30" rx="6"/>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/2548c6793465bbe79f50b25202e85f10d1a60592/nemo_rl/models/generation/vllm/vllm_worker_async.py#L1806"><text class="code" x="140" y="266">own thread: read 3 keys</text></a>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/2548c6793465bbe79f50b25202e85f10d1a60592/nemo_rl/models/generation/vllm/vllm_worker_async.py#L1806"><text class="code" x="140" y="310">own thread: read 4 keys</text></a>
+  <text class="note" x="16" y="342">2 reads, running side by side. A bad row only fails its own request.</text>
+
+  <rect class="box" x="486" y="246" width="60" height="30" rx="6"/><text class="t" x="510" y="266">A</text>
+  <rect class="box" x="486" y="290" width="60" height="30" rx="6"/><text class="t" x="510" y="310">B</text>
+  <path class="arr" d="M546 261 L596 276"/><path class="arr" d="M546 305 L596 290"/>
+  <rect class="box" x="600" y="262" width="316" height="44" rx="6"/>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/5498a0a3239909cbead3d8def19d4482a196974e/nemo_rl/models/generation/prefix_read_batcher.py#L108"><text class="code" x="610" y="280">PrefixReadBatcher: wait 2 ms, merge</text></a>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/5498a0a3239909cbead3d8def19d4482a196974e/nemo_rl/models/generation/prefix_read_batcher.py#L94"><text class="code" x="610" y="298">→ 1 read of 7 keys</text></a>
+  <text class="bad" x="486" y="330">One bad row (not a missing one) fails both A and B.</text>
+  <text class="warnt" x="486" y="346">One read at a time per worker; ≤ 32 keys at 128k context.</text>
+
+  <!-- legend -->
+  <rect class="call" x="16" y="388" width="14" height="14" rx="2"/><text class="note" x="36" y="400">call that is saved the same way as before</text>
+  <rect class="callo" x="300" y="388" width="14" height="14" rx="2"/><text class="note" x="320" y="400">call held locked across a shared write</text>
+  <text class="warnt" x="520" y="426">orange text</text><text class="note" x="594" y="426">= new cost, not measured yet</text>
+  <text class="bad" x="16" y="426">red text</text><text class="note" x="74" y="426">= review finding (comment linked below the figure)</text>
+</svg>
+
+<h2>Where the two paths meet, and what still differs</h2>
+
+<p><b>They share the per-call code.</b> The old body that freezes one call's tokens, writes them, and checks the reply is now the generator <a href="https://github.com/NVIDIA-NeMo/RL/blob/5498a0a3239909cbead3d8def19d4482a196974e/nemo_rl/models/generation/generation_cut_capture.py#L1005"><code>_generation_cut_transaction</code></a>. It hands its row out (<a href="https://github.com/NVIDIA-NeMo/RL/blob/5498a0a3239909cbead3d8def19d4482a196974e/nemo_rl/models/generation/generation_cut_capture.py#L1148">L1148</a>) and waits for the write result. The batched loop drives many of these at once. Reads meet in <a href="https://github.com/NVIDIA-NeMo/RL/blob/5498a0a3239909cbead3d8def19d4482a196974e/nemo_rl/models/generation/generation_cut_capture.py#L584"><code>_fetch_generation_cut_rows</code></a>, which both the old one-request read and the new shared read call.</p>
+
+<div class="tbl"><table>
+<tr><th>What still differs</th><th>Before</th><th>This PR</th></tr>
+<tr><td>Writes per save</td><td>one per call</td><td>one per group of ≤ 256 rows / ≤ 4,194,304 tokens</td></tr>
+<tr><td>How long a call stays locked</td><td>its own write</td><td>the whole group's write. A call that errors meanwhile blocks the server's event loop until the write is back (open on #4506)</td></tr>
+<tr><td>Reads at restore</td><td>one per request, side by side</td><td>one shared read at a time per worker</td></tr>
+<tr><td>A bad saved row fails…</td><td>its own request</td><td>every request in the same shared read
+  <p class="cref"><a href="https://github.com/NVIDIA-NeMo/RL/pull/4508">review comment: prefix_read_batcher.py:92</a></p></td></tr>
+<tr><td>Batch size 1</td><td>n/a</td><td>still runs the old per-call loop (<a href="https://github.com/NVIDIA-NeMo/RL/blob/5498a0a3239909cbead3d8def19d4482a196974e/nemo_rl/models/generation/generation_cut_capture.py#L1399">L1399</a>), which no test reaches
+  <p class="cref"><a href="https://github.com/NVIDIA-NeMo/RL/pull/4508">review comment: generation_cut_capture.py:1399</a></p></td></tr>
+</table></div>
+
+<div class="warn"><b>So what.</b> The write side is a fair shape, and its rollback and deadline handling checked out in review. Whether the PR is worth its 2,802 lines depends on two numbers it does not report yet: save time before and after with hundreds of unfinished calls, and restore time with many requests resuming at once. The shared read also needs one fix, so that a bad row fails only the request that asked for it.
+<p class="cref"><a href="https://github.com/NVIDIA-NeMo/RL/pull/4508">review comment: prefix_read_batcher.py:23 (numbers)</a></p></div>
+
+</div>
+</body>
+</html>

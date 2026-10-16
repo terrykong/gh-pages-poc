@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PR #4508: where the 2,802 lines go</title>
+<style>
+:root{
+  --bg:#0d1117; --surface:#161b22; --surface2:#1c2128; --border:#30363d;
+  --text:#e6edf3; --dim:#8b949e; --accent:#58a6ff; --green:#3fb950;
+  --orange:#d29922; --red:#f85149;
+}
+:root[data-theme="light"]{
+  --bg:#ffffff; --surface:#f6f8fa; --surface2:#eaeef2; --border:#d0d7de;
+  --text:#1f2328; --dim:#59636e; --accent:#0969da; --green:#1a7f37;
+  --orange:#9a6700; --red:#cf222e;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:28px 16px 70px}
+h1{font-size:22px;margin:0 0 8px;line-height:1.3}
+h2{font-size:18px;margin:32px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;
+  font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
+.sub{color:var(--dim);font-size:13.5px;margin:0 0 16px}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);
+  border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;
+  font:13px/1 ui-monospace,Menlo,monospace;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.18)}
+.status{border:1px solid var(--border);border-radius:10px;background:var(--surface);
+  padding:2px 16px 10px;margin:0 0 20px}
+.status dl{display:grid;grid-template-columns:max-content 1fr;gap:4px 14px;margin:12px 0 0}
+.status dt{color:var(--dim);font-size:12px;text-transform:uppercase;letter-spacing:.04em;
+  white-space:nowrap;padding-top:2px}
+.status dd{margin:0;font-size:14px}
+.verdict{font-weight:700}
+.verdict.open{color:var(--orange)}
+.warn{border-left:3px solid var(--orange);background:var(--surface);
+  padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0}
+.where{border-left:4px solid var(--accent);background:var(--surface);padding:6px 12px;margin:6px 0 10px}
+.diff{font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--surface);
+  border:1px solid var(--border);border-radius:8px;padding:12px;overflow-x:auto;white-space:pre;margin:10px 0}
+.diff .add{color:var(--green)}
+.diff .del{color:var(--red)}
+.diff .hunk{color:var(--accent)}
+.diff .skip{color:var(--dim);font-style:italic}
+table{border-collapse:collapse;width:100%;font-size:13.5px;margin:10px 0}
+th,td{border-bottom:1px solid var(--border);padding:5px 8px;text-align:left;vertical-align:top}
+th{color:var(--dim);font-weight:600;font-size:12px}
+td.n{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
+.tbl{overflow-x:auto}
+.tip{border-bottom:1px dotted var(--dim);cursor:help;position:relative;outline:none}
+.tip:hover::after,.tip:focus::after{content:attr(data-tip);position:absolute;left:0;top:1.7em;z-index:60;
+  width:max-content;max-width:min(340px,80vw);white-space:normal;background:var(--surface2);color:var(--text);
+  border:1px solid var(--border);border-radius:6px;padding:7px 10px;font:13px/1.45 -apple-system,sans-serif;
+  font-weight:400;box-shadow:0 4px 14px rgba(0,0,0,.3)}
+svg{max-width:100%;height:auto;display:block;margin:16px 0}
+svg .t{fill:var(--text);font:bold 12.5px -apple-system,sans-serif}
+svg .note{fill:var(--dim);font:11.5px -apple-system,sans-serif}
+svg .in{fill:var(--bg);font:bold 11.5px -apple-system,sans-serif}
+svg .in-d{fill:var(--text);font:11px -apple-system,sans-serif}
+svg .cut{fill:var(--orange);font:bold 11.5px -apple-system,sans-serif}
+svg .other{fill:var(--surface2);stroke:var(--border);stroke-width:1}
+svg .this{fill:var(--accent)}
+svg .src{fill:var(--accent)}
+svg .src2{fill:var(--accent);fill-opacity:.72}
+svg .src3{fill:var(--accent);fill-opacity:.5}
+svg .ut{fill:var(--green)}
+svg .fn{fill:var(--dim)}
+svg .doc{fill:var(--border)}
+svg .sep{stroke:var(--bg);stroke-width:1.5}
+svg .hatch-bar{fill:var(--orange)}
+svg .hatched{fill:url(#hatch);stroke:var(--orange);stroke-width:1.2}
+svg .zoom{stroke:var(--dim);stroke-width:1;stroke-dasharray:4 4;fill:none}
+.cref{margin:6px 0 0;font-size:13px}
+.cref a{display:inline-block;padding:4px 10px;border:1px solid var(--border);
+  border-radius:16px;background:var(--surface);font:12.5px ui-monospace,Menlo,monospace;margin:2px 4px 2px 0}
+.cref a:hover{background:var(--surface2);text-decoration:none}
+td .cref{margin:4px 0 0}
+td .cref a{font-size:11.5px;padding:2px 8px}
+nav.chain{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 6px;padding:0}
+nav.chain a,nav.chain span{display:inline-block;padding:5px 11px;border:1px solid var(--border);
+  border-radius:20px;background:var(--surface);text-decoration:none;color:var(--accent);
+  font-size:12.5px;line-height:1.3;white-space:nowrap}
+nav.chain a:hover{background:var(--surface2)}
+nav.chain span.here{background:var(--accent);color:var(--bg);border-color:var(--accent);font-weight:600}
+p.chainnote{color:var(--dim);font-size:12px;margin:0 0 18px}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+  document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head>
+<body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+  function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+  function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
+    b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
+      else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+  document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+
+<div class="wrap">
+
+<h1>Where the 2,802 lines go, and how this PR gets to about 1,000</h1>
+<p class="sub">Size review of <a href="https://github.com/NVIDIA-NeMo/RL/pull/4508">NVIDIA-NeMo/RL #4508</a>. Line counts are from <code>git diff 2548c67 5498a0a</code> (the PR against its real base, <a href="https://github.com/NVIDIA-NeMo/RL/pull/4612">#4612</a>). All permalinks pin the PR head <code>5498a0a</code>. The review comments are in a pending review; their links work once it is published.</p>
+
+<div class="status">
+<dl>
+  <dt>Before</dt>
+  <dd>The partial-checkpointing feature is a stack of 8 open PRs, about 21,300 added lines. An older version of this PR, <a href="https://github.com/NVIDIA-NeMo/RL/pull/4389">#4389</a> (+2,867), is still open and was never reviewed.</dd>
+  <dt>This PR</dt>
+  <dd>+2,802 lines: 805 product, 845 test, and 1,152 of benchmark scripts. The write benchmark is the same file, byte for byte, as in #4389. The PR reports no numbers from either script.</dd>
+  <dt>Status</dt>
+  <dd><span class="verdict open">Proposed, not applied.</span> Each cut below is a review comment. The diff on this page has not been run.</dd>
+</dl>
+</div>
+
+<nav class="chain">
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4508-batched-prefix-io.html">old vs new path</a>
+  <span class="here">size and reuse</span>
+</nav>
+<p class="chainnote">Two pages on this PR. This one: how big it is, and what can go.</p>
+
+<p>The write side mostly reuses what exists. About 140 of the 274 lines added to <code>tq_token_sink.py</code> are an existing body moved into <a href="https://github.com/NVIDIA-NeMo/RL/blob/5498a0a3239909cbead3d8def19d4482a196974e/nemo_rl/data_plane/tq_token_sink.py#L596"><code>_encode_record</code></a>, and batching goes through TransferQueue's own <code>put_samples</code>.
+The lines that can go are the benchmark scripts, a second copy of the save loop, plumbing for two settings, and the shared read path. The shared read path has no numbers behind it yet.</p>
+
+<h2>Where the lines go</h2>
+
+<svg viewBox="0 0 940 300" role="img" aria-label="Three bars. Top: the 8-PR feature stack, about 21,300 lines, with #4508 at 2,802. Middle: #4508 split into product 805, tests 845, benchmark scripts 1,152, with the removable part of each hatched. Bottom: about 960 lines left after the cuts.">
+  <defs><pattern id="hatch" patternUnits="userSpaceOnUse" width="6" height="6" patternTransform="rotate(45)">
+    <rect class="hatch-bar" width="3" height="6"/></pattern></defs>
+
+  <text class="t" x="16" y="20">The feature stack, in stack order: ~21,300 added lines</text>
+  <rect class="other" x="16" y="30" width="345.2" height="26"/>
+  <rect class="other" x="361.2" y="30" width="57.6" height="26"/>
+  <rect class="other" x="418.8" y="30" width="158.6" height="26"/>
+  <rect class="other" x="577.4" y="30" width="88.7" height="26"/>
+  <rect class="other" x="666.1" y="30" width="48" height="26"/>
+  <rect class="other" x="714.1" y="30" width="45.7" height="26"/>
+  <rect class="this" x="759.8" y="30" width="118.5" height="26"/>
+  <rect class="other" x="878.3" y="30" width="37.7" height="26"/>
+  <text class="in-d" x="188" y="47" text-anchor="middle">#4500 · 8,164 (turn recovery)</text>
+  <text class="in-d" x="390" y="47" text-anchor="middle">#4501</text>
+  <text class="in-d" x="498" y="47" text-anchor="middle">#4506 · 3,751</text>
+  <text class="in-d" x="621.7" y="47" text-anchor="middle">#4507</text>
+  <text class="in-d" x="690" y="47" text-anchor="middle">#4583</text>
+  <text class="in-d" x="737" y="47" text-anchor="middle">#4612</text>
+  <text class="in" x="819" y="47" text-anchor="middle">#4508</text>
+  <text class="in-d" x="897" y="47" text-anchor="middle">#4655</text>
+  <text class="note" x="16" y="72">#4501 1,362 · #4507 2,098 · #4583 1,135 · #4612 1,080 · #4655 891 (GitHub "additions" for each PR)</text>
+
+  <path class="zoom" d="M759.8 56 L16 104 M878.3 56 L916 104"/>
+
+  <text class="t" x="16" y="98">#4508: 2,802 lines</text>
+  <rect class="src" x="16" y="106" width="258.6" height="32"/>
+  <rect class="ut" x="274.6" y="106" width="271.4" height="32"/>
+  <rect class="fn" x="546" y="106" width="370" height="32"/>
+  <rect class="hatched" x="160.3" y="106" width="114.3" height="32"/>
+  <rect class="hatched" x="440" y="106" width="106" height="32"/>
+  <rect class="hatched" x="546" y="106" width="370" height="32"/>
+  <text class="in" x="88" y="127" text-anchor="middle">product 805</text>
+  <text class="in" x="357" y="127" text-anchor="middle">tests 845</text>
+  <text class="t" x="731" y="127" text-anchor="middle">benchmark scripts 1,152</text>
+  <text class="cut" x="217" y="156" text-anchor="middle">−356</text>
+  <text class="cut" x="493" y="156" text-anchor="middle">−330</text>
+  <text class="cut" x="731" y="156" text-anchor="middle">−1,152</text>
+
+  <text class="t" x="16" y="196">After the cuts: about 960 lines</text>
+  <rect class="src" x="16" y="206" width="144.3" height="32"/>
+  <rect class="ut" x="160.3" y="206" width="165.4" height="32"/>
+  <text class="in" x="88" y="227" text-anchor="middle">449</text>
+  <text class="in" x="243" y="227" text-anchor="middle">515</text>
+  <text class="note" x="336" y="227">same scale as the bar above</text>
+
+  <rect class="hatched" x="16" y="262" width="18" height="12"/>
+  <text class="note" x="40" y="272">can go: see the table below. Counts are hand counts, ±20%.</text>
+</svg>
+
+<div class="tbl"><table>
+<tr><th>What the PR adds</th><th>Ask</th><th class="n">lines</th></tr>
+<tr><td>Two benchmark scripts (<a href="https://github.com/NVIDIA-NeMo/RL/blob/5498a0a3239909cbead3d8def19d4482a196974e/tools/benchmark_tq_prefix_writes.py#L15">writes</a> 781, <a href="https://github.com/NVIDIA-NeMo/RL/blob/5498a0a3239909cbead3d8def19d4482a196974e/tools/benchmark_tq_prefix_reads.py#L11">reads</a> 371) plus a test that checks only the script's own counters (<a href="https://github.com/NVIDIA-NeMo/RL/blob/5498a0a3239909cbead3d8def19d4482a196974e/tests/unit/models/generation/test_prefix_read_benchmark.py#L17">81</a>). Both call the sink directly, so they time TransferQueue, not the save path.
+  <p class="cref"><a href="https://github.com/NVIDIA-NeMo/RL/pull/4508">review comment: benchmark_tq_prefix_writes.py:15</a></p></td>
+  <td>Delete; put a results table in the PR description</td><td class="n">−1,233</td></tr>
+<tr><td>The shared read path: <a href="https://github.com/NVIDIA-NeMo/RL/blob/5498a0a3239909cbead3d8def19d4482a196974e/nemo_rl/models/generation/prefix_read_batcher.py#L23"><code>PrefixReadBatcher</code></a> 186, wiring ~40, tests 214. No restore timing exists, and it has one confirmed bug.
+  <p class="cref"><a href="https://github.com/NVIDIA-NeMo/RL/pull/4508">review comment: prefix_read_batcher.py:23</a></p></td>
+  <td>Move to its own PR that leads with restore timings</td><td class="n">~−440</td></tr>
+<tr><td>A second save loop kept for batch size 1 (<a href="https://github.com/NVIDIA-NeMo/RL/blob/5498a0a3239909cbead3d8def19d4482a196974e/nemo_rl/models/generation/generation_cut_capture.py#L1399">L1399</a>), its driver, and the single-row write it calls. No test reaches anything that only it does.
+  <p class="cref"><a href="https://github.com/NVIDIA-NeMo/RL/pull/4508">review comment: generation_cut_capture.py:1399</a></p></td>
+  <td>One loop: diff below</td><td class="n">~−110</td></tr>
+<tr><td>Default values 256 / 4,194,304 written into 5 function signatures, plus a limits class that repeats the config's own "must be positive" check (<a href="https://github.com/NVIDIA-NeMo/RL/blob/5498a0a3239909cbead3d8def19d4482a196974e/nemo_rl/models/generation/generation_cut_capture.py#L38">L38</a>)
+  <p class="cref"><a href="https://github.com/NVIDIA-NeMo/RL/pull/4508">review comment: interfaces.py:647</a></p></td>
+  <td>Keep the 2 config keys; drop the copies and the class</td><td class="n">~−30</td></tr>
+<tr><td>Per-row failure results in the batch write (<a href="https://github.com/NVIDIA-NeMo/RL/blob/5498a0a3239909cbead3d8def19d4482a196974e/nemo_rl/data_plane/tq_token_sink.py#L741">L741</a>) that its only caller never uses: it stops at the first failure</td>
+  <td>Stop at the first failure in the sink too <p class="cref"><a href="https://github.com/NVIDIA-NeMo/RL/pull/4508">review comment: tq_token_sink.py:741</a></p></td><td class="n">~−25</td></tr>
+</table></div>
+
+<h2>The one-loop cut as a diff: proposed, not in the PR</h2>
+
+<p class="where"><b>Where the fix lands: RL only, two files.</b> <a href="https://github.com/NVIDIA-NeMo/RL/blob/5498a0a3239909cbead3d8def19d4482a196974e/nemo_rl/models/generation/generation_cut_capture.py#L1396"><code>generation_cut_capture.py</code></a> and <a href="https://github.com/NVIDIA-NeMo/RL/blob/5498a0a3239909cbead3d8def19d4482a196974e/nemo_rl/data_plane/tq_token_sink.py#L530"><code>tq_token_sink.py</code></a>. <b>No Gym change:</b> Gym never calls the single-row write.</p>
+
+<pre class="diff"><span class="hunk">@@ generation_cut_capture.py L1396-L1433 · _checkpoint_generation_cut</span>
+<span class="del">-        acknowledgements = []
+-        single_prefixes = inventory.active_prefixes
+-        batch_limits = self._require_generation_prefix_batch_limits()
+-        if batch_limits.max_rows > 1:
+-            acknowledgements = self._checkpoint_generation_cut_batched(
+-                inventory, deadline=deadline
+-            )
+-            single_prefixes = ()
+-        for index, prefix in enumerate(single_prefixes):
+</span><span class="skip">   … 28 more deleted lines: the per-call loop with its own deadline check …</span>
+<span class="add">+        # Batch size 1 is one row per write through the same loop.
++        acknowledgements = self._checkpoint_generation_cut_batched(
++            inventory, deadline=deadline
++        )
+</span>         receipt = GenerationCutReceipt(
+
+<span class="hunk">@@ generation_cut_capture.py L977-L1003 · delete _checkpoint_active_generation_cut (its only caller is gone)</span>
+<span class="hunk">@@ tq_token_sink.py L530-L549 · delete stage_generation_prefix (its only product caller was L990)</span></pre>
+
+<p>Why this is safe: with a batch limit of 1, <a href="https://github.com/NVIDIA-NeMo/RL/blob/5498a0a3239909cbead3d8def19d4482a196974e/nemo_rl/models/generation/generation_cut_capture.py#L1206"><code>_checkpoint_generation_cut_batched</code></a> writes after every row, with the same key, deadline and rollback rules. The test worker already defaults to 256 rows (<a href="https://github.com/NVIDIA-NeMo/RL/blob/5498a0a3239909cbead3d8def19d4482a196974e/tests/unit/models/generation/test_vllm_token_capture_hosting.py#L168">test L168</a>). In review, routing batch size 1 through the batched loop left all 62 tests passing, and so did turning off the old loop's deadline check. To keep batch size 1 covered, add one assert to the <code>[1]</code> case of <a href="https://github.com/NVIDIA-NeMo/RL/blob/5498a0a3239909cbead3d8def19d4482a196974e/tests/unit/models/generation/test_vllm_token_capture_hosting.py#L941"><code>test_worker_batch_consecutive_cuts_reuse_then_append</code></a>: <code>assert sink.batches == [[3], [4]]</code>. That assert was run: it passes after the change and fails today.</p>
+
+<div class="warn"><b>So what.</b> The PR can ship the faster writes at about a third of its size: about 960 lines instead of 2,802. The biggest single cut is the benchmark scripts. The PR should report their numbers, not carry them. The shared read path should come back as its own PR once restore timings show it helps. Close <a href="https://github.com/NVIDIA-NeMo/RL/pull/4389">#4389</a>, the older copy of this PR.</div>
+
+</div>
+</body>
+</html>
