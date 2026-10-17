@@ -109,13 +109,28 @@ the optimizer updates. On resume, <a href="https://github.com/NVIDIA-NeMo/RL/blo
 which reloads both. A Hugging Face model is first converted to Megatron's format once and cached in a folder;
 later runs reuse that folder. Dotted words have a short explanation: hover or tap them.</div>
 
-<p>The PR makes three separate changes, one per row below. Row 1:
-<a href="https://github.com/NVIDIA-NeMo/RL/blob/ef033f77c060800fa3cb5da01d7a4091734dab65/nemo_rl/algorithms/sft_v2.py#L459-L461">SFT v2 now copies the setting into the policy config</a>,
-which is where the <a href="https://github.com/NVIDIA-NeMo/RL/blob/ef033f77c060800fa3cb5da01d7a4091734dab65/nemo_rl/models/megatron/setup.py#L899">model workers read it</a>.
-Row 2: <a href="https://github.com/NVIDIA-NeMo/RL/blob/ef033f77c060800fa3cb5da01d7a4091734dab65/nemo_rl/models/megatron/community_import.py#L73-L91"><code>megatron_conversion_is_complete</code></a>
-now opens the checkpoint's file list and checks each file exists and is not empty.
-Row 3: after the load, the PR calls <a href="https://github.com/NVIDIA/Megatron-LM/blob/b4d72b79c6b7e30010894ea0827a06c3477387fd/megatron/core/optimizer/optimizer.py#L241-L258"><code>quantize_and_sync_model_params_from_main_params</code></a>
-again — but Bridge already calls it during the load whenever it can change anything.</p>
+<p>The PR makes three separate changes, one per row below:</p>
+<ol>
+<li><b>Use the configured start checkpoint in SFT v2. SFT v2 only. Before: wrong result.</b>
+A fresh SFT v2 run with <code>checkpointing.pretrained_checkpoint</code> set ignored it, with no error, and trained from the
+Hugging Face weights instead. The model workers read the setting from the policy config
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/ef033f77c060800fa3cb5da01d7a4091734dab65/nemo_rl/models/megatron/setup.py#L899"><code>setup.py</code> L899</a>),
+and SFT v2 never copied it there. The other algorithms already do;
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/ef033f77c060800fa3cb5da01d7a4091734dab65/nemo_rl/algorithms/sft_v2.py#L459-L461">the PR adds the same 3 lines</a>.
+PPO and xtoken distillation still lack them (<a href="https://github.com/NVIDIA-NeMo/RL/issues/4768">#4768</a>).</li>
+<li><b>Stricter check before reusing a converted model. Every Megatron run. Before: wrong result, in a rare case.</b>
+A cached Hugging Face→Megatron conversion counted as complete once its small <code>run_config.yaml</code> existed, even when a
+weight file was missing or empty. That can happen with an older conversion that was cut off, or files removed from storage.
+The run reused the folder, and the gap only showed up when the weights were read.
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/ef033f77c060800fa3cb5da01d7a4091734dab65/nemo_rl/models/megatron/community_import.py#L73-L91"><code>megatron_conversion_is_complete</code></a>
+now checks every weight file the checkpoint lists, so such a folder is converted again. New conversions were already safe, because
+they are published with one atomic rename. The check runs on every rank at startup; the review asks it to check each file once, not once per tensor.</li>
+<li><b>Extra weight sync after a resume. Every Megatron resume that loads optimizer state. Before: nothing was wrong.</b>
+Bridge's load already leaves the weights matching the FP32 master copies. The PR calls
+<a href="https://github.com/NVIDIA/Megatron-LM/blob/b4d72b79c6b7e30010894ea0827a06c3477387fd/megatron/core/optimizer/optimizer.py#L241-L258"><code>quantize_and_sync_model_params_from_main_params</code></a>
+again anyway. The weights come out the same, so the only effect is a slightly slower resume: one extra blocking all-gather across
+data-parallel ranks. The review asks to remove it.</li>
+</ol>
 
 <h2>Each change, on one small example</h2>
 
