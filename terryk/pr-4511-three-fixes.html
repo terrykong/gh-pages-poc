@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NVIDIA-NeMo/RL #4511 — which of the three fixes change what a run does</title>
+<style>
+:root{
+  --bg:#0d1117; --surface:#161b22; --surface2:#1c2128; --border:#30363d;
+  --text:#e6edf3; --dim:#8b949e; --accent:#58a6ff; --green:#3fb950;
+  --orange:#d29922; --red:#f85149;
+}
+:root[data-theme="light"]{
+  --bg:#ffffff; --surface:#f6f8fa; --surface2:#eaeef2; --border:#d0d7de;
+  --text:#1f2328; --dim:#59636e; --accent:#0969da; --green:#1a7f37;
+  --orange:#9a6700; --red:#cf222e;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:28px 20px 70px}
+h1{font-size:22px;margin:0 0 8px;line-height:1.3}
+h2{font-size:18px;margin:32px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;
+  font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
+.sub{color:var(--dim);font-size:13.5px;margin:0 0 16px}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);
+  border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;
+  font:13px/1 ui-monospace,Menlo,monospace;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.18)}
+.status{border:1px solid var(--border);border-radius:10px;background:var(--surface);
+  padding:2px 16px 10px;margin:0 0 20px}
+.status dl{display:grid;grid-template-columns:max-content 1fr;gap:4px 14px;margin:12px 0 0}
+.status dt{color:var(--dim);font-size:12px;text-transform:uppercase;letter-spacing:.04em;
+  white-space:nowrap;padding-top:2px}
+.status dd{margin:0;font-size:14px}
+.verdict{font-weight:700}
+.verdict.good{color:var(--green)}
+.verdict.open{color:var(--red)}
+.bg{border-left:4px solid var(--dim);background:var(--surface);padding:8px 14px;margin:0 0 16px;font-size:14px}
+.warn{border-left:3px solid var(--orange);background:var(--surface);
+  padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0}
+.where{border-left:4px solid var(--accent);background:var(--surface);padding:6px 12px;margin:6px 0 10px}
+.diff{font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--surface);
+  border:1px solid var(--border);border-radius:8px;padding:12px;overflow-x:auto;white-space:pre;margin:10px 0}
+.diff .add{color:var(--green)}
+.diff .del{color:var(--red)}
+.diff .hunk{color:var(--accent)}
+.cref{margin:6px 0 0;font-size:13px}
+.cref a{display:inline-block;padding:4px 10px;border:1px solid var(--border);
+  border-radius:16px;background:var(--surface);font:12.5px ui-monospace,Menlo,monospace}
+.cref a:hover{background:var(--surface2);text-decoration:none}
+.tip{border-bottom:1px dotted var(--dim);cursor:help;position:relative;outline:none}
+.tip:hover::after,.tip:focus::after{content:attr(data-tip);position:absolute;left:0;top:1.7em;z-index:60;
+  width:max-content;max-width:min(340px,80vw);white-space:normal;background:var(--surface2);color:var(--text);
+  border:1px solid var(--border);border-radius:6px;padding:7px 10px;font:13px/1.45 -apple-system,sans-serif;
+  font-weight:400;box-shadow:0 4px 14px rgba(0,0,0,.3)}
+svg{max-width:100%;height:auto;display:block;margin:16px 0}
+svg .box{fill:var(--surface);stroke:var(--border);stroke-width:1.4}
+svg .bad{fill:var(--surface);stroke:var(--red);stroke-width:2}
+svg .ok{fill:var(--surface);stroke:var(--green);stroke-width:2}
+svg .none{fill:var(--surface);stroke:var(--dim);stroke-width:2;stroke-dasharray:5 4}
+svg .lbl{fill:var(--text);font:12px ui-monospace,Menlo,monospace}
+svg .lbl-b{fill:var(--text);font:bold 13px -apple-system,sans-serif}
+svg .note{fill:var(--dim);font:11.5px -apple-system,sans-serif}
+svg .hdr{fill:var(--accent);font:bold 12.5px -apple-system,sans-serif}
+svg .t-red{fill:var(--red);font:bold 12px -apple-system,sans-serif}
+svg .t-green{fill:var(--green);font:bold 12px -apple-system,sans-serif}
+svg .t-dim{fill:var(--dim);font:bold 12px -apple-system,sans-serif}
+svg .arrow{stroke:var(--dim);stroke-width:1.6;fill:none}
+svg .ah{fill:var(--dim)}
+svg .sw-red{fill:var(--red)} svg .sw-green{fill:var(--green)} svg .sw-dim{fill:var(--dim)}
+svg a text{text-decoration:underline;fill:var(--accent);font:11.5px ui-monospace,Menlo,monospace}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+  document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head>
+<body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+  function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+  function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
+    b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
+      else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+  document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+<div class="wrap">
+
+<h1>Which of this PR's three fixes change what a Megatron run does</h1>
+<p class="sub">Explainer for
+<a href="https://github.com/NVIDIA-NeMo/RL/pull/4511">NVIDIA-NeMo/RL #4511</a>
+(fix(sft): preserve checkpoint initialization and optimizer resume state).
+Permalinks pin the PR head <code>ef033f7</code>, Megatron-Bridge <code>ec83553</code> and Megatron-LM <code>b4d72b7</code>.</p>
+
+<div class="status">
+<dl>
+  <dt>Before</dt>
+  <dd>SFT v2 ignored <code>checkpointing.pretrained_checkpoint</code>, and a conversion folder counted as complete if one small config file existed.</dd>
+  <dt>This PR</dt>
+  <dd>Forwards the setting to the model workers, checks every weight file before reusing a conversion, and adds one more weight sync after a resume.</dd>
+  <dt>Status</dt>
+  <dd><span class="verdict good">The first two are fixed by this PR.</span> The resume sync does nothing at the pinned Megatron versions; the review asks to remove it.</dd>
+</dl>
+</div>
+
+<div class="bg"><b>Background.</b> Megatron training keeps two copies of the weights: the BF16 weights the model
+runs on, and FP32 <span class="tip" tabindex="0" data-tip="High-precision copies of the weights that the optimizer (Adam) updates. After each step they are cast down into the BF16 weights the model runs on.">master copies</span>
+the optimizer updates. On resume, <a href="https://github.com/NVIDIA-NeMo/RL/blob/ef033f77c060800fa3cb5da01d7a4091734dab65/nemo_rl/models/megatron/setup.py#L2685-L2693">NeMo-RL calls Megatron-Bridge's <code>load_checkpoint</code></a>,
+which reloads both. A Hugging Face model is first converted to Megatron's format once and cached in a folder;
+later runs reuse that folder. Dotted words have a short explanation: hover or tap them.</div>
+
+<p>The PR makes three separate changes, one per row below. Row 1:
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/ef033f77c060800fa3cb5da01d7a4091734dab65/nemo_rl/algorithms/sft_v2.py#L459-L461">SFT v2 now copies the setting into the policy config</a>,
+which is where the <a href="https://github.com/NVIDIA-NeMo/RL/blob/ef033f77c060800fa3cb5da01d7a4091734dab65/nemo_rl/models/megatron/setup.py#L899">model workers read it</a>.
+Row 2: <a href="https://github.com/NVIDIA-NeMo/RL/blob/ef033f77c060800fa3cb5da01d7a4091734dab65/nemo_rl/models/megatron/community_import.py#L73-L91"><code>megatron_conversion_is_complete</code></a>
+now opens the checkpoint's file list and checks each file exists and is not empty.
+Row 3: after the load, the PR calls <a href="https://github.com/NVIDIA/Megatron-LM/blob/b4d72b79c6b7e30010894ea0827a06c3477387fd/megatron/core/optimizer/optimizer.py#L241-L258"><code>quantize_and_sync_model_params_from_main_params</code></a>
+again — but Bridge already calls it during the load whenever it can change anything.</p>
+
+<h2>Each change, on one small example</h2>
+
+<svg viewBox="0 0 920 520" role="img" aria-label="Three rows. Row 1: SFT v2 used to start from Hugging Face weights and now starts from the configured checkpoint. Row 2: a conversion folder with one of two weight files missing used to be reused and is now converted again. Row 3: after a BF16 resume the weights already match, so the new sync writes the same values.">
+  <text class="hdr" x="16" y="22">before this PR</text>
+  <text class="hdr" x="490" y="22">after this PR</text>
+
+  <!-- row 1 -->
+  <text class="lbl-b" x="16" y="52">1 · SFT v2 start point</text>
+  <text class="lbl" x="16" y="72">checkpointing.pretrained_checkpoint = {path: "/ckpt/sft-base"}</text>
+  <rect class="bad" x="16" y="84" width="420" height="58" rx="8"/>
+  <text class="lbl" x="30" y="106">policy.pretrained_checkpoint: (missing)</text>
+  <text class="t-red" x="30" y="128">→ workers start from the Hugging Face weights</text>
+  <path class="arrow" d="M442 113 L478 113"/><path class="ah" d="M478 108 L486 113 L478 118z"/>
+  <rect class="ok" x="490" y="84" width="414" height="58" rx="8"/>
+  <text class="lbl" x="504" y="106">policy.pretrained_checkpoint: {path: "/ckpt/sft-base"}</text>
+  <text class="t-green" x="504" y="128">→ workers start from /ckpt/sft-base</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/ef033f77c060800fa3cb5da01d7a4091734dab65/nemo_rl/algorithms/sft_v2.py#L459-L461" target="_blank" rel="noopener"><text x="504" y="160">sft_v2.py L459-461</text></a>
+
+  <!-- row 2 -->
+  <text class="lbl-b" x="16" y="200">2 · reuse a cached conversion?</text>
+  <text class="lbl" x="16" y="220">iter_0000000/  run_config.yaml ✓   .metadata lists 2 files:</text>
+  <text class="lbl" x="16" y="236">               __0_0.distcp ✓      __1_0.distcp ✗ missing</text>
+  <rect class="bad" x="16" y="248" width="420" height="58" rx="8"/>
+  <text class="lbl" x="30" y="270">checks run_config.yaml only → "complete"</text>
+  <text class="t-red" x="30" y="292">→ reused; the gap shows up only when read</text>
+  <path class="arrow" d="M442 277 L478 277"/><path class="ah" d="M478 272 L486 277 L478 282z"/>
+  <rect class="ok" x="490" y="248" width="414" height="58" rx="8"/>
+  <text class="lbl" x="504" y="270">checks every listed file → "incomplete"</text>
+  <text class="t-green" x="504" y="292">→ converted again</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/512e608896918a4d5c2a9b32fcd3c9f28aff1910/nemo_rl/models/megatron/community_import.py#L72-L76" target="_blank" rel="noopener"><text x="30" y="324">base: community_import.py L72-76</text></a>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/ef033f77c060800fa3cb5da01d7a4091734dab65/nemo_rl/models/megatron/community_import.py#L73-L91" target="_blank" rel="noopener"><text x="504" y="324">head: community_import.py L73-91</text></a>
+
+  <!-- row 3 -->
+  <text class="lbl-b" x="16" y="364">3 · resume with optimizer state (BF16 run)</text>
+  <text class="lbl" x="16" y="384">saved: master 0.30000001 → BF16 weight 0.30078</text>
+  <rect class="box" x="16" y="396" width="420" height="58" rx="8"/>
+  <text class="lbl" x="30" y="418">Bridge load_checkpoint: weight 0.30078,</text>
+  <text class="lbl" x="30" y="440">master 0.30000001 (already match)</text>
+  <path class="arrow" d="M442 425 L478 425"/><path class="ah" d="M478 420 L486 425 L478 430z"/>
+  <rect class="none" x="490" y="396" width="414" height="58" rx="8"/>
+  <text class="lbl" x="504" y="418">+ new sync: writes bf16(master) = 0.30078</text>
+  <text class="t-dim" x="504" y="440">→ same value, plus one blocking all-gather</text>
+  <a href="https://github.com/NVIDIA-NeMo/Megatron-Bridge/blob/ec835530efeff71b55ec015f36bcc0c33b8b52b7/src/megatron/bridge/training/checkpointing.py#L3303-L3310" target="_blank" rel="noopener"><text x="30" y="472">Bridge already syncs FP8/FP4 here: L3303-3310</text></a>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/ef033f77c060800fa3cb5da01d7a4091734dab65/nemo_rl/models/megatron/setup.py#L2714-L2716" target="_blank" rel="noopener"><text x="504" y="472">setup.py L2714-2716</text></a>
+
+  <!-- legend -->
+  <rect class="sw-red" x="16" y="494" width="12" height="12"/><text class="note" x="34" y="505">wrong result</text>
+  <rect class="sw-green" x="130" y="494" width="12" height="12"/><text class="note" x="148" y="505">fixed by this PR</text>
+  <rect class="sw-dim" x="268" y="494" width="12" height="12"/><text class="note" x="286" y="505">no change in what the run computes</text>
+</svg>
+
+<p>Row 3 has no FP8 case because Bridge's own load already runs the same sync when
+<span class="tip" tabindex="0" data-tip="Megatron setting that all-gathers the weights in FP8 (or FP4) instead of BF16. NeMo-RL turns it on whenever FP8 params are on.">FP8/FP4 param gather</span>
+is on (<a href="https://github.com/NVIDIA-NeMo/RL/blob/ef033f77c060800fa3cb5da01d7a4091734dab65/nemo_rl/models/megatron/setup.py#L2173">NeMo-RL turns it on with FP8 params</a>),
+so the PR's call repeats it with the same result. And because every Megatron optimizer has the method,
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/ef033f77c060800fa3cb5da01d7a4091734dab65/nemo_rl/models/megatron/setup.py#L304-L327"><code>_sync_model_params_from_loaded_optimizer</code></a>
+never walks into child optimizers.</p>
+
+<h2>The fix — what lands, and what the review asks to remove</h2>
+
+<p class="where"><b>Where it lands: RL only.</b> No Megatron-Bridge or Megatron-LM change: Bridge already does the resume sync.
+First hunk is in the PR. Second hunk is <b>proposed in the review, not in the PR</b>.</p>
+
+<pre class="diff"><span class="hunk">@@ sft_v2.py L456-L461 · setup_sft_v2  (in the PR)</span>
+     """Build the V2 cluster, TQPolicy, placement, and resume state."""
+     set_seed(master_config.sft.seed)
+<span class="add">+    pretrained_checkpoint = master_config.checkpointing.get("pretrained_checkpoint")
++    if pretrained_checkpoint is not None:
++        master_config.policy["pretrained_checkpoint"] = pretrained_checkpoint</span>
+     if master_config.data.get("backend") != "energon":
+
+<span class="hunk">@@ setup.py L2714-L2716 · setup_model_and_optimizer  (proposed — not in the PR)</span>
+             elif resume_checkpoint_exists and megatron_cfg.checkpoint.load_optim:
+<span class="del">-                if not _force_sync_model_from_optimizer_fp32(optimizer):
+-                    _sync_model_params_from_loaded_optimizer(optimizer)</span>
+<span class="add">+                _force_sync_model_from_optimizer_fp32(optimizer)</span>
+     torch.distributed.barrier()</pre>
+
+<p>The first hunk is the same three lines that
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/ef033f77c060800fa3cb5da01d7a4091734dab65/nemo_rl/algorithms/grpo.py#L636-L638"><code>grpo.py</code></a> and
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/ef033f77c060800fa3cb5da01d7a4091734dab65/nemo_rl/algorithms/sft.py#L308-L310"><code>sft.py</code></a> already have.
+The second keeps the PR's <code>load_optim</code> check and drops the extra sync. With it,
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/ef033f77c060800fa3cb5da01d7a4091734dab65/nemo_rl/models/megatron/setup.py#L304-L327"><code>_sync_model_params_from_loaded_optimizer</code></a>
+and its three tests can be deleted. The review also asks to check each weight file once, not once per tensor, in row 2.</p>
+
+<div class="warn">
+<strong>So what.</strong> Rows 1 and 2 are real fixes: SFT v2 now starts from the checkpoint you configured, and a
+conversion with a missing weight file is redone instead of reused. Row 3 changes no weights in any shipped config at
+these pins. It only adds a blocking all-gather to every Megatron resume, in GRPO, DPO and distillation too, not just SFT.
+</div>
+
+</div>
+</body>
+</html>
