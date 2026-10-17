@@ -231,6 +231,23 @@ The figure lines the numbering up per lane.</p>
 Reshaping 24 GPUs as <code>(pp=1, -1, cp=1, tp=4)</code> leaves <i>r</i> // 4 = 3·d + g on the middle axis, which is the same lane number B computes by hand.
 So splitting the producer's batches along A's <code>data_parallel</code> axis already sends batch k to lane k.</p>
 
+<div class="bg" id="feed"><b>How SFT v2 feeds each lane: the loader never needs (dp, gtp).</b>
+<ol style="margin:6px 0 4px;padding-left:22px">
+<li><b>One loader per lane.</b> SFT v2 builds a loader on every GPU with TP = CP = PP = 0: GPUs 0, 4, 8, 12, 16, 20, the same 6 GPUs in either layout
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/339e20206ed2bcbf6fb55de178a2309f04106b3d/nemo_rl/algorithms/sft_v2.py#L268-L272">sft_v2.py:268-272</a>).</li>
+<li><b>Each loader asks Megatron which lane it is.</b> It calls <code>get_data_parallel_rank()</code> and <code>get_data_parallel_world_size()</code>, which count GTP by default, so the answers are 0..5 of 6.
+Energon reads shard k of 6 from that (<a href="https://github.com/NVIDIA-NeMo/RL/blob/339e20206ed2bcbf6fb55de178a2309f04106b3d/nemo_rl/data/energon/sft_worker.py#L82-L83">sft_worker.py:82-83</a>, unchanged by the PR).</li>
+<li><b>The driver collects the 6 batches in lane order.</b> It already checks they come back as exactly 0..5
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/339e20206ed2bcbf6fb55de178a2309f04106b3d/nemo_rl/algorithms/sft_v2.py#L300-L305">sft_v2.py:300-305</a>).</li>
+<li><b>The driver sends batch k to lane k.</b> Before the PR: split on <code>data_parallel</code> (6 entries)
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/ef033f77c060800fa3cb5da01d7a4091734dab65/nemo_rl/models/policy/tq_policy.py#L801-L803">tq_policy.py:801-803, base</a>).
+The PR: the same list reshaped into <code>[[0,1,2],[3,4,5]]</code> and split on (dp, gtp)
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/339e20206ed2bcbf6fb55de178a2309f04106b3d/nemo_rl/models/policy/tq_policy.py#L763-L770">tq_policy.py:763-770</a>). Same GPUs, same batches.</li>
+</ol>
+The only place G has to be known is Megatron itself (the PR's setup calls, which stay) and the driver's world-size check
+(<a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4512-gtp-knob.html">page 2</a>). The PR's (dp, gtp) code builds the pair from one number and turns it straight back into that number
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/339e20206ed2bcbf6fb55de178a2309f04106b3d/nemo_rl/data/energon/topology.py#L88-L89">topology.py:88-89</a>).</div>
+
 <h2>Same 24 GPUs, two layouts, two kinds of call</h2>
 <svg viewBox="0 0 900 580" role="img" aria-label="24 GPUs in Megatron order. In the old 4-D layout every GPU belongs to one of 6 data lanes and every call reaches all 24. In the PR's 5-D layout the placed SFT v2 train call still reaches all 24, but every other call reaches only the 8 GPUs with GTP index 0.">
 <text class="hdr" x="30" y="22">24 GPUs: DP = 2, GTP = 3, TP = 4 (CP = PP = 1). Megatron numbers them TP fastest, then CP, GTP, DP, PP.</text>
