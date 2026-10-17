@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NVIDIA-NeMo/RL #4743 — how an S3 checkpoint is saved and found again</title>
+<style>
+:root{
+  --bg:#0d1117; --surface:#161b22; --surface2:#1c2128; --border:#30363d;
+  --text:#e6edf3; --dim:#8b949e; --accent:#58a6ff; --green:#3fb950;
+  --orange:#d29922; --red:#f85149;
+}
+:root[data-theme="light"]{
+  --bg:#ffffff; --surface:#f6f8fa; --surface2:#eaeef2; --border:#d0d7de;
+  --text:#1f2328; --dim:#59636e; --accent:#0969da; --green:#1a7f37;
+  --orange:#9a6700; --red:#cf222e;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:28px 16px 70px}
+h1{font-size:22px;margin:0 0 8px;line-height:1.3}
+h2{font-size:18px;margin:32px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;
+  font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
+.sub{color:var(--dim);font-size:13.5px;margin:0 0 16px}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);
+  border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;
+  font:13px/1 ui-monospace,Menlo,monospace;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.18)}
+.status{border:1px solid var(--border);border-radius:10px;background:var(--surface);
+  padding:2px 16px 10px;margin:0 0 20px}
+.status dl{display:grid;grid-template-columns:max-content 1fr;gap:4px 14px;margin:12px 0 0}
+.status dt{color:var(--dim);font-size:12px;text-transform:uppercase;letter-spacing:.04em;
+  white-space:nowrap;padding-top:2px}
+.status dd{margin:0;font-size:14px}
+.verdict{font-weight:700}
+.verdict.good{color:var(--green)}
+.verdict.open{color:var(--orange)}
+.bg{border:1px dashed var(--border);border-radius:8px;padding:8px 14px;margin:0 0 16px;font-size:14px}
+.hl{border-left:3px solid var(--accent);background:var(--surface);padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0}
+.where{border-left:4px solid var(--accent);background:var(--surface);padding:6px 12px;margin:6px 0 10px}
+.cref{margin:4px 0 0;font-size:13px}
+.cref a{display:inline-block;padding:3px 10px;border:1px solid var(--border);
+  border-radius:16px;background:var(--surface);font:12px ui-monospace,Menlo,monospace;margin:2px 4px 2px 0}
+.cref a:hover{background:var(--surface2);text-decoration:none}
+ul.find{padding-left:20px;margin:8px 0}
+ul.find li{margin:0 0 12px}
+.sev{font:bold 11px ui-monospace,Menlo,monospace;padding:1px 6px;border-radius:4px;border:1px solid var(--border);margin-right:6px}
+.sev.r{color:var(--red);border-color:var(--red)} .sev.o{color:var(--orange);border-color:var(--orange)} .sev.d{color:var(--dim)}
+.tip{border-bottom:1px dotted var(--dim);cursor:help;position:relative;outline:none}
+.tip:hover::after,.tip:focus::after{content:attr(data-tip);position:absolute;left:0;top:1.7em;z-index:60;
+  width:max-content;max-width:min(340px,80vw);white-space:normal;background:var(--surface2);color:var(--text);
+  border:1px solid var(--border);border-radius:6px;padding:7px 10px;font:13px/1.45 -apple-system,sans-serif;
+  font-weight:400;box-shadow:0 4px 14px rgba(0,0,0,.3)}
+.figscroll{overflow-x:auto}
+svg{min-width:720px;width:100%;height:auto;display:block;margin:16px 0}
+svg .box{fill:var(--surface);stroke:var(--border);stroke-width:1.4}
+svg .box-red{fill:var(--surface);stroke:var(--red);stroke-width:2.2}
+svg .box-or{fill:var(--surface);stroke:var(--orange);stroke-width:2}
+svg .box-same{fill:var(--surface);stroke:var(--green);stroke-width:2}
+svg .t{fill:var(--text);font:bold 12.5px -apple-system,sans-serif}
+svg .d{fill:var(--text);font:11px ui-monospace,Menlo,monospace}
+svg .dim{fill:var(--dim);font:11px -apple-system,sans-serif}
+svg .red{fill:var(--red);font:bold 11px -apple-system,sans-serif}
+svg .orn{fill:var(--orange);font:bold 11px -apple-system,sans-serif}
+svg .grn{fill:var(--green);font:bold 11px -apple-system,sans-serif}
+svg .lane{fill:var(--accent);font:bold 13px -apple-system,sans-serif}
+svg .arr{stroke:var(--dim);stroke-width:1.4;fill:none;marker-end:url(#ah)}
+svg .ahf{fill:var(--dim)}
+svg a text{text-decoration:underline;fill:var(--accent);font:11px ui-monospace,Menlo,monospace}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+  document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head>
+<body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+  function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+  function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
+    b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
+      else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+  document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+<div class="wrap">
+
+<h1>Checkpoints in S3: how a save is marked complete without a rename, and how resume finds it</h1>
+<p class="sub"><a href="https://github.com/NVIDIA-NeMo/RL/pull/4743">NVIDIA-NeMo/RL #4743</a>
+· feat(checkpoint): opt-in MSC (S3) checkpoint storage · permalinks pin the PR head <code>b3ae176</code></p>
+
+<div class="status">
+<dl>
+  <dt>Before</dt>
+  <dd>Checkpoints could only go to a filesystem path. A save went to a temporary folder that was renamed when done.</dd>
+  <dt>This PR</dt>
+  <dd>Adds <code>checkpoint_dir: msc://&lt;profile&gt;/&lt;prefix&gt;</code>. The run writes straight into the bucket and marks a finished step with an <code>_SUCCESS</code> file. Plain paths keep the old rename.</dd>
+  <dt>Status</dt>
+  <dd><span class="verdict good">New feature; the save-and-mark design is sound</span>, and it has been run end to end with Megatron on GB300.
+  <span class="verdict open">Open in review:</span> the PR's own new test fails, and a few <code>msc://</code> paths still break (last section).</dd>
+</dl>
+</div>
+
+<div class="bg"><b>Background.</b> <a href="https://github.com/NVIDIA/multi-storage-client">Multi-Storage Client</a> (MSC) is an
+NVIDIA library that reads and writes S3, GCS or Azure through one API. A path like <code>msc://sbx/run</code> means "the storage
+setup named <code>sbx</code> in the MSC config file, folder <code>run</code>". Megatron can already write its checkpoint shards through
+MSC, but only in a process where a <span class="tip" tabindex="0" data-tip="megatron.core.msc_utils.MultiStorageClientFeature. It starts off. While it is off, Megatron treats every path, msc:// included, as a local file.">per-process MSC switch</span> is turned on.
+Dotted words have a short explanation: hover or tap them.</div>
+
+<p>Object storage has no cheap rename: "renaming" a folder means copying every object in it. So the old trick, write to
+<code>tmp_step_6/</code> and rename it to <code>step_6/</code> when done
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/b3ae176192fd0d00ae61ef1704217a1d0cb8e0ea/nemo_rl/utils/checkpoint.py#L410-L420"><code>_rename_checkpoint</code></a>),
+does not work in a bucket. For <code>msc://</code>, the PR writes into <code>step_6/</code> from the start and, once every writer has
+finished, adds one small file, <code>step_6/_SUCCESS</code>
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/b3ae176192fd0d00ae61ef1704217a1d0cb8e0ea/nemo_rl/utils/checkpoint.py#L405-L409">L405-L409</a>).
+Resume only looks at steps that have that file
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/b3ae176192fd0d00ae61ef1704217a1d0cb8e0ea/nemo_rl/utils/checkpoint.py#L710-L719"><code>_msc_step_dirs</code></a>),
+so a half-written step is never picked up.</p>
+
+<h2>Same save, two storage paths</h2>
+
+<p>One save of step 6, with <code>save_period: 3</code>, through both paths. Every algorithm calls the same three
+<code>CheckpointManager</code> methods; the two paths split only inside them.</p>
+
+<div class="figscroll">
+<svg viewBox="0 0 940 372" role="img" aria-label="Local and msc:// checkpoint save and resume, step by step">
+<defs><marker id="ah" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path class="ahf" d="M0,0 L8,4 L0,8 z"/></marker></defs>
+
+<text class="lane" x="10" y="18">local path — checkpoint_dir: /ckpt/run (unchanged by this PR)</text>
+<rect class="box" x="10" y="28" width="218" height="112" rx="7"/>
+<text class="t" x="20" y="48">1 · start the save</text>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/b3ae176192fd0d00ae61ef1704217a1d0cb8e0ea/nemo_rl/utils/checkpoint.py#L368-L377"><text x="20" y="66">init_tmp_checkpoint(6)</text></a>
+<text class="d" x="20" y="86">/ckpt/run/tmp_step_6/</text>
+<text class="d" x="20" y="102">  training_info.json</text>
+<text class="d" x="20" y="118">  config.yaml</text>
+
+<rect class="box" x="240" y="28" width="218" height="112" rx="7"/>
+<text class="t" x="250" y="48">2 · workers write shards</text>
+<text class="dim" x="250" y="66">Megatron save_checkpoint</text>
+<text class="d" x="250" y="86">tmp_step_6/policy/</text>
+<text class="d" x="250" y="102">  weights/*.distcp</text>
+<text class="d" x="250" y="118">  optimizer/*.distcp</text>
+
+<rect class="box" x="470" y="28" width="218" height="112" rx="7"/>
+<text class="t" x="480" y="48">3 · mark it complete</text>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/b3ae176192fd0d00ae61ef1704217a1d0cb8e0ea/nemo_rl/utils/checkpoint.py#L410-L420"><text x="480" y="66">_rename_checkpoint</text></a>
+<text class="d" x="480" y="86">os.rename(</text>
+<text class="d" x="480" y="102">  tmp_step_6 → step_6)</text>
+<text class="dim" x="480" y="124">one cheap filesystem call</text>
+
+<rect class="box" x="700" y="28" width="230" height="112" rx="7"/>
+<text class="t" x="710" y="48">4 · resume finds it</text>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/b3ae176192fd0d00ae61ef1704217a1d0cb8e0ea/nemo_rl/utils/checkpoint.py#L681-L686"><text x="710" y="66">get_latest_checkpoint_path</text></a>
+<text class="d" x="710" y="86">glob step_*</text>
+<text class="d" x="710" y="102">→ /ckpt/run/step_6</text>
+<text class="dim" x="710" y="124">tmp_step_* never matches</text>
+<path class="arr" d="M228,84 L238,84"/><path class="arr" d="M458,84 L468,84"/><path class="arr" d="M688,84 L698,84"/>
+
+<text class="lane" x="10" y="176">msc:// path — checkpoint_dir: msc://sbx/run (new)</text>
+<rect class="box-or" x="10" y="186" width="218" height="128" rx="7"/>
+<text class="t" x="20" y="206">1 · start the save</text>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/b3ae176192fd0d00ae61ef1704217a1d0cb8e0ea/nemo_rl/utils/checkpoint.py#L358-L367"><text x="20" y="224">init_tmp_checkpoint(6)</text></a>
+<text class="d" x="20" y="244">msc://sbx/run/step_6/</text>
+<text class="d" x="20" y="260">  training_info.json</text>
+<text class="d" x="20" y="276">  config.yaml</text>
+<text class="orn" x="20" y="296">has _SUCCESS → FileExistsError</text>
+<text class="orn" x="20" y="310">no _SUCCESS → delete, start over</text>
+
+<rect class="box-or" x="240" y="186" width="218" height="128" rx="7"/>
+<text class="t" x="250" y="206">2 · workers write shards</text>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/b3ae176192fd0d00ae61ef1704217a1d0cb8e0ea/nemo_rl/models/policy/workers/megatron_policy_worker.py#L4721"><text x="250" y="224">enable_msc_for(weights_path)</text></a>
+<text class="d" x="250" y="244">step_6/policy/</text>
+<text class="d" x="250" y="260">  weights/*.distcp</text>
+<text class="d" x="250" y="276">  optimizer/*.distcp</text>
+<text class="orn" x="250" y="296">each worker turns its own</text>
+<text class="orn" x="250" y="310">MSC switch on first</text>
+
+<rect class="box-red" x="470" y="186" width="218" height="128" rx="7"/>
+<text class="t" x="480" y="206">3 · mark it complete</text>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/b3ae176192fd0d00ae61ef1704217a1d0cb8e0ea/nemo_rl/utils/checkpoint.py#L405-L409"><text x="480" y="224">_rename_checkpoint</text></a>
+<text class="d" x="480" y="244">write step_6/_SUCCESS</text>
+<text class="d" x="480" y="260">  {"version": 1}</text>
+<text class="dim" x="480" y="282">only after every async</text>
+<text class="dim" x="480" y="298">writer has finished</text>
+
+<rect class="box-or" x="700" y="186" width="230" height="128" rx="7"/>
+<text class="t" x="710" y="206">4 · resume finds it</text>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/b3ae176192fd0d00ae61ef1704217a1d0cb8e0ea/nemo_rl/utils/checkpoint.py#L710-L719"><text x="710" y="224">_msc_step_dirs</text></a>
+<text class="d" x="710" y="244">glob step_*/_SUCCESS</text>
+<text class="d" x="710" y="260">→ msc://sbx/run/step_6</text>
+<text class="dim" x="710" y="282">a step with no _SUCCESS</text>
+<text class="dim" x="710" y="298">is never resumed</text>
+<path class="arr" d="M228,250 L238,250"/><path class="arr" d="M458,250 L468,250"/><path class="arr" d="M688,250 L698,250"/>
+
+<rect class="box" x="10" y="336" width="18" height="12" rx="2"/>
+<text class="dim" x="34" y="346">same as before</text>
+<rect class="box-or" x="150" y="336" width="18" height="12" rx="2"/>
+<text class="dim" x="174" y="346">differs from the local path</text>
+<rect class="box-red" x="350" y="336" width="18" height="12" rx="2"/>
+<text class="dim" x="374" y="346">the key difference: a marker file replaces the rename</text>
+<text class="dim" x="10" y="366">Values follow the PR's GB300 runs: save_period 3, steps 3 and 6 saved, resume from step_6.</text>
+</svg>
+</div>
+
+<p><b>Where the two paths meet.</b> The algorithm code is the same for both. Each one calls
+<code>init_tmp_checkpoint</code> → <code>policy.save_checkpoint</code> → <code>finalize_checkpoint</code>, and the
+non-model files go through new helpers that accept either kind of path:
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/b3ae176192fd0d00ae61ef1704217a1d0cb8e0ea/nemo_rl/data/utils.py#L69-L83"><code>save_dataloader_state</code></a>,
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/b3ae176192fd0d00ae61ef1704217a1d0cb8e0ea/nemo_rl/utils/checkpoint_storage.py#L85-L96"><code>path_exists</code> / <code>open_path</code></a>.
+The split happens inside <code>CheckpointManager</code>, on one check, <code>self._msc is not None</code>, in four
+places: start, mark complete, find latest, and delete old steps. What still differs after that: the <code>msc://</code>
+path refuses to overwrite a finished step, and it needs <code>save_data_plane=false</code>, so a SingleController resume
+rebuilds its buffered rollouts instead of restoring them
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/b3ae176192fd0d00ae61ef1704217a1d0cb8e0ea/nemo_rl/utils/checkpoint.py#L257-L261">checkpoint.py L257-L261</a>).</p>
+
+<p><b>Why keep both.</b> A local or shared filesystem gets the atomic rename for free and needs no MSC config.
+<code>msc://</code> skips the copy to a bucket after training, at the cost of a marker file and of every process
+that hands Megatron a path having to turn its MSC switch on first. That last cost is where most of the open review
+items come from.</p>
+
+<h2>What the review still asks for</h2>
+
+<p class="where"><b>Where the fixes land: RL only.</b> No Megatron or MSC change is needed: both already handle
+<code>msc://</code> once the switch is on. An earlier review also found three save or resume sites not converted yet
+(the Megatron value worker, async PPO resume, and <code>sft_v2</code>); those are in its own comments.</p>
+
+<ul class="find">
+<li><span class="sev r">test</span>The PR's new SingleController setup test builds a real <code>CheckpointManager</code> for
+<code>msc://profile/run</code>. No MSC config exists in CI, so it fails with <code>Profile "profile" not found</code>.
+No unit-test CI has run on this head yet, which is why it has not shown up.
+<p class="cref"><a href="https://github.com/NVIDIA-NeMo/RL/pull/4743/files">review comment — test_setup.py:1257</a></p></li>
+<li><span class="sev o">bug</span><code>listdir()</code> calls <code>msc.os.listdir</code>, which MSC 0.51 does not have. An
+<code>msc://</code> pretrained checkpoint folder without a <code>latest_checkpointed_iteration.txt</code> crashes worker start with
+<code>AttributeError</code>.
+<p class="cref"><a href="https://github.com/NVIDIA-NeMo/RL/pull/4743/files">review comment — checkpoint_storage.py:115</a></p></li>
+<li><span class="sev o">bug</span>Deleting an old step leaves <code>_SUCCESS</code> in place until the end. If the delete
+stops halfway, that step still looks finished but has no <code>training_info.json</code>, and every later cleanup fails
+on it. <code>keep_top_k</code> stops working and the bucket keeps growing. Fix: delete <code>_SUCCESS</code> first.
+<p class="cref"><a href="https://github.com/NVIDIA-NeMo/RL/pull/4743/files">review comment — checkpoint.py:618</a></p></li>
+<li><span class="sev o">bug</span>With an Automodel (DTensor) policy, the weights reach the bucket but the tokenizer is saved
+to a local folder literally named <code>./msc:/…</code>, with no error. The docs say only Megatron is supported, so the
+ask is to raise an error for that case.
+<p class="cref"><a href="https://github.com/NVIDIA-NeMo/RL/pull/4743/files">review comment — lm_policy.py:150</a></p></li>
+<li><span class="sev d">small</span>A docs fix (which resume files are full pickles), a missing type-check entry, and a test
+for the SingleController resume fix.</li>
+</ul>
+
+<div class="hl"><b>So what.</b> Point <code>checkpointing.checkpoint_dir</code> at <code>msc://&lt;profile&gt;/&lt;prefix&gt;</code>
+and a Megatron run saves to and resumes from S3 directly. A step counts only once its <code>_SUCCESS</code> file exists,
+so a crash mid-save is safe. Plain filesystem paths behave exactly as before. Use a fresh prefix for each new run,
+because a finished step is never overwritten.</div>
+
+</div>
+</body>
+</html>
