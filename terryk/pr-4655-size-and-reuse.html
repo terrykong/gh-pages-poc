@@ -282,6 +282,7 @@ A checkpoint must not save TQ while a final-row write is half done, so the worke
 <tr><td><code>close()</code>, its paused check, <code>stats()</code> and 5 counters only tests read</td><td>Gone. The thread is a daemon; the PR already accepts that lost deletes only leave extra rows.</td></tr>
 <tr><td>253-line module; 19 unit tests, mostly for the fence above</td><td>About 25 lines; tests for the removed fence go with it.</td></tr>
 </table></div>
+<p class="cref"><a href="https://github.com/NVIDIA-NeMo/RL/pull/4655#discussion_r4305678947">review comment — background_prefix_cleanup.py:157</a> <a href="https://github.com/NVIDIA-NeMo/RL/pull/4655#discussion_r4305678951">review comment — background_prefix_cleanup.py:221</a></p>
 
 <h2>The change — proposed, not in the PR</h2>
 <p>Nothing below is implemented in NeMo-RL. The same design ran as a stand-alone prototype against the real gate class.</p>
@@ -350,8 +351,10 @@ A checkpoint must not save TQ while a final-row write is half done, so the worke
 (3) the checkpoint code goes back to what <a href="https://github.com/NVIDIA-NeMo/RL/pull/4508">#4508</a> has.
 The prototype checked: a reply returns while a CLEAR is still running; a checkpoint waits for that CLEAR; no CLEAR starts while the gate is closed; 1,024 calls blocked on a full queue plus a second checkpoint do not deadlock; 2,048 keys clear in 34–36 calls at batch size 32 (the PR's test gets 32).
 Do not reuse <a href="https://github.com/NVIDIA-NeMo/RL/blob/495ce13048300fc47077daf301d04e34bef5168a/nemo_rl/models/generation/prefix_read_batcher.py#L23"><code>PrefixReadBatcher</code></a> from #4508 instead: it returns awaited results on one event loop, while this delete is fire-and-forget from a worker thread.</p>
+<p class="cref"><a href="https://github.com/NVIDIA-NeMo/RL/pull/4655#discussion_r4305678947">review comment — background_prefix_cleanup.py:157</a></p>
 
 <div class="warn"><b>So what.</b> The feature stack is already about 20k lines, and this PR adds a second checkpoint fence for one thread. Taking a permit on the gate that exists keeps the reply-time gain and drops the module to about 25 lines, with no checkpoint changes. It also removes the bug on the <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4655-failed-clear.html">next page</a>. The PR still shows no latency number for the gain; the review asks for one.</div>
+
 </div>
 </body>
 </html>
