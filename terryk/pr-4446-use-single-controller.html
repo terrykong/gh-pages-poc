@@ -107,10 +107,12 @@ Permalinks pin <code>main</code> at <code>e12d18b</code>.</p>
 
 <div class="status">
 <dl>
-  <dt>Before</dt>
-  <dd>On the original GRPO loops (<code>grpo_train</code>, <code>async_grpo_train</code>, PPO, distillation), one failed NeMo-Gym <code>/run</code> fails the step.</dd>
+  <dt>Main</dt>
+  <dd>On the original GRPO loops (<code>grpo_train</code>, <code>async_grpo_train</code>, PPO, distillation), one failed NeMo-Gym <code>/run</code> fails the step. The single controller already re-sends failed rows, retries the whole prompt group, routes calls around a dead engine, and restarts dead engines.</dd>
   <dt>This PR</dt>
-  <dd>Adds a retry budget for failed rollouts to those loops.</dd>
+  <dd>Adds a per-row retry to the original loops (<code>env.nemo_gym.max_infra_attempts_per_rollout</code>, default 1 = no retry). It also changes code the single controller shares: the Gym actor now returns failed rows as markers, and a 200 reply whose body is not valid JSON now counts as an infrastructure failure, not a data failure.</dd>
+  <dt>After the review</dt>
+  <dd>The original loops' setting is renamed <code>max_row_attempts</code> with default 3, the same name and meaning as the single controller's (C7). The single controller stays the reference; the review flags its behavior changes for the maintainer to decide on (C13 and the review body).</dd>
   <dt>Status</dt>
   <dd><span class="verdict open">Proposed: switch to the single controller instead.</span> It already ships stronger recovery for the same failure, and the config below passes its setup checks. Nothing on this page is merged as a new recipe.</dd>
 </dl>

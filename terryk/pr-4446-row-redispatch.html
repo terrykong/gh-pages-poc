@@ -79,6 +79,14 @@ svg .t-mark{fill:var(--orange);font:bold 12px -apple-system,sans-serif}
 svg .arrow{stroke:var(--dim);stroke-width:1.4;fill:none;marker-end:url(#ah)}
 svg .arrow-o{stroke:var(--orange);stroke-width:1.6;fill:none;marker-end:url(#aho)}
 svg a text{text-decoration:underline;fill:var(--accent);font:11px ui-monospace,Menlo,monospace}
+svg .lane-r{fill:none;stroke:var(--green);stroke-width:1.2;stroke-dasharray:6 4}
+.st{display:inline-block;padding:0 6px;border-radius:4px;font:600 11px/1.6 ui-monospace,Menlo,monospace;
+  text-transform:none;letter-spacing:0;border:1px solid}
+.st.m{color:var(--dim);border-color:var(--dim)}
+.st.p{color:var(--accent);border-color:var(--accent)}
+.st.r{color:var(--green);border-color:var(--green)}
+table.cmp td .st{margin-right:4px}
+table.cmp td div{margin:2px 0}
 </style>
 <script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
   document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
@@ -108,12 +116,14 @@ svg a text{text-decoration:underline;fill:var(--accent);font:11px ui-monospace,M
 
 <div class="status">
 <dl>
-  <dt>Before</dt>
-  <dd>One failed <code>/run</code> (say, a 503 from a dead vLLM engine) ended its whole actor stream. The rollouts still running on that stream were thrown away, and the step failed.</dd>
-  <dt>This PR</dt>
-  <dd>NeMo-Gym hands back the failed rollout as a data row. The other rollouts keep running, and only the failed one is sent again, up to a set number of tries.</dd>
+  <dt><span class="st m">main</span></dt>
+  <dd>One failed <code>/run</code> (say, a 503 from a dead vLLM engine) ended its whole actor stream. The rollouts still running on that stream were thrown away, and the step failed. The driver path has no retry setting.</dd>
+  <dt><span class="st p">this PR</span></dt>
+  <dd>NeMo-Gym hands back the failed rollout as a data row. The other rollouts keep running, and only the failed one is sent again, up to <code>max_infra_attempts_per_rollout</code> tries. That defaults to 1, which means no retry. The actor is shared, so the single controller changes too.</dd>
+  <dt><span class="st r">after the review</span></dt>
+  <dd>The setting is renamed <code>max_row_attempts</code> with default 3, the same name and meaning as on the single controller (C7), and checked at setup (C8). A re-sent row gets a new rollout id (C4). The re-send count is summed per step on every path (C1). With a budget of 1, a failure no longer cancels the other Gym actors' streams (C12). Doc and test fixes (C2, C3, C5, C6). <b>For the maintainer to decide:</b> the single controller re-sends a failed row at once instead of after its stream ends (C13).</dd>
   <dt>Status</dt>
-  <dd><span class="verdict good">New feature, in review.</span> Off by default: <code>max_infra_attempts_per_rollout</code> defaults to 1, which keeps today's "one failure ends the step". The review found no blocking bug, but asks for 4 follow-up changes (listed at the end).</dd>
+  <dd><span class="verdict good">New feature, in review.</span> No blocking bug. The "after the review" row is what the code does once the author applies the changes proposed in the review; the review is not posted yet.</dd>
 </dl>
 </div>
 
@@ -135,12 +145,12 @@ sees the marker and starts a new one-row stream for that prompt on the same acto
 
 <h2>One batch, one dead engine: before and after</h2>
 
-<svg viewBox="0 0 900 470" role="img" aria-label="Four rollouts, row 2 hits a 503. Before: the stream ends, row 3 is lost, the step fails. After: row 2 comes back as a marker, is sent again once, and the step finishes.">
+<svg viewBox="0 0 900 600" role="img" aria-label="Four rollouts, row 2 hits a 503. Main: the stream ends, row 3 is lost, the step fails. This PR: row 2 comes back as a marker, is sent again once, and the step finishes. After the review: the same with no extra config, and a new rollout id on the retry.">
   <defs>
     <marker id="ah" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" style="fill:var(--dim)"/></marker>
     <marker id="aho" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" style="fill:var(--orange)"/></marker>
   </defs>
-  <text class="hdr" x="14" y="20">4 rollouts on one actor · row 2's engine is dead (HTTP 503) · budget max_infra_attempts_per_rollout = 3</text>
+  <text class="hdr" x="14" y="20">4 rollouts on one actor · row 2's engine is dead (HTTP 503) · same input in all three states</text>
 
   <!-- legend -->
   <rect class="ok" x="14" y="32" width="14" height="12"/><text class="note" x="33" y="42">finished</text>
@@ -150,7 +160,7 @@ sees the marker and starts a new one-row stream for that prompt on the same acto
 
   <!-- BEFORE lane -->
   <rect class="lane" x="8" y="56" width="884" height="150" rx="8"/>
-  <text class="lbl-b" x="18" y="78">Before (main)</text>
+  <text class="lbl-b" x="18" y="78">main</text>
   <rect class="ok" x="18" y="92" width="64" height="26" rx="4"/><text class="lbl" x="28" y="110">row 0</text>
   <rect class="ok" x="88" y="92" width="64" height="26" rx="4"/><text class="lbl" x="98" y="110">row 1</text>
   <rect class="bad" x="158" y="92" width="64" height="26" rx="4"/><text class="lbl" x="168" y="110">row 2</text>
@@ -170,7 +180,7 @@ sees the marker and starts a new one-row stream for that prompt on the same acto
 
   <!-- AFTER lane -->
   <rect class="lane" x="8" y="216" width="884" height="246" rx="8"/>
-  <text class="lbl-b" x="18" y="238">After (this PR, driver path)</text>
+  <text class="lbl-b" x="18" y="238">this PR · driver path, with max_infra_attempts_per_rollout: 3 set by hand (default 1 = no retry)</text>
   <rect class="ok" x="18" y="252" width="64" height="26" rx="4"/><text class="lbl" x="28" y="270">row 0</text>
   <rect class="ok" x="88" y="252" width="64" height="26" rx="4"/><text class="lbl" x="98" y="270">row 1</text>
   <rect class="mark" x="158" y="252" width="64" height="26" rx="4"/><text class="lbl" x="168" y="270">row 2</text>
@@ -196,45 +206,66 @@ sees the marker and starts a new one-row stream for that prompt on the same acto
   <a href="https://github.com/NVIDIA-NeMo/RL/blob/8fecfa2cefbcc8189a73753d9cc56b3f5c6a1e5b/nemo_rl/experience/rollouts.py#L1930-L1950" target="_blank" rel="noopener"><text x="390" y="414">record_infra_failure L1930-L1950</text></a>
   <text class="note" x="18" y="440">Rows finished: 4 of 4 · step result: ok · nemo_gym_infra_redispatches = 1</text>
   <text class="note" x="18" y="456">If row 2 failed on all 3 tries, the 3rd marker raises GymTransportError with the 503 detail, as before.</text>
+
+  <!-- AFTER THE REVIEW lane -->
+  <rect class="lane-r" x="8" y="472" width="884" height="120" rx="8"/>
+  <text class="lbl-b" x="18" y="494">after the review · proposed, not in the PR yet</text>
+  <text class="note" x="18" y="516">Same run, no setting needed: max_row_attempts defaults to 3, same name and meaning as the single controller (C7).</text>
+  <text class="note" x="18" y="536">The re-sent row 2 carries _ng_attempt_index = 1, so Gym gives it a new rollout id and can pick another engine (C4).</text>
+  <text class="note" x="18" y="556">nemo_gym_infra_redispatches = 1 on every path: summed per step, never averaged over groups (C1).</text>
+  <text class="note" x="18" y="576">With a budget of 1, the marker still fails the step, but other Gym actors' streams keep draining, as on main (C12).</text>
 </svg>
 
 <h2>Two places now retry a failed row, with two different knobs</h2>
 
 <p>The single-controller path already had a row-level retry loop: it re-sends any row of a prompt group
-that did not come back. This PR feeds the same marker into that loop. Both paths read the marker from the
-same actor method, then split on <em>when</em> they re-send.</p>
+that did not come back. This PR feeds the same marker into that loop. Each cell shows the three states:
+<span class="st m">main</span> today, <span class="st p">PR</span> at head, and
+<span class="st r">review</span> once the proposed changes are applied.</p>
 
 <div class="scroll"><table class="cmp">
 <tr><th></th><th>Driver path (sync GRPO, PPO, distillation, async GRPO collector)</th><th>Single controller</th></tr>
-<tr><td>Where the marker is handled</td>
-<td><a href="https://github.com/NVIDIA-NeMo/RL/blob/8fecfa2cefbcc8189a73753d9cc56b3f5c6a1e5b/nemo_rl/experience/rollouts.py#L2681-L2707"><code>_merge_nemo_gym_instance_streams</code></a></td>
-<td><a href="https://github.com/NVIDIA-NeMo/RL/blob/8fecfa2cefbcc8189a73753d9cc56b3f5c6a1e5b/nemo_rl/experience/rollout_manager.py#L1206-L1220"><code>_stream_rows</code></a></td></tr>
-<tr><td>When the row is sent again</td>
-<td>At once, as a new 1-row stream, while the other rows keep running</td>
-<td>In the next pass of the attempt loop, after the current stream drains
-(<a href="https://github.com/NVIDIA-NeMo/RL/blob/8fecfa2cefbcc8189a73753d9cc56b3f5c6a1e5b/nemo_rl/experience/rollout_manager.py#L1337-L1338">L1337-L1338</a>)</td></tr>
+<tr><td>What happens to a failed row</td>
+<td><div><span class="st m">main</span>The stream raises; the step fails</div>
+<div><span class="st p">PR</span>A marker is handled in <a href="https://github.com/NVIDIA-NeMo/RL/blob/8fecfa2cefbcc8189a73753d9cc56b3f5c6a1e5b/nemo_rl/experience/rollouts.py#L2681-L2707"><code>_merge_nemo_gym_instance_streams</code></a> and the row is sent again at once, as a new 1-row stream</div>
+<div><span class="st r">review</span>No change</div></td>
+<td><div><span class="st m">main</span>The stream dies; the failed row <b>and</b> the rows still running are all re-sent in the next attempt</div>
+<div><span class="st p">PR</span>A marker in <a href="https://github.com/NVIDIA-NeMo/RL/blob/8fecfa2cefbcc8189a73753d9cc56b3f5c6a1e5b/nemo_rl/experience/rollout_manager.py#L1206-L1220"><code>_stream_rows</code></a>; only the failed row is re-sent, but only after the rest of its stream finishes (<a href="https://github.com/NVIDIA-NeMo/RL/blob/8fecfa2cefbcc8189a73753d9cc56b3f5c6a1e5b/nemo_rl/experience/rollout_manager.py#L1337-L1338">L1337-L1338</a>)</div>
+<div><span class="st r">review</span>Re-send at once, like the driver path. For the maintainer to decide (C13)</div></td></tr>
 <tr><td>Budget</td>
-<td><code>env.nemo_gym.max_infra_attempts_per_rollout</code>, default 1</td>
-<td><code>async_rl.rollout_failure.nemo_gym.max_row_attempts</code>, default 3; the env key above is ignored here</td></tr>
+<td><div><span class="st m">main</span>None</div>
+<div><span class="st p">PR</span><code>env.nemo_gym.max_infra_attempts_per_rollout</code>, default 1 (no retry), checked at the first rollout</div>
+<div><span class="st r">review</span><code>env.nemo_gym.max_row_attempts</code>, default 3 (C7), checked at setup (C8)</div></td>
+<td><div><span class="st m">main</span><code>async_rl.rollout_failure.nemo_gym.max_row_attempts</code>, default 3</div>
+<div><span class="st p">PR</span>Unchanged; the driver's env key is ignored here</div>
+<div><span class="st r">review</span>Unchanged; this is the reference the driver setting now matches</div></td></tr>
 <tr><td>On the last try</td>
-<td>The marker raises <code>GymTransportError</code></td>
-<td>The first marker ends the attempt; the whole prompt group is retried with a new group attempt</td></tr>
+<td><div><span class="st m">main</span>Other Gym actors' streams drain, then the step fails</div>
+<div><span class="st p">PR</span>The marker raises <code>GymTransportError</code> and the merge cancels <b>every</b> stream, other actors' included</div>
+<div><span class="st r">review</span>Record the failure and keep draining the other streams, as on main (C12)</div></td>
+<td><div><span class="st m">main</span><span class="st p">PR</span><span class="st r">review</span>The attempt ends; the whole prompt group is retried with a new group attempt</div></td></tr>
 <tr><td>Metric <code>nemo_gym_infra_redispatches</code></td>
-<td>One number per step: rows sent again</td>
-<td>One number per prompt group, then <b>averaged</b> across groups by
-<a href="https://github.com/NVIDIA-NeMo/RL/blob/8fecfa2cefbcc8189a73753d9cc56b3f5c6a1e5b/nemo_rl/algorithms/grpo.py#L4680-L4709"><code>aggregate_rollout_metrics</code></a></td></tr>
+<td><div><span class="st m">main</span>Not logged</div>
+<div><span class="st p">PR</span>Sync: one total per step. Async collector: only the last group of a batch carries it, then averaged</div>
+<div><span class="st r">review</span>One total per step (C1)</div></td>
+<td><div><span class="st m">main</span>Not logged</div>
+<div><span class="st p">PR</span>One number per prompt group, then <b>averaged</b> by <a href="https://github.com/NVIDIA-NeMo/RL/blob/8fecfa2cefbcc8189a73753d9cc56b3f5c6a1e5b/nemo_rl/algorithms/grpo.py#L4680-L4709"><code>aggregate_rollout_metrics</code></a></div>
+<div><span class="st r">review</span>Summed: one total per step (C1)</div></td></tr>
 </table></div>
 
 <div class="warn">
-<b>What the review asks the author to change.</b> None of these blocks the feature. Each has a review comment (the links work for others once the review is published).
+<b>Changes proposed in the review (C = comment number).</b> None of these blocks the feature. The review is not posted yet; comment links work for others once it is.
 <ul>
-<li><b>The metric reads differently on the two paths.</b> 10 rows sent again across 64 prompt groups logs 10 on the driver path and about 0.16 on the single controller. Fix: sum this key in <code>aggregate_rollout_metrics</code>, as <code>total_turns</code> is.
+<li><b>C7: one name for one setting.</b> Rename the driver setting to <code>max_row_attempts</code>, default 3, to match the single controller, and say in the doc that the driver path has no group-level retry above it.</li>
+<li><b>C12: don't throw away other actors' work.</b> With a budget of 1 and more than one Gym actor, the first failed row cancels every stream, so groups that finished on healthy actors never reach the buffer. Main kept draining them.</li>
+<li><b>C13, for the maintainer to decide:</b> on the single controller, re-send a failed row at once instead of after its stream ends, so a group with one failure doesn't finish later than it did on main. See <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4446-failure-rows.html">failure rows on both paths</a>.</li>
+<li><b>C1: the metric reads differently on the two paths.</b> 10 rows sent again across 64 prompt groups logs 10 on the driver path and about 0.16 on the single controller. Fix: sum this key in <code>aggregate_rollout_metrics</code>, as <code>total_turns</code> is.
 <p class="cref"><a href="https://github.com/NVIDIA-NeMo/RL/pull/4446#discussion_r4309661931">review comment — rollout_manager.py:1487</a></p></li>
-<li><b>The design doc's note on refused connections is out of date.</b> The Gym version this PR now pins caps those retries when <code>route_around_failing_endpoints</code> is on, which is the setting the doc recommends.
+<li><b>C2, C3: the design doc's note on refused connections is out of date.</b> The Gym version this PR now pins caps those retries when <code>route_around_failing_endpoints</code> is on, which is the setting the doc recommends.
 <p class="cref"><a href="https://github.com/NVIDIA-NeMo/RL/pull/4446#discussion_r4309661938">review comment — nemo-gym-integration.md:52</a></p></li>
-<li><b>A retry can go back to the same dead engine.</b> When Gym's rollout tracking is on (<code>observability_enabled</code>), Gym picks the engine from the rollout id, and the retry sends the same id. Fix: send a copy of the row with <code>_ng_attempt_index</code> set, as Gym's own retry does.
+<li><b>C4: a retry can go back to the same dead engine.</b> When Gym's rollout tracking is on (<code>observability_enabled</code>), Gym picks the engine from the rollout id, and the retry sends the same id. Fix: send a copy of the row with <code>_ng_attempt_index</code> set, as Gym's own retry does.
 <p class="cref"><a href="https://github.com/NVIDIA-NeMo/RL/pull/4446#discussion_r4309661955">review comment — rollouts.py:1949</a></p></li>
-<li><b>No test checks the copied Gym key names against real Gym.</b> Renaming Gym's status key leaves all 16 failure-row tests green. Fix: one <code>nemo_gym</code>-lane test that builds the row with Gym's own <code>_agent_request_failure_row</code>.
+<li><b>C5: no test checks the copied Gym key names against real Gym.</b> Renaming Gym's status key leaves all 16 failure-row tests green. Fix: one <code>nemo_gym</code>-lane test that builds the row with Gym's own <code>_agent_request_failure_row</code>.
 <p class="cref"><a href="https://github.com/NVIDIA-NeMo/RL/pull/4446#discussion_r4309661963">review comment — nemo_gym.py:319</a></p></li>
 </ul>
 </div>
