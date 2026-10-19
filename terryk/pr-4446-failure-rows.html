@@ -111,15 +111,16 @@ svg a text{text-decoration:underline;fill:var(--accent);font:11px ui-monospace,M
 <h1>When a Gym <code>/run</code> fails, when does the group finish: on main, with this PR, and after the review's fixes?</h1>
 <p class="sub"><a href="https://github.com/NVIDIA-NeMo/RL/pull/4446">NVIDIA-NeMo/RL #4446</a>.
 Permalinks pin the PR head <code>8fecfa2</code>. Main means the PR's base, <code>8338530</code>.
-The review comments named below (C7, C12, C13) are proposed in a review that has not been posted yet.</p>
+The review comments named below (C7, C12, C13, C14) are proposed in a review that has not been posted yet.</p>
 
 <nav class="chain">
   <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4446-row-redispatch.html">what the PR does</a>
   <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4446-use-single-controller.html">use the single controller</a>
   <span class="here">failure rows on both paths</span>
   <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4446-under-400-is-infra.html">the &lt;400 rule</a>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4446-policy-mix.html">policy mix in a group</a>
 </nav>
-<p class="chainnote">Four pages on this PR, one question each. This one: what the shared Gym change does to timing on each path.</p>
+<p class="chainnote">Five pages on this PR, one question each. This one: what the shared Gym change does to timing on each path.</p>
 
 <div class="bg"><b>Two paths, named the same way on every page.</b>
 <b>v1</b> = <code>grpo_train</code>, <code>async_grpo_train</code>, PPO and distillation; each sends a whole batch to a Gym actor as one stream.
@@ -139,16 +140,20 @@ Both call the same Gym actor, so a change to the actor reaches both.</div>
   <td>Sends the row again at once, but the new setting defaults to <a href="https://github.com/NVIDIA-NeMo/RL/blob/8fecfa2cefbcc8189a73753d9cc56b3f5c6a1e5b/nemo_rl/experience/rollouts.py#L2022">1 try</a>: by default the rollout still fails, and now it also cancels every other Gym actor's stream.</td>
   <td>Sends the row again only after the rest of the stream finishes, so a group can finish later than on main.</td></tr>
 <tr><th>After the review</th>
-  <td><span class="tag ask">C7 · v1, aligning to v2</span> rename to <code>max_row_attempts</code>, default 3: retries by default.<br>
-  <span class="tag ask">C12 · v1</span> when a row runs out of tries, keep draining the other actors, as main did.</td>
-  <td><span class="tag decide">C13 · v2 · maintainer's call</span> send the failed row again as soon as its marker arrives, as v1 does. Without C13, v2 stays as in this PR.</td></tr>
+  <td colspan="2" class="both"><span class="tag both">both · shared code</span> <span class="tag ask">C14 · v1+v2</span> one flag, off by default. Off = main on both paths: no failure rows, a failed <code>/run</code> raises as on main. On = this PR. A row re-sent alone can get a newer policy than its siblings, so this needs an ablation first (<a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4446-policy-mix.html">policy mix in a group</a>, <a href="https://github.com/NVIDIA-NeMo/RL/pull/4446#discussion_r4310864810">review comment</a>).</td></tr>
+<tr><th></th>
+  <td><b>Default:</b> as main.<br>
+  <span class="tag ask">C7 · v1, aligning to v2</span> rename to <code>max_row_attempts</code>; the default stays 1 (main has no v1 row retry).<br>
+  <span class="tag ask">C12 · v1</span> with the flag on, when a row runs out of tries, keep draining the other actors, as main did.</td>
+  <td><b>Default:</b> as main.<br>
+  <span class="tag decide">C13 · v2 · maintainer's call</span> with the flag on, send the failed row again as soon as its marker arrives, as v1 does.</td></tr>
 </table></div>
-<p style="margin:8px 0 0"><span class="verdict open">Open. The PR changes both paths. C7 and C12 (v1) are asks in the review; C13 (v2) is flagged, not asked.</span></p>
+<p style="margin:8px 0 0"><span class="verdict open">Open. The PR changes both paths. The review asks to keep main's behavior by default (C14); C7 and C12 (v1) are asks; C13 (v2) is flagged, not asked.</span></p>
 </div>
 
 <h2>One group, 4 rows, row 2 fails at minute 5: six timelines</h2>
 
-<svg viewBox="0 0 960 800" role="img" aria-label="Six timelines of a four-row group. v2 (single controller): main finishes at 14, this PR at 16, after review fix C13 at 12. v1: main fails the step at 5 while other actors drain, this PR fails at 5 and cancels other actors, after review fixes C7 and C12 finishes at 12.">
+<svg viewBox="0 0 960 800" role="img" aria-label="Six timelines of a four-row group. v2 (single controller): main finishes at 14, this PR at 16, after the review by default same as main (14), with the flag on and C13 at 12. v1: main fails the step at 5 while other actors drain, this PR fails at 5 and cancels other actors, after the review by default same as main, with the flag on, a budget of 3 and C12 it finishes at 12.">
   <defs>
     <marker id="ah" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" style="fill:var(--dim)"/></marker>
   </defs>
@@ -202,9 +207,9 @@ Both call the same Gym actor, so a change to the actor reaches both.</div>
 
   <!-- SC after review (C13) -->
   <rect class="lane" x="8" y="282" width="944" height="96" rx="8"/>
-  <text class="lbl-b" x="18" y="302">After review · C13</text>
-  <text class="note" x="18" y="320">maintainer's call: row 2</text>
-  <text class="note" x="18" y="334">sent again at 5</text>
+  <text class="lbl-b" x="18" y="302">After review</text>
+  <text class="note" x="18" y="320">default: as main (14)</text>
+  <text class="note" x="18" y="334">flag on + C13: at 5</text>
   <rect class="ok" x="210" y="290" width="88" height="15"/><text class="bar" x="214" y="301">row 0</text>
   <rect class="ok" x="210" y="309" width="176" height="15"/><text class="bar" x="214" y="320">row 1</text>
   <rect class="bad" x="210" y="328" width="220" height="15"/><text class="bar" x="214" y="339">row 2 ✕</text>
@@ -243,27 +248,29 @@ Both call the same Gym actor, so a change to the actor reaches both.</div>
 
   <!-- v1 after review -->
   <rect class="lane" x="8" y="620" width="944" height="132" rx="8"/>
-  <text class="lbl-b" x="18" y="640">After review · C7 + C12</text>
-  <text class="note" x="18" y="658">default 3 tries: row 2</text>
-  <text class="note" x="18" y="672">sent again at 5</text>
+  <text class="lbl-b" x="18" y="640">After review</text>
+  <text class="note" x="18" y="658">default: as main (fails)</text>
+  <text class="note" x="18" y="672">flag on, budget 3: at 5</text>
   <rect class="ok" x="210" y="628" width="88" height="15"/><text class="bar" x="214" y="639">row 0</text>
   <rect class="ok" x="210" y="647" width="176" height="15"/><text class="bar" x="214" y="658">row 1</text>
   <rect class="bad" x="210" y="666" width="220" height="15"/><text class="bar" x="214" y="677">row 2 ✕</text>
   <rect class="ok" x="210" y="685" width="396" height="15"/><text class="bar" x="214" y="696">row 3 (kept)</text>
   <rect class="redo" x="430" y="666" width="308" height="15"/><text class="bar" x="434" y="677">row 2 again</text>
   <line class="done" x1="738" y1="626" x2="738" y2="708"/><text class="t-green" x="744" y="640">12</text>
-  <text class="note" x="18" y="728">C12: if a row does use all its tries, the rollout still fails,</text>
-  <text class="note" x="18" y="742">but other actors drain first and their finished groups land, as on main.</text>
+  <text class="note" x="18" y="728">Shown: the C14 flag on and max_row_attempts raised to 3 (renamed by C7; default 1). With the flag off, this lane is the main lane.</text>
+  <text class="note" x="18" y="742">C12: if a row does use all its tries, the rollout still fails, but other actors drain first and their finished groups land, as on main.</text>
 </svg>
 
 <div class="tw"><table>
 <tr><th>Path · state</th><th>Row 2 sent again</th><th>Work thrown away</th><th>Group done</th></tr>
 <tr><td>v2 (single controller) · main</td><td>at 5, with row 3 (stream ended)</td><td>5 min of row 3</td><td>14</td></tr>
 <tr><td>v2 (single controller) · this PR</td><td>at 9: waits for row 3 (<a href="https://github.com/NVIDIA-NeMo/RL/blob/8fecfa2cefbcc8189a73753d9cc56b3f5c6a1e5b/nemo_rl/experience/rollout_manager.py#L1220">marker → <code>continue</code></a>, then the <a href="https://github.com/NVIDIA-NeMo/RL/blob/8fecfa2cefbcc8189a73753d9cc56b3f5c6a1e5b/nemo_rl/experience/rollout_manager.py#L1337-L1338">next attempt</a>)</td><td>none</td><td><b style="color:var(--red)">16: later than main</b></td></tr>
-<tr><td>v2 (single controller) · after C13</td><td>at 5, alone</td><td>none</td><td><b style="color:var(--green)">12</b> = max(row 3 at 9, 5 + 7)</td></tr>
+<tr><td>v2 (single controller) · after the review, default (C14 flag off)</td><td>as main</td><td>as main</td><td>14</td></tr>
+<tr><td>v2 (single controller) · after the review, flag on + C13</td><td>at 5, alone</td><td>none</td><td><b style="color:var(--green)">12</b> = max(row 3 at 9, 5 + 7)</td></tr>
 <tr><td>v1 · main</td><td>never: no retry</td><td>row 3; other actors drain</td><td>rollout fails</td></tr>
 <tr><td>v1 · this PR, default</td><td>never: 1 try</td><td>row 3, <b>and every other actor's unfinished groups</b></td><td>rollout fails</td></tr>
-<tr><td>v1 · after C7 + C12</td><td>at 5, alone (<a href="https://github.com/NVIDIA-NeMo/RL/blob/8fecfa2cefbcc8189a73753d9cc56b3f5c6a1e5b/nemo_rl/experience/rollouts.py#L2690-L2704"><code>record_infra_failure</code> → <code>_start_stream</code></a>)</td><td>none</td><td><b style="color:var(--green)">12</b></td></tr>
+<tr><td>v1 · after the review, default (C14 flag off)</td><td>never: as main</td><td>row 3; other actors drain</td><td>rollout fails</td></tr>
+<tr><td>v1 · after the review, flag on, budget 3 + C12</td><td>at 5, alone (<a href="https://github.com/NVIDIA-NeMo/RL/blob/8fecfa2cefbcc8189a73753d9cc56b3f5c6a1e5b/nemo_rl/experience/rollouts.py#L2690-L2704"><code>record_infra_failure</code> → <code>_start_stream</code></a>)</td><td>none</td><td><b style="color:var(--green)">12</b></td></tr>
 </table></div>
 
 <p><b>Why the finish time matters, by path.</b> A later group either holds up a step or trains in a later step, depending on the loop:</p>
@@ -277,23 +284,28 @@ Both call the same Gym actor, so a change to the actor reaches both.</div>
 <p>For a verifier that scores a group together (<code>genrm_compare</code>), the PR's own comment says
 “<a href="https://github.com/NVIDIA-NeMo/RL/blob/8fecfa2cefbcc8189a73753d9cc56b3f5c6a1e5b/examples/configs/grpo_math_1B_megatron_single_controller.yaml#L99-L107">the siblings wait in /verify for the failed row until the verifier's cohort timeout</a>”, so v2's later re-send makes that wait longer.</p>
 
-<h2>After the review: what C7, C12 and C13 change</h2>
+<h2>After the review: what C14, C7, C12 and C13 change</h2>
 
-<p class="where"><b>Where the fixes land: RL only.</b> C7 and C12 in
+<p class="where"><b>Where the fixes land: RL only.</b> C14 in the shared Gym actor,
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/8fecfa2cefbcc8189a73753d9cc56b3f5c6a1e5b/nemo_rl/environments/nemo_gym.py#L1148"><code>nemo_gym.py</code></a>: v1 and v2. C7 and C12 in
 <a href="https://github.com/NVIDIA-NeMo/RL/blob/8fecfa2cefbcc8189a73753d9cc56b3f5c6a1e5b/nemo_rl/experience/rollouts.py#L2020-L2058"><code>rollouts.py</code></a>: v1 only.
 C13 in <a href="https://github.com/NVIDIA-NeMo/RL/blob/8fecfa2cefbcc8189a73753d9cc56b3f5c6a1e5b/nemo_rl/experience/rollout_manager.py#L1138-L1252"><code>rollout_manager.py</code></a>: v2 (single controller) only.
 <b>No Gym change:</b> Gym already returns the failure row these fixes act on.</p>
 
-<p><span class="tag ask">C7 · v1, aligning to v2</span> Rename <code>env.nemo_gym.max_infra_attempts_per_rollout</code> to <code>max_row_attempts</code> and change its default from 1 to 3, v2's value. v2 is unchanged. With that, the v1 timeline above re-sends row 2 by default. The rename touches the reader, its docs and the YAML comment, so it is not shown as a diff here; the default is one line:</p>
+<p><span class="tag ask">C14 · v1+v2</span> <b>Keep main's behavior by default.</b> One flag, off by default, read by the shared Gym actor (for example <code>env.nemo_gym.retry_single_rollouts: false</code>). Off: don't pass <code>route_failures_to_sidecar</code>, and type a raised <code>/run</code> failure the way main does (<a href="https://github.com/NVIDIA-NeMo/RL/blob/83385307ab71b044c7a77d5802c9f2ff0909e002/nemo_rl/environments/nemo_gym.py#L1110"><code>_typed_gym_failure(error)</code></a>, linked at the base because this PR removes it). Then every main lane above is also the "after the review" default. On: this PR's behavior, with C7, C12 and C13 below. Setup fails if the v1 row budget is above 1 while the flag is off. Why: a row re-sent alone can come from a newer policy than its siblings, and that needs an ablation (<a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4446-policy-mix.html">policy mix in a group</a>).</p>
+<p class="cref" style="margin:0 0 12px"><a href="https://github.com/NVIDIA-NeMo/RL/pull/4446#discussion_r4310864810" style="display:inline-block;padding:4px 10px;border:1px solid var(--border);border-radius:16px;background:var(--surface);font:12.5px ui-monospace,Menlo,monospace">review comment — nemo_gym.py:1148</a></p>
+
+<p><span class="tag ask">C7 · v1, aligning to v2</span> Rename <code>env.nemo_gym.max_infra_attempts_per_rollout</code> to <code>max_row_attempts</code>, v2's name. The default stays 1, because main has no v1 row retry; raise it only with the C14 flag on. v2 is unchanged. The rename touches the reader, its docs and the YAML comment, so it is not shown as a diff here; the default line becomes:</p>
 <pre class="diff"><span class="hunk">@@ rollouts.py L2020-L2022 · module constant (proposed, renamed with the setting)</span>
 <span class="del">-# A row is dispatched once and never again after an infrastructure failure unless
 -# env.nemo_gym.max_infra_attempts_per_rollout raises the budget.
 -DEFAULT_MAX_INFRA_ATTEMPTS_PER_ROLLOUT = 1
-</span><span class="add">+# Same name and default as the single controller's
-+# async_rl.rollout_failure.nemo_gym.max_row_attempts.
-+DEFAULT_MAX_ROW_ATTEMPTS = 3</span></pre>
+</span><span class="add">+# Same name as the single controller's async_rl.rollout_failure.nemo_gym.max_row_attempts.
++# 1 = main's behavior: no row retry. Raising it takes effect only with the
++# single-rollout retry flag on (C14).
++DEFAULT_MAX_ROW_ATTEMPTS = 1</span></pre>
 
-<p><span class="tag ask">C12 · v1</span> When a row has used all its tries, end the rollout the way main ended it after a failed stream: record it and keep draining.</p>
+<p><span class="tag ask">C12 · v1, flag on</span> When a row has used all its tries, end the rollout the way main ended it after a failed stream: record it and keep draining.</p>
 <pre class="diff"><span class="hunk">@@ rollouts.py L2689-L2690 · _merge_nemo_gym_instance_streams</span>
                          pending[asyncio.ensure_future(anext(iterator))] = iterator
                          continue
@@ -312,7 +324,7 @@ C13 in <a href="https://github.com/NVIDIA-NeMo/RL/blob/8fecfa2cefbcc8189a73753d9
                      print(</pre>
 <p>Recording it as <code>first_failure</code> reuses the existing end of the merge, which raises once every stream has drained (<a href="https://github.com/NVIDIA-NeMo/RL/blob/8fecfa2cefbcc8189a73753d9cc56b3f5c6a1e5b/nemo_rl/experience/rollouts.py#L2709-L2713">L2709-L2713</a>), and the check at <a href="https://github.com/NVIDIA-NeMo/RL/blob/8fecfa2cefbcc8189a73753d9cc56b3f5c6a1e5b/nemo_rl/experience/rollouts.py#L2682-L2688">L2682-L2688</a> then skips retries for later markers. Proposed, not run.</p>
 
-<p><span class="tag decide">C13 · v2 · for the maintainer to decide</span> Send the failed row again as soon as its marker arrives. There is no one-line diff:
+<p><span class="tag decide">C13 · v2, flag on · for the maintainer to decide</span> Send the failed row again as soon as its marker arrives. There is no one-line diff:
 <a href="https://github.com/NVIDIA-NeMo/RL/blob/8fecfa2cefbcc8189a73753d9cc56b3f5c6a1e5b/nemo_rl/experience/rollout_manager.py#L1138-L1252"><code>_stream_rows</code></a> reads one stream at a time, so it would have to merge a second one-row stream into the attempt, the way v1's
 <a href="https://github.com/NVIDIA-NeMo/RL/blob/8fecfa2cefbcc8189a73753d9cc56b3f5c6a1e5b/nemo_rl/experience/rollouts.py#L2690-L2704"><code>_merge_nemo_gym_instance_streams</code></a> already does. On the example:</p>
 <pre class="diff"><span class="cm"># _stream_rows, attempt 1, rows 0..3 in flight</span>
@@ -321,7 +333,7 @@ on marker for row 2 at minute 5:      <span class="cm"># row 2 has used 1 of max
 <span class="add">    start a one-row stream for row 2   # proposed: row 2 runs again from 5, lands at 5 + 7 = 12</span>
 row 3 lands at 9
 group done at max(9, 12) = 12         <span class="cm"># main: 14, this PR: 16</span></pre>
-<p>Without C13, v2 still works; the cost is the later finish shown above, worst when a row fails early in a long rollout (up to about twice one rollout's time).</p>
+<p>With the flag on and without C13, v2 still works; the cost is the later finish shown above, worst when a row fails early in a long rollout (up to about twice one rollout's time).</p>
 
 </div>
 </body>
