@@ -119,7 +119,7 @@ svg .vline{stroke:var(--dim);stroke-width:1;stroke-dasharray:2 4}
 <h1>Re-sending one rollout of a group, instead of the whole group, can mix policy versions inside the group</h1>
 <p class="sub"><a href="https://github.com/NVIDIA-NeMo/RL/pull/4446">NVIDIA-NeMo/RL #4446</a>.
 Permalinks pin the PR head <code>8fecfa2</code>. Main means the PR's base, <code>8338530</code>.
-The review comment named below (C14) is staged in a pending review; its link works for others once the review is posted.</p>
+The review comment named below (C13) is staged in a pending review; its link works for others once the review is posted.</p>
 
 <nav class="chain">
   <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4446-row-redispatch.html">what the PR does</a>
@@ -128,7 +128,7 @@ The review comment named below (C14) is staged in a pending review; its link wor
   <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4446-under-400-is-infra.html">the &lt;400 rule</a>
   <span class="here">policy mix in a group</span>
 </nav>
-<p class="chainnote">Five pages on this PR, one question each. This one: why single-rollout retry needs an ablation before it is on by default.</p>
+<p class="chainnote">Five pages on this PR, one question each. This one: which policy versions a group ends up with when one rollout is re-sent.</p>
 
 <div class="bg"><b>Two paths, named the same way on every page.</b>
 <b>v1</b> = <code>grpo_train</code>, <code>async_grpo_train</code>, PPO and distillation.
@@ -146,11 +146,10 @@ A <b>group</b> is one prompt with G answers (called rollouts or rows). GRPO scor
 <td>Single-rollout retry added, <b>off by default</b> (<a href="https://github.com/NVIDIA-NeMo/RL/blob/8fecfa2cefbcc8189a73753d9cc56b3f5c6a1e5b/nemo_rl/experience/rollouts.py#L2022"><code>DEFAULT_MAX_INFRA_ATTEMPTS_PER_ROLLOUT = 1</code></a>).</td>
 <td>Siblings keep running; only the failed row is re-sent, <b>after the stream finishes</b> (<a href="https://github.com/NVIDIA-NeMo/RL/blob/8fecfa2cefbcc8189a73753d9cc56b3f5c6a1e5b/nemo_rl/experience/rollout_manager.py#L1206-L1220">rollout_manager.py#L1206-L1220</a>). <b>On by default.</b></td></tr>
 <tr><th>After the review</th>
-<td colspan="2" class="both"><span class="tag both">v1+v2</span> <span class="tag ask">C14</span>
-One flag, off by default (for example <code>env.nemo_gym.retry_single_rollouts: false</code>). Off = main on both paths. On = this PR's behavior.
-Setup fails if the v1 row budget is above 1 while the flag is off.</td></tr>
+<td>As this PR: off by default. Setting renamed <code>max_row_attempts</code>, default stays 1 (C7).</td>
+<td><span class="tag ask">C13</span> Siblings keep running; only the failed row is re-sent, <b>as soon as its marker arrives</b>. Its policy gap to its siblings is then no wider than on main.</td></tr>
 </table></div>
-<p style="margin:10px 0 0"><span class="verdict open">Proposed in the review: default off until ablated.</span>
+<p style="margin:10px 0 0"><span class="verdict open">Open. Main already re-sends single rows on v2, so the PR is not a new kind of mixing. The review asks for C13 so the re-sent row doesn't start later than main's.</span>
 Nothing below has been measured.</p>
 </div>
 
@@ -203,9 +202,9 @@ Each bar is colored by the version the rollout started on.</p>
 <rect x="548" y="252" width="294" height="12" class="v2"/>
 <text class="bar" x="120" y="278">row 3</text>
 <rect x="170" y="268" width="378" height="12" class="v0"/>
-<text class="sec" x="14" y="316">v2 · after the review (C14: flag off = main)</text>
-<text class="note" x="14" y="330">same as main</text>
-<text class="t-dim" x="946" y="316" text-anchor="end">done 14 · versions k, k, k+1, k+1</text>
+<text class="sec" x="14" y="316">v2 · after the review (C13: re-send at once)</text>
+<text class="note" x="14" y="330">row 3 keeps running; row 2 re-sent at 5, alone</text>
+<text class="t-dim" x="946" y="316" text-anchor="end">done 12 · versions k, k, k+1, k</text>
 <text class="bar" x="120" y="346">row 0</text>
 <rect x="170" y="336" width="84" height="12" class="v0"/>
 <text class="bar" x="120" y="362">row 1</text>
@@ -215,8 +214,7 @@ Each bar is colored by the version the rollout started on.</p>
 <line class="fail" x1="380" y1="366" x2="380" y2="382"/>
 <rect x="380" y="368" width="294" height="12" class="v1"/>
 <text class="bar" x="120" y="394">row 3</text>
-<rect x="170" y="384" width="210" height="12" class="lost"/>
-<rect x="380" y="384" width="378" height="12" class="v1"/>
+<rect x="170" y="384" width="378" height="12" class="v0"/>
 <text class="sec" x="14" y="432">reference · whole group redone at 5</text>
 <text class="note" x="14" y="446">what a group-level retry does</text>
 <text class="t-dim" x="946" y="432" text-anchor="end">done 14 · versions k+1 ×4</text>
@@ -275,6 +273,7 @@ Each bar is colored by the version the rollout started on.</p>
 <ol>
 <li><b>v2 main</b> already mixes versions: rows 0 and 1 are <code>k</code>, rows 2 and 3 are <code>k+1</code>. Two versions, one apart.</li>
 <li><b>v2 with this PR</b> keeps row 3 on <code>k</code>, but row 2 waits for the stream to end and starts at minute 9 on <code>k+2</code>. The gap grows to two versions, and one rollout stands alone on the newest policy.</li>
+<li><b>v2 after the review (C13)</b> re-sends row 2 at minute 5, so it starts on <code>k+1</code>, the same version main gave it. The gap is one version, as on main, and the group is done at 12 instead of 14. Row 3 stays on <code>k</code>, so three rollouts are on <code>k</code> instead of two.</li>
 <li><b>Whole group redone</b> puts all four on the same version. It throws away finished work, but the group compares like with like.</li>
 <li><b>v1 sync</b> cannot mix: the weights do not change during a step. <b>v1 async</b> mixes only with
 <a href="https://github.com/NVIDIA-NeMo/RL/blob/8fecfa2cefbcc8189a73753d9cc56b3f5c6a1e5b/nemo_rl/algorithms/async_utils/trajectory_collector.py#L1080-L1082"><code>in_flight_weight_updates</code></a> on; otherwise refit waits for the batch. Both v1 lanes need the budget raised by hand, because this PR keeps it at 1.</li>
@@ -284,15 +283,12 @@ so nothing downstream can tell which rollout came from which policy.</li>
 </ol>
 
 <h2>What the review asks — proposed, not in the PR</h2>
-<p class="where"><b>Where it lands: RL only.</b> <a href="https://github.com/NVIDIA-NeMo/RL/blob/8fecfa2cefbcc8189a73753d9cc56b3f5c6a1e5b/nemo_rl/environments/nemo_gym.py#L1148"><code>nemo_gym.py</code> L1148</a> (the actor that both paths call) reads the flag; v1 setup checks the budget. No Gym change: Gym already supports both modes.</p>
+<p class="where"><b>Where it lands: RL only, v2 only.</b> <a href="https://github.com/NVIDIA-NeMo/RL/blob/8fecfa2cefbcc8189a73753d9cc56b3f5c6a1e5b/nemo_rl/experience/rollout_manager.py#L1206-L1220"><code>rollout_manager.py</code> L1206-L1220</a>. No Gym change.</p>
 <ul>
-<li><b>Off (default) = main.</b> The actor does not pass <code>route_failures_to_sidecar</code>, and a failed <code>/run</code> raises and is typed the way main does it
-(<a href="https://github.com/NVIDIA-NeMo/RL/blob/83385307ab71b044c7a77d5802c9f2ff0909e002/nemo_rl/environments/nemo_gym.py#L1110"><code>_typed_gym_failure(error)</code></a>, linked at the base because this PR removes it). v2 goes back to re-sending the failed row with its running siblings at once; v1 ends the step.</li>
-<li><b>On = this PR.</b> Only failed rows are re-sent.</li>
-<li><b>Fail loud.</b> Setup raises if the v1 row budget is above 1 while the flag is off, so the setting is never silently ignored.</li>
-<li><b>Before turning it on by default:</b> an ablation, not part of this PR. Run the same recipe with the flag off and on, inject failures, and compare reward curves.</li>
+<li><b>C13: re-send a failed row as soon as its marker arrives</b>, the way the v1 merge already does (<a href="https://github.com/NVIDIA-NeMo/RL/blob/8fecfa2cefbcc8189a73753d9cc56b3f5c6a1e5b/nemo_rl/experience/rollouts.py#L2681-L2707">rollouts.py L2681-L2707</a>). The re-sent row then starts when it would have on main, so its policy gap is no wider than main's.</li>
+<li><b>Not asked:</b> keeping every rollout of a group on one version would need a whole-group redo, which main does not do either. That is an existing v2 behavior, not something this PR adds.</li>
 </ul>
-<p class="cref">🟠 <a href="https://github.com/NVIDIA-NeMo/RL/pull/4446#discussion_r4310864810">review comment C14 — nemo_gym.py:1148</a></p>
+<p class="cref">🟠 <a href="https://github.com/NVIDIA-NeMo/RL/pull/4446#discussion_r4310942672">review comment C13 — rollout_manager.py:1220</a></p>
 
 </div>
 </body>

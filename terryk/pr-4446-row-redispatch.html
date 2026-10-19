@@ -135,13 +135,13 @@ table.sgrid td.shared{background:var(--surface2)}
 <tr><td>v1 re-sends the failed row at once. New setting <code>max_infra_attempts_per_rollout</code>, default 1 = no retry. At budget 1 a failure cancels <b>every</b> Gym actor's stream.</td>
 <td>Same <code>max_row_attempts</code> loop, but only the failed row is re-sent, and only after its stream ends. The new metric is averaged over prompt groups.</td></tr>
 <tr><th rowspan="2"><span class="st r">after the review</span></th>
-<td colspan="2" class="shared"><span class="pt both">both — shared code</span><b>One flag, off by default (C14)</b>, e.g. <code>env.nemo_gym.retry_single_rollouts</code>. Off = main on both paths: no marker rows, a failed <code>/run</code> raises as on main. On = this PR's behavior. Why: a rollout re-sent alone can get a newer policy than its siblings, which needs an ablation (<a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4446-policy-mix.html">policy mix in a group</a>). Either way: the metric is summed per step (C1), a test pins Gym's failure-row keys (C5), the unused key is deleted (C6).</td></tr>
-<tr><td><b>Default:</b> same as main: no row retry, the step fails, other Gym actors' streams drain. Setting renamed <code>max_row_attempts</code>, default stays 1 (C7); checked at setup (C8).<br><b>With the flag on:</b> raise the budget to re-send rows; the re-sent row gets a new rollout id (C4); a row that runs out no longer cancels other actors' streams (C12). Doc fixes (C2, C3).</td>
-<td><b>Default:</b> same as main: the failed row and the rows still running are re-sent at once.<br><b>With the flag on:</b> this PR's behavior. <b>For the maintainer to decide:</b> re-send a failed row at once, not after its stream ends (C13).</td></tr>
+<td colspan="2" class="shared"><span class="pt both">both — shared code</span>As this PR: failed rows come back as markers, so the other rollouts keep running. Plus: the metric is summed per step (C1), a test pins Gym's failure-row keys (C5), the unused key is deleted (C6).</td></tr>
+<tr><td>As this PR, plus: setting renamed <code>max_row_attempts</code>, default stays 1 = no retry, as main (C7); checked at setup (C8). With the budget raised: the re-sent row gets a new rollout id (C4), and a row that runs out no longer cancels other actors' streams (C12). Doc fixes (C2, C3).</td>
+<td>As this PR, plus: a failed row is re-sent <b>as soon as its marker arrives</b>, not after its stream ends (C13, the review's top item). Only the failed row is re-sent; siblings keep running.</td></tr>
 </table></div>
 <dl>
   <dt>Status</dt>
-  <dd><span class="verdict good">New feature, in review.</span> No blocking bug. The review asks for the new behavior to be off by default until an ablation (C14). "After the review" is what the code does once the author applies the changes proposed in the review; the review is not posted yet.</dd>
+  <dd><span class="verdict good">New feature, in review.</span> No blocking bug. The top ask is C13: on v2, re-send a failed row at once. "After the review" is what the code does once the author applies the changes proposed in the review; the review is not posted yet.</dd>
 </dl>
 </div>
 
@@ -228,9 +228,9 @@ sees the marker and starts a new one-row stream for that prompt on the same acto
   <!-- AFTER THE REVIEW lane -->
   <rect class="lane-r" x="8" y="472" width="884" height="120" rx="8"/>
   <text class="lbl-b" x="18" y="494">after the review · proposed, not in the PR yet</text>
-  <text class="note" x="18" y="516">[v1+v2] Default: the new flag is off (C14), so this run looks like main: row 2 raises, the step fails.</text>
-  <text class="note" x="18" y="536">[v1] Flag on + max_row_attempts raised (renamed, default 1, C7): the PR lane above, and row 2 gets a new rollout id (C4).</text>
-  <text class="note" x="18" y="556">[v1] Flag on, budget 1: the marker fails the step, but other Gym actors' streams keep draining (C12).</text>
+  <text class="note" x="18" y="516">[v1] Budget raised (max_row_attempts, renamed, default 1, C7): the PR lane above, and row 2 gets a new rollout id (C4).</text>
+  <text class="note" x="18" y="536">[v1] Budget 1 (default): the marker fails the step, but other Gym actors' streams keep draining (C12).</text>
+  <text class="note" x="18" y="556">[v2] Row 2 is re-sent as soon as its marker arrives, while row 3 is still running (C13).</text>
   <text class="note" x="18" y="576">[v1+v2] nemo_gym_infra_redispatches is summed per step, never averaged over groups (C1).</text>
 </svg>
 
@@ -246,21 +246,21 @@ that did not come back. This PR feeds the same marker into that loop. Each cell 
 <tr><td>What happens to a failed row</td>
 <td><div><span class="st m">main</span>The stream raises; the step fails</div>
 <div><span class="st p">PR</span>A marker is handled in <a href="https://github.com/NVIDIA-NeMo/RL/blob/8fecfa2cefbcc8189a73753d9cc56b3f5c6a1e5b/nemo_rl/experience/rollouts.py#L2681-L2707"><code>_merge_nemo_gym_instance_streams</code></a> and the row is sent again at once, as a new 1-row stream</div>
-<div><span class="st r">review</span>Default: as main (C14). Flag on: as the PR</div></td>
+<div><span class="st r">review</span>As the PR, once the budget is raised above the default of 1 (C7)</div></td>
 <td><div><span class="st m">main</span>The stream dies; the failed row <b>and</b> the rows still running are all re-sent in the next attempt</div>
 <div><span class="st p">PR</span>A marker in <a href="https://github.com/NVIDIA-NeMo/RL/blob/8fecfa2cefbcc8189a73753d9cc56b3f5c6a1e5b/nemo_rl/experience/rollout_manager.py#L1206-L1220"><code>_stream_rows</code></a>; only the failed row is re-sent, but only after the rest of its stream finishes (<a href="https://github.com/NVIDIA-NeMo/RL/blob/8fecfa2cefbcc8189a73753d9cc56b3f5c6a1e5b/nemo_rl/experience/rollout_manager.py#L1337-L1338">L1337-L1338</a>)</div>
-<div><span class="st r">review</span>Default: as main (C14). Flag on: re-send at once, like v1 — for the maintainer to decide (C13)</div></td></tr>
+<div><span class="st r">review</span>Only the failed row, re-sent as soon as its marker arrives, like v1 (C13)</div></td></tr>
 <tr><td>Budget</td>
 <td><div><span class="st m">main</span>None</div>
 <div><span class="st p">PR</span><code>env.nemo_gym.max_infra_attempts_per_rollout</code>, default 1 (no retry), checked at the first rollout</div>
-<div><span class="st r">review</span><code>env.nemo_gym.max_row_attempts</code>, default 1 = main (C7), checked at setup (C8); used only with the flag on (C14)</div></td>
+<div><span class="st r">review</span><code>env.nemo_gym.max_row_attempts</code>, default 1 = main (C7), checked at setup (C8)</div></td>
 <td><div><span class="st m">main</span><code>async_rl.rollout_failure.nemo_gym.max_row_attempts</code>, default 3</div>
 <div><span class="st p">PR</span>Unchanged; v1's env key is ignored here</div>
 <div><span class="st r">review</span>Unchanged; the v1 setting now has the same name</div></td></tr>
 <tr><td>On the last try</td>
 <td><div><span class="st m">main</span>Other Gym actors' streams drain, then the step fails</div>
 <div><span class="st p">PR</span>The marker raises <code>GymTransportError</code> and the merge cancels <b>every</b> stream, other actors' included</div>
-<div><span class="st r">review</span>Default: as main. Flag on: record the failure and keep draining the other streams, as on main (C12)</div></td>
+<div><span class="st r">review</span>Record the failure and keep draining the other streams, as on main (C12)</div></td>
 <td><div><span class="st m">main</span><span class="st p">PR</span><span class="st r">review</span>The attempt ends; the whole prompt group is retried with a new group attempt</div></td></tr>
 <tr><td>Metric <code>nemo_gym_infra_redispatches</code></td>
 <td><div><span class="st m">main</span>Not logged</div>
@@ -274,12 +274,12 @@ that did not come back. This PR feeds the same marker into that loop. Each cell 
 <div class="warn">
 <b>Changes proposed in the review (C = comment number).</b> Each item is tagged with the path it changes. None of these blocks the feature. The review is not posted yet; comment links work for others once it is.
 <ul>
-<li><span class="pt both">v1+v2</span><b>C14: keep main's behavior by default.</b> Re-sending one rollout of a group, instead of the whole group, can give it a newer policy than its siblings. That needs an ablation before it is on by default. Ask: one flag, off by default, read by the shared Gym actor. Off = main on both paths; on = this PR. Fail at setup if the v1 row budget is above 1 while the flag is off. See <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4446-policy-mix.html">policy mix in a group</a>.
-<p class="cref"><a href="https://github.com/NVIDIA-NeMo/RL/pull/4446#discussion_r4310864810">review comment — nemo_gym.py:1148</a></p></li>
+<li><span class="pt">v2</span><b>C13 (top item): re-send a failed row at once.</b> On v2 the PR re-sends a failed row only after the rest of its stream finishes; main re-sent it right away. So a group can finish later than on main, and the re-sent row can start on a newer policy than its siblings. Ask: re-send it as soon as its marker arrives, as v1 does. See <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4446-failure-rows.html">failure rows on both paths</a> and <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4446-policy-mix.html">policy mix in a group</a>.
+<p class="cref"><a href="https://github.com/NVIDIA-NeMo/RL/pull/4446#discussion_r4310942672">review comment C13 — rollout_manager.py:1220</a></p></li>
 <li><span class="pt">v1</span><b>C7: one name for one setting.</b> Rename the v1 setting to <code>max_row_attempts</code>, the same name as on v2. The default stays 1, because main has no v1 row retry. Say in the doc that v1 has no group-level retry above it.</li>
 <li><span class="pt">v1</span><b>C8: check the setting at setup,</b> not at the first rollout after vLLM and Gym have started.</li>
-<li><span class="pt">v1</span><b>C12, with the flag on: don't throw away other actors' work.</b> With a budget of 1 and more than one Gym actor, the first failed row cancels every stream, so groups that finished on healthy actors never reach the buffer. Main kept draining them.</li>
-<li><span class="pt">v2</span><b>C13, with the flag on, for the maintainer to decide:</b> on v2, re-send a failed row at once instead of after its stream ends, so a group with one failure doesn't finish later than it did on main. See <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4446-failure-rows.html">failure rows on both paths</a>.</li>
+<li><span class="pt">v1</span><b>C12 (low): don't throw away other actors' work.</b> With a budget of 1 and more than one Gym actor, the first failed row cancels every stream, so groups that finished on healthy actors never reach the buffer. Main kept draining them.
+<p class="cref"><a href="https://github.com/NVIDIA-NeMo/RL/pull/4446#discussion_r4310942543">review comment C12 — rollouts.py:2690</a></p></li>
 <li><span class="pt both">v1+v2</span><b>C1: the metric reads differently on the two paths.</b> 10 rows sent again across 64 prompt groups logs 10 on v1 sync and about 0.16 on v2; v1 async is also diluted. Fix in shared code: sum this key in <code>aggregate_rollout_metrics</code>, as <code>total_turns</code> is. That fixes v2 and v1 async.
 <p class="cref"><a href="https://github.com/NVIDIA-NeMo/RL/pull/4446#discussion_r4309661931">review comment — rollout_manager.py:1487</a></p></li>
 <li><span class="pt">v1</span><b>C2, C3: the design doc's note on refused connections is out of date.</b> The text documents the v1 setting, but describes Gym behavior both paths share. The Gym version this PR now pins caps those retries when <code>route_around_failing_endpoints</code> is on, which is the setting the doc recommends.
@@ -290,10 +290,10 @@ that did not come back. This PR feeds the same marker into that loop. Each cell 
 <p class="cref"><a href="https://github.com/NVIDIA-NeMo/RL/pull/4446#discussion_r4309661963">review comment — nemo_gym.py:319</a></p></li>
 <li><span class="pt both">v1+v2</span><b>C6: delete <code>GYM_FAILURE_CLASS_KEY</code>.</b> It's defined in the shared actor module and never read.</li>
 </ul>
-<b>Flagged in the review body, no ask (shared code, so both paths change).</b> After the review, A and B happen only with the C14 flag on:
+<b>Flagged in the review body, no ask (shared code, so both paths change).</b> These stay after the review:
 <ul>
 <li><span class="pt both">v1+v2</span><b>A.</b> The Gym actor returns failed rows as markers, so a failed row's siblings are no longer lost.</li>
-<li><span class="pt both">v1+v2</span><b>B.</b> A 200 whose body isn't valid JSON now counts as infrastructure. It matters most on v2, where it moves from 2 tries to up to 15 sends. The rule only applies to Gym failure rows, so with the flag off it has no effect. See <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4446-under-400-is-infra.html">the &lt;400 rule</a>.</li>
+<li><span class="pt both">v1+v2</span><b>B.</b> A 200 whose body isn't valid JSON now counts as infrastructure. It matters most on v2, where it moves from 2 tries to up to 15 sends. See <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4446-under-400-is-infra.html">the &lt;400 rule</a>.</li>
 <li><span class="pt both">v1+v2</span><b>C.</b> Retry timings get a <code>/retry&lt;n&gt;</code> label. On v2 this fixes a re-send overwriting the group's totals.</li>
 <li><span class="pt both">v1+v2</span><b>D.</b> New metric <code>nemo_gym_infra_redispatches</code> on both paths (see C1).</li>
 </ul>
