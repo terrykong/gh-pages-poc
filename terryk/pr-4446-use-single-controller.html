@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NVIDIA-NeMo/RL #4446 — the single controller already survives a dead engine</title>
+<style>
+:root{
+  --bg:#0d1117; --surface:#161b22; --surface2:#1c2128; --border:#30363d;
+  --text:#e6edf3; --dim:#8b949e; --accent:#58a6ff; --green:#3fb950;
+  --orange:#d29922; --red:#f85149;
+}
+:root[data-theme="light"]{
+  --bg:#ffffff; --surface:#f6f8fa; --surface2:#eaeef2; --border:#d0d7de;
+  --text:#1f2328; --dim:#59636e; --accent:#0969da; --green:#1a7f37;
+  --orange:#9a6700; --red:#cf222e;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:28px 16px 70px}
+h1{font-size:22px;margin:0 0 8px;line-height:1.3}
+h2{font-size:18px;margin:32px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;
+  font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
+.sub{color:var(--dim);font-size:13.5px;margin:0 0 16px}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);
+  border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;
+  font:13px/1 ui-monospace,Menlo,monospace;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.18)}
+nav.chain{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 6px;padding:0}
+nav.chain a,nav.chain span{display:inline-block;padding:5px 11px;border:1px solid var(--border);
+  border-radius:20px;background:var(--surface);text-decoration:none;color:var(--accent);
+  font-size:12.5px;line-height:1.3;white-space:nowrap}
+nav.chain a:hover{background:var(--surface2)}
+nav.chain span.here{background:var(--accent);color:var(--bg);border-color:var(--accent);font-weight:600}
+p.chainnote{color:var(--dim);font-size:12px;margin:0 0 18px}
+.status{border:1px solid var(--border);border-radius:10px;background:var(--surface);
+  padding:2px 16px 10px;margin:0 0 20px}
+.status dl{display:grid;grid-template-columns:max-content 1fr;gap:4px 14px;margin:12px 0 0}
+.status dt{color:var(--dim);font-size:12px;text-transform:uppercase;letter-spacing:.04em;
+  white-space:nowrap;padding-top:2px}
+.status dd{margin:0;font-size:14px}
+.verdict{font-weight:700}
+.verdict.open{color:var(--orange)}
+.bg{border-left:3px solid var(--accent);background:var(--surface);padding:10px 14px;margin:0 0 16px;
+  border-radius:0 8px 8px 0;font-size:14px}
+.warn{border-left:3px solid var(--orange);background:var(--surface);
+  padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0}
+.warn ol{margin:6px 0 0;padding-left:20px}
+.tip{border-bottom:1px dotted var(--dim);cursor:help;position:relative;outline:none}
+.tip:hover::after,.tip:focus::after{content:attr(data-tip);position:absolute;left:0;top:1.7em;z-index:60;
+  width:max-content;max-width:min(340px,80vw);white-space:normal;background:var(--surface2);color:var(--text);
+  border:1px solid var(--border);border-radius:6px;padding:7px 10px;font:13px/1.45 -apple-system,sans-serif;
+  font-weight:400;box-shadow:0 4px 14px rgba(0,0,0,.3)}
+pre.yaml{font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--surface);
+  border:1px solid var(--border);border-radius:8px;padding:12px;overflow-x:auto;white-space:pre;margin:10px 0}
+pre.yaml .c{color:var(--dim)}
+pre.yaml .k{color:var(--accent)}
+pre.yaml .on{color:var(--green);font-weight:700}
+svg{max-width:100%;height:auto;display:block;margin:16px 0}
+svg .box{fill:var(--surface);stroke:var(--border);stroke-width:1.4}
+svg .lane{fill:none;stroke:var(--border);stroke-width:1;stroke-dasharray:4 4}
+svg .lbl{fill:var(--text);font:12px ui-monospace,Menlo,monospace}
+svg .lbl-b{fill:var(--text);font:bold 13.5px -apple-system,sans-serif}
+svg .note{fill:var(--dim);font:11.5px -apple-system,sans-serif}
+svg .data{fill:var(--dim);font:10.5px ui-monospace,Menlo,monospace}
+svg .hdr{fill:var(--accent);font:bold 12.5px -apple-system,sans-serif}
+svg .ok{fill:var(--green);fill-opacity:.22;stroke:var(--green);stroke-width:1.4}
+svg .bad{fill:var(--red);fill-opacity:.22;stroke:var(--red);stroke-width:1.4}
+svg .redo{fill:var(--orange);fill-opacity:.22;stroke:var(--orange);stroke-width:1.4}
+svg .t-ok{fill:var(--green);font:bold 12px -apple-system,sans-serif}
+svg .t-redo{fill:var(--orange);font:bold 12px -apple-system,sans-serif}
+svg .arrow{stroke:var(--dim);stroke-width:1.4;fill:none;marker-end:url(#ah)}
+svg a text{text-decoration:underline;fill:var(--accent);font:11px ui-monospace,Menlo,monospace}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+  document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head>
+<body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+  function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+  function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
+    b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
+      else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+  document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+<div class="wrap">
+
+<h1>You don't need #4446 on the single controller: it already survives a dead engine</h1>
+<p class="sub"><a href="https://github.com/NVIDIA-NeMo/RL/pull/4446">NVIDIA-NeMo/RL #4446</a> versus the
+single-controller fault tolerance merged in
+<a href="https://github.com/NVIDIA-NeMo/RL/pull/3589">#3589</a>,
+<a href="https://github.com/NVIDIA-NeMo/RL/pull/3590">#3590</a>,
+<a href="https://github.com/NVIDIA-NeMo/RL/pull/3591">#3591</a> and
+<a href="https://github.com/NVIDIA-NeMo/RL/pull/3592">#3592</a>.
+Permalinks pin <code>main</code> at <code>e12d18b</code>.</p>
+
+<nav class="chain">
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4446-row-redispatch.html">what #4446 does</a>
+  <span class="here">use the single controller</span>
+</nav>
+<p class="chainnote">Two pages on this PR, one question each. This one: is there already a way to get this?</p>
+
+<div class="status">
+<dl>
+  <dt>Before</dt>
+  <dd>On the original GRPO loops (<code>grpo_train</code>, <code>async_grpo_train</code>, PPO, distillation), one failed NeMo-Gym <code>/run</code> fails the step.</dd>
+  <dt>This PR</dt>
+  <dd>Adds a retry budget for failed rollouts to those loops.</dd>
+  <dt>Status</dt>
+  <dd><span class="verdict open">Proposed: switch to the single controller instead.</span> It already ships stronger recovery for the same failure, and the config below passes its setup checks. Nothing on this page is merged as a new recipe.</dd>
+</dl>
+</div>
+
+<div class="bg"><b>Background.</b> NeMo RL has two ways to run GRPO with NeMo-Gym. The original loops
+run rollouts and training in turn from one driver process. The
+<span class="tip" tabindex="0" data-tip="A newer training loop (examples/run_grpo_single_controller.py) where one Ray actor runs a rollout pump and a train pump at the same time, connected by a data plane.">single controller</span>
+is the newer path, and the one new work is meant to use. Its fault tolerance came in four PRs:
+<span class="tip" tabindex="0" data-tip="#3589: sorts failures into infrastructure vs data, retries each with its own budget, and re-sends only the NeMo-Gym rows that never came back.">rollout retries</span>,
+<span class="tip" tabindex="0" data-tip="#3590: tracks which vLLM engines are alive, and puts a NeMo-RL HTTP router between Gym and the engines.">engine health and a router</span>,
+<span class="tip" tabindex="0" data-tip="#3591: rebuilds the weight-sync group over the surviving engines, so the next weight update does not hang on a dead one.">weight sync over survivors</span>, and
+<span class="tip" tabindex="0" data-tip="#3592: restarts a dead engine and adds it back at the next weight update.">engine restart</span>.
+Dotted words have a short explanation: hover or tap them.</div>
+
+<h2>One multi-turn rollout, one engine dies at turn 3</h2>
+
+<svg viewBox="0 0 900 400" role="img" aria-label="With PR 4446 on the original loop, the whole rollout is redone. On the single controller, the router answers 500, Gym retries the one call on a healthy engine, and turns 1 and 2 are kept.">
+  <defs>
+    <marker id="ah" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" style="fill:var(--dim)"/></marker>
+  </defs>
+  <text class="hdr" x="14" y="20">A 4-turn agent rollout · its engine dies during turn 3</text>
+  <rect class="ok" x="14" y="32" width="14" height="12"/><text class="note" x="33" y="42">turn done</text>
+  <rect class="bad" x="104" y="32" width="14" height="12"/><text class="note" x="123" y="42">call failed</text>
+  <rect class="redo" x="204" y="32" width="14" height="12"/><text class="note" x="223" y="42">work done again</text>
+
+  <!-- PR lane -->
+  <rect class="lane" x="8" y="56" width="884" height="150" rx="8"/>
+  <text class="lbl-b" x="18" y="78">Original loop + #4446</text>
+  <rect class="ok" x="18" y="92" width="62" height="26" rx="4"/><text class="lbl" x="26" y="110">turn 1</text>
+  <rect class="ok" x="86" y="92" width="62" height="26" rx="4"/><text class="lbl" x="94" y="110">turn 2</text>
+  <rect class="bad" x="154" y="92" width="62" height="26" rx="4"/><text class="lbl" x="162" y="110">turn 3</text>
+  <path class="arrow" d="M220 105 L256 105"/>
+  <rect class="box" x="260" y="88" width="250" height="34" rx="6"/>
+  <text class="lbl" x="270" y="104">/run fails → marker row</text>
+  <text class="data" x="270" y="117">{_gym_infra_failure: "…HTTP 500…"}</text>
+  <path class="arrow" d="M514 105 L548 105"/>
+  <rect class="redo" x="552" y="92" width="62" height="26" rx="4"/><text class="lbl" x="560" y="110">turn 1</text>
+  <rect class="redo" x="620" y="92" width="62" height="26" rx="4"/><text class="lbl" x="628" y="110">turn 2</text>
+  <rect class="redo" x="688" y="92" width="62" height="26" rx="4"/><text class="lbl" x="696" y="110">turn 3</text>
+  <rect class="ok" x="756" y="92" width="62" height="26" rx="4"/><text class="lbl" x="764" y="110">turn 4</text>
+  <text class="t-redo" x="18" y="146">Whole rollout sent again as a new session: turns 1–2 are generated twice.</text>
+  <text class="note" x="18" y="164">The retry may land on the same dead engine; Gym picks one by hashing a session or rollout id.</text>
+  <text class="note" x="18" y="182">No engine health tracking here: new rollouts keep reaching the dead engine unless Gym's own route-around is on.</text>
+
+  <!-- SC lane -->
+  <rect class="lane" x="8" y="216" width="884" height="176" rx="8"/>
+  <text class="lbl-b" x="18" y="238">Single controller (main, no new code)</text>
+  <rect class="ok" x="18" y="252" width="62" height="26" rx="4"/><text class="lbl" x="26" y="270">turn 1</text>
+  <rect class="ok" x="86" y="252" width="62" height="26" rx="4"/><text class="lbl" x="94" y="270">turn 2</text>
+  <rect class="bad" x="154" y="252" width="62" height="26" rx="4"/><text class="lbl" x="162" y="270">turn 3</text>
+  <path class="arrow" d="M220 265 L256 265"/>
+  <rect class="box" x="260" y="248" width="300" height="34" rx="6"/>
+  <text class="lbl" x="270" y="264">router: backend failed → HTTP 500</text>
+  <text class="data" x="270" y="277">drops that engine from its list</text>
+  <path class="arrow" d="M564 265 L598 265"/>
+  <rect class="ok" x="602" y="252" width="62" height="26" rx="4"/><text class="lbl" x="610" y="270">turn 3</text>
+  <rect class="ok" x="670" y="252" width="62" height="26" rx="4"/><text class="lbl" x="678" y="270">turn 4</text>
+  <text class="t-ok" x="18" y="306">Gym retries that one HTTP call; the router sends it to a live engine. Turns 1–2 are kept.</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/e12d18ba8e115fdcb957329740dae1f12864cb53/nemo_rl/models/generation/generation_router.py#L246-L289" target="_blank" rel="noopener"><text x="18" y="326">generation_router.py L246-L289</text></a>
+  <a href="https://github.com/NVIDIA-NeMo/Gym/blob/ad4f4804f397c6686a966c5e38b5554f05d98b55/nemo_gym/openai_utils.py#L1483-L1484" target="_blank" rel="noopener"><text x="260" y="326">Gym retries 500: openai_utils.py L1483-L1484</text></a>
+  <text class="note" x="18" y="350">If a /run still fails: re-send the rows that never came back, then the whole prompt group.</text>
+  <text class="note" x="18" y="368">The next weight sync is rebuilt over the live engines; the dead one is restarted and re-added.</text>
+</svg>
+
+<h2>The config: grpo_nanov3 on the single controller</h2>
+
+<p>Save next to <code>examples/nemo_gym/grpo_nanov3.yaml</code> and run
+<code>uv run examples/run_grpo_single_controller.py --config examples/nemo_gym/grpo_nanov3_single_controller.yaml</code>.
+It loads through the launcher's config path and passes every setup check that runs before Ray starts, at
+<code>main</code> <code>e12d18b</code>. It has not been run on GPUs. Main also has tested single-controller nanov3 recipes to compare against:
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/e12d18ba8e115fdcb957329740dae1f12864cb53/examples/configs/recipes/llm/grpo-nanov3-30BA3B-2n8g-noncolocated-async-gym-single-controller-token_capture-r3-defer.yaml">vLLM</a> and
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/e12d18ba8e115fdcb957329740dae1f12864cb53/examples/configs/recipes/llm/grpo-nanov3-30BA3B-2n8g-megatron_generation-noncolocated-async-gym-single-controller-token_capture.yaml">Megatron generation</a>.
+Green lines are the fault-tolerance switches.</p>
+
+<pre class="yaml"><span class="k">defaults:</span> grpo_nanov3.yaml
+
+<span class="k">grpo:</span>
+  <span class="c"># No validation on the single controller yet; setup raises if any is on.</span>
+  val_period: 0
+  val_at_start: false
+  val_at_end: false
+  async_grpo: null                  <span class="c"># replaced by the single controller</span>
+
+<span class="k">checkpointing:</span>
+  metric_name: null                 <span class="c"># no validation metric to rank by</span>
+  save_data_plane: true             <span class="c"># keep buffered rollouts across a resume</span>
+
+<span class="k">policy:</span>
+  generation:
+    colocated:
+      enabled: false                <span class="c"># vLLM needs its own GPUs here</span>
+      resources:
+        <span class="c"># 32 nodes: 16 for vLLM, 16 (128 GPUs) for training. Training must divide</span>
+        <span class="c"># by TP2 x PP2 x CP4 = 16, and its DP (8) must divide 2048. 1 vLLM node</span>
+        <span class="c"># leaves 248 training GPUs, and Megatron fails at startup.</span>
+        num_nodes: 16
+        gpus_per_node: 8
+
+<span class="k">data_plane:</span>                         <span class="c"># required on this path</span>
+  enabled: true
+  impl: transfer_queue
+  backend: simple
+  claim_meta_poll_interval_s: 0.5
+  simple:
+    num_storage_units: ${mul:2, ${cluster.num_nodes}}
+
+<span class="k">async_rl:</span>
+  sampler: {name: in_order, max_lookahead_versions: 1}   <span class="c"># = max_trajectory_age_steps: 1</span>
+  min_groups_for_streaming_train: ${grpo.num_prompts_per_step}
+  max_inflight_prompts: ${grpo.num_prompts_per_step}
+  max_buffered_rollouts: ${mul:${grpo.num_prompts_per_step}, 2}
+  rollout_failure:
+<span class="on">    max_infra_attempts_per_prompt: 5      # retry a prompt that failed on infrastructure
+    max_consecutive_dropped_prompts: 8    # ride out an outage; any success resets it
+    on_dropped_prompt: replace            # keep the step's batch size
+    nemo_gym:
+      max_row_attempts: 3                 # re-send only the rows that never came back</span>
+  generation_fleet_health:
+<span class="on">    enabled: true                         # track live engines; rebuild weight sync over them
+    restart_dead_shards: true             # restart a dead engine, re-add it at the next sync</span>
+  generation_router:
+<span class="on">    enabled: true                         # Gym talks to one router URL, never a dead engine</span></pre>
+
+<div class="warn">
+<b>Two costs to check before switching.</b> These are the likely reasons a job stayed on the original loop.
+If either one blocks you, #4446 is still the only way to get retries there.
+<ol>
+<li><b>No validation.</b> The single controller rejects <code>val_period &gt; 0</code> at setup
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/e12d18ba8e115fdcb957329740dae1f12864cb53/nemo_rl/algorithms/single_controller_utils/setup.py#L1115-L1119">setup.py L1115</a>).
+<code>grpo_nanov3</code> validates every 5 steps.</li>
+<li><b>vLLM needs its own GPUs.</b> With vLLM, the single controller requires <code>colocated.enabled: false</code>
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/e12d18ba8e115fdcb957329740dae1f12864cb53/nemo_rl/algorithms/single_controller_utils/config.py#L1164-L1171">config.py L1164</a>),
+so the 32 nodes split 16 / 16 instead of sharing GPUs.</li>
+</ol>
+</div>
+
+</div>
+</body>
+</html>
