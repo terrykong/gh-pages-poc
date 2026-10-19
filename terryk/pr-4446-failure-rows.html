@@ -122,13 +122,13 @@ The review comments named below (C7, C12, C13) are proposed in a review that has
 <p class="chainnote">Four pages on this PR, one question each. This one: what the shared Gym change does to timing on each path.</p>
 
 <div class="bg"><b>Two paths, named the same way on every page.</b>
-<b>v1 (driver loops)</b> = <code>grpo_train</code>, <code>async_grpo_train</code>, PPO and distillation; each sends a whole batch to a Gym actor as one stream.
+<b>v1</b> = <code>grpo_train</code>, <code>async_grpo_train</code>, PPO and distillation; each sends a whole batch to a Gym actor as one stream.
 <b>v2 (single controller)</b> = <code>examples/run_grpo_single_controller.py</code>; it sends one prompt group (one prompt, N answers called rows) per stream.
 Both call the same Gym actor, so a change to the actor reaches both.</div>
 
 <div class="status">
 <div class="tw"><table class="stgrid">
-<tr><th></th><th>v1 (driver loops)</th><th>v2 (single controller)</th></tr>
+<tr><th></th><th>v1</th><th>v2 (single controller)</th></tr>
 <tr><th>Main</th>
   <td>A failed <code>/run</code> raised inside the actor's stream (<a href="https://github.com/NVIDIA-NeMo/RL/blob/83385307ab71b044c7a77d5802c9f2ff0909e002/nemo_rl/environments/nemo_gym.py#L1102-L1115"><code>_stream_rollouts</code></a>), so that actor's rows still running were lost. No retry: the rollout failed after the other Gym actors finished.</td>
   <td>Same raise, same lost rows. The next row attempt sent the lost rows again at once (up to <code>max_row_attempts</code> = 3).</td></tr>
@@ -148,7 +148,7 @@ Both call the same Gym actor, so a change to the actor reaches both.</div>
 
 <h2>One group, 4 rows, row 2 fails at minute 5: six timelines</h2>
 
-<svg viewBox="0 0 960 800" role="img" aria-label="Six timelines of a four-row group. v2 (single controller): main finishes at 14, this PR at 16, after review fix C13 at 12. v1 (driver loops): main fails the step at 5 while other actors drain, this PR fails at 5 and cancels other actors, after review fixes C7 and C12 finishes at 12.">
+<svg viewBox="0 0 960 800" role="img" aria-label="Six timelines of a four-row group. v2 (single controller): main finishes at 14, this PR at 16, after review fix C13 at 12. v1: main fails the step at 5 while other actors drain, this PR fails at 5 and cancels other actors, after review fixes C7 and C12 finishes at 12.">
   <defs>
     <marker id="ah" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" style="fill:var(--dim)"/></marker>
   </defs>
@@ -213,7 +213,7 @@ Both call the same Gym actor, so a change to the actor reaches both.</div>
   <line class="done" x1="738" y1="288" x2="738" y2="370"/><text class="t-green" x="744" y="302">12</text>
 
   <!-- ===== v1 ===== -->
-  <text class="sec" x="14" y="404">v1 (driver loops): one Gym actor shown; the others run their own streams</text>
+  <text class="sec" x="14" y="404">v1: one Gym actor shown; the others run their own streams</text>
 
   <!-- v1 main -->
   <rect class="lane" x="8" y="412" width="944" height="96" rx="8"/>
@@ -261,16 +261,16 @@ Both call the same Gym actor, so a change to the actor reaches both.</div>
 <tr><td>v2 (single controller) · main</td><td>at 5, with row 3 (stream ended)</td><td>5 min of row 3</td><td>14</td></tr>
 <tr><td>v2 (single controller) · this PR</td><td>at 9: waits for row 3 (<a href="https://github.com/NVIDIA-NeMo/RL/blob/8fecfa2cefbcc8189a73753d9cc56b3f5c6a1e5b/nemo_rl/experience/rollout_manager.py#L1220">marker → <code>continue</code></a>, then the <a href="https://github.com/NVIDIA-NeMo/RL/blob/8fecfa2cefbcc8189a73753d9cc56b3f5c6a1e5b/nemo_rl/experience/rollout_manager.py#L1337-L1338">next attempt</a>)</td><td>none</td><td><b style="color:var(--red)">16: later than main</b></td></tr>
 <tr><td>v2 (single controller) · after C13</td><td>at 5, alone</td><td>none</td><td><b style="color:var(--green)">12</b> = max(row 3 at 9, 5 + 7)</td></tr>
-<tr><td>v1 (driver loops) · main</td><td>never: no retry</td><td>row 3; other actors drain</td><td>rollout fails</td></tr>
-<tr><td>v1 (driver loops) · this PR, default</td><td>never: 1 try</td><td>row 3, <b>and every other actor's unfinished groups</b></td><td>rollout fails</td></tr>
-<tr><td>v1 (driver loops) · after C7 + C12</td><td>at 5, alone (<a href="https://github.com/NVIDIA-NeMo/RL/blob/8fecfa2cefbcc8189a73753d9cc56b3f5c6a1e5b/nemo_rl/experience/rollouts.py#L2690-L2704"><code>record_infra_failure</code> → <code>_start_stream</code></a>)</td><td>none</td><td><b style="color:var(--green)">12</b></td></tr>
+<tr><td>v1 · main</td><td>never: no retry</td><td>row 3; other actors drain</td><td>rollout fails</td></tr>
+<tr><td>v1 · this PR, default</td><td>never: 1 try</td><td>row 3, <b>and every other actor's unfinished groups</b></td><td>rollout fails</td></tr>
+<tr><td>v1 · after C7 + C12</td><td>at 5, alone (<a href="https://github.com/NVIDIA-NeMo/RL/blob/8fecfa2cefbcc8189a73753d9cc56b3f5c6a1e5b/nemo_rl/experience/rollouts.py#L2690-L2704"><code>record_infra_failure</code> → <code>_start_stream</code></a>)</td><td>none</td><td><b style="color:var(--green)">12</b></td></tr>
 </table></div>
 
 <p><b>Why the finish time matters, by path.</b> A later group either holds up a step or trains in a later step, depending on the loop:</p>
 <div class="tw"><table>
 <tr><th>Path</th><th>What a later group does</th></tr>
-<tr><td>v1 (driver loops) · sync <code>grpo_train</code>, PPO, distillation</td><td>The whole step waits for the batch; no group changes step.</td></tr>
-<tr><td>v1 (driver loops) · <code>async_grpo_train</code></td><td>Each group is tied to its target step (<a href="https://github.com/NVIDIA-NeMo/RL/blob/8fecfa2cefbcc8189a73753d9cc56b3f5c6a1e5b/nemo_rl/algorithms/async_utils/replay_buffer.py#L548"><code>target_weight_version</code></a>), so a slow group stalls that step.</td></tr>
+<tr><td>v1 · sync <code>grpo_train</code>, PPO, distillation</td><td>The whole step waits for the batch; no group changes step.</td></tr>
+<tr><td>v1 · <code>async_grpo_train</code></td><td>Each group is tied to its target step (<a href="https://github.com/NVIDIA-NeMo/RL/blob/8fecfa2cefbcc8189a73753d9cc56b3f5c6a1e5b/nemo_rl/algorithms/async_utils/replay_buffer.py#L548"><code>target_weight_version</code></a>), so a slow group stalls that step.</td></tr>
 <tr><td>v2 (single controller) · <code>in_order</code> sampler (the example configs)</td><td>Each group is tied to one step (<a href="https://github.com/NVIDIA-NeMo/RL/blob/8fecfa2cefbcc8189a73753d9cc56b3f5c6a1e5b/nemo_rl/algorithms/async_utils/staleness_sampler.py#L629-L691"><code>InOrderSampler.select</code></a>), so a slow group stalls that step.</td></tr>
 <tr><td>v2 (single controller) · <code>ready_first</code>, <code>windowed</code>, <code>weight_fifo</code></td><td><b>The finish time decides which step the group trains in</b> and how stale it is (<a href="https://github.com/NVIDIA-NeMo/RL/blob/8fecfa2cefbcc8189a73753d9cc56b3f5c6a1e5b/nemo_rl/algorithms/async_utils/staleness_sampler.py#L523-L571"><code>ReadyFirstSampler</code></a>). Here the PR's later finish (16 vs 14) can move a group to a later step.</td></tr>
 </table></div>
@@ -280,7 +280,7 @@ Both call the same Gym actor, so a change to the actor reaches both.</div>
 <h2>After the review: what C7, C12 and C13 change</h2>
 
 <p class="where"><b>Where the fixes land: RL only.</b> C7 and C12 in
-<a href="https://github.com/NVIDIA-NeMo/RL/blob/8fecfa2cefbcc8189a73753d9cc56b3f5c6a1e5b/nemo_rl/experience/rollouts.py#L2020-L2058"><code>rollouts.py</code></a>: v1 (driver loops) only.
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/8fecfa2cefbcc8189a73753d9cc56b3f5c6a1e5b/nemo_rl/experience/rollouts.py#L2020-L2058"><code>rollouts.py</code></a>: v1 only.
 C13 in <a href="https://github.com/NVIDIA-NeMo/RL/blob/8fecfa2cefbcc8189a73753d9cc56b3f5c6a1e5b/nemo_rl/experience/rollout_manager.py#L1138-L1252"><code>rollout_manager.py</code></a>: v2 (single controller) only.
 <b>No Gym change:</b> Gym already returns the failure row these fixes act on.</p>
 

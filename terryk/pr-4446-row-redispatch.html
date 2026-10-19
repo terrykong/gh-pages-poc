@@ -123,15 +123,15 @@ table.sgrid td.shared{background:var(--surface2)}
 <p class="chainnote">Four pages on this PR, one question each. This one: what the PR changes.</p>
 
 <div class="status">
-<p class="vrow"><b>Two paths.</b> <span class="pt">v1 (driver loops)</span> = <code>grpo_train</code>, <code>async_grpo_train</code>, PPO, distillation, via <code>run_nemo_gym_rollout_sync</code> / <code>run_async_nemo_gym_rollout</code>. <span class="pt">v2 (single controller)</span> = <code>examples/run_grpo_single_controller.py</code>, rollouts in <code>rollout_manager.py</code>. A row tagged <span class="pt both">both — shared code</span> changes both paths at once.</p>
+<p class="vrow"><b>Two paths.</b> <span class="pt">v1</span> = <code>grpo_train</code>, <code>async_grpo_train</code>, PPO, distillation, via <code>run_nemo_gym_rollout_sync</code> / <code>run_async_nemo_gym_rollout</code>. <span class="pt">v2 (single controller)</span> = <code>examples/run_grpo_single_controller.py</code>, rollouts in <code>rollout_manager.py</code>. A row tagged <span class="pt both">both — shared code</span> changes both paths at once.</p>
 <div class="scroll"><table class="sgrid">
-<tr><th></th><th>v1 (driver loops)</th><th>v2 (single controller)</th></tr>
+<tr><th></th><th>v1</th><th>v2 (single controller)</th></tr>
 <tr><th><span class="st m">main</span></th>
 <td>No retry. One failed <code>/run</code> (say, a 503 from a dead engine) ends its actor stream; the rollouts still running on it are lost and the step fails.</td>
 <td>Row re-send already exists (<code>max_row_attempts</code>, default 3). A failed <code>/run</code> kills the stream, so the failed row <b>and</b> the rows still running are re-sent in the next attempt.</td></tr>
 <tr><th rowspan="2"><span class="st p">this PR</span></th>
 <td colspan="2" class="shared"><span class="pt both">both — shared code</span>The Gym actor (<code>nemo_gym.py</code>) returns a failed <code>/run</code> as a marker row, so the other rollouts keep running. <code>failures.py</code>: a 200 whose body isn't valid JSON now counts as infrastructure. New metric <code>nemo_gym_infra_redispatches</code>; retry timings get a <code>/retry&lt;n&gt;</code> label.</td></tr>
-<tr><td>The driver re-sends the failed row at once. New setting <code>max_infra_attempts_per_rollout</code>, default 1 = no retry. At budget 1 a failure cancels <b>every</b> Gym actor's stream.</td>
+<tr><td>v1 re-sends the failed row at once. New setting <code>max_infra_attempts_per_rollout</code>, default 1 = no retry. At budget 1 a failure cancels <b>every</b> Gym actor's stream.</td>
 <td>Same <code>max_row_attempts</code> loop, but only the failed row is re-sent, and only after its stream ends. The new metric is averaged over prompt groups.</td></tr>
 <tr><th rowspan="2"><span class="st r">after the review</span></th>
 <td colspan="2" class="shared"><span class="pt both">both — shared code</span>The metric is summed per step in <code>aggregate_rollout_metrics</code> (C1; fixes v2 and v1 async, v1 sync is already right). Test pins Gym's failure-row keys (C5); unused key deleted (C6).</td></tr>
@@ -148,7 +148,7 @@ table.sgrid td.shared{background:var(--surface2)}
 <span class="tip" tabindex="0" data-tip="A Ray actor (class NemoGym) that runs NeMo-Gym's rollout collector. It sends each prompt to a Gym agent server and streams back one result per prompt as they finish.">NemoGym actor</span>
 to run a batch of prompts. The actor calls a Gym agent's <code>/run</code> once per prompt, and each
 <code>/run</code> talks to one of several vLLM engines. Results stream back to the
-<span class="tip" tabindex="0" data-tip="The Python process that runs the training loop and collects rollouts (sync GRPO, PPO, distillation, and the async GRPO collector all use this path).">driver</span>
+v1 training loop
 one row at a time. Dotted words have a short explanation: hover or tap them.</div>
 
 <p>The PR changes two places. In the actor, it asks Gym's collector for a failure row instead of an exception
@@ -156,7 +156,7 @@ one row at a time. Dotted words have a short explanation: hover or tap them.</di
 classifies it with <a href="https://github.com/NVIDIA-NeMo/RL/blob/8fecfa2cefbcc8189a73753d9cc56b3f5c6a1e5b/nemo_rl/environments/nemo_gym.py#L330"><code>_typed_gym_failure</code></a>,
 and streams a one-key marker row in place of the result
 (<a href="https://github.com/NVIDIA-NeMo/RL/blob/8fecfa2cefbcc8189a73753d9cc56b3f5c6a1e5b/nemo_rl/environments/nemo_gym.py#L1166-L1179">L1166-L1179</a>).
-A 4xx that describes the request itself still raises at once. In the driver,
+A 4xx that describes the request itself still raises at once. On v1,
 <a href="https://github.com/NVIDIA-NeMo/RL/blob/8fecfa2cefbcc8189a73753d9cc56b3f5c6a1e5b/nemo_rl/experience/rollouts.py#L2681-L2707"><code>_merge_nemo_gym_instance_streams</code></a>
 sees the marker and starts a new one-row stream for that prompt on the same actor.</p>
 
@@ -177,7 +177,7 @@ sees the marker and starts a new one-row stream for that prompt on the same acto
 
   <!-- BEFORE lane -->
   <rect class="lane" x="8" y="56" width="884" height="150" rx="8"/>
-  <text class="lbl-b" x="18" y="78">main · v1 (driver loops) — v2 re-sends instead; see the table below</text>
+  <text class="lbl-b" x="18" y="78">main · v1 — v2 re-sends instead; see the table below</text>
   <rect class="ok" x="18" y="92" width="64" height="26" rx="4"/><text class="lbl" x="28" y="110">row 0</text>
   <rect class="ok" x="88" y="92" width="64" height="26" rx="4"/><text class="lbl" x="98" y="110">row 1</text>
   <rect class="bad" x="158" y="92" width="64" height="26" rx="4"/><text class="lbl" x="168" y="110">row 2</text>
@@ -197,7 +197,7 @@ sees the marker and starts a new one-row stream for that prompt on the same acto
 
   <!-- AFTER lane -->
   <rect class="lane" x="8" y="216" width="884" height="246" rx="8"/>
-  <text class="lbl-b" x="18" y="238">this PR · v1 (driver loops), max_infra_attempts_per_rollout: 3 set by hand (default 1 = no retry)</text>
+  <text class="lbl-b" x="18" y="238">this PR · v1, max_infra_attempts_per_rollout: 3 set by hand (default 1 = no retry)</text>
   <rect class="ok" x="18" y="252" width="64" height="26" rx="4"/><text class="lbl" x="28" y="270">row 0</text>
   <rect class="ok" x="88" y="252" width="64" height="26" rx="4"/><text class="lbl" x="98" y="270">row 1</text>
   <rect class="mark" x="158" y="252" width="64" height="26" rx="4"/><text class="lbl" x="168" y="270">row 2</text>
@@ -210,7 +210,7 @@ sees the marker and starts a new one-row stream for that prompt on the same acto
 
   <path class="arrow-o" d="M190 280 L190 330"/>
   <rect class="box" x="18" y="334" width="420" height="56" rx="6" style="stroke:var(--orange)"/>
-  <text class="t-mark" x="28" y="352">v1 driver merge: record_infra_failure(2) → 1 of 3</text>
+  <text class="t-mark" x="28" y="352">v1 merge: record_infra_failure(2) → 1 of 3</text>
   <text class="data" x="28" y="368">start new stream on the same actor: rows=[row 2]</text>
   <text class="data" x="28" y="383">timing label "&lt;instance&gt;/retry1"</text>
   <path class="arrow" d="M442 362 L484 362"/>
@@ -241,21 +241,21 @@ that did not come back. This PR feeds the same marker into that loop. Each cell 
 <span class="st r">review</span> once the proposed changes are applied.</p>
 
 <div class="scroll"><table class="cmp">
-<tr><th></th><th>v1 (driver loops): sync GRPO, PPO, distillation, async GRPO collector</th><th>v2 (single controller)</th></tr>
+<tr><th></th><th>v1: sync GRPO, PPO, distillation, async GRPO collector</th><th>v2 (single controller)</th></tr>
 <tr><td>What happens to a failed row</td>
 <td><div><span class="st m">main</span>The stream raises; the step fails</div>
 <div><span class="st p">PR</span>A marker is handled in <a href="https://github.com/NVIDIA-NeMo/RL/blob/8fecfa2cefbcc8189a73753d9cc56b3f5c6a1e5b/nemo_rl/experience/rollouts.py#L2681-L2707"><code>_merge_nemo_gym_instance_streams</code></a> and the row is sent again at once, as a new 1-row stream</div>
 <div><span class="st r">review</span>No change</div></td>
 <td><div><span class="st m">main</span>The stream dies; the failed row <b>and</b> the rows still running are all re-sent in the next attempt</div>
 <div><span class="st p">PR</span>A marker in <a href="https://github.com/NVIDIA-NeMo/RL/blob/8fecfa2cefbcc8189a73753d9cc56b3f5c6a1e5b/nemo_rl/experience/rollout_manager.py#L1206-L1220"><code>_stream_rows</code></a>; only the failed row is re-sent, but only after the rest of its stream finishes (<a href="https://github.com/NVIDIA-NeMo/RL/blob/8fecfa2cefbcc8189a73753d9cc56b3f5c6a1e5b/nemo_rl/experience/rollout_manager.py#L1337-L1338">L1337-L1338</a>)</div>
-<div><span class="st r">review</span>Re-send at once, like the driver path. For the maintainer to decide (C13)</div></td></tr>
+<div><span class="st r">review</span>Re-send at once, like v1. For the maintainer to decide (C13)</div></td></tr>
 <tr><td>Budget</td>
 <td><div><span class="st m">main</span>None</div>
 <div><span class="st p">PR</span><code>env.nemo_gym.max_infra_attempts_per_rollout</code>, default 1 (no retry), checked at the first rollout</div>
 <div><span class="st r">review</span><code>env.nemo_gym.max_row_attempts</code>, default 3 (C7), checked at setup (C8)</div></td>
 <td><div><span class="st m">main</span><code>async_rl.rollout_failure.nemo_gym.max_row_attempts</code>, default 3</div>
-<div><span class="st p">PR</span>Unchanged; the driver's env key is ignored here</div>
-<div><span class="st r">review</span>Unchanged; this is the reference the driver setting now matches</div></td></tr>
+<div><span class="st p">PR</span>Unchanged; v1's env key is ignored here</div>
+<div><span class="st r">review</span>Unchanged; this is the reference the v1 setting now matches</div></td></tr>
 <tr><td>On the last try</td>
 <td><div><span class="st m">main</span>Other Gym actors' streams drain, then the step fails</div>
 <div><span class="st p">PR</span>The marker raises <code>GymTransportError</code> and the merge cancels <b>every</b> stream, other actors' included</div>
