@@ -43,6 +43,19 @@ p.chainnote{color:var(--dim);font-size:12px;margin:0 0 18px}
   white-space:nowrap;padding-top:2px}
 .status dd{margin:0;font-size:14px}
 .verdict{font-weight:700}
+p.paths{font-size:13.5px;margin:0 0 14px;color:var(--text)}
+.status p.shared{margin:12px 0 8px;font-size:14px}
+.gridwrap{overflow-x:auto}
+table.states{border-collapse:collapse;width:100%;font-size:13.5px;min-width:520px}
+table.states th,table.states td{border:1px solid var(--border);padding:7px 9px;vertical-align:top;text-align:left}
+table.states tr:first-child th{background:var(--surface2);font-size:13px}
+table.states td:first-child,table.states th:first-child{width:1%}
+table.states tr th:first-child{color:var(--dim);font-size:12px;text-transform:uppercase;letter-spacing:.04em;white-space:nowrap}
+.tag{display:inline-block;padding:0 7px;border-radius:10px;font-size:11.5px;font-weight:600;
+  border:1px solid currentColor;white-space:nowrap;line-height:1.6}
+.tag.both{color:var(--accent)}
+.tag.v1{color:var(--green)}
+.tag.chg{color:var(--red)}
 .verdict.open{color:var(--orange)}
 .bg{border-left:3px solid var(--accent);background:var(--surface);padding:10px 14px;margin:0 0 16px;
   border-radius:0 8px 8px 0;font-size:14px}
@@ -91,19 +104,27 @@ svg a text{text-decoration:underline;fill:var(--accent);font:11px ui-monospace,M
   document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
 <div class="wrap">
 
-<h1>Does the new “status below 400 means infrastructure” rule change what the single controller retries? Mostly no. One case flips.</h1>
+<h1>Does the new “status below 400 means infrastructure” rule change what gets retried? Mostly no. One case flips, and it shows on v2.</h1>
 <p class="sub"><a href="https://github.com/NVIDIA-NeMo/RL/pull/4446">NVIDIA-NeMo/RL #4446</a> · permalinks at head <code>8fecfa2</code>, removed code at the merge base <code>8338530</code>, Gym at <code>ad4f480</code></p>
+<p class="paths"><b>Two paths, named the same way on every page.</b> <b>v1 (driver loops)</b> = <code>grpo_train</code>, <code>async_grpo_train</code>, PPO and distillation. <b>v2 (single controller)</b> = <code>examples/run_grpo_single_controller.py</code>.</p>
 
 <div class="status">
+<p class="shared"><span class="tag both">both — shared code</span> The rule is one line in <a href="https://github.com/NVIDIA-NeMo/RL/blob/8fecfa2cefbcc8189a73753d9cc56b3f5c6a1e5b/nemo_rl/experience/failures.py#L192-L205"><code>http_status_is_infra</code></a>. The Gym actor uses it on both paths, and v2's retry loops also use it. What it does differs by path:</p>
+<div class="gridwrap"><table class="states">
+<tr><th></th><th>v1 (driver loops)</th><th>v2 (single controller)</th></tr>
+<tr><th>Main</th>
+<td>The bucket makes no difference: v1 has no row retry, so <b>any</b> broken <code>/run</code> ends the rollout (a <code>RuntimeError</code>, after the other Gym streams finish).</td>
+<td>A cut body or dropped connection counts as <b>infrastructure</b> (rows re-sent, then group retries). A 200 reply that is not valid JSON counts as <b>data</b>: 2 group tries, then the prompt is skipped or the run stops.</td></tr>
+<tr><th>This PR</th>
+<td>All three now come back as failure rows with status 200 and count as infrastructure. With the default budget of 1, the rollout still ends, now at once with a <code>GymTransportError</code>. Same result, different error.</td>
+<td>Cut body and dropped connection: unchanged. <b>Non-JSON 200: data → infrastructure</b>, so up to 5 group tries × 3 row sends = 15 sends, with waits. <span class="tag chg">changed</span></td></tr>
+<tr><th>After the review</th>
+<td><b>C7</b> <span class="tag v1">v1, aligning to v2</span> (proposed): renames the setting to <code>max_row_attempts</code> with default 3. All three failures would be re-sent up to 3 times before the rollout ends.</td>
+<td>Same as this PR. The review asks for no change and only <b>flags</b> it in the body for the maintainer to decide <span class="tag both">v1+v2, matters most on v2</span>.</td></tr>
+</table></div>
 <dl>
-  <dt>Main</dt>
-  <dd>(merge base <code>8338530</code>) When Gym's <code>/run</code> reply broke after a 200 status, Gym raised the error itself. A cut body or a dropped connection reached RL as its own type and counted as an <b>infrastructure</b> failure. A 200 reply whose body was not valid JSON counted as a <b>data</b> failure.</dd>
-  <dt>This PR</dt>
-  <dd>(head <code>8fecfa2</code>) Gym now returns a failure row that records the reply's status, which is 200 for all three. RL counts any failed request with a status below 400 as infrastructure. Cut bodies and dropped connections stay infrastructure. A 200 reply that is not JSON moves from data to infrastructure, on both paths.</dd>
-  <dt>After the review</dt>
-  <dd>The review asks for <b>no change</b> to this rule. Its body <b>flags</b> the single-controller change for the maintainer to decide. One comment does change the v1 result: <b>C7</b> (proposed in the review) renames the v1 setting to <code>max_row_attempts</code> with default 3. On v1, a non-JSON 200 would then be re-sent up to 3 times before it ends the step, where today it ends the step at once.</dd>
   <dt>Status</dt>
-  <dd><span class="verdict open">In this PR, and it changes the single controller too. Flagged in the review, not asked to change.</span></dd>
+  <dd><span class="verdict open">In this PR. The code is shared, but the change only shows on v2. Flagged in the review, not asked to change.</span></dd>
 </dl>
 </div>
 
@@ -115,12 +136,12 @@ svg a text{text-decoration:underline;fill:var(--accent);font:11px ui-monospace,M
 </nav>
 <p class="chainnote">Four pages on this PR, one question each. This one covers the status-below-400 rule.</p>
 
-<div class="bg">Every failed rollout goes into one of two buckets. <b>Infrastructure</b> means the prompt is fine but something broke on the way. It gets a large budget of retries with waits in between. <b>Data</b> means the prompt itself is bad. It gets a small budget. Both the single controller and the v1 loop use one function to choose the bucket: <a href="https://github.com/NVIDIA-NeMo/RL/blob/8fecfa2cefbcc8189a73753d9cc56b3f5c6a1e5b/nemo_rl/experience/failures.py#L240"><code>classify_rollout_failure</code></a>. Dotted words have a short explanation: hover over them or tap them.</div>
+<div class="bg">Every failed rollout goes into one of two buckets. <b>Infrastructure</b> means the prompt is fine but something broke on the way. It gets a large budget of retries with waits in between. <b>Data</b> means the prompt itself is bad. It gets a small budget. v1 (driver loops) and v2 (single controller) use one function to choose the bucket: <a href="https://github.com/NVIDIA-NeMo/RL/blob/8fecfa2cefbcc8189a73753d9cc56b3f5c6a1e5b/nemo_rl/experience/failures.py#L240"><code>classify_rollout_failure</code></a>. Dotted words have a short explanation: hover over them or tap them.</div>
 
-<p>The PR has Gym return a failed <code>/run</code> as a row instead of raising, so one bad row no longer ends the whole stream. Gym fills in that row's status from the error. When the error has no status, it uses the reply's status line instead (<a href="https://github.com/NVIDIA-NeMo/Gym/blob/ad4f4804f397c6686a966c5e38b5554f05d98b55/nemo_gym/rollout_collection.py#L3729-L3731"><code>rollout_collection.py</code> L3729-L3731</a>). A reply that broke while its body was being read therefore arrives with status <b>200</b>. Under the old rule, 200 is not 5xx, so all of these would have turned into data failures. The new rule (<a href="https://github.com/NVIDIA-NeMo/RL/blob/8fecfa2cefbcc8189a73753d9cc56b3f5c6a1e5b/nemo_rl/experience/failures.py#L192-L205"><code>http_status_is_infra</code></a>) counts them as infrastructure. The rule lives in shared code, so the single controller follows it too.</p>
+<p>The PR has Gym return a failed <code>/run</code> as a row instead of raising, so one bad row no longer ends the whole stream. Gym fills in that row's status from the error. When the error has no status, it uses the reply's status line instead (<a href="https://github.com/NVIDIA-NeMo/Gym/blob/ad4f4804f397c6686a966c5e38b5554f05d98b55/nemo_gym/rollout_collection.py#L3729-L3731"><code>rollout_collection.py</code> L3729-L3731</a>). A reply that broke while its body was being read therefore arrives with status <b>200</b>. Under the old rule, 200 is not 5xx, so all of these would have turned into data failures. The new rule (<a href="https://github.com/NVIDIA-NeMo/RL/blob/8fecfa2cefbcc8189a73753d9cc56b3f5c6a1e5b/nemo_rl/experience/failures.py#L192-L205"><code>http_status_is_infra</code></a>) counts them as infrastructure. The rule lives in shared code, so v1 and v2 both follow it.</p>
 
 <svg viewBox="0 0 940 560" role="img" aria-label="Which body failures change bucket on main, in this PR and after the review, and what the one changed case does on each path">
-<text x="14" y="22" class="hdr">1 · A /run reply that broke after a 200 status. Which bucket?</text>
+<text x="14" y="22" class="hdr">1 · A /run reply that broke after a 200 status. Which bucket? (v1 and v2: shared code)</text>
 <text x="280" y="48" class="lbl-b">Main (Gym raised)</text>
 <text x="460" y="48" class="lbl-b">This PR (row, 200)</text>
 <text x="640" y="48" class="lbl-b">After the review</text>
@@ -147,6 +168,7 @@ svg a text{text-decoration:underline;fill:var(--accent);font:11px ui-monospace,M
 <rect x="640" y="158" width="170" height="30" rx="6" class="bad"/><text x="652" y="178" class="t-bad">infrastructure</text>
 <text x="822" y="178" class="t-bad">changed</text>
 <text x="14" y="214" class="note">"Main" was tested: each error sent through a Ray actor stream, then the merge-base classifier. The review keeps the PR's rule. Red = changed by the PR.</text>
+<text x="14" y="230" class="note">The bucket matters only where a retry follows: on v2 always; on v1 only once C7 gives rows a budget above 1.</text>
 
 <line x1="14" y1="236" x2="926" y2="236" class="lane"/>
 <text x="14" y="262" class="hdr">2 · The one changed case (a 200 reply that is not JSON), default settings, on each path</text>
@@ -154,8 +176,8 @@ svg a text{text-decoration:underline;fill:var(--accent);font:11px ui-monospace,M
 <text x="410" y="290" class="lbl-b">This PR</text>
 <text x="670" y="290" class="lbl-b">After the review</text>
 
-<text x="14" y="322" class="lbl-b">Single</text>
-<text x="14" y="340" class="lbl-b">controller</text>
+<text x="14" y="322" class="lbl-b">v2 (single</text>
+<text x="14" y="340" class="lbl-b">controller)</text>
 <rect x="150" y="300" width="250" height="84" rx="6" class="redo"/>
 <text x="160" y="320" class="t-redo">data bucket</text>
 <text x="160" y="338" class="txt">2 group tries,</text>
@@ -168,13 +190,14 @@ svg a text{text-decoration:underline;fill:var(--accent);font:11px ui-monospace,M
 <g><a href="https://github.com/NVIDIA-NeMo/RL/blob/8fecfa2cefbcc8189a73753d9cc56b3f5c6a1e5b/nemo_rl/experience/rollout_manager.py#L2148-L2158"><text x="420" y="374">prompt retries L2148-L2158</text></a></g>
 <rect x="670" y="300" width="256" height="84" rx="6" class="bad"/>
 <text x="680" y="320" class="t-bad">same as this PR</text>
-<text x="680" y="338" class="txt">no change asked; the review</text>
-<text x="680" y="354" class="txt">flags it for the maintainer</text>
+<text x="680" y="338" class="txt">no ask; flagged in the body</text>
+<text x="680" y="354" class="txt">[v1+v2, matters most on v2]</text>
 <g><a href="https://github.com/NVIDIA-NeMo/RL/blob/8fecfa2cefbcc8189a73753d9cc56b3f5c6a1e5b/nemo_rl/experience/rollout_manager.py#L1337"><text x="680" y="374">row re-sends L1337</text></a></g>
 
-<text x="14" y="430" class="lbl-b">v1 loop</text>
+<text x="14" y="422" class="lbl-b">v1 (driver</text>
+<text x="14" y="440" class="lbl-b">loops)</text>
 <rect x="150" y="400" width="250" height="84" rx="6" class="redo"/>
-<text x="160" y="420" class="t-redo">data bucket</text>
+<text x="160" y="420" class="t-redo">data bucket (no retry anyway)</text>
 <text x="160" y="438" class="txt">the rollout ends: RuntimeError</text>
 <text x="160" y="454" class="txt">after other streams drain</text>
 <g><a href="https://github.com/NVIDIA-NeMo/RL/blob/83385307ab71b044c7a77d5802c9f2ff0909e002/nemo_rl/experience/rollouts.py#L2538"><text x="160" y="474">merge, base L2538</text></a></g>
@@ -184,35 +207,35 @@ svg a text{text-decoration:underline;fill:var(--accent);font:11px ui-monospace,M
 <text x="420" y="454" class="txt">at once: GymTransportError</text>
 <g><a href="https://github.com/NVIDIA-NeMo/RL/blob/8fecfa2cefbcc8189a73753d9cc56b3f5c6a1e5b/nemo_rl/experience/rollouts.py#L1930-L1950"><text x="420" y="474">record_infra_failure</text></a></g>
 <rect x="670" y="400" width="256" height="84" rx="6" class="ok"/>
-<text x="680" y="420" class="t-ok">proposed in the review (C7)</text>
+<text x="680" y="420" class="t-ok">C7 proposed [v1, aligning to v2]</text>
 <text x="680" y="438" class="txt">max_row_attempts, default 3:</text>
 <text x="680" y="454" class="txt">row sent up to 3 times, then</text>
 <text x="680" y="470" class="txt">GymTransportError</text>
 
 <text x="14" y="512" class="note">Orange = data bucket (main). Red = changed by this PR. Green = what a review comment would change. Waits double between group tries.</text>
-<text x="14" y="532" class="note">Single controller, with max_consecutive_dropped_prompts &gt; 0: the prompt is dropped instead of stopping the run (replaced, with on_dropped_prompt: replace).</text>
+<text x="14" y="532" class="note">v2, with max_consecutive_dropped_prompts &gt; 0: the prompt is dropped instead of stopping the run (replaced, with on_dropped_prompt: replace).</text>
 </svg>
 
 <h2>The change, and why it is needed</h2>
-<p class="where"><b>Where it lands: RL only, one line.</b> <a href="https://github.com/NVIDIA-NeMo/RL/blob/8fecfa2cefbcc8189a73753d9cc56b3f5c6a1e5b/nemo_rl/experience/failures.py#L192-L205"><code>failures.py</code> · <code>http_status_is_infra</code></a>. Two places call it. The Gym actor calls it to type each failure row (<a href="https://github.com/NVIDIA-NeMo/RL/blob/8fecfa2cefbcc8189a73753d9cc56b3f5c6a1e5b/nemo_rl/environments/nemo_gym.py#L330-L373"><code>_typed_gym_failure</code></a>), on both paths. Every single-controller retry loop also calls it through <a href="https://github.com/NVIDIA-NeMo/RL/blob/8fecfa2cefbcc8189a73753d9cc56b3f5c6a1e5b/nemo_rl/experience/failures.py#L221-L237"><code>_is_infra</code></a>. <b>No Gym change:</b> Gym already records the reply's status on the row.</p>
+<p class="where"><b>Where it lands: RL only, one line.</b> <a href="https://github.com/NVIDIA-NeMo/RL/blob/8fecfa2cefbcc8189a73753d9cc56b3f5c6a1e5b/nemo_rl/experience/failures.py#L192-L205"><code>failures.py</code> · <code>http_status_is_infra</code></a>. Two places call it. The Gym actor calls it to type each failure row (<a href="https://github.com/NVIDIA-NeMo/RL/blob/8fecfa2cefbcc8189a73753d9cc56b3f5c6a1e5b/nemo_rl/environments/nemo_gym.py#L330-L373"><code>_typed_gym_failure</code></a>), on v1 and v2. Every v2 retry loop also calls it through <a href="https://github.com/NVIDIA-NeMo/RL/blob/8fecfa2cefbcc8189a73753d9cc56b3f5c6a1e5b/nemo_rl/experience/failures.py#L221-L237"><code>_is_infra</code></a>. <b>No Gym change:</b> Gym already records the reply's status on the row.</p>
 <pre class="diff"><span class="hunk">@@ failures.py L202 (merge base) → L205 (head) · http_status_is_infra</span>
 <span class="del">-    return status &gt;= 500 or status in _RETRIABLE_HTTP_STATUSES
 </span><span class="add">+    # A failed request whose status says success: the reply broke mid-body.
 +    return status &lt; 400 or status &gt;= 500 or status in _RETRIABLE_HTTP_STATUSES</span></pre>
 <p>Without this line, the PR's switch to failure rows would turn every cut body into a data failure. Data failures get 2 tries and then stop the run. That would be a regression, so the rule is needed. It only changes the bucket for one kind of failure: a body that arrives in full but is not valid JSON. Gym parses it with <a href="https://github.com/NVIDIA-NeMo/Gym/blob/ad4f4804f397c6686a966c5e38b5554f05d98b55/nemo_gym/server_utils.py#L719-L720"><code>orjson.loads</code></a>, and the old path raised that error as a <code>ValueError</code>, which counts as data.</p>
-<p><b>Only Gym hits this rule.</b> A status below 400 reaches the classifier only through a Gym failure row. Every other HTTP client in RL raises only on statuses of 400 and up (<a href="https://github.com/NVIDIA-NeMo/RL/blob/8fecfa2cefbcc8189a73753d9cc56b3f5c6a1e5b/nemo_rl/experience/failures.py#L208-L218"><code>_http_status</code></a> reads statuses only from aiohttp response errors). <b>v1 loop:</b> at the default budget of 1 dispatch per row, a changed failure still ends the rollout. It now ends with <code>GymTransportError</code> from <a href="https://github.com/NVIDIA-NeMo/RL/blob/8fecfa2cefbcc8189a73753d9cc56b3f5c6a1e5b/nemo_rl/experience/rollouts.py#L1944-L1948"><code>record_infra_failure</code></a> instead of a <code>RuntimeError</code> raised after the other streams finish. <b>After the review:</b> C7 (proposed) sets the v1 default to 3, matching the single controller's <code>max_row_attempts</code>. The actor still marks the row as infrastructure, so the driver would re-send it up to 3 times before it ends the step.</p>
+<p><b>Only Gym hits this rule.</b> A status below 400 reaches the classifier only through a Gym failure row. Every other HTTP client in RL raises only on statuses of 400 and up (<a href="https://github.com/NVIDIA-NeMo/RL/blob/8fecfa2cefbcc8189a73753d9cc56b3f5c6a1e5b/nemo_rl/experience/failures.py#L208-L218"><code>_http_status</code></a> reads statuses only from aiohttp response errors). <b>v1 (driver loops):</b> at the default budget of 1 dispatch per row, a changed failure still ends the rollout. It now ends with <code>GymTransportError</code> from <a href="https://github.com/NVIDIA-NeMo/RL/blob/8fecfa2cefbcc8189a73753d9cc56b3f5c6a1e5b/nemo_rl/experience/rollouts.py#L1944-L1948"><code>record_infra_failure</code></a> instead of a <code>RuntimeError</code> raised after the other streams finish. <b>After the review:</b> C7 (proposed, v1 only, aligning to v2) sets the v1 default to 3, matching v2's <code>max_row_attempts</code>. The actor still marks the row as infrastructure, so the driver would re-send it up to 3 times before it ends the step.</p>
 
 <h2>Timing: which training step gets the group</h2>
-<p>A retried group arrives later. Where it ends up depends on the <span class="tip" tabindex="0" data-tip="The single controller's rule for which finished prompt groups go into each training step. Set by async_rl.sampler.name.">sampler</span>:</p>
+<p><b>v2 (single controller)</b>: a retried group arrives later. Where it ends up depends on the <span class="tip" tabindex="0" data-tip="v2's rule for which finished prompt groups go into each training step. Set by async_rl.sampler.name.">sampler</span>. <b>v1 (driver loops)</b>: no timing change from this rule today, because the rollout ends either way; after C7, a re-sent row makes its step wait (<code>async_grpo_train</code> ties each group to one target step).</p>
 <ul>
 <li><b><code>in_order</code></b> (the default, <a href="https://github.com/NVIDIA-NeMo/RL/blob/8fecfa2cefbcc8189a73753d9cc56b3f5c6a1e5b/nemo_rl/algorithms/single_controller_utils/config.py#L480-L481">config.py L481</a>) stamps each prompt with the step it is for. A step takes only the groups stamped for it (<a href="https://github.com/NVIDIA-NeMo/RL/blob/8fecfa2cefbcc8189a73753d9cc56b3f5c6a1e5b/nemo_rl/algorithms/async_utils/staleness_sampler.py#L686-L690">staleness_sampler.py L689</a>). A slow retry makes its step wait. It does not move the group to a different step.</li>
 <li><b><code>ready_first</code></b> and <b><code>weight_fifo</code></b> fill a step from whatever is ready (<a href="https://github.com/NVIDIA-NeMo/RL/blob/8fecfa2cefbcc8189a73753d9cc56b3f5c6a1e5b/nemo_rl/algorithms/async_utils/staleness_sampler.py#L523-L533">ready_first</a>, <a href="https://github.com/NVIDIA-NeMo/RL/blob/8fecfa2cefbcc8189a73753d9cc56b3f5c6a1e5b/nemo_rl/algorithms/async_utils/staleness_sampler.py#L578-L583">weight_fifo</a>). With them, a group that now retries for longer can end up in a later step than it would have before.</li>
 </ul>
 
-<div class="warn"><b>What this means for the single controller</b>
+<div class="warn"><b>What this means for v2 (single controller)</b>
 <ol>
 <li>No change for a cut body or a dropped connection. The rule keeps their old behavior once Gym returns rows. This also means the rule does <b>not</b> remove a bias against long replies, because cut bodies were already retried before.</li>
-<li>One real change: a 200 reply that is not JSON used to get 2 group tries. It now gets up to 15 sends with waits in between. With the drop budget from the suggested single-controller config, that prompt is dropped and replaced instead of stopping the run.</li>
+<li>One real change: a 200 reply that is not JSON used to get 2 group tries. It now gets up to 15 sends with waits in between. With the drop budget from the suggested v2 config, that prompt is dropped and replaced instead of stopping the run.</li>
 <li>How often this happens was not measured. If it is a real agent bug, it fails every time, so it now uses up the bigger budget before it stops. That decision belongs to the maintainer. The review flags it in its body and does not ask the author to change it.</li>
 </ol></div>
 
