@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NVIDIA-NeMo/RL #4730 — where a rollout checkpoint save shows up: W&amp;B before, W&amp;B and Lens after</title>
+<style>
+:root{--bg:#0d1117;--surface:#161b22;--surface2:#1c2128;--border:#30363d;--text:#e6edf3;--dim:#8b949e;
+  --accent:#58a6ff;--green:#3fb950;--red:#f85149;--orange:#d29922}
+:root[data-theme="light"]{--bg:#ffffff;--surface:#f6f8fa;--surface2:#eaeef2;--border:#d0d7de;--text:#1f2328;
+  --dim:#59636e;--accent:#0969da;--green:#1a7f37;--red:#cf222e;--orange:#9a6700}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:28px 20px 70px}
+h1{font-size:22px;margin:0 0 8px;line-height:1.3}
+h2{font-size:18px;margin:30px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
+.sub{color:var(--dim);font-size:13.5px;margin:0 0 14px}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);
+  border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;
+  font:13px/1 ui-monospace,Menlo,monospace;cursor:pointer}
+.status{border:1px solid var(--border);border-radius:10px;background:var(--surface);padding:2px 16px 10px;margin:0 0 18px}
+.status dl{display:grid;grid-template-columns:max-content 1fr;gap:4px 14px;margin:12px 0 0}
+.status dt{color:var(--dim);font-size:12px;text-transform:uppercase;letter-spacing:.04em;white-space:nowrap;padding-top:2px}
+.status dd{margin:0;font-size:14px}
+.verdict{font-weight:700}
+.verdict.open{color:var(--orange)}
+.bg{border-left:3px solid var(--accent);background:var(--surface);padding:8px 14px;margin:0 0 14px;font-size:14px}
+.warn{border-left:3px solid var(--orange);background:var(--surface);padding:12px 16px;margin:18px 0;border-radius:0 8px 8px 0}
+.tip{border-bottom:1px dotted var(--dim);cursor:help;position:relative;outline:none}
+.tip:hover::after,.tip:focus::after{content:attr(data-tip);position:absolute;left:0;top:1.7em;z-index:60;
+  width:max-content;max-width:min(340px,80vw);white-space:normal;background:var(--surface2);color:var(--text);
+  border:1px solid var(--border);border-radius:6px;padding:7px 10px;font:13px/1.45 -apple-system,sans-serif;
+  font-weight:400;box-shadow:0 4px 14px rgba(0,0,0,.3)}
+.cref{margin:4px 0 0;font-size:13px}
+.cref a{display:inline-block;padding:3px 9px;border:1px solid var(--border);border-radius:16px;
+  background:var(--surface);font:12px ui-monospace,Menlo,monospace}
+ul.asks{padding-left:20px;margin:6px 0}
+ul.asks li{margin:6px 0}
+svg{max-width:100%;height:auto;display:block;margin:14px 0}
+svg .box{fill:var(--surface);stroke:var(--border);stroke-width:1.4}
+svg .old{fill:var(--surface);stroke:var(--dim);stroke-width:1.4;stroke-dasharray:5 4}
+svg .new{fill:var(--surface);stroke:var(--green);stroke-width:2}
+svg .split{fill:var(--surface2);stroke:var(--accent);stroke-width:2}
+svg .hdr{fill:var(--accent);font:bold 13px -apple-system,sans-serif}
+svg .t{fill:var(--text);font:bold 12.5px -apple-system,sans-serif}
+svg .note{fill:var(--dim);font:11.5px -apple-system,sans-serif}
+svg .d{fill:var(--text);font:11px ui-monospace,Menlo,monospace}
+svg .dg{fill:var(--green);font:11px ui-monospace,Menlo,monospace}
+svg .dx{fill:var(--dim);font:11px ui-monospace,Menlo,monospace;text-decoration:line-through}
+svg .do{fill:var(--orange);font:11px ui-monospace,Menlo,monospace}
+svg .arrow{stroke:var(--dim);stroke-width:1.6;fill:none}
+svg .ahead{fill:var(--dim)}
+svg a text{text-decoration:underline;fill:var(--accent);font:11px ui-monospace,Menlo,monospace}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+  document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head>
+<body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+  function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+  function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
+    b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
+      else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+  document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+<div class="wrap">
+
+<h1>Where a rollout checkpoint save shows up: W&amp;B before, W&amp;B and Lens after</h1>
+<p class="sub"><a href="https://github.com/NVIDIA-NeMo/RL/pull/4730">NVIDIA-NeMo/RL #4730</a> —
+export rollout checkpoint metrics to Lens. All permalinks pin the PR head <code>ec5348f</code>.</p>
+
+<div class="status">
+<dl>
+  <dt>Before</dt>
+  <dd>Rollout snapshot timings, sizes and attempt outcomes went to W&amp;B and the file/MLflow loggers only. Lens had no <code>rl.checkpoint.*</code> series and no span for a snapshot save.</dd>
+  <dt>This PR</dt>
+  <dd>Copies those same logged numbers into Lens: 8 metrics, plus one trace span per completed save. The checkpoint code itself does not change.</dd>
+  <dt>Status</dt>
+  <dd><span class="verdict open">Open PR, in review.</span> The review found no correctness bug in the export. It has 9 suggestions (docs, shared names, one test gap).</dd>
+</dl>
+</div>
+
+<div class="bg"><b>Background.</b> In Single-Controller runs, a background task (the
+<span class="tip" tabindex="0" data-tip="_rollout_checkpoint_pump: wakes every snapshot_attempt_interval_s and tries to save the rollout state (replay buffer, in-flight groups) next to the last durable trainer checkpoint.">snapshot pump</span>)
+saves rollout state every few seconds while training keeps running. It only saves when the trainer sits on a durable checkpoint, so many attempts
+<span class="tip" tabindex="0" data-tip="The attempt returns early without saving, with a reason such as missing_trainer_anchor or no_data_plane_mutations. This is normal.">skip</span>.
+<span class="tip" tabindex="0" data-tip="NeMo-RL's OpenTelemetry layer. It sends metrics and trace spans to an OTLP backend (Prometheus, Grafana, a trace viewer) for dashboards and alerts across runs.">Lens</span>
+is NeMo-RL's OpenTelemetry export. Dotted words have a short explanation: hover or tap them.</div>
+
+<h2>One logger call, two destinations</h2>
+
+<p>The controller logs each save as one dict through
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/ec5348f2aa6b519f10ece29e4189472a7adb0e44/nemo_rl/algorithms/single_controller.py#L949-L964"><code>_log_telemetry_metrics</code></a>,
+which adds the step and the wall-clock time. Nothing changes up to
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/ec5348f2aa6b519f10ece29e4189472a7adb0e44/nemo_rl/utils/logger.py#L1370-L1373"><code>Logger.log_metrics</code></a>:
+it sends the dict to W&amp;B as before, then calls the Lens tee. The PR teaches the tee three new
+prefixes (<a href="https://github.com/NVIDIA-NeMo/RL/blob/ec5348f2aa6b519f10ece29e4189472a7adb0e44/nemo_rl/telemetry/metrics.py#L810-L851">metrics.py L810-L851</a>).
+The example below uses the PR's own test values.</p>
+
+<svg viewBox="0 0 900 560" role="img" aria-label="A completed save and a skipped attempt, each logged once; Logger.log_metrics sends every key to W&amp;B and sends labelled metrics plus a span to Lens">
+  <defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="ahead" d="M0 0L10 5L0 10z"/></marker></defs>
+
+  <!-- save dict -->
+  <text class="hdr" x="16" y="22">1 · a completed save at train step 7</text>
+  <rect class="box" x="16" y="34" width="262" height="168" rx="8"/>
+  <text class="t" x="28" y="54">controller logs one dict</text>
+  <text class="d" x="28" y="74">prefix "timing/rollout_checkpoint"</text>
+  <text class="d" x="28" y="92">total_save_seconds:   30.0</text>
+  <text class="d" x="28" y="108">barrier_wait_seconds: 4.0</text>
+  <text class="d" x="28" y="124">replay_rows:          256</text>
+  <text class="d" x="28" y="140">snapshot_sequence:    99</text>
+  <text class="d" x="28" y="156">train_step:           7</text>
+  <text class="d" x="28" y="172">wall_time_seconds:    1.7e9</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/ec5348f2aa6b519f10ece29e4189472a7adb0e44/nemo_rl/algorithms/single_controller.py#L4809-L4832"><text x="28" y="192">single_controller.py L4809-L4832</text></a>
+
+  <!-- split point -->
+  <rect class="split" x="300" y="210" width="168" height="62" rx="8"/>
+  <text class="t" x="312" y="232">Logger.log_metrics</text>
+  <text class="note" x="312" y="248">the two paths split here</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/ec5348f2aa6b519f10ece29e4189472a7adb0e44/nemo_rl/utils/logger.py#L1370-L1373"><text x="312" y="264">logger.py L1370-L1373</text></a>
+  <path class="arrow" d="M278 130 C 290 130, 300 180, 340 210" marker-end="url(#ah)"/>
+
+  <!-- W&B lane -->
+  <rect class="old" x="496" y="34" width="390" height="104" rx="8"/>
+  <text class="t" x="508" y="54">already existed: W&amp;B / file / MLflow</text>
+  <text class="d" x="508" y="74">…/total_save_seconds   = 30.0</text>
+  <text class="d" x="508" y="90">…/barrier_wait_seconds = 4.0</text>
+  <text class="d" x="508" y="106">…/snapshot_sequence    = 99</text>
+  <text class="note" x="508" y="126">every key is its own series, plotted against wall time</text>
+  <path class="arrow" d="M468 224 C 480 224, 480 100, 494 92" marker-end="url(#ah)"/>
+
+  <!-- Lens lane: save -->
+  <rect class="new" x="496" y="152" width="390" height="190" rx="8"/>
+  <text class="t" x="508" y="172">new in this PR: tee → Lens</text>
+  <text class="dg" x="508" y="192">rl.checkpoint.duration{save,total}        30.0</text>
+  <text class="dg" x="508" y="208">rl.checkpoint.duration{save,barrier_wait} 4.0</text>
+  <text class="dg" x="508" y="224">rl.checkpoint.rows{save,replay}           256</text>
+  <text class="dx" x="508" y="240">snapshot_sequence, train_step as labels</text>
+  <text class="note" x="508" y="256">IDs are not metric labels; they go on the span:</text>
+  <text class="dg" x="508" y="276">span rl.sc.rollout_checkpoint.save</text>
+  <text class="d" x="508" y="292">  from 1.7e9 − 30 s to 1.7e9</text>
+  <text class="d" x="508" y="308">  rl.checkpoint.snapshot_sequence=99</text>
+  <text class="d" x="508" y="324">  rl.iteration=7</text>
+  <path class="arrow" d="M468 248 C 480 248, 480 246, 494 246" marker-end="url(#ah)"/>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/ec5348f2aa6b519f10ece29e4189472a7adb0e44/nemo_rl/telemetry/metrics.py#L611-L685"><text x="700" y="336">metrics.py L611-L685</text></a>
+
+  <!-- attempts -->
+  <text class="hdr" x="16" y="378">2 · every pump attempt, saved or not</text>
+  <rect class="box" x="16" y="390" width="262" height="120" rx="8"/>
+  <text class="t" x="28" y="410">controller logs one dict</text>
+  <text class="d" x="28" y="430">prefix "rollout/checkpoint_outcome"</text>
+  <text class="d" x="28" y="446">skipped: 1.0</text>
+  <text class="d" x="28" y="462">reason_missing_trainer_anchor: 1.0</text>
+  <text class="d" x="28" y="478">attempt_duration_seconds: 0.02</text>
+  <text class="d" x="28" y="494">seconds_since_last_success: 840</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/ec5348f2aa6b519f10ece29e4189472a7adb0e44/nemo_rl/algorithms/single_controller.py#L4846-L4885"><text x="28" y="507">L4846-L4885</text></a>
+  <path class="arrow" d="M278 450 L 494 450" marker-end="url(#ah)"/>
+  <text class="note" x="300" y="442">same Logger.log_metrics call</text>
+
+  <rect class="new" x="496" y="390" width="390" height="120" rx="8"/>
+  <text class="t" x="508" y="410">new in this PR: tee → Lens</text>
+  <text class="dg" x="508" y="430">rl.checkpoint.attempts{skipped,</text>
+  <text class="dg" x="508" y="446">    missing_trainer_anchor}         +1</text>
+  <text class="dg" x="508" y="462">rl.checkpoint.attempt_duration{skipped} 0.02</text>
+  <text class="do" x="508" y="478">rl.checkpoint.seconds_since_last_success 840</text>
+  <text class="note" x="508" y="496">↑ set only when an attempt finishes</text>
+
+  <!-- legend -->
+  <rect x="16" y="530" width="14" height="10" fill="var(--green)"/><text class="note" x="36" y="539">new Lens series</text>
+  <text class="dx" x="150" y="539">struck out</text><text class="note" x="222" y="539">= dropped from metrics on purpose</text>
+  <rect x="452" y="530" width="14" height="10" fill="var(--orange)"/><text class="note" x="472" y="539">review note (see below)</text>
+  <rect x="640" y="530" width="22" height="10" fill="none" stroke="var(--dim)" stroke-dasharray="4 3"/><text class="note" x="670" y="539">unchanged by this PR</text>
+</svg>
+
+<h2>Where they agree, and where they differ</h2>
+<p><b>They are the same numbers.</b> Both paths start from the one dict the controller already
+logged, so Lens adds no second timer. W&amp;B is still the per-run record of every key. Lens is for
+dashboards and alerts across runs. There, a metric label must come from a small fixed set, so the
+tee keeps only the fixed <code>operation</code>, <code>phase</code> and <code>category</code> labels. The snapshot
+number and step ride on the span, where a trace viewer can find which save was slow.</p>
+<p><b>Read the save phases with care.</b> Save phases overlap: barrier wait, the
+<span class="tip" tabindex="0" data-tip="exclusive_hold: the time the snapshot holds the data plane exclusively; the TransferQueue save (tq) runs inside it.">exclusive hold</span>
+and publication all sit inside <code>total</code>. So never add save phases up. Restore phases do not overlap.
+The span carries no goodput bucket, because the pump runs while training continues.</p>
+
+<h2>What the review asks</h2>
+<ul class="asks">
+<li><b>Share the names instead of copying them.</b> The tee re-types the controller's outcome prefix, the
+<code>reason_</code> flag format, two key names and both outcome/reason lists. On a scratch copy, renaming any one of them
+in the controller left all 58 telemetry tests green while Lens lost the series. A light module both sides already import exists:
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/ec5348f2aa6b519f10ece29e4189472a7adb0e44/nemo_rl/algorithms/metric_utils.py#L27"><code>metric_utils.py</code></a>.</li>
+<li><b>Do not alert on the staleness gauge.</b> It is set only when an attempt finishes. On the locked OpenTelemetry SDK (1.44.0) a gauge sends one point per set, and nothing times out a save, so a hung save shows no new point. Alert on completed attempts instead:
+<code>increase(rl_checkpoint_attempts_total{outcome="completed"}[30m]) == 0</code>.</li>
+<li><b>Smaller fixes.</b> Delete a test-setup block that now repeats one from main. Make the restore drift test follow <code>dict.update(...)</code>. Correct two doc lines and one code comment. Document the default histogram buckets.</li>
+</ul>
+
+<div class="warn"><b>So what.</b> With telemetry on, Lens now shows how long rollout snapshots take,
+how big they are, and whether attempts keep skipping. Before, only W&amp;B had this. The export logic checks out.
+The asks keep it correct over time: share the names the tee depends on, and alert on completed attempts, not on the gauge.</div>
+
+</div>
+</body>
+</html>
