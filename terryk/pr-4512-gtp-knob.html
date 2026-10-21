@@ -91,8 +91,10 @@ copies any field the provider accepts in its constructor. Bridge's
 <span class="tip" tabindex="0" data-tip="TransformerConfig.finalize() runs Megatron's deferred setup. It derives gtp_weight_remat_size = tensor_parallel_num_weight_shards // tensor_model_parallel_size.">finalize()</span>
 computes the GTP size itself. Dotted words have a short explanation: hover or tap them.</div>
 
-<p>Bridge declares <code>gtp_weight_remat_size: int = field(init=False, default=1)</code>, meaning it cannot be passed in, and computes it from
-<code>tensor_parallel_num_weight_shards</code> (<a href="https://github.com/NVIDIA-NeMo/Megatron-Bridge/blob/ec835530efeff71b55ec015f36bcc0c33b8b52b7/src/megatron/bridge/models/transformer_config.py#L173-L176">transformer_config.py:173-176</a>,
+<p><b>How GTP is turned on.</b> You set one number, <code>tensor_parallel_num_weight_shards</code>: how many pieces each weight is cut into across GPUs.
+Bridge divides it by TP to get the GTP size, 12 // 4 = 3, and hands that to Megatron, which works out DP = 24 GPUs // (TP 4 × GTP 3) = 2
+(<a href="https://github.com/NVIDIA-NeMo/Megatron-Bridge/blob/ec835530efeff71b55ec015f36bcc0c33b8b52b7/src/megatron/bridge/training/initialize.py#L822-L826">initialize.py:822-826</a>). Nobody sets DP.
+<code>gtp_weight_remat_size</code> is the computed result, so Bridge declares it <code>field(init=False, default=1)</code>, meaning it cannot be passed in (<a href="https://github.com/NVIDIA-NeMo/Megatron-Bridge/blob/ec835530efeff71b55ec015f36bcc0c33b8b52b7/src/megatron/bridge/models/transformer_config.py#L173-L176">transformer_config.py:173-176</a>,
 <a href="https://github.com/NVIDIA-NeMo/Megatron-Bridge/blob/ec835530efeff71b55ec015f36bcc0c33b8b52b7/src/megatron/bridge/models/transformer_config.py#L204-L218">:204-218</a>). Megatron-LM calls the shard count "the user-facing knob"
 (<a href="https://github.com/NVIDIA/Megatron-LM/blob/b4d72b79c6b7e30010894ea0827a06c3477387fd/megatron/core/model_parallel_config.py#L56-L67">model_parallel_config.py:56-67</a>).
 NeMo-RL's override merge only accepts fields that can be passed in
@@ -100,59 +102,85 @@ NeMo-RL's override merge only accepts fields that can be passed in
 (<a href="https://github.com/NVIDIA-NeMo/RL/blob/339e20206ed2bcbf6fb55de178a2309f04106b3d/nemo_rl/models/policy/lm_policy.py#L78-L88">lm_policy.py:78-88</a>). The PR's test calls that helper on a plain dict, so it never meets Bridge
 (<a href="https://github.com/NVIDIA-NeMo/RL/blob/339e20206ed2bcbf6fb55de178a2309f04106b3d/tests/unit/models/policy/test_gtp_config.py#L20-L56">test_gtp_config.py</a>).</p>
 
-<h2>Two ways to ask for GTP 3, neither reaches the PR's code</h2>
-<svg viewBox="0 0 900 480" role="img" aria-label="Two configs. Setting gtp_weight_remat_size makes the driver plan GTP 3 but every worker rejects the key. Setting tensor_parallel_num_weight_shards 12 makes Megatron run GTP 3 while the driver still thinks GTP is 1 and skips its world-size check.">
-<text class="hdr" x="20" y="24">A · the key this PR reads</text>
-<text class="hdr" x="470" y="24">B · the key Bridge actually reads</text>
-<rect class="box" x="20" y="38" width="410" height="62" rx="7"/>
-<text class="lbl-b" x="32" y="58">YAML (policy.megatron_cfg)</text>
-<text class="lbl" x="32" y="78">tensor_model_parallel_size: 4</text>
-<text class="lbl" x="32" y="93">model_overrides: {gtp_weight_remat_size: <tspan class="v-bad">3</tspan>}</text>
-<rect class="box" x="470" y="38" width="410" height="62" rx="7"/>
-<text class="lbl-b" x="482" y="58">YAML (policy.megatron_cfg)</text>
-<text class="lbl" x="482" y="78">tensor_model_parallel_size: 4</text>
-<text class="lbl" x="482" y="93">model_overrides: {tensor_parallel_num_weight_shards: <tspan class="v-ok">12</tspan>}</text>
-<path class="arrow" d="M225 100 V116"/><path class="arrow" d="M675 100 V116"/>
-<rect class="box-ok" x="20" y="116" width="410" height="66" rx="7"/>
-<text class="lbl-b" x="32" y="136">1 · driver: _megatron_gtp_weight_remat_size</text>
-<text class="lbl" x="32" y="155">reads gtp_weight_remat_size → <tspan class="v-ok">3</tspan></text>
-<text class="lbl" x="32" y="172">plans GTP 3, checks world % (TP·GTP)</text>
-<a href="https://github.com/NVIDIA-NeMo/RL/blob/339e20206ed2bcbf6fb55de178a2309f04106b3d/nemo_rl/models/policy/lm_policy.py#L78-L88" target="_blank" rel="noopener"><text x="420" y="172" text-anchor="end">lm_policy.py:78-88</text></a>
-<rect class="box-bad" x="470" y="116" width="410" height="66" rx="7"/>
-<text class="lbl-b" x="482" y="136">1 · driver: _megatron_gtp_weight_remat_size</text>
-<text class="lbl" x="482" y="155">key absent → <tspan class="v-bad">1</tspan> (never reads the shard count)</text>
-<text class="lbl" x="482" y="172">world-size check ignores GTP</text>
-<a href="https://github.com/NVIDIA-NeMo/RL/blob/339e20206ed2bcbf6fb55de178a2309f04106b3d/nemo_rl/models/policy/lm_policy.py#L317" target="_blank" rel="noopener"><text x="870" y="172" text-anchor="end">lm_policy.py:317</text></a>
-<path class="arrow" d="M225 182 V198"/><path class="arrow" d="M675 182 V198"/>
-<rect class="box-bad" x="20" y="198" width="410" height="84" rx="7"/>
-<text class="lbl-b" x="32" y="218">2 · every worker: _merge_model_overrides</text>
-<text class="lbl" x="32" y="237">only fields with init=True are allowed;</text>
-<text class="lbl" x="32" y="253">Bridge declares gtp_weight_remat_size init=False</text>
-<text class="bad" x="32" y="273">✗ AttributeError: does not match a configurable field</text>
-<a href="https://github.com/NVIDIA-NeMo/RL/blob/339e20206ed2bcbf6fb55de178a2309f04106b3d/nemo_rl/models/megatron/setup.py#L1248" target="_blank" rel="noopener"><text x="420" y="237" text-anchor="end">setup.py:1248</text></a>
-<rect class="box-ok" x="470" y="198" width="410" height="84" rx="7"/>
-<text class="lbl-b" x="482" y="218">2 · every worker: Bridge finalize()</text>
-<text class="lbl" x="482" y="237">gtp_weight_remat_size = 12 // 4 = <tspan class="v-ok">3</tspan></text>
-<text class="lbl" x="482" y="253">Megatron runs GTP 3</text>
-<text class="ok" x="482" y="273">✓ GTP is on</text>
-<a href="https://github.com/NVIDIA-NeMo/Megatron-Bridge/blob/ec835530efeff71b55ec015f36bcc0c33b8b52b7/src/megatron/bridge/models/transformer_config.py#L204-L218" target="_blank" rel="noopener"><text x="870" y="253" text-anchor="end">transformer_config.py:204-218</text></a>
-<path class="arrow" d="M675 282 V298"/>
-<rect class="box-bad" x="470" y="298" width="410" height="102" rx="7"/>
-<text class="lbl-b" x="482" y="318">3 · driver and workers disagree</text>
-<text class="lbl" x="482" y="337">driver: GTP <tspan class="v-bad">1</tspan> · Megatron: GTP <tspan class="v-ok">3</tspan></text>
-<text class="lbl" x="482" y="353">bad world size → fails late in Megatron init</text>
-<text class="note" x="482" y="371">data still lands right: the 4-D layout (page 1)</text>
-<a href="https://github.com/NVIDIA/Megatron-LM/blob/b4d72b79c6b7e30010894ea0827a06c3477387fd/megatron/core/parallel_state.py#L856-L857" target="_blank" rel="noopener"><text x="870" y="390" text-anchor="end">parallel_state.py:856-857</text></a>
-<text class="bad" x="20" y="316">✗ crashes at setup:</text>
-<text class="note" x="20" y="334">no config that sets this key can run,</text>
-<text class="note" x="20" y="350">so the PR's GTP axis, loader loop and</text>
-<text class="note" x="20" y="366">dispatch nesting never run</text>
-<rect class="r-ok" x="20" y="425" width="18" height="12"/><text class="note" x="44" y="435">works</text>
-<rect class="r-bad" x="110" y="425" width="18" height="12"/><text class="note" x="134" y="435">the problem</text>
-<text class="note" x="20" y="463">Numbers: TP 4, shard count 12, so GTP 3. Read from the code; not run on a GPU.</text>
+<h2>Three configs: the two you can write today, and the proposed one</h2>
+<svg viewBox="0 0 1080 510" role="img" aria-label="Three configs side by side. A sets gtp_weight_remat_size and every worker rejects it. B sets tensor_parallel_num_weight_shards 12: Megatron runs GTP 3 but the driver thinks GTP is 1. C is the proposed fix: the same shard count, read by the driver too, so both agree on GTP 3.">
+<text class="hdr" x="15" y="24">A · the key this PR reads</text>
+<rect class="box" x="15" y="36" width="340" height="82" rx="7"/>
+<text class="lbl-b" x="27" y="56">YAML: policy.megatron_cfg</text>
+<text class="lbl" x="27" y="76">tensor_model_parallel_size: 4</text>
+<text class="lbl" x="27" y="92">model_overrides:</text>
+<text class="lbl" x="27" y="108">  gtp_weight_remat_size: <tspan class="v-bad">3</tspan></text>
+<path class="arrow" d="M185 118 V134"/>
+<rect class="box-ok" x="15" y="134" width="340" height="72" rx="7"/>
+<text class="lbl-b" x="27" y="154">1 · driver reads GTP size</text>
+<text class="lbl" x="27" y="173">gtp_weight_remat_size → <tspan class="v-ok">3</tspan></text>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/339e20206ed2bcbf6fb55de178a2309f04106b3d/nemo_rl/models/policy/lm_policy.py#L78-L88" target="_blank" rel="noopener"><text x="345" y="198" text-anchor="end">lm_policy.py:78-88</text></a>
+<path class="arrow" d="M185 206 V222"/>
+<rect class="box-bad" x="15" y="222" width="340" height="90" rx="7"/>
+<text class="lbl-b" x="27" y="242">2 · every worker builds the model</text>
+<text class="lbl" x="27" y="261">key is init=False in Bridge</text>
+<text class="bad" x="27" y="278">✗ crash: not a configurable field</text>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/339e20206ed2bcbf6fb55de178a2309f04106b3d/nemo_rl/models/megatron/setup.py#L1248" target="_blank" rel="noopener"><text x="345" y="304" text-anchor="end">setup.py:1248</text></a>
+<path class="arrow" d="M185 312 V328"/>
+<rect class="box-bad" x="15" y="328" width="340" height="108" rx="7"/>
+<text class="lbl-b" x="27" y="348">3 · result</text>
+<text class="bad" x="27" y="367">✗ no run gets past setup</text>
+<text class="note" x="27" y="384">so the PR's GTP axis, loader loop</text>
+<text class="note" x="27" y="401">and dispatch nesting never run</text>
+<text class="hdr" x="370" y="24">B · the key Bridge reads (works today)</text>
+<rect class="box" x="370" y="36" width="340" height="82" rx="7"/>
+<text class="lbl-b" x="382" y="56">YAML: policy.megatron_cfg</text>
+<text class="lbl" x="382" y="76">tensor_model_parallel_size: 4</text>
+<text class="lbl" x="382" y="92">model_overrides:</text>
+<text class="lbl" x="382" y="108">  tensor_parallel_num_weight_shards: <tspan class="v-ok">12</tspan></text>
+<path class="arrow" d="M540 118 V134"/>
+<rect class="box-bad" x="370" y="134" width="340" height="72" rx="7"/>
+<text class="lbl-b" x="382" y="154">1 · driver reads GTP size</text>
+<text class="lbl" x="382" y="173">key not found → <tspan class="v-bad">1</tspan></text>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/339e20206ed2bcbf6fb55de178a2309f04106b3d/nemo_rl/models/policy/lm_policy.py#L317" target="_blank" rel="noopener"><text x="700" y="198" text-anchor="end">lm_policy.py:317</text></a>
+<path class="arrow" d="M540 206 V222"/>
+<rect class="box-ok" x="370" y="222" width="340" height="90" rx="7"/>
+<text class="lbl-b" x="382" y="242">2 · every worker builds the model</text>
+<text class="lbl" x="382" y="261">Bridge: GTP = 12 // 4 = <tspan class="v-ok">3</tspan></text>
+<text class="lbl" x="382" y="278">Megatron: DP = 24 // 12 = <tspan class="v-ok">2</tspan></text>
+<a href="https://github.com/NVIDIA-NeMo/Megatron-Bridge/blob/ec835530efeff71b55ec015f36bcc0c33b8b52b7/src/megatron/bridge/models/transformer_config.py#L204-L218" target="_blank" rel="noopener"><text x="700" y="304" text-anchor="end">transformer_config.py:204-218</text></a>
+<path class="arrow" d="M540 312 V328"/>
+<rect class="box-bad" x="370" y="328" width="340" height="108" rx="7"/>
+<text class="lbl-b" x="382" y="348">3 · driver says GTP 1, Megatron GTP 3</text>
+<text class="ok" x="382" y="367">✓ 24 GPUs: trains correctly</text>
+<text class="bad" x="382" y="384">✗ 8 GPUs: workers start, then</text>
+<text class="note" x="382" y="401">Megatron fails: 8 is not divisible by 12</text>
+<a href="https://github.com/NVIDIA/Megatron-LM/blob/b4d72b79c6b7e30010894ea0827a06c3477387fd/megatron/core/parallel_state.py#L856-L857" target="_blank" rel="noopener"><text x="700" y="428" text-anchor="end">parallel_state.py:856-857</text></a>
+<text class="hdr" x="725" y="24">C · proposed: same key, driver reads it</text>
+<rect class="box" x="725" y="36" width="340" height="82" rx="7"/>
+<text class="lbl-b" x="737" y="56">YAML: policy.megatron_cfg</text>
+<text class="lbl" x="737" y="76">tensor_model_parallel_size: 4</text>
+<text class="lbl" x="737" y="92">tensor_parallel_num_weight_shards: <tspan class="v-ok">12</tspan></text>
+<text class="note" x="737" y="108">  (typed field, not an override)</text>
+<path class="arrow" d="M895 118 V134"/>
+<rect class="box-ok" x="725" y="134" width="340" height="72" rx="7"/>
+<text class="lbl-b" x="737" y="154">1 · driver reads GTP size</text>
+<text class="lbl" x="737" y="173">shards // TP = 12 // 4 → <tspan class="v-ok">3</tspan></text>
+<a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4512-gtp-knob.html#fix" target="_blank" rel="noopener"><text x="1055" y="198" text-anchor="end">diff below</text></a>
+<path class="arrow" d="M895 206 V222"/>
+<rect class="box-ok" x="725" y="222" width="340" height="90" rx="7"/>
+<text class="lbl-b" x="737" y="242">2 · every worker builds the model</text>
+<text class="lbl" x="737" y="261">provider gets shard count 12, then</text>
+<text class="lbl" x="737" y="278">same as B: GTP 3, DP 2</text>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/339e20206ed2bcbf6fb55de178a2309f04106b3d/nemo_rl/models/megatron/setup.py#L1290" target="_blank" rel="noopener"><text x="1055" y="304" text-anchor="end">setup.py:1290</text></a>
+<path class="arrow" d="M895 312 V328"/>
+<rect class="box-ok" x="725" y="328" width="340" height="108" rx="7"/>
+<text class="lbl-b" x="737" y="348">3 · driver and Megatron agree: GTP 3</text>
+<text class="ok" x="737" y="367">✓ 24 GPUs: trains, 6 lanes, 4-D layout</text>
+<text class="ok" x="737" y="384">✓ 8 GPUs: driver stops before workers</text>
+<text class="note" x="737" y="401">start: needs at least 4 × 3 = 12</text>
+<a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4512-gtp-lanes.html#after" target="_blank" rel="noopener"><text x="1055" y="428" text-anchor="end">layout: page 1</text></a>
+<rect class="r-ok" x="15" y="458" width="18" height="12"/><text class="note" x="39" y="468">works</text>
+<rect class="r-bad" x="105" y="458" width="18" height="12"/><text class="note" x="129" y="468">the problem</text>
+<text class="note" x="15" y="494">Numbers: TP 4, shard count 12, so GTP 3; 24 GPUs, so DP 2 and 6 lanes. Read from the code; not run on a GPU.</text>
 </svg>
 
-<h2>What would fix it: proposed, not in the PR</h2>
+<h2 id="fix">What would fix it (C): proposed, not in the PR</h2>
 <p class="where"><b>Where the fix lands: RL only, three places.</b> A typed <code>tensor_parallel_num_weight_shards</code> field in
 <a href="https://github.com/NVIDIA-NeMo/RL/blob/339e20206ed2bcbf6fb55de178a2309f04106b3d/nemo_rl/models/policy/__init__.py#L396-L400"><code>MegatronConfig</code></a>; always set on the provider in
 <a href="https://github.com/NVIDIA-NeMo/RL/blob/339e20206ed2bcbf6fb55de178a2309f04106b3d/nemo_rl/models/megatron/setup.py#L1305"><code>_apply_parallelism_config</code></a>, like TP and CP; and read by the driver helper for the world-size check only.
@@ -178,7 +206,8 @@ Setting it every run matters because a provider loaded from a checkpoint can car
 +        return 1
 +    # Same rule as Bridge's TransformerConfig._finalize_gtp_weight_shards.
 +    return shards // megatron_cfg["tensor_model_parallel_size"]</span></pre>
-<p>With config B and this change, the driver sees GTP 3 and rejects a world size that is not a multiple of TP × GTP = 12 before any worker starts.
+<p>B and C run the same model on the same GPUs. The only difference is step 1: the driver now knows GTP is 3, so its world-size check asks for at least TP × GTP = 12 GPUs and stops an 8-GPU run before any worker starts.
+This must ship together with page 1's fix: once the driver sees GTP 3, the PR's code would turn on the fifth layout axis, and that axis hangs every call except SFT v2 training.
 The test should run the real <code>_merge_model_overrides</code> on a Bridge provider and compare its finalized GTP size with this helper.</p>
 <p class="cref">🔴 <a href="https://github.com/NVIDIA-NeMo/RL/pull/4512#discussion_r4301732779">review comment, lm_policy.py:78</a></p>
 
