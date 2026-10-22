@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NVIDIA-NeMo/RL #4818 — why turn 2 of a VLM token-capture rollout now returns HTTP 500</title>
+<style>
+:root{--bg:#0d1117;--surface:#161b22;--surface2:#1c2128;--border:#30363d;--text:#e6edf3;--dim:#8b949e;
+  --accent:#58a6ff;--green:#3fb950;--red:#f85149;--orange:#d29922}
+:root[data-theme="light"]{--bg:#ffffff;--surface:#f6f8fa;--surface2:#eaeef2;--border:#d0d7de;--text:#1f2328;
+  --dim:#59636e;--accent:#0969da;--green:#1a7f37;--red:#cf222e;--orange:#9a6700}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:28px 20px 70px}
+h1{font-size:22px;margin:0 0 8px;line-height:1.3}
+h2{font-size:18px;margin:30px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
+.sub{color:var(--dim);font-size:13.5px;margin:0 0 16px}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);
+  border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;
+  font:13px/1 ui-monospace,Menlo,monospace;cursor:pointer}
+.status{border:1px solid var(--border);border-radius:10px;background:var(--surface);padding:2px 16px 10px;margin:0 0 20px}
+.status dl{display:grid;grid-template-columns:max-content 1fr;gap:4px 14px;margin:12px 0 0}
+.status dt{color:var(--dim);font-size:12px;text-transform:uppercase;letter-spacing:.04em;white-space:nowrap;padding-top:2px}
+.status dd{margin:0;font-size:14px}
+.verdict{font-weight:700}
+.verdict.open{color:var(--red)}
+nav.chain{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 6px;padding:0}
+nav.chain a,nav.chain span{display:inline-block;padding:5px 11px;border:1px solid var(--border);
+  border-radius:20px;background:var(--surface);text-decoration:none;color:var(--accent);
+  font-size:12.5px;line-height:1.3;white-space:nowrap}
+nav.chain a:hover{background:var(--surface2)}
+nav.chain span.here{background:var(--accent);color:var(--bg);border-color:var(--accent);font-weight:600}
+p.chainnote{color:var(--dim);font-size:12px;margin:0 0 18px}
+.bg{border-left:4px solid var(--accent);background:var(--surface);padding:8px 14px;margin:0 0 16px;font-size:14px}
+.warn{border-left:3px solid var(--red);background:var(--surface);padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0}
+.where{border-left:4px solid var(--accent);background:var(--surface);padding:6px 12px;margin:6px 0 10px}
+.cref{margin:6px 0 0;font-size:13px}
+.cref a{display:inline-block;padding:4px 10px;border:1px solid var(--border);border-radius:16px;background:var(--surface);font:12.5px ui-monospace,Menlo,monospace}
+.tip{border-bottom:1px dotted var(--dim);cursor:help;position:relative;outline:none}
+.tip:hover::after,.tip:focus::after{content:attr(data-tip);position:absolute;left:0;top:1.7em;z-index:60;
+  width:max-content;max-width:min(340px,80vw);white-space:normal;background:var(--surface2);color:var(--text);
+  border:1px solid var(--border);border-radius:6px;padding:7px 10px;font:13px/1.45 -apple-system,sans-serif;
+  font-weight:400;box-shadow:0 4px 14px rgba(0,0,0,.3)}
+.diff{font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--surface);
+  border:1px solid var(--border);border-radius:8px;padding:12px;overflow-x:auto;white-space:pre;margin:10px 0}
+.diff .add{color:var(--green)}
+.diff .del{color:var(--red)}
+.diff .hunk{color:var(--accent)}
+svg{max-width:100%;height:auto;display:block;margin:14px 0}
+svg .box{fill:var(--surface);stroke:var(--border);stroke-width:1.3}
+svg .ok{fill:var(--surface);stroke:var(--green);stroke-width:2}
+svg .bad{fill:var(--surface);stroke:var(--red);stroke-width:2.2}
+svg .code{fill:var(--text);font:11px ui-monospace,Menlo,monospace}
+svg .data{fill:var(--dim);font:10.5px ui-monospace,Menlo,monospace}
+svg .hdr{fill:var(--accent);font:bold 14px -apple-system,sans-serif}
+svg .row{fill:var(--dim);font:bold 11px -apple-system,sans-serif}
+svg .okt{fill:var(--green);font:bold 11.5px -apple-system,sans-serif}
+svg .badt{fill:var(--red);font:bold 11.5px -apple-system,sans-serif}
+svg .ln{stroke:var(--border);stroke-width:1}
+svg a text{text-decoration:underline;fill:var(--accent)}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+  document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head>
+<body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+  function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+  function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
+    b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
+      else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+  document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+<div class="wrap">
+
+<h1>Why turn 2 of a VLM token-capture rollout now returns HTTP 500</h1>
+<p class="sub"><a href="https://github.com/NVIDIA-NeMo/RL/pull/4818">NVIDIA-NeMo/RL #4818</a>,
+one line in <code>vllm_worker_async.py</code>. Permalinks pin head <code>0dc043c7</code>; the old line is linked at base <code>f0639c60</code>.</p>
+
+<div class="status"><dl>
+  <dt>Before</dt>
+  <dd>A captured call that added no new image passed <code>None</code> as its image tensors, and the call staged normally.</dd>
+  <dt>This PR</dt>
+  <dd>Wraps those tensors in <code>dict(...)</code> so top-K columns can be added to the same mapping. <code>dict(None)</code> raises.</dd>
+  <dt>Status</dt>
+  <dd><span class="verdict open">Open — introduced by this PR, not fixed yet.</span> Hits every VLM run with token capture, with score centering on or off. The one-line fix is in the review.</dd>
+</dl></div>
+
+<nav class="chain">
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4818-score-centering.html">what it adds</a>
+  <span class="here">image-capture crash</span>
+</nav>
+<p class="chainnote">Two pages on this PR, one question each — this one: the image-capture regression.</p>
+
+<div class="bg"><b>Background.</b> When the model has an image processor and token capture is on, setup turns on
+<span class="tip" tabindex="0" data-tip="The vLLM worker also saves the processed image tensors of each call, so the trainer sees exactly the pixels vLLM saw.">media capture</span>
+automatically (<a href="https://github.com/NVIDIA-NeMo/RL/blob/0dc043c7fad7594b00d6046658dcd5c9bab8f7f3/nemo_rl/algorithms/single_controller_utils/setup.py#L1251">setup.py:1251</a>).
+Then every captured call gets a <code>CapturedMedia(items, tensors)</code>
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/0dc043c7fad7594b00d6046658dcd5c9bab8f7f3/nemo_rl/models/generation/vllm/vllm_worker_async.py#L753-L768"><code>_capture_request_media</code></a>).
+<code>tensors</code> holds only the images that are <i>new</i> in this call; an image from an earlier turn is kept, not resent.
+So when a call adds no image, <code>tensors</code> is <code>None</code>
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/0dc043c7fad7594b00d6046658dcd5c9bab8f7f3/nemo_rl/data/captured_media.py#L395-L411"><code>capture_processed_media</code></a>,
+type <a href="https://github.com/NVIDIA-NeMo/RL/blob/0dc043c7fad7594b00d6046658dcd5c9bab8f7f3/nemo_rl/data/captured_media.py#L141"><code>dict | None</code></a>).</div>
+
+<h2>Two turns of one rollout, before and after</h2>
+<svg viewBox="0 0 960 400" role="img" aria-label="Turn 1 sends an image and works before and after. Turn 2 adds no image, so tensors is None; before the PR it staged, after the PR dict(None) raises and the request returns HTTP 500.">
+  <text class="hdr" x="215" y="22" text-anchor="middle">before (base f0639c60)</text>
+  <text class="hdr" x="705" y="22" text-anchor="middle">after (this PR, head 0dc043c7)</text>
+  <line class="ln" x1="450" y1="8" x2="450" y2="392"/>
+
+  <text class="row" x="12" y="48">TURN 1 · user sends an image</text>
+  <rect class="box" x="10" y="54" width="940" height="34" rx="6"/>
+  <text class="code" x="22" y="75">state.media = CapturedMedia(items=(img0,), tensors={"imgs": tensor(…), "imgs_sizes": tensor(…)})</text>
+  <rect class="ok" x="10" y="94" width="430" height="44" rx="6"/>
+  <text class="code" x="22" y="112">attachments = state.media.tensors</text>
+  <text class="okt" x="22" y="129">→ {"imgs", "imgs_sizes"} · staged ✓</text>
+  <rect class="ok" x="460" y="94" width="490" height="44" rx="6"/>
+  <text class="code" x="472" y="112">attachments = dict(state.media.tensors)</text>
+  <text class="okt" x="472" y="129">→ {"imgs", "imgs_sizes"} · staged ✓</text>
+
+  <text class="row" x="12" y="168">TURN 2 · follow-up text; img0 is kept from turn 1, nothing new</text>
+  <rect class="box" x="10" y="174" width="940" height="34" rx="6"/>
+  <text class="code" x="22" y="195">state.media = CapturedMedia(items=(), tensors=None)</text>
+  <rect class="ok" x="10" y="214" width="430" height="84" rx="6"/>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/f0639c60422ca477268bc678f6e00f35eda778a9/nemo_rl/models/generation/vllm/vllm_worker_async.py#L945"><text class="code" x="22" y="232">attachments = state.media.tensors   (L945)</text></a>
+  <text class="code" x="22" y="250">→ None</text>
+  <text class="data" x="22" y="268">complete_call_from_response(..., attachments=None)</text>
+  <text class="okt" x="22" y="287">staged ✓  · reply sent to Gym</text>
+  <rect class="bad" x="460" y="214" width="490" height="84" rx="6"/>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/0dc043c7fad7594b00d6046658dcd5c9bab8f7f3/nemo_rl/models/generation/vllm/vllm_worker_async.py#L968"><text class="code" x="472" y="232">attachments = dict(state.media.tensors)   (L968)</text></a>
+  <text class="badt" x="472" y="250">→ TypeError: 'NoneType' object is not iterable</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/0dc043c7fad7594b00d6046658dcd5c9bab8f7f3/nemo_rl/models/generation/vllm/vllm_worker_async.py#L1655"><text class="code" x="472" y="268">raised inside to_thread(...) (L1655): HTTP 500</text></a>
+  <text class="badt" x="472" y="287">call already popped: never completed, never failed</text>
+
+  <text class="row" x="12" y="328">ALSO HIT</text>
+  <text class="data" x="22" y="346">any text-only prompt in a VLM run (no image at all → tensors=None)</text>
+  <text class="data" x="472" y="346">score centering on or off: the line runs for every captured call</text>
+
+  <rect x="610" y="372" width="14" height="10" class="ok"/><text class="data" x="630" y="381">works</text>
+  <rect x="690" y="372" width="14" height="10" class="bad"/><text class="data" x="710" y="381">fails (this PR)</text>
+</svg>
+
+<p style="font-size:14px">Running the real <code>_finish_request_capture</code> from each commit with
+<code>media=CapturedMedia((), None)</code> and centering off: base stages with <code>attachments=None</code>;
+head raises <code>TypeError</code> and leaves no capture state behind. The existing VLM token-capture functional
+tests send one image per call, so they never build a call with <code>tensors=None</code>.</p>
+
+<h2>The fix</h2>
+<p class="where"><b>Where the fix lands: RL only, one line plus a unit test.</b>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/0dc043c7fad7594b00d6046658dcd5c9bab8f7f3/nemo_rl/models/generation/vllm/vllm_worker_async.py#L968"><code>vllm_worker_async.py</code> L968</a>.
+<b>No Gym change:</b> Gym already accepts <code>attachments=None</code>, as the base code relied on.</p>
+<pre class="diff"><span class="hunk">@@ vllm_worker_async.py L968 · _finish_request_capture</span>
+             )
+<span class="del">-        attachments = dict(state.media.tensors) if state.media is not None else {}
+</span><span class="add">+        attachments = dict(state.media.tensors or {}) if state.media is not None else {}
+</span>         if sampler_topk is not None:
+             attachments.update(</pre>
+<p style="font-size:14px">With the fix, turn 2 builds <code>{}</code>; with centering off it stays empty and
+<code>attachments or None</code> a few lines below
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/0dc043c7fad7594b00d6046658dcd5c9bab8f7f3/nemo_rl/models/generation/vllm/vllm_worker_async.py#L978-L982">L978-L982</a>)
+passes <code>None</code>, exactly as before the PR; with centering on it holds only the two top-K tensors.
+Proposed in the review; not yet applied by the author. A unit test should call
+<code>_finish_request_capture</code> with <code>CapturedMedia((), None)</code> and check that the call is staged.</p>
+
+<div class="warn"><b>So what.</b> Without the fix, any multi-turn VLM rollout with token capture fails on its second
+model call, and any text-only prompt in a VLM run fails on its first. The failure is a bare HTTP 500 with the capture
+call left open, so Gym does not even get a <code>capture_failed</code> to recover from. It does not need score centering
+to be on, so it reaches users who never touch the new feature.</div>
+
+</div>
+</body>
+</html>
