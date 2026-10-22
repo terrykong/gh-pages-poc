@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GTP refit and checkpoints</title><style>
+:root{--bg:#0d1117;--surface:#161b22;--surface2:#1c2128;--border:#30363d;--text:#e6edf3;--dim:#8b949e;
+  --accent:#58a6ff;--green:#3fb950;--orange:#d29922;--red:#f85149}
+:root[data-theme="light"]{--bg:#ffffff;--surface:#f6f8fa;--surface2:#eaeef2;--border:#d0d7de;--text:#1f2328;
+  --dim:#59636e;--accent:#0969da;--green:#1a7f37;--orange:#9a6700;--red:#cf222e}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:28px 16px 70px}
+h1{font-size:22px;margin:0 0 8px;line-height:1.3}
+h2{font-size:18px;margin:32px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
+code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;font:13px ui-monospace,SFMono-Regular,Menlo,monospace;overflow-wrap:anywhere}
+.sub{color:var(--dim);font-size:13.5px;margin:0 0 12px}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);border:1px solid var(--border);color:var(--text);
+  border-radius:20px;padding:6px 12px;font:13px/1 ui-monospace,Menlo,monospace;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.18)}
+nav.chain{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 6px;padding:0}
+nav.chain a,nav.chain span{display:inline-block;padding:5px 11px;border:1px solid var(--border);border-radius:20px;background:var(--surface);
+  text-decoration:none;color:var(--accent);font-size:12.5px;line-height:1.3;white-space:nowrap}
+nav.chain a:hover{background:var(--surface2)}
+nav.chain span.here{background:var(--accent);color:var(--bg);border-color:var(--accent);font-weight:600}
+p.chainnote{color:var(--dim);font-size:12px;margin:0 0 18px}
+.status{border:1px solid var(--border);border-radius:10px;background:var(--surface);padding:2px 16px 10px;margin:0 0 20px}
+.status dl{display:grid;grid-template-columns:max-content 1fr;gap:4px 14px;margin:12px 0 0}
+.status dt{color:var(--dim);font-size:12px;text-transform:uppercase;letter-spacing:.04em;white-space:nowrap;padding-top:2px}
+.status dd{margin:0;font-size:14px}
+.verdict{font-weight:700}.verdict.good{color:var(--green)}.verdict.open{color:var(--red)}
+.bg{border-left:3px solid var(--accent);background:var(--surface);padding:10px 14px;margin:0 0 16px;border-radius:0 8px 8px 0;font-size:14px}
+.tip{border-bottom:1px dotted var(--dim);cursor:help;position:relative;outline:none}
+.tip:hover::after,.tip:focus::after{content:attr(data-tip);position:absolute;left:0;top:1.7em;z-index:60;width:max-content;max-width:min(340px,80vw);
+  white-space:normal;background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:7px 10px;
+  font:13px/1.45 -apple-system,sans-serif;font-weight:400;box-shadow:0 4px 14px rgba(0,0,0,.3)}
+.warn{border-left:3px solid var(--red);background:var(--surface);padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0}
+.hl{border-left:3px solid var(--green);background:var(--surface);padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0}
+.where{border-left:4px solid var(--accent);background:var(--surface);padding:6px 12px;margin:6px 0 10px}
+.diff{font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--surface);border:1px solid var(--border);border-radius:8px;
+  padding:12px;overflow-x:auto;white-space:pre;margin:10px 0}
+.diff .add{color:var(--green)}.diff .del{color:var(--red)}.diff .hunk{color:var(--accent)}
+.cref{margin:6px 0 0;font-size:13px}
+.cref a{display:inline-block;padding:4px 10px;border:1px solid var(--border);border-radius:16px;background:var(--surface);font:12.5px ui-monospace,Menlo,monospace}
+.cref a:hover{background:var(--surface2);text-decoration:none}
+ul{margin:6px 0 10px;padding-left:22px}li{margin:3px 0}
+svg{max-width:100%;height:auto;display:block;margin:16px 0}
+svg .box{fill:var(--surface);stroke:var(--border);stroke-width:1.4}
+svg .gpu{fill:var(--surface2);stroke:var(--border);stroke-width:1.2}
+svg .box-ok{fill:var(--surface);stroke:var(--green);stroke-width:2}
+svg .box-bad{fill:var(--surface);stroke:var(--red);stroke-width:2}
+svg .sq-ok{fill:var(--green)}svg .sq-bad{fill:var(--red)}
+svg .lbl{fill:var(--text);font:11.5px ui-monospace,Menlo,monospace}
+svg .lbl-b{fill:var(--text);font:bold 13px -apple-system,sans-serif}
+svg .note{fill:var(--dim);font:11.5px -apple-system,sans-serif}
+svg .hdr{fill:var(--accent);font:bold 13px -apple-system,sans-serif}
+svg .v-ok{fill:var(--green);font:11.5px ui-monospace,Menlo,monospace}
+svg .v-bad{fill:var(--red);font:11.5px ui-monospace,Menlo,monospace}
+svg .arrow{stroke:var(--dim);stroke-width:1.4;fill:none}
+svg .ah{fill:var(--dim)}
+svg a text{text-decoration:underline;fill:var(--accent);font:11px ui-monospace,Menlo,monospace}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head><body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+function wire(){var b=document.getElementById('theme-toggle');if(!b)return;b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
+else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+<div class="wrap">
+
+<h1>Do refit or checkpoint saving need a GTP axis on the driver? No: both learn GTP from Megatron on each GPU</h1>
+<p class="sub">Explainer for <a href="https://github.com/NVIDIA-NeMo/RL/pull/4512">NVIDIA-NeMo/RL #4512</a>. NeMo-RL permalinks pin the PR head <code>e3248a60</code>; Megatron-Bridge at <code>ec835530</code>, Megatron-LM at <code>b4d72b79</code> (the PR's pins). Read from the code; nothing here was run on a GPU.</p>
+
+<div class="status"><dl>
+<dt>Before</dt><dd>The driver lays GPUs out in 4 named axes (PP, DP, CP, TP). Refit and checkpoint save already go to every GPU.</dd>
+<dt>This PR</dt><dd>Adds a fifth driver axis for GTP. It does not touch the refit or checkpoint code.</dd>
+<dt>Status</dt><dd><span class="verdict good">Driver axis not needed.</span> Neither refit nor checkpointing picks GPUs by a GTP axis.
+<span class="verdict open">Two gaps are open, and neither is fixed in this PR:</span> GTP refit exports the wrong weights, and a GTP checkpoint save will likely fail on one RNG entry. Both fixes belong in Megatron-Bridge, on the GPU side.</dd>
+</dl></div>
+
+<nav class="chain">
+<a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4512-gtp-lanes.html">1 · where GTP data goes</a>
+<a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4512-gtp-knob.html">2 · the GTP setting</a>
+<span class="here">3 · refit and checkpoints</span>
+</nav>
+<p class="chainnote">Three pages on this PR, one question each. This one: whether refit or checkpoint saving need the PR's GTP axis.</p>
+
+<div class="bg"><b>Background.</b>
+<span class="tip" tabindex="0" data-tip="Generalized tensor parallelism with weight rematerialization, in Megatron-LM's generalized_tensor_parallelism.py. Turned on by tensor_parallel_num_weight_shards > tensor_model_parallel_size; G = shards / TP.">GTP</span>
+works like FSDP inside each TP slice. Each GPU keeps 1/G of its TP slice of a weight.
+Before a layer runs, the G GPUs in a GTP group all-gather the weight
+(<a href="https://github.com/NVIDIA/Megatron-LM/blob/b4d72b79c6b7e30010894ea0827a06c3477387fd/megatron/core/tensor_parallel/generalized_tensor_parallelism.py#L1565-L1571">gtp.py:1565</a>), and after backward they reduce-scatter the gradients
+(<a href="https://github.com/NVIDIA/Megatron-LM/blob/b4d72b79c6b7e30010894ea0827a06c3477387fd/megatron/core/tensor_parallel/generalized_tensor_parallelism.py#L2271">gtp.py:2271</a>).
+Each GPU in the group trains on its own batch.
+<span class="tip" tabindex="0" data-tip="Copying the trained weights from the Megatron trainer into the vLLM inference engine, so the next rollouts use the new weights.">Refit</span> is the copy of trained weights into vLLM.
+The <span class="tip" tabindex="0" data-tip="The single Ray process that owns the training loop. It tells worker GPUs what to run and, through a NamedSharding layout, which GPUs get which slice of the data.">driver</span> decides which GPUs run a call. Megatron on each GPU knows its own TP and GTP rank.
+Dotted words have a short explanation: hover or tap them.</div>
+
+<p>The example below uses TP = 2, G = 3 and one model copy, so 6 GPUs. Megatron numbers them TP fastest, then GTP: GPU <i>r</i> = t + 2·g
+(<a href="https://github.com/NVIDIA/Megatron-LM/blob/b4d72b79c6b7e30010894ea0827a06c3477387fd/megatron/core/parallel_state.py#L602-L617">parallel_state.py:602</a>).
+One weight W has 24 rows. TP splits the rows in half, and GTP splits each half in 3, so each GPU holds 4 rows
+(<a href="https://github.com/NVIDIA/Megatron-LM/blob/b4d72b79c6b7e30010894ea0827a06c3477387fd/megatron/core/tensor_parallel/generalized_tensor_parallelism.py#L619-L659">gtp.py:619</a>).
+The driver sends all three calls that matter here to <b>every</b> GPU, without naming an axis.</p>
+
+<svg viewBox="0 0 960 540" role="img" aria-label="Driver sends refit and save to all 6 GPUs; GTP handling happens on each GPU">
+<!-- driver -->
+<rect class="box" x="20" y="10" width="920" height="64" rx="8"/>
+<text class="lbl-b" x="36" y="32">Driver: picks which GPUs run a call. It names no axis for these three calls:</text>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/e3248a60b462ddb5049bda2c8dd366268823e456/nemo_rl/models/policy/lm_policy.py#L1273-L1277"><text x="36" y="56">lm_policy.py:1273 refit (IPC)</text></a>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/e3248a60b462ddb5049bda2c8dd366268823e456/nemo_rl/models/policy/lm_policy.py#L1361-L1367"><text x="262" y="56">lm_policy.py:1361 refit (broadcast)</text></a>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/e3248a60b462ddb5049bda2c8dd366268823e456/nemo_rl/models/policy/lm_policy.py#L1473-L1478"><text x="530" y="56">lm_policy.py:1473 save_checkpoint</text></a>
+<text class="note" x="778" y="56">→ all 6 GPUs</text>
+<path class="arrow" d="M480 74 L480 96"/><polygon class="ah" points="474,92 486,92 480,100"/>
+<text class="note" x="490" y="92">run_all_workers_single_data</text>
+<!-- gpu grid -->
+<text class="hdr" x="150" y="122">GTP peer g = 0</text><text class="hdr" x="360" y="122">GTP peer g = 1</text><text class="hdr" x="570" y="122">GTP peer g = 2</text>
+<text class="note" x="20" y="152">TP slice t = 0</text><text class="note" x="20" y="167">(rows 0–11)</text>
+<text class="note" x="20" y="212">TP slice t = 1</text><text class="note" x="20" y="227">(rows 12–23)</text>
+<rect class="gpu" x="140" y="132" width="190" height="46" rx="6"/><text class="lbl" x="152" y="152">r0  (t0, g0)</text><text class="lbl" x="152" y="170">holds rows 0–3</text>
+<rect class="gpu" x="350" y="132" width="190" height="46" rx="6"/><text class="lbl" x="362" y="152">r2  (t0, g1)</text><text class="lbl" x="362" y="170">holds rows 4–7</text>
+<rect class="gpu" x="560" y="132" width="190" height="46" rx="6"/><text class="lbl" x="572" y="152">r4  (t0, g2)</text><text class="lbl" x="572" y="170">holds rows 8–11</text>
+<rect class="gpu" x="140" y="192" width="190" height="46" rx="6"/><text class="lbl" x="152" y="212">r1  (t1, g0)</text><text class="lbl" x="152" y="230">holds rows 12–15</text>
+<rect class="gpu" x="350" y="192" width="190" height="46" rx="6"/><text class="lbl" x="362" y="212">r3  (t1, g1)</text><text class="lbl" x="362" y="230">holds rows 16–19</text>
+<rect class="gpu" x="560" y="192" width="190" height="46" rx="6"/><text class="lbl" x="572" y="212">r5  (t1, g2)</text><text class="lbl" x="572" y="230">holds rows 20–23</text>
+<text class="note" x="768" y="150">Each GPU's Megatron</text>
+<text class="note" x="768" y="166">knows its own t and g.</text>
+<text class="note" x="768" y="182">GTP groups: {r0,r2,r4}</text>
+<text class="note" x="768" y="198">and {r1,r3,r5}.</text>
+<text class="note" x="768" y="214">TP groups: {r0,r1},</text>
+<text class="note" x="768" y="230">{r2,r3}, {r4,r5}.</text>
+<!-- refit panel -->
+<rect class="box" x="20" y="262" width="450" height="226" rx="8"/>
+<text class="lbl-b" x="36" y="284">Refit: every GPU runs Bridge's export</text>
+<text class="v-bad" x="36" y="310">today, r0: TP gather {r0,r1}</text>
+<text class="v-bad" x="36" y="327">  → rows 0–3 + 12–15 = [8,k], not [24,k]   ✗</text>
+<text class="v-ok" x="36" y="356">fix, r0: GTP gather {r0,r2,r4} → rows 0–11</text>
+<text class="v-ok" x="36" y="373">  then TP gather {r0,r1} → rows 0–23   ✓</text>
+<text class="note" x="36" y="400">Order matters: TP first, then GTP, gives rows</text>
+<text class="note" x="36" y="416">0–3, 12–15, 4–7, 16–19, … (all rows, wrong order).</text>
+<a href="https://github.com/NVIDIA-NeMo/Megatron-Bridge/blob/ec835530efeff71b55ec015f36bcc0c33b8b52b7/src/megatron/bridge/models/conversion/param_mapping.py#L1331-L1356"><text x="36" y="444">param_mapping.py:1331 TP-only gather</text></a>
+<a href="https://github.com/NVIDIA-NeMo/Megatron-Bridge/blob/ec835530efeff71b55ec015f36bcc0c33b8b52b7/src/megatron/bridge/models/conversion/model_bridge.py#L1779-L1787"><text x="36" y="466">model_bridge.py:1779 where the gather goes</text></a>
+<!-- checkpoint panel -->
+<rect class="box" x="490" y="262" width="450" height="226" rx="8"/>
+<text class="lbl-b" x="506" y="284">Checkpoint: every GPU writes its own pieces</text>
+<text class="v-ok" x="506" y="310">weights: piece = t·3 + g, 6 pieces, each once  ✓</text>
+<a href="https://github.com/NVIDIA/Megatron-LM/blob/b4d72b79c6b7e30010894ea0827a06c3477387fd/megatron/core/utils.py#L1130-L1145"><text x="506" y="327">mcore utils.py:1130 offset rule</text></a>
+<text class="v-ok" x="506" y="354">loader state: 3 lanes, from Megatron's DP rank  ✓</text>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/e3248a60b462ddb5049bda2c8dd366268823e456/nemo_rl/data/energon/sft_worker.py#L82-L83"><text x="506" y="371">sft_worker.py:82 lane = d·3 + g</text></a>
+<text class="v-bad" x="506" y="398">rng_state at (pp0, tp0, dp0): r0, r2, r4</text>
+<text class="v-bad" x="506" y="415">  all write it as the main copy   ✗</text>
+<a href="https://github.com/NVIDIA-NeMo/Megatron-Bridge/blob/ec835530efeff71b55ec015f36bcc0c33b8b52b7/src/megatron/bridge/training/checkpointing.py#L579-L601"><text x="506" y="442">bridge checkpointing.py:579 uses dp_cp</text></a>
+<a href="https://github.com/NVIDIA/Megatron-LM/blob/b4d72b79c6b7e30010894ea0827a06c3477387fd/megatron/core/dist_checkpointing/validation.py#L458-L469"><text x="506" y="464">validation.py:458 rejects duplicate keys</text></a>
+<!-- legend -->
+<rect class="sq-ok" x="20" y="510" width="12" height="12"/><text class="note" x="38" y="520">correct today</text>
+<rect class="sq-bad" x="140" y="510" width="12" height="12"/><text class="note" x="158" y="520">broken today; the fix is in Megatron-Bridge on each GPU, not in the driver</text>
+</svg>
+
+<h2>Refit: vLLM needs no GTP support; Bridge must gather GTP first (fix proposed, not in the PR)</h2>
+<p>Every GPU runs Bridge's <code>export_hf_weights</code>
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/e3248a60b462ddb5049bda2c8dd366268823e456/nemo_rl/models/policy/workers/megatron_policy_worker.py#L3372-L3376">megatron_policy_worker.py:3372</a>).
+Bridge hands the local weight to the mapping as-is
+(<a href="https://github.com/NVIDIA-NeMo/Megatron-Bridge/blob/ec835530efeff71b55ec015f36bcc0c33b8b52b7/src/megatron/bridge/models/conversion/model_bridge.py#L2459-L2464">model_bridge.py:2459</a>), and the mapping gathers over TP only.
+Bridge's only GTP code is training setup (<a href="https://github.com/NVIDIA-NeMo/Megatron-Bridge/blob/ec835530efeff71b55ec015f36bcc0c33b8b52b7/src/megatron/bridge/training/gtp.py#L32-L42">training/gtp.py</a>).
+vLLM never sees trainer slices: it receives full Hugging Face tensors and splits them for its own TP
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/e3248a60b462ddb5049bda2c8dd366268823e456/nemo_rl/models/generation/vllm/vllm_backend.py#L1615-L1648">vllm_backend.py:1615</a>), so vLLM needs no GTP support.
+Once each GPU gathers its GTP group, every GTP peer holds the full TP slice and the rest of refit works unchanged.</p>
+
+<p class="where"><b>Where the fix lands: Megatron-Bridge export, plus the same gather in NeMo-RL's NCCL-reshard refit path</b>
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/e3248a60b462ddb5049bda2c8dd366268823e456/nemo_rl/models/policy/workers/megatron_policy_worker.py#L3463-L3502">megatron_policy_worker.py:3463</a>, which ships local slices the same way).
+<b>No driver change:</b> refit already runs on every GPU, and it never picks senders by axis. The broadcast path sends from GPU 0, which is hard-coded
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/e3248a60b462ddb5049bda2c8dd366268823e456/nemo_rl/models/policy/workers/megatron_policy_worker.py#L3735-L3738">:3735</a>).</p>
+
+<p>Nothing below is implemented. It is a sketch and has not been run. Native-FP8 GTP weights also need <code>dequantize_gtp_native_fp8</code> first.</p>
+<pre class="diff"><span class="hunk">@@ megatron/bridge/models/conversion/model_bridge.py L1779-L1787 · stream_weights_megatron_to_hf task loop</span>
+         for task in self._with_progress_tracking(megatron_to_hf_tasks, "Converting to HuggingFace", show_progress):
+             if isinstance(task.param_weight, DTensor):
+                 ...
+                 megatron_weights = uneven_dtensor_to_full_tensor(task.param_weight)
+<span class="add">+            elif is_gtp_param(task.param_weight):
++                # GTP keeps 1/G of this GPU's TP slice; rebuild the TP slice
++                # before the mapping does its TP gather. All GTP peers must call this.
++                w = task.param_weight
++                full = w.new_empty((w.shape[0] * w.group.size(), *w.shape[1:]))
++                torch.distributed.all_gather_into_tensor(full, w.get_padded_shard().contiguous(), group=w.group)
++                megatron_weights = w._strip_padding(full)
+</span>             else:
+                 megatron_weights = task.param_weight</pre>
+<p><code>is_gtp_param</code>, <code>.group</code>, <code>get_padded_shard</code> and <code>_strip_padding</code> are Megatron-LM's own
+(<a href="https://github.com/NVIDIA/Megatron-LM/blob/b4d72b79c6b7e30010894ea0827a06c3477387fd/megatron/core/tensor_parallel/generalized_tensor_parallelism.py#L863-L865">gtp.py:863</a>,
+<a href="https://github.com/NVIDIA/Megatron-LM/blob/b4d72b79c6b7e30010894ea0827a06c3477387fd/megatron/core/tensor_parallel/generalized_tensor_parallelism.py#L1255-L1257">:1255</a>,
+<a href="https://github.com/NVIDIA/Megatron-LM/blob/b4d72b79c6b7e30010894ea0827a06c3477387fd/megatron/core/tensor_parallel/generalized_tensor_parallelism.py#L1375">:1375</a>). There is no public "unshard" call; the forward pass gathers into a reused buffer, so export should not borrow it.
+Refit is not reachable in this PR's scope: SFT v2 never refits (<a href="https://github.com/NVIDIA-NeMo/RL/blob/e3248a60b462ddb5049bda2c8dd366268823e456/nemo_rl/algorithms/sft_v2.py#L579-L591">sft_v2.py:579</a>). Until Bridge has the fix, the review asks for a setup-time error when GTP is combined with refit.</p>
+<p class="cref">🔴 <a href="https://github.com/NVIDIA-NeMo/RL/pull/4512#discussion_r4301732781">review comment C3 — setup.py:2612</a></p>
+
+<h2>Checkpoints: Megatron already writes GTP pieces; one RNG entry collides (fix proposed, not in the PR)</h2>
+<p>The driver sends <code>save_checkpoint</code> to every GPU (figure), and each GPU loads at start-up (<a href="https://github.com/NVIDIA-NeMo/RL/blob/e3248a60b462ddb5049bda2c8dd366268823e456/nemo_rl/algorithms/sft_v2.py#L579-L591">sft_v2.py:579</a>).
+Megatron describes each GTP weight piece by its place in the full weight, t·G + g of TP·G pieces, and marks model copies as replicas
+(<a href="https://github.com/NVIDIA/Megatron-LM/blob/b4d72b79c6b7e30010894ea0827a06c3477387fd/megatron/core/utils.py#L1130-L1145">utils.py:1130</a>,
+<a href="https://github.com/NVIDIA/Megatron-LM/blob/b4d72b79c6b7e30010894ea0827a06c3477387fd/megatron/core/tensor_parallel/generalized_tensor_parallelism.py#L2854">gtp.py:2854</a>). The optimizer reuses the same replica marks
+(<a href="https://github.com/NVIDIA/Megatron-LM/blob/b4d72b79c6b7e30010894ea0827a06c3477387fd/megatron/core/optimizer/distrib_optimizer.py#L1804">distrib_optimizer.py:1804</a>).
+The only state saved per data lane is the SFT loader. Its lane number comes from Megatron on the GPU (sft_worker.py:82). The owners are picked by skipping only TP, CP and PP copies
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/e3248a60b462ddb5049bda2c8dd366268823e456/nemo_rl/algorithms/sft_v2.py#L385-L390">sft_v2.py:385</a>), which gives r0, r2 and r4 under both the 4-axis and 5-axis layouts.</p>
+<p>The gap is the RNG state. Bridge keys it by the data-parallel group <i>without</i> GTP
+(<a href="https://github.com/NVIDIA/Megatron-LM/blob/b4d72b79c6b7e30010894ea0827a06c3477387fd/megatron/core/process_groups_config.py#L274-L278">process_groups_config.py:274</a>), so all 3 GTP peers write the same key as the main copy.
+Bridge already has a helper that fixes exactly this for weights
+(<a href="https://github.com/NVIDIA-NeMo/Megatron-Bridge/blob/ec835530efeff71b55ec015f36bcc0c33b8b52b7/src/megatron/bridge/training/checkpointing.py#L4085-L4100">checkpointing.py:4085</a>), but the RNG code does not use it.
+No test saves with GTP &gt; 1: the PR has none, and Bridge's GTP functional test turns saving off
+(<a href="https://github.com/NVIDIA-NeMo/Megatron-Bridge/blob/ec835530efeff71b55ec015f36bcc0c33b8b52b7/tests/functional_tests/test_groups/training/test_pretrain.py#L202">test_pretrain.py:202</a>).</p>
+
+<p class="where"><b>Where the fix lands: Megatron-Bridge, one function.</b> <code>get_rng_state</code> should use <code>_checkpoint_dp_cp_group</code>.
+<b>Stopgap in NeMo-RL:</b> set <code>save_rng=False</code> when GTP &gt; 1. NeMo-RL already loads with <code>load_rng=False</code>
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/e3248a60b462ddb5049bda2c8dd366268823e456/nemo_rl/models/megatron/setup.py#L1985">setup.py:1985</a>). <b>No driver change.</b></p>
+<p>Nothing below is implemented. It has not been run.</p>
+<pre class="diff"><span class="hunk">@@ megatron/bridge/training/checkpointing.py L578-L601 · get_rng_state</span>
+     rng_state_list = None
+<span class="del">-    if torch.distributed.is_initialized() and pg_collection.dp_cp.size() > 1 and data_parallel_random_init:
+-        rng_state_list = [None for i in range(pg_collection.dp_cp.size())]
+-        torch.distributed.all_gather_object(rng_state_list, rng_state, group=pg_collection.dp_cp)
+</span><span class="add">+    # Include GTP peers: they share (pp, tp, dp) and would all claim one key.
++    dp_cp = _checkpoint_dp_cp_group(pg_collection)
++    if torch.distributed.is_initialized() and dp_cp.size() > 1 and data_parallel_random_init:
++        rng_state_list = [None for i in range(dp_cp.size())]
++        torch.distributed.all_gather_object(rng_state_list, rng_state, group=dp_cp)
+</span>     ...
+         rng_state_list = ShardedObject(
+             key,
+             rng_state_list,
+<span class="del">-            (pp_size, tp_size, pg_collection.dp_cp.size()),
+-            (pp_rank, tp_rank, pg_collection.dp_cp.rank()),
+</span><span class="add">+            (pp_size, tp_size, dp_cp.size()),
++            (pp_rank, tp_rank, dp_cp.rank()),
+</span>             replica_id=0,
+         )</pre>
+<p>In the example, the key's last coordinate becomes 0, 1 and 2 for r0, r2 and r4, so the 6 GPUs write 6 different RNG entries instead of 2 keys claimed 3 times each.</p>
+
+<div class="warn"><b>So what.</b> The worry is reasonable, but neither refit nor checkpointing chooses GPUs by a GTP axis. Every GTP detail they need lives in Megatron on each GPU, so the driver can keep its 4-axis layout.
+The check did find two real gaps, both in Megatron-Bridge. Refit is out of SFT v2's reach and is blocked by C3. The RNG save is <b>in</b> SFT v2's path: a GTP run will likely fail at its first checkpoint, so ask whether the author's GTP runs ever saved one.
+Decide the layout before anyone saves: the loader's placement check includes the layout's axes
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/e3248a60b462ddb5049bda2c8dd366268823e456/nemo_rl/data/energon/topology.py#L114-L129">topology.py:114</a>), so a checkpoint saved under one layout will not resume under the other.</div>
+
+</div></body></html>
