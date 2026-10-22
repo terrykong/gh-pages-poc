@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NVIDIA-NeMo/RL #4519 — main already builds this mask, and the PR's copy crashes Omni at CP=2</title>
+<style>
+:root{--bg:#0d1117;--surface:#161b22;--surface2:#1c2128;--border:#30363d;--text:#e6edf3;--dim:#8b949e;
+  --accent:#58a6ff;--green:#3fb950;--red:#f85149;--orange:#d29922}
+:root[data-theme="light"]{--bg:#ffffff;--surface:#f6f8fa;--surface2:#eaeef2;--border:#d0d7de;--text:#1f2328;
+  --dim:#59636e;--accent:#0969da;--green:#1a7f37;--red:#cf222e;--orange:#9a6700}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:28px 20px 70px}
+h1{font-size:22px;margin:0 0 8px;line-height:1.3}
+h2{font-size:18px;margin:30px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
+.sub{color:var(--dim);font-size:13.5px;margin:0 0 16px}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);
+  border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;
+  font:13px/1 ui-monospace,Menlo,monospace;cursor:pointer}
+.status{border:1px solid var(--border);border-radius:10px;background:var(--surface);padding:2px 16px 10px;margin:0 0 20px}
+.status dl{display:grid;grid-template-columns:max-content 1fr;gap:4px 14px;margin:12px 0 0}
+.status dt{color:var(--dim);font-size:12px;text-transform:uppercase;letter-spacing:.04em;white-space:nowrap;padding-top:2px}
+.status dd{margin:0;font-size:14px}
+.verdict{font-weight:700}
+.verdict.open{color:var(--red)}
+nav.chain{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 6px;padding:0}
+nav.chain a,nav.chain span{display:inline-block;padding:5px 11px;border:1px solid var(--border);
+  border-radius:20px;background:var(--surface);text-decoration:none;color:var(--accent);
+  font-size:12.5px;line-height:1.3;white-space:nowrap}
+nav.chain a:hover{background:var(--surface2)}
+nav.chain span.here{background:var(--accent);color:var(--bg);border-color:var(--accent);font-weight:600}
+p.chainnote{color:var(--dim);font-size:12px;margin:0 0 18px}
+.bg{border-left:4px solid var(--accent);background:var(--surface);padding:8px 14px;margin:0 0 16px;font-size:14px}
+.warn{border-left:3px solid var(--red);background:var(--surface);padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0}
+.where{border-left:4px solid var(--accent);background:var(--surface);padding:6px 12px;margin:6px 0 10px;font-size:14px}
+.cref{margin:6px 0 0;font-size:13px}
+.cref a{display:inline-block;padding:4px 10px;border:1px solid var(--border);border-radius:16px;background:var(--surface);font:12.5px ui-monospace,Menlo,monospace}
+.cref a:hover{background:var(--surface2);text-decoration:none}
+.tip{border-bottom:1px dotted var(--dim);cursor:help;position:relative;outline:none}
+.tip:hover::after,.tip:focus::after{content:attr(data-tip);position:absolute;left:0;top:1.7em;z-index:60;
+  width:max-content;max-width:min(340px,80vw);white-space:normal;background:var(--surface2);color:var(--text);
+  border:1px solid var(--border);border-radius:6px;padding:7px 10px;font:13px/1.45 -apple-system,sans-serif;
+  font-weight:400;box-shadow:0 4px 14px rgba(0,0,0,.3)}
+.diff{font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--surface);
+  border:1px solid var(--border);border-radius:8px;padding:12px;overflow-x:auto;white-space:pre;margin:10px 0}
+.diff .add{color:var(--green)}
+.diff .del{color:var(--red)}
+.diff .hunk{color:var(--accent)}
+svg{max-width:100%;height:auto;display:block;margin:14px 0}
+svg .box{fill:var(--surface);stroke:var(--border);stroke-width:1.3}
+svg .ok{fill:var(--surface);stroke:var(--green);stroke-width:2}
+svg .bad{fill:var(--surface);stroke:var(--red);stroke-width:2.2}
+svg .code{fill:var(--text);font:11px ui-monospace,Menlo,monospace}
+svg .data{fill:var(--dim);font:10.5px ui-monospace,Menlo,monospace}
+svg .hdr{fill:var(--accent);font:bold 14px -apple-system,sans-serif}
+svg .row{fill:var(--dim);font:bold 11px -apple-system,sans-serif}
+svg .okt{fill:var(--green);font:bold 11.5px -apple-system,sans-serif}
+svg .badt{fill:var(--red);font:bold 11.5px -apple-system,sans-serif}
+svg .ln{stroke:var(--border);stroke-width:1}
+svg a text{text-decoration:underline;fill:var(--accent)}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+  document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head>
+<body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+  function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+  function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
+    b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
+      else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+  document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+<div class="wrap">
+
+<h1>Main already builds this mask, and the PR's second copy crashes the Omni CP=2 recipe</h1>
+<p class="sub"><a href="https://github.com/NVIDIA-NeMo/RL/pull/4519">NVIDIA-NeMo/RL #4519</a> vs main's
+<a href="https://github.com/NVIDIA-NeMo/RL/pull/4503">#4503</a>. PR code at head <code>ffce4a2b</code>; main at <code>f0639c60</code>; Megatron-Bridge at its pinned <code>1f8873bb</code>.</p>
+
+<div class="status"><dl>
+  <dt>Before</dt>
+  <dd>While this PR was open, main merged #4503. It decides once at worker setup whether expert counts need a padding mask, and builds that mask for dense, packed and prepacked inputs.</dd>
+  <dt>This PR</dt>
+  <dd>Builds its own second mask on every call, from a new required <code>model_config</code> argument. It also adds a guard that refuses some layouts main supports.</dd>
+  <dt>Status</dt>
+  <dd><span class="verdict open">Open — the PR conflicts with main and must be rebased.</span> At the PR head the guard crashes a shipped Omni recipe. The fix below is a proposal from the review; the author has not made it yet.</dd>
+</dl></div>
+
+<nav class="chain">
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4519-placeholder-counts.html">1 · what it removes</a>
+  <span class="here">2 · rebase + Omni crash</span>
+</nav>
+<p class="chainnote">Two pages on this PR, one question each. This one: why the PR has to be rebuilt on main's mask.</p>
+
+<div class="bg"><b>Background.</b> Nemotron Omni
+<span class="tip" tabindex="0" data-tip="With context parallelism (CP), each GPU holds one slice of every long sequence. Most models get their slice from NeMo-RL. Omni takes the whole row and cuts its own slice, so it also needs the whole mask.">slices its own CP inputs</span>:
+it sets <code>model_slices_context_parallel_inputs = True</code>
+(<a href="https://github.com/NVIDIA-NeMo/Megatron-Bridge/blob/1f8873bb00a8ddf3af811649f0a7efdb2363570c/src/megatron/bridge/models/nemotron_omni/modeling_nemotron_omni.py#L174">Bridge :174</a>)
+and cuts <code>padding_mask</code> with the same index as <code>input_ids</code>
+(<a href="https://github.com/NVIDIA-NeMo/Megatron-Bridge/blob/1f8873bb00a8ddf3af811649f0a7efdb2363570c/src/megatron/bridge/models/nemotron_omni/modeling_nemotron_omni.py#L768">:768</a>).
+So NeMo-RL only has to hand it the full, unsliced mask.
+Dotted words have a short explanation: hover or tap them.</div>
+
+<h2>One recipe, two code paths</h2>
+<svg viewBox="0 0 960 420" role="img" aria-label="With the Omni CP=2 recipe, main decides once at setup, passes the full mask in training, and Omni slices it. The PR computes its flag on every call, hits its new guard, and raises NotImplementedError on the first logprob pass.">
+  <rect class="box" x="10" y="8" width="940" height="40" rx="6"/>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/ffce4a2bdfd7b9bf6a3783ea2b629d21275b8aa4/examples/configs/recipes/vlm/vlm_grpo-nemotron-omni-30ba3b-circle-click-2n8g-megatron-tp2ep8.v1.yaml#L42-L47"><text class="code" x="22" y="26">vlm_grpo-nemotron-omni-30ba3b-circle-click-2n8g-megatron-tp2ep8.v1.yaml</text></a>
+  <text class="data" x="22" y="41">context_parallel_size: 2 · sequence_packing.enabled: true · moe_router_enable_expert_bias: true · bias_update_rate: 0.001</text>
+
+  <text class="hdr" x="230" y="76" text-anchor="middle">main today (#4503)</text>
+  <text class="hdr" x="710" y="76" text-anchor="middle">this PR (head ffce4a2b)</text>
+  <line class="ln" x1="470" y1="62" x2="470" y2="412"/>
+
+  <text class="row" x="12" y="100">DECIDE</text>
+  <rect class="ok" x="10" y="106" width="450" height="58" rx="6"/>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/f0639c60422ca477268bc678f6e00f35eda778a9/nemo_rl/models/policy/workers/megatron_policy_worker.py#L269-L312"><text class="code" x="22" y="124">_model_needs_router_padding_mask(model)</text></a>
+  <text class="data" x="22" y="140">once at setup: bias on, rate≠0, unfrozen expert_bias,</text>
+  <text class="data" x="22" y="155">forward takes padding_mask → True</text>
+  <rect class="box" x="480" y="106" width="470" height="58" rx="6"/>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/ffce4a2bdfd7b9bf6a3783ea2b629d21275b8aa4/nemo_rl/models/megatron/data.py#L352-L355"><text class="code" x="492" y="124">enable_expert_bias and rate != 0</text></a>
+  <text class="data" x="492" y="140">on every call, from model_config= → True</text>
+  <text class="data" x="492" y="155">in train AND get_logprobs / get_topk_logits</text>
+
+  <text class="row" x="12" y="188">WHICH CALLS</text>
+  <rect class="ok" x="10" y="194" width="450" height="44" rx="6"/>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/f0639c60422ca477268bc678f6e00f35eda778a9/nemo_rl/models/policy/workers/megatron_policy_worker.py#L1443"><text class="code" x="22" y="212">train paths only (L1443, L2143)</text></a>
+  <text class="data" x="22" y="229">counts only change while grads are on</text>
+  <rect class="box" x="480" y="194" width="470" height="44" rx="6"/>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/ffce4a2bdfd7b9bf6a3783ea2b629d21275b8aa4/nemo_rl/models/policy/workers/megatron_policy_worker.py#L2336"><text class="code" x="492" y="212">first call: get_logprobs (L2336)</text></a>
+  <text class="data" x="492" y="229">runs before any training step</text>
+
+  <text class="row" x="12" y="262">BUILD MASK</text>
+  <rect class="ok" x="10" y="268" width="450" height="58" rx="6"/>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/f0639c60422ca477268bc678f6e00f35eda778a9/nemo_rl/models/megatron/data.py#L1060-L1069"><text class="code" x="22" y="286">packed: model slices CP →</text></a>
+  <text class="code" x="22" y="302">padding_mask = full_padding_mask   [1, S]</text>
+  <text class="data" x="22" y="318">Omni cuts its own slice</text>
+  <rect class="bad" x="480" y="268" width="470" height="58" rx="6"/>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/ffce4a2bdfd7b9bf6a3783ea2b629d21275b8aa4/nemo_rl/models/megatron/data.py#L554-L567"><text class="code" x="492" y="286">guard: packed ∧ model slices CP ∧ CP 2 &gt; 1</text></a>
+  <text class="badt" x="492" y="302">NotImplementedError: Router exclusion supports</text>
+  <text class="badt" x="492" y="318">dense CP1, NeMo-sharded packing, or prepacked inputs.</text>
+
+  <text class="row" x="12" y="350">RESULT</text>
+  <rect class="ok" x="10" y="356" width="450" height="34" rx="6"/>
+  <text class="okt" x="22" y="377">runs · padding left out of expert counts ✓</text>
+  <rect class="bad" x="480" y="356" width="470" height="34" rx="6"/>
+  <text class="badt" x="492" y="377">crash on the first microbatch ✗</text>
+
+  <rect x="620" y="400" width="14" height="10" class="ok"/><text class="data" x="640" y="409">works</text>
+  <rect x="700" y="400" width="14" height="10" class="bad"/><text class="data" x="720" y="409">fails (this PR)</text>
+</svg>
+
+<p style="font-size:14px">The PR's own test expects this raise: the case <code>(packed, model slices CP, CP=2)</code> is listed as "must raise"
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/ffce4a2bdfd7b9bf6a3783ea2b629d21275b8aa4/tests/unit/models/megatron/test_router_mask.py#L121-L124">test_router_mask.py:121-124</a>).
+CI won't show it, because the recipe is in
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/ffce4a2bdfd7b9bf6a3783ea2b629d21275b8aa4/tests/test_suites/disabled.txt#L40">disabled.txt</a>.
+The new required <code>model_config</code> argument also breaks main's existing callers that don't pass it.</p>
+<!--CREF-C1-->
+
+<h2>Proposed fix — not in the PR</h2>
+<p class="where"><b>Where the fix lands: RL only.</b> Keep main's mask path and add only the flag, in
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/f0639c60422ca477268bc678f6e00f35eda778a9/nemo_rl/models/megatron/hybridep.py#L196-L212"><code>hybridep.py</code></a> and
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/f0639c60422ca477268bc678f6e00f35eda778a9/nemo_rl/models/megatron/data.py#L1256-L1267"><code>data.py</code></a>.
+(plus the <code>IS_ARTIFICIAL_INPUT</code> import). Then delete <code>router_mask.py</code>, the <code>model_config</code> argument and its 7 call sites, the guard, and the end-of-function mask block.
+<b>No Megatron change:</b> MCore already skips every <code>True</code> position in <code>padding_mask</code>.</p>
+<pre class="diff"><span class="hunk">@@ hybridep.py L196-L212 · get_packed_seq_padding_mask (main)</span>
+ def get_packed_seq_padding_mask(
+     cu_seqlens: torch.Tensor,
+     cu_seqlens_padded: torch.Tensor,
+     total_tokens: int,
+<span class="add">+    excluded_sequences: torch.Tensor | None = None,
+</span> ) -> torch.Tensor:
+     ...
+     valid_lengths = (cu_seqlens[1:] - cu_seqlens[:-1]).index_select(0, sequence_indices)
+<span class="del">-    return ((token_positions - padded_starts) &gt;= valid_lengths).unsqueeze(0)
+</span><span class="add">+    mask = (token_positions - padded_starts) &gt;= valid_lengths
++    if excluded_sequences is not None:
++        # Failed-rollout placeholders: skip the whole sequence, not just its padding.
++        mask |= excluded_sequences.index_select(0, sequence_indices)
++    return mask.unsqueeze(0)
+</span>
+<span class="hunk">@@ data.py L1060-L1064 · process_microbatch, packed branch (main)</span>
+                     full_padding_mask = get_packed_seq_padding_mask(
+                         cu_seqlens=cu_seqlens,
+                         cu_seqlens_padded=cu_seqlens_padded,
+                         total_tokens=input_ids.shape[1],
+<span class="add">+                        excluded_sequences=data_dict.get(IS_ARTIFICIAL_INPUT),
+</span>                     )
+
+<span class="hunk">@@ data.py L1265-L1267 · process_microbatch, dense branch (main)</span>
+                 padding_mask = torch.arange(
+                     input_ids.shape[1], device=input_ids.device
+                 ).unsqueeze(0) &gt;= lengths.unsqueeze(1)
+<span class="add">+                if IS_ARTIFICIAL_INPUT in data_dict:
++                    padding_mask |= data_dict[IS_ARTIFICIAL_INPUT].to(
++                        padding_mask.device
++                    ).unsqueeze(1)
+</span></pre>
+<p style="font-size:14px">The packed OR happens before main's existing CP slicing, so Omni (full mask) and NeMo-sliced models (index_select)
+both get the flag with no extra code. Prepacked inputs only come from SFT packing, which never carries the tag, so that path should raise if it ever sees it.
+Main's value worker never passes <code>create_router_padding_mask</code>
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/f0639c60422ca477268bc678f6e00f35eda778a9/nemo_rl/models/value/workers/megatron_value_worker.py#L569">megatron_value_worker.py:569</a>).
+The PR head covered critics through <code>model_config</code>, so the rebase should give the value worker the same setup-time flag.</p>
+<!--CREF-C3-->
+
+<div class="warn"><b>So what.</b> As written, this PR can't merge: it conflicts in <code>data.py</code> and the policy worker, and at its head
+it breaks the Omni CP=2 recipe that main already supports. Rebuilt on #4503, the useful part is the tag plus a few added
+lines in main's mask code. Everything else here is a second copy of something main already does.</div>
+
+</div>
+</body>
+</html>
