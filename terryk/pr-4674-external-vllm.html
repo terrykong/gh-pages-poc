@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NVIDIA-NeMo/RL #4674 — how an external vLLM server gets new weights, next to the managed one</title>
+<style>
+:root{--bg:#0d1117;--surface:#161b22;--surface2:#1c2128;--border:#30363d;--text:#e6edf3;--dim:#8b949e;
+  --accent:#58a6ff;--green:#3fb950;--red:#f85149;--orange:#d29922}
+:root[data-theme="light"]{--bg:#ffffff;--surface:#f6f8fa;--surface2:#eaeef2;--border:#d0d7de;--text:#1f2328;
+  --dim:#59636e;--accent:#0969da;--green:#1a7f37;--red:#cf222e;--orange:#9a6700}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:28px 20px 70px}
+h1{font-size:22px;margin:0 0 8px;line-height:1.3}
+h2{font-size:18px;margin:30px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
+.sub{color:var(--dim);font-size:13.5px;margin:0 0 16px}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);
+  border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;
+  font:13px/1 ui-monospace,Menlo,monospace;cursor:pointer}
+.status{border:1px solid var(--border);border-radius:10px;background:var(--surface);padding:2px 16px 10px;margin:0 0 20px}
+.status dl{display:grid;grid-template-columns:max-content 1fr;gap:4px 14px;margin:12px 0 0}
+.status dt{color:var(--dim);font-size:12px;text-transform:uppercase;letter-spacing:.04em;white-space:nowrap;padding-top:2px}
+.status dd{margin:0;font-size:14px}
+.verdict{font-weight:700}
+.verdict.open{color:var(--orange)}
+.bg{border-left:4px solid var(--accent);background:var(--surface);padding:8px 14px;margin:0 0 16px;font-size:14px}
+.warn{border-left:3px solid var(--orange);background:var(--surface);padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0}
+.cref{margin:6px 0 0;font-size:13px}
+.cref a{display:inline-block;padding:4px 10px;border:1px solid var(--border);border-radius:16px;background:var(--surface);font:12.5px ui-monospace,Menlo,monospace}
+.tip{border-bottom:1px dotted var(--dim);cursor:help;position:relative;outline:none}
+.tip:hover::after,.tip:focus::after{content:attr(data-tip);position:absolute;left:0;top:1.7em;z-index:60;
+  width:max-content;max-width:min(340px,80vw);white-space:normal;background:var(--surface2);color:var(--text);
+  border:1px solid var(--border);border-radius:6px;padding:7px 10px;font:13px/1.45 -apple-system,sans-serif;
+  font-weight:400;box-shadow:0 4px 14px rgba(0,0,0,.3)}
+table{border-collapse:collapse;width:100%;font-size:13.5px;margin:10px 0}
+th,td{border:1px solid var(--border);padding:6px 9px;text-align:left;vertical-align:top}
+th{background:var(--surface)}
+svg{max-width:100%;height:auto;display:block;margin:14px 0}
+svg .box{fill:var(--surface);stroke:var(--border);stroke-width:1.3}
+svg .same{fill:var(--surface);stroke:var(--green);stroke-width:2}
+svg .diffb{fill:var(--surface);stroke:var(--accent);stroke-width:1.6}
+svg .bad{fill:var(--surface);stroke:var(--orange);stroke-width:2;stroke-dasharray:6 4}
+svg .lbl{fill:var(--text);font:bold 12.5px -apple-system,sans-serif}
+svg .code{fill:var(--text);font:11px ui-monospace,Menlo,monospace}
+svg .data{fill:var(--dim);font:10.5px ui-monospace,Menlo,monospace}
+svg .hdr{fill:var(--accent);font:bold 14px -apple-system,sans-serif}
+svg .row{fill:var(--dim);font:bold 11px -apple-system,sans-serif}
+svg .warnt{fill:var(--orange);font:bold 11px -apple-system,sans-serif}
+svg .okt{fill:var(--green);font:bold 11px -apple-system,sans-serif}
+svg .ln{stroke:var(--border);stroke-width:1}
+svg a text{text-decoration:underline;fill:var(--accent)}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+  document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head>
+<body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+  function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+  function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
+    b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
+      else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+  document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+<div class="wrap">
+
+<h1>How an external vLLM server gets new weights, next to the vLLM that NeMo-RL runs itself</h1>
+<p class="sub"><a href="https://github.com/NVIDIA-NeMo/RL/pull/4674">NVIDIA-NeMo/RL #4674</a>
+(adds <code>policy.generation.backend: remote_vllm</code>). Permalinks pin head <code>69c7ea3</code>.</p>
+
+<div class="status"><dl>
+  <dt>Before</dt>
+  <dd>NeMo-RL could only refit a vLLM it started itself, as Ray workers inside the training job.</dd>
+  <dt>This PR</dt>
+  <dd>Adds a second backend: a vLLM 0.29.0 server someone else started. NeMo-RL talks to it over HTTP and sends weights straight to its GPUs over NCCL.</dd>
+  <dt>Status</dt>
+  <dd><span class="verdict open">New feature, in review.</span> The design holds up and the wire format matches vLLM 0.29.0. One small open issue shows in the figure (orange): each refit pauses the server twice. Other asks, such as checking <code>max_model_len</code> against the server at startup, are in the review comments.</dd>
+</dl></div>
+
+<div class="bg"><b>Background.</b> In RL training, the trainer updates the model and the inference
+server (here vLLM) generates the next rollouts. After every step the trainer must copy its new weights
+into the server; that copy is the <i>refit</i>. Both paths below do it over NCCL, the GPU-to-GPU network
+library: trainer GPUs and server GPUs join one group, and the trainer broadcasts. Dotted words have a short
+explanation: hover or tap them.</div>
+
+<p>The two paths share the whole trainer side. Both call the same
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/69c7ea3da8620d67ceca053ca502113badc18d83/nemo_rl/models/policy/lm_policy.py#L596-L617"><code>policy.init_collective</code></a> and
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/69c7ea3da8620d67ceca053ca502113badc18d83/nemo_rl/models/policy/lm_policy.py#L1416-L1435"><code>policy.broadcast_weights_for_collective</code></a>,
+so the Megatron-to-HF conversion and the broadcast are the same code. They split on the receiving side.
+The managed path tells its own vLLM workers to receive through Ray calls into NeMo-RL code
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/69c7ea3da8620d67ceca053ca502113badc18d83/nemo_rl/weight_sync/collective_weight_synchronizer.py#L129-L155"><code>CollectiveWeightSynchronizer</code></a>).
+The external path cannot run NeMo-RL code inside the server, so it uses vLLM's own
+<span class="tip" tabindex="0" data-tip="vLLM 0.29.0 HTTP endpoints, enabled with VLLM_SERVER_DEV_MODE=1 and --weight-transfer-config '{&quot;backend&quot;:&quot;nccl&quot;}'. They let an outside trainer join the server's GPUs to an NCCL group and push weights.">weight-transfer API</span>
+over HTTP (<a href="https://github.com/NVIDIA-NeMo/RL/blob/69c7ea3da8620d67ceca053ca502113badc18d83/nemo_rl/weight_sync/remote_vllm_nccl_weight_synchronizer.py#L133-L235"><code>RemoteVllmNcclWeightSynchronizer</code></a>).</p>
+
+<h2>One refit, both paths, same example</h2>
+<p style="font-size:13.5px;color:var(--dim)">Example layout: Megatron trainer on 4 GPUs (NCCL ranks 0–3), vLLM with tensor-parallel 2 (2 GPUs), so the group has 6 ranks and vLLM starts at rank 4. This is refit number 3.</p>
+
+<svg viewBox="0 0 960 600" role="img" aria-label="Two columns compare one refit in the managed vLLM backend and the external remote_vllm backend. The trainer side is the same. The receiving side differs, and the external path pauses the server twice.">
+  <text class="hdr" x="200" y="22" text-anchor="middle">backend: vllm (NeMo-RL starts it)</text>
+  <text class="hdr" x="700" y="22" text-anchor="middle">backend: remote_vllm (this PR)</text>
+  <line class="ln" x1="450" y1="8" x2="450" y2="592"/>
+
+  <text class="row" x="12" y="50">WHO RUNS vLLM</text>
+  <rect class="box" x="10" y="56" width="430" height="44" rx="6"/>
+  <text class="code" x="22" y="74">Ray actors on the inference cluster</text>
+  <text class="data" x="22" y="91">NeMo-RL starts, owns and stops them</text>
+  <rect class="diffb" x="460" y="56" width="490" height="44" rx="6"/>
+  <text class="code" x="472" y="74">a separate vLLM 0.29.0 server; Gym calls base_url</text>
+  <text class="data" x="472" y="91">base_url: http://serving-host:8000/v1 · NeMo-RL never stops it</text>
+
+  <text class="row" x="12" y="124">ONCE: BUILD NCCL GROUP</text>
+  <rect class="same" x="10" y="130" width="940" height="40" rx="6"/>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/69c7ea3da8620d67ceca053ca502113badc18d83/nemo_rl/models/policy/lm_policy.py#L596-L617"><text class="code" x="22" y="148">policy.init_collective(ip, port, world_size=6, train_world_size=4, nccl_peer=…)</text></a>
+  <text class="data" x="22" y="163">same trainer code — only nccl_peer differs: "nemo" (left) vs "vllm" (right)</text>
+  <text class="okt" x="840" y="156">same code</text>
+
+  <rect class="box" x="10" y="178" width="430" height="58" rx="6"/>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/69c7ea3da8620d67ceca053ca502113badc18d83/nemo_rl/weight_sync/collective_weight_synchronizer.py#L244-L247"><text class="code" x="22" y="196">generation.init_collective(…)  — Ray call</text></a>
+  <text class="data" x="22" y="213">into NeMo-RL's vLLM worker code</text>
+  <text class="data" x="22" y="228">vLLM ranks 4,5 join</text>
+  <rect class="diffb" x="460" y="178" width="490" height="58" rx="6"/>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/69c7ea3da8620d67ceca053ca502113badc18d83/nemo_rl/weight_sync/remote_vllm_nccl_weight_synchronizer.py#L155-L179"><text class="code" x="472" y="196">POST /init_weight_transfer_engine  — HTTP</text></a>
+  <text class="data" x="472" y="213">{master_address, master_port, rank_offset: 4, world_size: 6,</text>
+  <text class="data" x="472" y="228"> packed: true, packed_buffer_size_bytes: 1 GiB, packed_num_buffers: 2}</text>
+
+  <text class="row" x="12" y="262">EVERY STEP: REFIT</text>
+  <rect class="box" x="10" y="268" width="430" height="44" rx="6"/>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/69c7ea3da8620d67ceca053ca502113badc18d83/nemo_rl/models/generation/vllm/vllm_worker_async.py#L2448"><text class="code" x="22" y="286">SingleController pauses once</text></a>
+  <text class="data" x="22" y="303">mode "keep", clear_cache = recompute_kv_… setting</text>
+  <rect class="bad" x="460" y="268" width="490" height="44" rx="6"/>
+  <text class="code" x="472" y="286">SingleController pauses: /pause?mode=keep&amp;clear_cache=&lt;setting&gt;</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/69c7ea3da8620d67ceca053ca502113badc18d83/nemo_rl/weight_sync/remote_vllm_nccl_weight_synchronizer.py#L218-L220"><text class="code" x="472" y="303">then the synchronizer pauses AGAIN with clear_cache=true</text></a>
+
+  <rect class="box" x="10" y="320" width="430" height="30" rx="6"/>
+  <text class="data" x="22" y="339">(nothing — the workers are ready to receive)</text>
+  <rect class="diffb" x="460" y="320" width="490" height="30" rx="6"/>
+  <text class="code" x="472" y="339">POST /start_weight_update</text>
+
+  <rect class="same" x="10" y="358" width="940" height="40" rx="6"/>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/69c7ea3da8620d67ceca053ca502113badc18d83/nemo_rl/models/policy/lm_policy.py#L1416-L1435"><text class="code" x="22" y="376">policy.broadcast_weights_for_collective(buffer_size_bytes, num_buffers, use_legacy_packing)</text></a>
+  <text class="data" x="22" y="391">same trainer code — tensors packed into buffers; right side uses vLLM's packing rule (use_legacy_packing=True)</text>
+  <text class="okt" x="840" y="384">same code</text>
+
+  <rect class="box" x="10" y="406" width="430" height="58" rx="6"/>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/69c7ea3da8620d67ceca053ca502113badc18d83/nemo_rl/weight_sync/collective_weight_synchronizer.py#L152-L154"><text class="code" x="22" y="424">generation.update_weights_from_collective()</text></a>
+  <text class="data" x="22" y="441">Ray call; NeMo-RL code on each vLLM worker</text>
+  <text class="data" x="22" y="456">receives and loads the tensors</text>
+  <rect class="diffb" x="460" y="406" width="490" height="58" rx="6"/>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/69c7ea3da8620d67ceca053ca502113badc18d83/nemo_rl/weight_sync/remote_vllm_nccl_weight_synchronizer.py#L229-L233"><text class="code" x="472" y="424">POST /update_weights  — runs at the same time</text></a>
+  <text class="data" x="472" y="441">{names: ["model.embed_tokens.weight", …],</text>
+  <text class="data" x="472" y="456"> dtype_names: ["bfloat16", …], shapes: [[151936, 1024], …]}</text>
+
+  <rect class="box" x="10" y="472" width="430" height="30" rx="6"/>
+  <text class="data" x="22" y="491">(no version sent to the engine)</text>
+  <rect class="diffb" x="460" y="472" width="490" height="30" rx="6"/>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/69c7ea3da8620d67ceca053ca502113badc18d83/nemo_rl/weight_sync/remote_vllm_nccl_weight_synchronizer.py#L234"><text class="code" x="472" y="491">POST /finish_weight_update {weight_version: "3"}</text></a>
+
+  <rect class="box" x="10" y="510" width="430" height="30" rx="6"/>
+  <text class="data" x="22" y="529">SingleController resumes once</text>
+  <rect class="bad" x="460" y="510" width="490" height="30" rx="6"/>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/69c7ea3da8620d67ceca053ca502113badc18d83/nemo_rl/weight_sync/remote_vllm_nccl_weight_synchronizer.py#L235"><text class="code" x="472" y="529">synchronizer resumes, then SingleController resumes again</text></a>
+
+  <text class="row" x="12" y="562">IF IT FAILS</text>
+  <text class="data" x="22" y="580">abort, rebuild the group over healthy ranks, retry</text>
+  <text class="data" x="472" y="580">serving stays paused; synchronizer refuses reuse; restart both jobs</text>
+
+  <rect x="610" y="550" width="14" height="10" class="same"/><text class="data" x="630" y="559">shared code</text>
+  <rect x="718" y="550" width="14" height="10" class="diffb"/><text class="data" x="738" y="559">differs</text>
+  <rect x="812" y="550" width="14" height="10" class="bad"/><text class="warnt" x="832" y="559">open issue</text>
+</svg>
+
+<h2>What differs after the shared trainer code</h2>
+<table>
+<tr><th></th><th>vllm (managed)</th><th>remote_vllm (this PR)</th></tr>
+<tr><td>Who starts the server</td><td>NeMo-RL, as Ray workers</td><td>You, separately; NeMo-RL only checks it at startup (model name, vLLM 0.29.0, NCCL transfer on, GPU count)</td></tr>
+<tr><td>How the server is told to receive</td><td>Ray calls into NeMo-RL code on each worker</td><td>HTTP calls to vLLM's own endpoints</td></tr>
+<tr><td>Packing rule</td><td>NeMo-RL's default</td><td>vLLM's rule, including tensors bigger than one buffer</td></tr>
+<tr><td>Failure</td><td>Rebuild the group and retry</td><td>Stop. Serving stays paused; restart training and serving</td></tr>
+<tr><td>Limits</td><td>Any policy backend; colocated or not</td><td>Megatron policy, Gym rollouts, one deployment, no <code>quant_cfg</code>, no draft weights, no fleet health</td></tr>
+</table>
+<p><b>Why keep both?</b> The managed path is simpler to run and can recover from a failed refit. The external
+path lets you scale, upgrade or place the server on its own, and keep its software stack apart from the
+training stack, in exchange for a stricter, stop-on-failure refit.</p>
+
+<div class="warn"><b>The small open issue.</b> SingleController already pauses the server with your
+<code>recompute_kv_cache_after_weight_updates</code> setting and resumes it afterwards
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/69c7ea3da8620d67ceca053ca502113badc18d83/nemo_rl/algorithms/single_controller.py#L5519-L5531">single_controller.py:5519</a>).
+The new synchronizer pauses a second time with <code>clear_cache=true</code> hard-coded. In vLLM 0.29.0 that
+drops the cached state of every request in flight
+(<a href="https://github.com/vllm-project/vllm/blob/v0.29.0/vllm/v1/engine/core.py#L842-L847">core.py:842</a>),
+so setting it to <code>false</code> does nothing: every request in flight is computed again after each refit.
+That costs speed, not correctness, and the default (<code>true</code>) only pays two extra HTTP calls. The fix is to
+delete the synchronizer's own pause and resume, as the managed path does.</div>
+
+</div>
+</body>
+</html>
