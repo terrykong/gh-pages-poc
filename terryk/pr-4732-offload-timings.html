@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PR 4732 · where a thread offload spends its time</title>
+<style>
+:root{--bg:#0d1117;--surface:#161b22;--surface2:#1c2128;--border:#30363d;--text:#e6edf3;--dim:#8b949e;
+  --accent:#58a6ff;--green:#3fb950;--red:#f85149;--orange:#d29922;--gray:#484f58}
+:root[data-theme="light"]{--bg:#ffffff;--surface:#f6f8fa;--surface2:#eaeef2;--border:#d0d7de;--text:#1f2328;
+  --dim:#59636e;--accent:#0969da;--green:#1a7f37;--red:#cf222e;--orange:#9a6700;--gray:#afb8c1}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--text);margin:0;font:15px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:28px 16px 60px}
+h1{font-size:26px;line-height:1.25;margin:0 0 6px}
+h2{font-size:19px;margin:30px 0 8px;border-bottom:1px solid var(--border);padding-bottom:4px}
+a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
+code{font:13px ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--surface2);padding:1px 5px;border-radius:4px}
+p.sub{color:var(--dim);font-size:13px;margin:0 0 16px}
+.status{border:1px solid var(--border);border-radius:10px;background:var(--surface);padding:2px 16px 10px;margin:0 0 20px}
+.status dl{display:grid;grid-template-columns:max-content 1fr;gap:4px 14px;margin:12px 0 0}
+.status dt{color:var(--dim);font-size:12px;text-transform:uppercase;letter-spacing:.04em;white-space:nowrap;padding-top:2px}
+.status dd{margin:0;font-size:14px}
+.verdict{font-weight:700}.verdict.good{color:var(--green)}.verdict.open{color:var(--red)}
+.bg{border-left:4px solid var(--dim);background:var(--surface);padding:8px 14px;margin:0 0 14px;font-size:14px}
+.fig{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:10px;margin:14px 0;overflow-x:auto}
+.fig svg{display:block;width:100%;min-width:640px;height:auto}
+svg text{fill:var(--text);font:12px -apple-system,Helvetica,Arial,sans-serif}
+svg .mono{font:11.5px ui-monospace,Menlo,monospace}
+svg .dim{fill:var(--dim)}svg .hd{font-weight:700;font-size:13px}
+svg a text{text-decoration:underline;fill:var(--accent)}
+svg .b-gray{fill:var(--gray)}svg .b-green{fill:var(--green)}svg .b-red{fill:var(--red)}
+svg .b-orange{fill:var(--orange)}svg .b-loop{fill:var(--surface2);stroke:var(--dim);stroke-dasharray:4 3}
+svg .on{fill:#fff;font-weight:600}
+:root[data-theme="light"] svg .on{fill:#fff}
+svg .axis{stroke:var(--dim);stroke-width:1}
+table{border-collapse:collapse;width:100%;font-size:14px;margin:8px 0}
+th,td{border:1px solid var(--border);padding:6px 9px;text-align:left;vertical-align:top}
+th{background:var(--surface2)}
+.diff{font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:12px;overflow-x:auto;white-space:pre;margin:10px 0}
+.diff .add{color:var(--green)}.diff .del{color:var(--red)}.diff .hunk{color:var(--accent)}
+.where{border-left:4px solid var(--accent);background:var(--surface);padding:6px 12px;margin:6px 0 10px}
+.hl{border:1px solid var(--accent);background:var(--surface);border-radius:8px;padding:10px 14px;margin:22px 0 0}
+.tip{border-bottom:1px dotted var(--dim);cursor:help;position:relative;outline:none}
+.tip:hover::after,.tip:focus::after{content:attr(data-tip);position:absolute;left:0;top:1.7em;z-index:60;width:max-content;max-width:min(340px,80vw);white-space:normal;background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:7px 10px;font:13px/1.45 -apple-system,sans-serif;font-weight:400;box-shadow:0 4px 14px rgba(0,0,0,.3)}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;font:13px/1 ui-monospace,monospace;cursor:pointer}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+  document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head>
+<body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+  function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+  function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
+    b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
+      else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+  document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+<div class="wrap">
+
+<h1>Where a slow thread offload spends its time, before and after this PR</h1>
+<p class="sub"><a href="https://github.com/NVIDIA-NeMo/RL/pull/4732">PR #4732</a> · feat(telemetry): add executor and event-loop diagnostics · permalinks pinned to <code>01a5304</code></p>
+
+<div class="status">
+<dl>
+  <dt>Before</dt>
+  <dd>Blocking calls were handed to a thread with <code>asyncio.to_thread</code>. Nothing was recorded, so a slow call was one opaque wait.</dd>
+  <dt>This PR</dt>
+  <dd>Wraps three thread hand-off sites so each wait splits into three timings and a live count, and adds a probe that measures how late the event loop runs.</dd>
+  <dt>Status</dt>
+  <dd><span class="verdict good">New metrics, off unless telemetry metrics are on.</span> Review found no bugs; two small test comments and two doc fixes.</dd>
+</dl>
+</div>
+
+<div class="bg"><b>Background.</b> NeMo-RL's controller and its vLLM HTTP server each run one asyncio <span class="tip" tabindex="0" data-tip="The single thread that runs every coroutine in the process. While it is busy with one thing, nothing else on it moves.">event loop</span>. Work that blocks (a disk read, a data-plane round trip) is sent to a small shared <span class="tip" tabindex="0" data-tip="asyncio's default ThreadPoolExecutor. Every to_thread call in the process shares it, so calls can queue behind each other.">thread pool</span> so the loop stays free. When the work finishes, the loop has to wake the waiting coroutine. Each of those three steps can be the slow one. Dotted words have a short explanation: hover or tap them.</div>
+
+<p>The new <a href="https://github.com/NVIDIA-NeMo/RL/blob/01a530456beca4bd7ee5e38bb290dcf7e6f7678a/nemo_rl/telemetry/runtime.py#L129-L202"><code>run_in_thread(site, fn, …)</code></a> replaces <code>asyncio.to_thread(fn, …)</code> at the chosen sites. It notes the time when the call is queued, when the thread starts it, when it finishes, and when the waiting coroutine wakes up again. It records the gaps as <code>queue_wait</code>, <code>execution</code> and <code>result_delivery</code>. It also keeps <code>rl.executor.pending</code>, a live count of calls queued or running. A separate probe, <a href="https://github.com/NVIDIA-NeMo/RL/blob/01a530456beca4bd7ee5e38bb290dcf7e6f7678a/nemo_rl/telemetry/runtime.py#L205-L213"><code>_probe_event_loop</code></a>, sleeps for 1 s in a loop and records how late it wakes up.</p>
+
+<div class="fig">
+<svg viewBox="0 0 860 400" role="img" aria-label="Two offloads A and B on a one-thread pool, before and after this PR">
+  <!-- scale: x = 170 + 8*ms -->
+  <text x="14" y="22" class="hd">Before this PR — asyncio.to_thread</text>
+  <rect x="170" y="34" width="616" height="22" rx="4" class="b-gray"/>
+  <text x="14" y="50" class="mono">A get([p0,p1])</text>
+  <text x="180" y="50" class="on">waited 77 ms — no metric, no breakdown</text>
+  <rect x="170" y="62" width="616" height="22" rx="4" class="b-gray"/>
+  <text x="14" y="78" class="mono">B get([p2])</text>
+  <text x="180" y="78" class="on">waited 77 ms — no metric, no breakdown</text>
+
+  <text x="14" y="122" class="hd">This PR — run_in_thread, same run</text>
+  <rect x="170" y="134" width="560" height="22" rx="4" class="b-loop"/>
+  <text x="14" y="150" class="mono">event loop</text>
+  <text x="180" y="150">busy with other work for 70 ms (nothing else can run)</text>
+
+  <text x="14" y="184" class="mono">A get([p0,p1])</text>
+  <rect x="170" y="168" width="344" height="22" rx="4" class="b-green"/>
+  <text x="180" y="184" class="on">execution 43</text>
+  <rect x="514" y="168" width="248" height="22" rx="4" class="b-orange"/>
+  <text x="524" y="184" class="on">result_delivery 31</text>
+  <text x="772" y="184" class="mono dim">→ [P0,P1]</text>
+
+  <text x="14" y="214" class="mono">B get([p2])</text>
+  <rect x="170" y="198" width="344" height="22" rx="4" class="b-red"/>
+  <text x="180" y="214" class="on">queue_wait 43 (thread busy with A)</text>
+  <rect x="514" y="198" width="200" height="22" rx="4" class="b-green"/>
+  <text x="524" y="214" class="on">execution 25</text>
+  <rect x="714" y="198" width="56" height="22" rx="4" class="b-orange"/>
+  <text x="719" y="214" class="on">7</text>
+  <text x="776" y="214" class="mono dim">→ [P2]</text>
+
+  <line x1="170" y1="232" x2="810" y2="232" class="axis"/>
+  <g class="dim">
+    <text x="166" y="248" class="dim">0</text><text x="324" y="248" class="dim">20</text>
+    <text x="484" y="248" class="dim">40</text><text x="644" y="248" class="dim">60</text>
+    <text x="796" y="248" class="dim">80 ms</text>
+  </g>
+
+  <text x="14" y="278" class="mono">pending</text>
+  <text x="170" y="278" class="mono">t=0: queued 2 · t≈0: queued 1, running 1 (A) · t=43: running 1 (B) · end: 0</text>
+
+  <text x="14" y="308" class="mono">loop probe</text>
+  <text x="170" y="308" class="mono">due at 1000 ms, loop busy, ran at 1072 ms → rl.event_loop.lag = 72</text>
+
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/01a530456beca4bd7ee5e38bb290dcf7e6f7678a/nemo_rl/telemetry/runtime.py#L78-L103"><text x="14" y="340" class="mono">_Submission.start() → queue_wait</text></a>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/01a530456beca4bd7ee5e38bb290dcf7e6f7678a/nemo_rl/telemetry/runtime.py#L105-L116"><text x="290" y="340" class="mono">finish() → execution</text></a>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/01a530456beca4bd7ee5e38bb290dcf7e6f7678a/nemo_rl/telemetry/runtime.py#L191-L201"><text x="470" y="340" class="mono">after await → result_delivery</text></a>
+
+  <rect x="14" y="364" width="14" height="12" class="b-red"/><text x="34" y="375">waiting for a free thread</text>
+  <rect x="210" y="364" width="14" height="12" class="b-green"/><text x="230" y="375">the work itself</text>
+  <rect x="350" y="364" width="14" height="12" class="b-orange"/><text x="370" y="375">done, waiting for the loop to wake the caller</text>
+  <rect x="700" y="364" width="14" height="12" class="b-gray"/><text x="720" y="375">not measured</text>
+</svg>
+</div>
+<p style="font-size:13px;color:var(--dim)">Real run at the PR head on CPU: a one-thread pool, A sleeps 40 ms, B sleeps 20 ms, and the loop is blocked for 70 ms. Times in ms, rounded. B's 43 ms queue wait is the time A spent running, because there is only one thread.</p>
+
+<h2>What each number tells you</h2>
+<table>
+<tr><th>Pattern</th><th>What it means</th><th>In the run above</th></tr>
+<tr><td>high <code>queue_wait</code>, low <code>execution</code></td><td>The thread pool is full. Calls are waiting for a free thread, not doing slow work.</td><td>B: 43 queued, 25 running</td></tr>
+<tr><td>high <code>execution</code></td><td>The work itself is slow (disk, network, CPU). Look inside the function.</td><td>A: 43</td></tr>
+<tr><td>high <code>result_delivery</code> plus high <code>rl.event_loop.lag</code></td><td>The work finished on time, but the event loop was too busy to resume the caller.</td><td>A: 31, loop lag 72</td></tr>
+</table>
+<p>The old way recorded none of these. Both A and B looked like "77 ms", and you could not tell a full thread pool from slow work or from a busy loop. Per the <a href="https://github.com/NVIDIA-NeMo/RL/blob/01a530456beca4bd7ee5e38bb290dcf7e6f7678a/docs/observability/metrics.md#async-runtime-diagnostics">metrics docs</a>, the probe only reports after the loop runs again, so it is not a hang detector.</p>
+
+<h2>Where the two ways meet, and where it is wired in</h2>
+<p><b>Both use the same thread pool.</b> <a href="https://github.com/python/cpython/blob/v3.13.14/Lib/asyncio/threads.py#L24-L26"><code>asyncio.to_thread</code></a> copies the context and calls <code>loop.run_in_executor(None, …)</code>. <code>run_in_thread</code> does the same at <a href="https://github.com/NVIDIA-NeMo/RL/blob/01a530456beca4bd7ee5e38bb290dcf7e6f7678a/nemo_rl/telemetry/runtime.py#L171-L181">L171-L181</a>, with timing added around the call. With metrics off it simply calls <code>asyncio.to_thread</code> (<a href="https://github.com/NVIDIA-NeMo/RL/blob/01a530456beca4bd7ee5e38bb290dcf7e6f7678a/nemo_rl/telemetry/runtime.py#L149-L150">L149-L150</a>), and no probe task is created. The only difference with metrics on is the bookkeeping: the author measured about 60 µs extra per call.</p>
+
+<p class="where"><b>Wired in at three hand-off sites and two loops, RL only.</b>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/01a530456beca4bd7ee5e38bb290dcf7e6f7678a/nemo_rl/data_plane/async_utils.py#L53">data-plane calls</a> (site <code>data_plane.&lt;method&gt;</code>) ·
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/01a530456beca4bd7ee5e38bb290dcf7e6f7678a/nemo_rl/algorithms/single_controller.py#L1054-L1056">replay-buffer restore</a> (<code>checkpoint_replay_load</code>) ·
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/01a530456beca4bd7ee5e38bb290dcf7e6f7678a/nemo_rl/models/generation/vllm/vllm_worker_async.py#L1595-L1599">vLLM token capture</a> (<code>generation_terminal</code>) ·
+loop probes on the <a href="https://github.com/NVIDIA-NeMo/RL/blob/01a530456beca4bd7ee5e38bb290dcf7e6f7678a/nemo_rl/algorithms/single_controller.py#L785">controller</a> and the <a href="https://github.com/NVIDIA-NeMo/RL/blob/01a530456beca4bd7ee5e38bb290dcf7e6f7678a/nemo_rl/models/generation/vllm/vllm_worker_async.py#L1725">vLLM HTTP server</a>.</p>
+
+<pre class="diff"><span class="hunk">@@ nemo_rl/data_plane/async_utils.py L52-L53 · call_data_plane</span>
+     if offload_sync:
+<span class="del">-        result = await asyncio.to_thread(method, **kwargs)
+</span><span class="add">+        result = await run_in_thread(f"data_plane.{method_name}", method, **kwargs)</span>
+     else:</pre>
+<p>Each site is a one-line swap like this one (<a href="https://github.com/NVIDIA-NeMo/RL/blob/bc1ddb7c857f2d23abc5ecc8acb4c80360afd673/nemo_rl/data_plane/async_utils.py#L51">old line at the base</a>). The site name is a fixed label, never a request ID, so the number of metric series stays small.</p>
+
+<div class="hl"><b>So what.</b> When a run stalls in rollout or a checkpoint restore, these timings tell you whether to add threads, speed up the work, or find what is hogging the event loop. They are off by default and cost about 60 µs per call when on. The main review ask is one test. Every data-plane call passes keyword arguments, and no test covers keyword arguments while metrics are on.</div>
+
+</div>
+</body>
+</html>
