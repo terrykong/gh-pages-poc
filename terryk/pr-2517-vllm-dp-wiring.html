@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NVIDIA-NeMo/RL #2517 — how EP &gt; TP becomes vLLM data parallelism</title>
+<style>
+:root{--bg:#0d1117;--surface:#161b22;--surface2:#1c2128;--border:#30363d;--text:#e6edf3;--dim:#8b949e;
+  --accent:#58a6ff;--green:#3fb950;--red:#f85149;--orange:#d29922}
+:root[data-theme="light"]{--bg:#ffffff;--surface:#f6f8fa;--surface2:#eaeef2;--border:#d0d7de;--text:#1f2328;
+  --dim:#59636e;--accent:#0969da;--green:#1a7f37;--red:#cf222e;--orange:#9a6700}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:28px 16px 70px}
+h1{font-size:22px;margin:0 0 8px;line-height:1.3}
+h2{font-size:18px;margin:30px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
+.sub{color:var(--dim);font-size:13.5px;margin:0 0 14px}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);
+  border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;
+  font:13px/1 ui-monospace,Menlo,monospace;cursor:pointer}
+.status{border:1px solid var(--border);border-radius:10px;background:var(--surface);padding:2px 16px 10px;margin:0 0 16px}
+.status dl{display:grid;grid-template-columns:max-content 1fr;gap:4px 14px;margin:12px 0 0}
+.status dt{color:var(--dim);font-size:12px;text-transform:uppercase;letter-spacing:.04em;white-space:nowrap;padding-top:2px}
+.status dd{margin:0;font-size:14px}
+.verdict{font-weight:700}.verdict.good{color:var(--green)}.verdict.open{color:var(--red)}
+nav.chain{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 6px;padding:0}
+nav.chain a,nav.chain span{display:inline-block;padding:5px 11px;border:1px solid var(--border);
+  border-radius:20px;background:var(--surface);text-decoration:none;color:var(--accent);font-size:12.5px;line-height:1.3;white-space:nowrap}
+nav.chain a:hover{background:var(--surface2)}
+nav.chain span.here{background:var(--accent);color:var(--bg);border-color:var(--accent);font-weight:600}
+p.chainnote{color:var(--dim);font-size:12px;margin:0 0 18px}
+.bg{border:1px dashed var(--border);border-radius:8px;padding:8px 14px;margin:0 0 14px;font-size:14px;color:var(--dim)}
+.tip{border-bottom:1px dotted var(--dim);cursor:help;position:relative;outline:none}
+.tip:hover::after,.tip:focus::after{content:attr(data-tip);position:absolute;left:0;top:1.7em;z-index:60;
+  width:max-content;max-width:min(340px,80vw);white-space:normal;background:var(--surface2);color:var(--text);
+  border:1px solid var(--border);border-radius:6px;padding:7px 10px;font:13px/1.45 -apple-system,sans-serif;
+  font-weight:400;box-shadow:0 4px 14px rgba(0,0,0,.3)}
+.hl{border-left:3px solid var(--accent);background:var(--surface);padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0}
+.cref{margin:6px 0 0;font-size:13px}
+.cref a{display:inline-block;padding:4px 10px;border:1px solid var(--border);border-radius:16px;background:var(--surface);font:12.5px ui-monospace,Menlo,monospace}
+svg{max-width:100%;height:auto;display:block;margin:14px 0}
+svg .box{fill:var(--surface);stroke:var(--border);stroke-width:1.2}
+svg .okb{fill:var(--surface);stroke:var(--green);stroke-width:1.6}
+svg .badb{fill:var(--surface);stroke:var(--red);stroke-width:1.6;stroke-dasharray:5 4}
+svg .lbl{fill:var(--text);font:12px ui-monospace,Menlo,monospace}
+svg .lblb{fill:var(--text);font:bold 13px -apple-system,sans-serif}
+svg .note{fill:var(--dim);font:11.5px -apple-system,sans-serif}
+svg .hdr{fill:var(--accent);font:bold 12.5px -apple-system,sans-serif}
+svg .badt{fill:var(--red);font:bold 12px -apple-system,sans-serif}
+svg .okt{fill:var(--green);font:bold 12px -apple-system,sans-serif}
+svg .arr{stroke:var(--dim);stroke-width:1.4;fill:none}
+svg a text{text-decoration:underline;fill:var(--accent);font:11.5px ui-monospace,Menlo,monospace}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+  document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head>
+<body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+  function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+  function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
+    b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
+      else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+  document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+<div class="wrap">
+
+<h1>How NeMo-RL turns EP &gt; TP into vLLM data parallelism, on both engines</h1>
+<p class="sub"><a href="https://github.com/NVIDIA-NeMo/RL/pull/2517">NVIDIA-NeMo/RL #2517</a> (fix the vLLM DP path) ·
+<a href="https://github.com/NVIDIA-NeMo/RL/issues/1101">#1101</a>.
+Permalinks pin head <code>1c42be6</code>; vLLM links pin <code>v0.29.0</code>.</p>
+
+<div class="status"><dl>
+<dt>Before</dt><dd>EP &gt; TP worked only on the sync engine. The async engine stopped at an assert pointing to #1101.</dd>
+<dt>This PR</dt><dd>One helper builds the vLLM DP settings for each worker: environment variables for the sync engine, engine arguments for the async engine.</dd>
+<dt>Status</dt><dd><span class="verdict good">Async + vLLM DP now starts.</span> Shown by the two new nightlies in bf16. FP8 with vLLM DP has no test yet.</dd>
+</dl></div>
+
+<nav class="chain">
+<span class="here">1 · how EP &gt; TP becomes vLLM DP</span>
+<a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-2517-refit-rank-collide.html">2 · why refit ranks collide</a>
+</nav>
+<p class="chainnote">Two pages on this PR, one question each. This one: what each worker hands to vLLM.</p>
+
+<div class="bg"><b>Background.</b> In vLLM, expert parallel size = DP × TP. So when a config asks for EP &gt; TP, vLLM must run
+EP ÷ TP <span class="tip" tabindex="0" data-tip="Data-parallel copies of the model inside one vLLM engine. They share the expert all-to-all, so they must step together.">DP ranks</span>
+as one <b>instance</b>. NeMo-RL starts one Ray worker per GPU, so each worker must tell vLLM which DP rank it is and where the instance's first worker listens.
+Dotted words have a short explanation: hover or tap them.</div>
+
+<p>Each worker calls
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/1c42be6aaa7319e29bc95fcaed9f489f3901a0c2/nemo_rl/models/generation/vllm/worker_utils.py#L63-L78"><code>resolve_vllm_dp_group</code></a>
+to get (vLLM DP size, its DP rank, the instance's first worker), then
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/1c42be6aaa7319e29bc95fcaed9f489f3901a0c2/nemo_rl/models/generation/vllm/worker_utils.py#L81-L120"><code>resolve_vllm_dp_settings</code></a>
+picks the form vLLM wants. The sync engine cannot take <code>data_parallel_size &gt; 1</code> as an argument
+(<a href="https://github.com/vllm-project/vllm/blob/v0.29.0/vllm/entrypoints/llm.py#L284-L295">llm.py</a>), so it gets
+<code>VLLM_DP_*</code> environment variables, which vLLM reads as a fallback
+(<a href="https://github.com/vllm-project/vllm/blob/v0.29.0/vllm/config/parallel.py#L923-L929">parallel.py</a>).
+The async engine gets the same numbers as engine arguments, with an
+<span class="tip" tabindex="0" data-tip="data_parallel_external_lb=True: NeMo-RL, not vLLM, decides which DP rank gets which prompts. Each worker runs one engine core for its own rank.">external load balancer</span>.</p>
+
+<h2>One worker, two engines: 32 GPUs, TP = 2, EP = 16 (the tp2ep16 nightly)</h2>
+
+<svg viewBox="0 0 940 470" role="img" aria-label="Worker 10 computes vLLM DP size 8, DP rank 5, first worker 0; sync engine gets env vars, async engine gets kwargs; before the PR async hit an assert">
+<text class="hdr" x="14" y="20">vLLM DP size = EP ÷ TP = 8 · one instance = 8 DP ranks × TP 2 = 16 workers · 2 instances</text>
+
+<rect class="box" x="14" y="36" width="300" height="76" rx="8"/>
+<text class="lblb" x="26" y="58">worker 10 of 32</text>
+<text class="lbl" x="26" y="80">TP=2  PP=1  EP=16</text>
+<text class="lbl" x="26" y="100">backend "ray" (TP &gt; 1)</text>
+
+<path class="arr" d="M314 74 L360 74"/><path class="arr" d="M360 74 L353 69 M360 74 L353 79"/>
+<rect class="box" x="364" y="36" width="560" height="76" rx="8"/>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/1c42be6aaa7319e29bc95fcaed9f489f3901a0c2/nemo_rl/models/generation/vllm/worker_utils.py#L63-L78" target="_blank" rel="noopener"><text x="376" y="58">resolve_vllm_dp_group</text></a>
+<text class="lbl" x="376" y="80">rank in instance = 10 % 16 = 10 → DP rank = 10 ÷ 2 = 5</text>
+<text class="lbl" x="376" y="100">→ (dp_size 8, dp_rank 5, first worker 0)</text>
+
+<path class="arr" d="M200 112 L200 140"/><path class="arr" d="M200 140 L195 133 M200 140 L205 133"/>
+<path class="arr" d="M700 112 L700 140"/><path class="arr" d="M700 140 L695 133 M700 140 L705 133"/>
+
+<rect class="okb" x="14" y="144" width="440" height="160" rx="8"/>
+<text class="lblb" x="26" y="166">sync engine (async_engine: false)</text>
+<text class="lbl" x="26" y="190">VLLM_DP_SIZE=8</text>
+<text class="lbl" x="26" y="208">VLLM_DP_RANK=5</text>
+<text class="lbl" x="26" y="226">VLLM_DP_RANK_LOCAL=1</text>
+<text class="lbl" x="26" y="244">VLLM_DP_MASTER_IP=addr[0]  PORT=port[0]</text>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/1c42be6aaa7319e29bc95fcaed9f489f3901a0c2/nemo_rl/models/generation/vllm/vllm_worker.py#L1035" target="_blank" rel="noopener"><text x="26" y="268">vllm.LLM(...) in the worker process</text></a>
+<text class="note" x="26" y="288">unchanged idea; values now come from one helper</text>
+
+<rect class="okb" x="484" y="144" width="440" height="160" rx="8"/>
+<text class="lblb" x="496" y="166">async engine (async_engine: true)</text>
+<text class="lbl" x="496" y="190">data_parallel_size=8</text>
+<text class="lbl" x="496" y="208">data_parallel_rank=5</text>
+<text class="lbl" x="496" y="226">data_parallel_external_lb=True</text>
+<text class="lbl" x="496" y="244">data_parallel_address=addr[0]  rpc_port=port[0]</text>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/1c42be6aaa7319e29bc95fcaed9f489f3901a0c2/nemo_rl/models/generation/vllm/vllm_worker_async.py#L417" target="_blank" rel="noopener"><text x="496" y="268">AsyncLLM → its own engine-core process</text></a>
+<text class="okt" x="496" y="290">new in this PR</text>
+
+<rect class="badb" x="484" y="318" width="440" height="58" rx="8"/>
+<text class="badt" x="496" y="340">before this PR: async + EP &gt; TP</text>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/7cd15995ed93336190eeab19e464926bd430321c/nemo_rl/models/generation/vllm/vllm_generation.py#L257-L263" target="_blank" rel="noopener"><text x="496" y="362">AssertionError … issues/1101 (base)</text></a>
+
+<rect class="box" x="14" y="318" width="440" height="58" rx="8"/>
+<text class="lblb" x="26" y="340">both meet in vLLM's ParallelConfig</text>
+<text class="note" x="26" y="360">same DP size 8, DP rank 5, same first-worker address</text>
+
+<rect class="box" x="14" y="392" width="910" height="64" rx="8"/>
+<text class="lblb" x="26" y="414">FP8 patches (an earlier review question)</text>
+<text class="note" x="26" y="434">sync: patched in the worker process, where the model loads · async: patched in the engine-core process via the</text>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/1c42be6aaa7319e29bc95fcaed9f489f3901a0c2/nemo_rl/models/generation/vllm/quantization/fp8.py#L405-L409" target="_blank" rel="noopener"><text x="26" y="450">run_engine_core hook, fp8.py:405-409</text></a>
+<text class="note" x="300" y="450">· read from code, not run · no FP8 + vLLM DP test exists</text>
+</svg>
+
+<p>The driver also checks that the generation DP size is a multiple of the vLLM DP size
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/1c42be6aaa7319e29bc95fcaed9f489f3901a0c2/nemo_rl/models/generation/vllm/vllm_generation.py#L256-L259">vllm_generation.py:256-259</a>),
+so a half-filled instance fails at startup. With 32 GPUs and TP 2, generation DP is 16, and 16 is a multiple of 8.</p>
+
+<div class="hl"><b>So what.</b> The async engine can now run EP &gt; TP, which closes the gap #1101 tracked. Both engines get the same three numbers from one helper, so
+they cannot disagree on which DP rank a worker is. What is not covered yet: FP8 with vLLM DP, TP = 1 with EP &gt; 1 on the sync engine, and the
+non-colocated refit (see <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-2517-refit-rank-collide.html">page 2</a>).</div>
+
+</div>
+</body>
+</html>

@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NVIDIA-NeMo/RL #2517 — why refit ranks collide with two vLLM instances</title>
+<style>
+:root{--bg:#0d1117;--surface:#161b22;--surface2:#1c2128;--border:#30363d;--text:#e6edf3;--dim:#8b949e;
+  --accent:#58a6ff;--green:#3fb950;--red:#f85149;--orange:#d29922}
+:root[data-theme="light"]{--bg:#ffffff;--surface:#f6f8fa;--surface2:#eaeef2;--border:#d0d7de;--text:#1f2328;
+  --dim:#59636e;--accent:#0969da;--green:#1a7f37;--red:#cf222e;--orange:#9a6700}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:28px 16px 70px}
+h1{font-size:22px;margin:0 0 8px;line-height:1.3}
+h2{font-size:18px;margin:30px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
+.sub{color:var(--dim);font-size:13.5px;margin:0 0 14px}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);
+  border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;
+  font:13px/1 ui-monospace,Menlo,monospace;cursor:pointer}
+.status{border:1px solid var(--border);border-radius:10px;background:var(--surface);padding:2px 16px 10px;margin:0 0 16px}
+.status dl{display:grid;grid-template-columns:max-content 1fr;gap:4px 14px;margin:12px 0 0}
+.status dt{color:var(--dim);font-size:12px;text-transform:uppercase;letter-spacing:.04em;white-space:nowrap;padding-top:2px}
+.status dd{margin:0;font-size:14px}
+.verdict{font-weight:700}.verdict.good{color:var(--green)}.verdict.open{color:var(--red)}
+nav.chain{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 6px;padding:0}
+nav.chain a,nav.chain span{display:inline-block;padding:5px 11px;border:1px solid var(--border);
+  border-radius:20px;background:var(--surface);text-decoration:none;color:var(--accent);font-size:12.5px;line-height:1.3;white-space:nowrap}
+nav.chain a:hover{background:var(--surface2)}
+nav.chain span.here{background:var(--accent);color:var(--bg);border-color:var(--accent);font-weight:600}
+p.chainnote{color:var(--dim);font-size:12px;margin:0 0 18px}
+.bg{border:1px dashed var(--border);border-radius:8px;padding:8px 14px;margin:0 0 14px;font-size:14px;color:var(--dim)}
+.tip{border-bottom:1px dotted var(--dim);cursor:help;position:relative;outline:none}
+.tip:hover::after,.tip:focus::after{content:attr(data-tip);position:absolute;left:0;top:1.7em;z-index:60;
+  width:max-content;max-width:min(340px,80vw);white-space:normal;background:var(--surface2);color:var(--text);
+  border:1px solid var(--border);border-radius:6px;padding:7px 10px;font:13px/1.45 -apple-system,sans-serif;
+  font-weight:400;box-shadow:0 4px 14px rgba(0,0,0,.3)}
+.diff{font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--surface);
+  border:1px solid var(--border);border-radius:8px;padding:12px;overflow-x:auto;white-space:pre;margin:10px 0}
+.diff .add{color:var(--green)}.diff .del{color:var(--red)}.diff .hunk{color:var(--accent)}
+.where{border-left:4px solid var(--accent);background:var(--surface);padding:6px 12px;margin:6px 0 10px}
+.warn{border-left:3px solid var(--red);background:var(--surface);padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0}
+.cref{margin:6px 0 0;font-size:13px}
+.cref a{display:inline-block;padding:4px 10px;border:1px solid var(--border);border-radius:16px;background:var(--surface);font:12.5px ui-monospace,Menlo,monospace}
+svg{max-width:100%;height:auto;display:block;margin:14px 0}
+svg .box{fill:var(--surface);stroke:var(--border);stroke-width:1.2}
+svg .lbl{fill:var(--text);font:12.5px ui-monospace,Menlo,monospace}
+svg .lblb{fill:var(--text);font:bold 13px -apple-system,sans-serif}
+svg .note{fill:var(--dim);font:11.5px -apple-system,sans-serif}
+svg .hdr{fill:var(--accent);font:bold 12.5px -apple-system,sans-serif}
+svg .ok{fill:var(--green);fill-opacity:.25;stroke:var(--green)}
+svg .bad{fill:var(--red);fill-opacity:.25;stroke:var(--red)}
+svg .i0{fill:var(--accent);fill-opacity:.12;stroke:var(--accent)}
+svg .i1{fill:var(--orange);fill-opacity:.14;stroke:var(--orange)}
+svg .cell{fill:var(--text);font:bold 13px ui-monospace,Menlo,monospace}
+svg .okt{fill:var(--green);font:bold 12px -apple-system,sans-serif}
+svg .badt{fill:var(--red);font:bold 12px -apple-system,sans-serif}
+svg a text{text-decoration:underline;fill:var(--accent);font:11.5px ui-monospace,Menlo,monospace}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+  document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head>
+<body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+  function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+  function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
+    b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
+      else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+  document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+<div class="wrap">
+
+<h1>Why refit ranks collide when there are two vLLM instances</h1>
+<p class="sub"><a href="https://github.com/NVIDIA-NeMo/RL/pull/2517">NVIDIA-NeMo/RL #2517</a> (fix the vLLM DP path).
+Permalinks pin head <code>1c42be6</code>; vLLM links pin <code>v0.29.0</code>.</p>
+
+<div class="status"><dl>
+<dt>Before</dt><dd>Every refit setup gave each vLLM DP rank its own rank offset. With more than one vLLM instance, that counts the DP rank twice.</dd>
+<dt>This PR</dt><dd>Fixes the offset in <code>init_collective</code> (the default NCCL refit): all DP ranks of one instance now share the instance's offset.</dd>
+<dt>Status</dt><dd><span class="verdict good">Fixed for the NCCL refit.</span> <span class="verdict open">Open for the checkpoint-engine (NIXL) refit and the shard rebuild</span>, which still use the old rule. Raised in the review.</dd>
+</dl></div>
+
+<nav class="chain">
+<a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-2517-vllm-dp-wiring.html">1 · how EP &gt; TP becomes vLLM DP</a>
+<span class="here">2 · why refit ranks collide</span>
+</nav>
+<p class="chainnote">Two pages on this PR, one question each. This one: which refit paths still give wrong ranks.</p>
+
+<div class="bg"><b>Background.</b> A <i>refit</i> copies new weights from the trainer into vLLM every step. Before the first refit,
+each vLLM worker gets one rank number in a shared group, and the numbers must be exactly 0 … N−1 with no repeats.
+The driver sends each DP rank an <span class="tip" tabindex="0" data-tip="The rank number of the first worker in a block. The worker adds its own rank inside vLLM to it.">offset</span>,
+and the worker adds its own rank inside vLLM. Dotted words have a short explanation: hover or tap them.</div>
+
+<p>When EP &gt; TP, vLLM runs data parallel (DP) inside one engine: one <b>instance</b> = EP ÷ TP DP ranks that share one torch group.
+vLLM numbers every worker of an instance in that group: rank = dp_rank × TP + tp_rank (PP = 1 here)
+(<a href="https://github.com/vllm-project/vllm/blob/v0.29.0/vllm/distributed/parallel_state.py#L1748-L1757">parallel_state.py</a>).
+The worker then computes its refit rank in
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/1c42be6aaa7319e29bc95fcaed9f489f3901a0c2/nemo_rl/models/generation/vllm/checkpoint_engine.py#L75-L80"><code>resolve_rollout_rank</code></a>:
+offset + that rank, unless one instance covers the whole rollout.
+So the offset must be the <b>instance's</b> first worker, not the DP rank's. The PR does that in
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/1c42be6aaa7319e29bc95fcaed9f489f3901a0c2/nemo_rl/models/generation/vllm/vllm_generation.py#L836-L841"><code>init_collective</code></a>, but the
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/1c42be6aaa7319e29bc95fcaed9f489f3901a0c2/nemo_rl/weight_sync/checkpoint_engine_weight_synchronizer.py#L189-L203">checkpoint-engine setup</a>
+still uses one offset per DP rank.</p>
+
+<h2>8 generation GPUs, TP = 1, EP = 4 → two instances</h2>
+
+<svg viewBox="0 0 940 410" role="img" aria-label="Eight workers in two vLLM instances; old offsets give ranks 0 2 4 6 4 6 8 10, new offsets give 0 to 7">
+<text class="hdr" x="14" y="20">vLLM DP size = EP ÷ TP = 4 DP ranks per instance · 2 instances · rollout has 8 ranks (0 … 7)</text>
+<text class="lblb" x="14" y="56">worker (DP rank)</text>
+<text class="lblb" x="14" y="96">instance</text>
+<text class="lblb" x="14" y="136">rank inside vLLM</text>
+<g>
+<rect class="i0" x="200" y="38" width="340" height="112" rx="8"/>
+<rect class="i1" x="560" y="38" width="340" height="112" rx="8"/>
+<text class="cell" x="222" y="58">0</text><text class="cell" x="307" y="58">1</text><text class="cell" x="392" y="58">2</text><text class="cell" x="477" y="58">3</text>
+<text class="cell" x="582" y="58">4</text><text class="cell" x="667" y="58">5</text><text class="cell" x="752" y="58">6</text><text class="cell" x="837" y="58">7</text>
+<text class="lbl" x="330" y="98">instance 0</text><text class="lbl" x="690" y="98">instance 1</text>
+<text class="cell" x="222" y="138">0</text><text class="cell" x="307" y="138">1</text><text class="cell" x="392" y="138">2</text><text class="cell" x="477" y="138">3</text>
+<text class="cell" x="582" y="138">0</text><text class="cell" x="667" y="138">1</text><text class="cell" x="752" y="138">2</text><text class="cell" x="837" y="138">3</text>
+</g>
+
+<text class="lblb" x="14" y="192">old rule: offset</text>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/1c42be6aaa7319e29bc95fcaed9f489f3901a0c2/nemo_rl/weight_sync/checkpoint_engine_weight_synchronizer.py#L189-L203" target="_blank" rel="noopener"><text x="14" y="208">checkpoint engine :189-203</text></a>
+<text class="cell" x="222" y="196">0</text><text class="cell" x="307" y="196">1</text><text class="cell" x="392" y="196">2</text><text class="cell" x="477" y="196">3</text>
+<text class="cell" x="582" y="196">4</text><text class="cell" x="667" y="196">5</text><text class="cell" x="752" y="196">6</text><text class="cell" x="837" y="196">7</text>
+<text class="lblb" x="14" y="240">old: refit rank</text>
+<rect class="ok" x="205" y="222" width="40" height="26" rx="4"/><text class="cell" x="220" y="240">0</text>
+<rect class="ok" x="290" y="222" width="40" height="26" rx="4"/><text class="cell" x="305" y="240">2</text>
+<rect class="bad" x="375" y="222" width="40" height="26" rx="4"/><text class="cell" x="390" y="240">4</text>
+<rect class="bad" x="460" y="222" width="40" height="26" rx="4"/><text class="cell" x="475" y="240">6</text>
+<rect class="bad" x="565" y="222" width="40" height="26" rx="4"/><text class="cell" x="580" y="240">4</text>
+<rect class="bad" x="650" y="222" width="40" height="26" rx="4"/><text class="cell" x="665" y="240">6</text>
+<rect class="bad" x="735" y="222" width="40" height="26" rx="4"/><text class="cell" x="745" y="240">8</text>
+<rect class="bad" x="820" y="222" width="40" height="26" rx="4"/><text class="cell" x="827" y="240">10</text>
+<text class="badt" x="200" y="268">4 and 6 appear twice · 8 and 10 do not exist · 1, 3, 5, 7 nobody has → first refit fails</text>
+
+<text class="lblb" x="14" y="314">new rule: offset</text>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/1c42be6aaa7319e29bc95fcaed9f489f3901a0c2/nemo_rl/models/generation/vllm/vllm_generation.py#L836-L841" target="_blank" rel="noopener"><text x="14" y="330">init_collective :836-841</text></a>
+<text class="cell" x="222" y="318">0</text><text class="cell" x="307" y="318">0</text><text class="cell" x="392" y="318">0</text><text class="cell" x="477" y="318">0</text>
+<text class="cell" x="582" y="318">4</text><text class="cell" x="667" y="318">4</text><text class="cell" x="752" y="318">4</text><text class="cell" x="837" y="318">4</text>
+<text class="lblb" x="14" y="362">new: refit rank</text>
+<rect class="ok" x="205" y="344" width="40" height="26" rx="4"/><text class="cell" x="220" y="362">0</text>
+<rect class="ok" x="290" y="344" width="40" height="26" rx="4"/><text class="cell" x="305" y="362">1</text>
+<rect class="ok" x="375" y="344" width="40" height="26" rx="4"/><text class="cell" x="390" y="362">2</text>
+<rect class="ok" x="460" y="344" width="40" height="26" rx="4"/><text class="cell" x="475" y="362">3</text>
+<rect class="ok" x="565" y="344" width="40" height="26" rx="4"/><text class="cell" x="580" y="362">4</text>
+<rect class="ok" x="650" y="344" width="40" height="26" rx="4"/><text class="cell" x="665" y="362">5</text>
+<rect class="ok" x="735" y="344" width="40" height="26" rx="4"/><text class="cell" x="750" y="362">6</text>
+<rect class="ok" x="820" y="344" width="40" height="26" rx="4"/><text class="cell" x="835" y="362">7</text>
+<text class="okt" x="200" y="392">exactly 0 … 7 · refit rank = offset + rank inside vLLM</text>
+<rect class="ok" x="620" y="380" width="14" height="12"/><text class="note" x="640" y="391">correct</text>
+<rect class="bad" x="700" y="380" width="14" height="12"/><text class="note" x="720" y="391">repeat / out of range</text>
+</svg>
+
+<p>Who uses which rule at head: <b>new</b> — the default NCCL refit
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/1c42be6aaa7319e29bc95fcaed9f489f3901a0c2/nemo_rl/models/generation/vllm/vllm_generation.py#L836-L841"><code>init_collective</code></a>).
+<b>Old</b> — the checkpoint-engine refit, used when <code>refit_transport</code> is <code>nixl</code> or a plugin on a non-colocated run; the
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/1c42be6aaa7319e29bc95fcaed9f489f3901a0c2/nemo_rl/weight_sync/factory.py#L140-L166">factory</a> checks only "non-colocated" and "vLLM", so nothing stops this setup.
+Also old — the shard rebuild after a lost worker
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/1c42be6aaa7319e29bc95fcaed9f489f3901a0c2/nemo_rl/weight_sync/membership.py#L166-L170"><code>plan_refit_membership</code></a>).
+The nccl_reshard copy is old too, but nccl_reshard
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/1c42be6aaa7319e29bc95fcaed9f489f3901a0c2/nemo_rl/weight_sync/nccl_reshard_utils.py#L829-L833">rejects EP &gt; TP</a>, so it cannot be reached.</p>
+
+<h2>The fix — proposed, not in the PR</h2>
+<p class="where"><b>Where the fix lands: RL only.</b> Nothing below is implemented.
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/1c42be6aaa7319e29bc95fcaed9f489f3901a0c2/nemo_rl/models/generation/vllm/worker_utils.py#L63"><code>worker_utils.py</code></a>: one helper for the offsets.
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/1c42be6aaa7319e29bc95fcaed9f489f3901a0c2/nemo_rl/weight_sync/checkpoint_engine_weight_synchronizer.py#L189-L203"><code>checkpoint_engine_weight_synchronizer.py</code></a> and <code>init_collective</code> both call it.
+The rebuild path raises when vLLM DP is on: losing one DP rank takes down its whole instance anyway.</p>
+<pre class="diff"><span class="hunk">@@ worker_utils.py · new function, next to resolve_vllm_dp_group (L63)</span>
+<span class="add">+def resolve_vllm_rank_prefixes(total_workers, dp_size, vllm_dp_size) -&gt; list[int]:
++    # All DP ranks of one vLLM instance share one torch group, so they share
++    # the instance's first worker as their offset.
++    per_instance = (total_workers // dp_size) * vllm_dp_size
++    return [(d // vllm_dp_size) * per_instance for d in range(dp_size)]</span>
+<span class="hunk">@@ checkpoint_engine_weight_synchronizer.py L189-L203 · first-time setup</span>
+         worker_count = len(self._generation.worker_group.workers)
+<span class="del">-        workers_per_group = worker_count // self._generation.dp_size
+</span><span class="add">+        rank_prefixes = resolve_vllm_rank_prefixes(
++            worker_count, self._generation.dp_size, self._generation.vllm_dp_size
++        )</span>
+         ...
+<span class="del">-                    for rank_prefix in range(0, worker_count, workers_per_group)
+</span><span class="add">+                    for rank_prefix in rank_prefixes</span></pre>
+<p>With the example above, <code>resolve_vllm_rank_prefixes(8, 8, 4)</code> returns <code>[0,0,0,0,4,4,4,4]</code>, the green row.
+A unit test that checks the refit ranks come out as exactly 0 … N−1 for (8 GPUs, TP 1, EP 4) and (32 GPUs, TP 2, EP 16) locks it in.
+The arithmetic was checked in Python, not on GPUs.</p>
+<p class="cref">🔴 <a href="https://github.com/NVIDIA-NeMo/RL/pull/2517">review comment — vllm_generation.py:836 (C1)</a></p>
+
+<div class="warn"><b>So what.</b> The PR's own nightlies are colocated, so they refit over CUDA IPC and never run any of these paths.
+A user who turns on vLLM DP with 2+ instances and a NIXL refit gets duplicate and out-of-range ranks at the first refit.
+One shared helper removes the second copy of the rule, which is the bug class
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/1c42be6aaa7319e29bc95fcaed9f489f3901a0c2/nemo_rl/weight_sync/membership.py#L89-L92"><code>membership.py</code></a> itself warns about.</div>
+
+</div>
+</body>
+</html>
