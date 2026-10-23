@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NVIDIA-NeMo/RL #4501 — what RL does with a Gym row that does not come back</title>
+<style>
+:root{
+  --bg:#0d1117; --surface:#161b22; --surface2:#1c2128; --border:#30363d;
+  --text:#e6edf3; --dim:#8b949e; --accent:#58a6ff; --green:#3fb950;
+  --orange:#d29922; --red:#f85149;
+}
+:root[data-theme="light"]{
+  --bg:#ffffff; --surface:#f6f8fa; --surface2:#eaeef2; --border:#d0d7de;
+  --text:#1f2328; --dim:#59636e; --accent:#0969da; --green:#1a7f37;
+  --orange:#9a6700; --red:#cf222e;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:28px 16px 70px}
+h1{font-size:22px;margin:0 0 8px;line-height:1.3}
+h2{font-size:18px;margin:32px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;
+  font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
+.sub{color:var(--dim);font-size:13.5px;margin:0 0 16px}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);
+  border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;
+  font:13px/1 ui-monospace,Menlo,monospace;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.18)}
+nav.chain{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 6px;padding:0}
+nav.chain a,nav.chain span{display:inline-block;padding:5px 11px;border:1px solid var(--border);
+  border-radius:20px;background:var(--surface);text-decoration:none;color:var(--accent);
+  font-size:12.5px;line-height:1.3;white-space:nowrap}
+nav.chain a:hover{background:var(--surface2)}
+nav.chain span.here{background:var(--accent);color:var(--bg);border-color:var(--accent);font-weight:600}
+p.chainnote{color:var(--dim);font-size:12px;margin:0 0 18px}
+.status{border:1px solid var(--border);border-radius:10px;background:var(--surface);
+  padding:2px 16px 10px;margin:0 0 20px}
+.status dl{display:grid;grid-template-columns:max-content 1fr;gap:4px 14px;margin:12px 0 0}
+.status dt{color:var(--dim);font-size:12px;text-transform:uppercase;letter-spacing:.04em;
+  white-space:nowrap;padding-top:2px}
+.status dd{margin:0;font-size:14px}
+.verdict{font-weight:700}
+.verdict.good{color:var(--green)}
+.bg{border:1px dashed var(--border);border-radius:8px;padding:8px 14px;margin:0 0 16px;font-size:14px}
+.bg ul{margin:4px 0;padding-left:20px}
+.tip{border-bottom:1px dotted var(--dim);cursor:help;position:relative;outline:none}
+.tip:hover::after,.tip:focus::after{content:attr(data-tip);position:absolute;left:0;top:1.7em;z-index:60;
+  width:max-content;max-width:min(340px,80vw);white-space:normal;background:var(--surface2);color:var(--text);
+  border:1px solid var(--border);border-radius:6px;padding:7px 10px;font:13px/1.45 -apple-system,sans-serif;
+  font-weight:400;box-shadow:0 4px 14px rgba(0,0,0,.3)}
+.diff{font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--surface);
+  border:1px solid var(--border);border-radius:8px;padding:12px;overflow-x:auto;white-space:pre;margin:10px 0}
+.diff .add{color:var(--green)}
+.diff .del{color:var(--red)}
+.diff .hunk{color:var(--accent)}
+.where{border-left:4px solid var(--accent);background:var(--surface);padding:6px 12px;margin:6px 0 10px}
+.hl{border-left:3px solid var(--accent);background:var(--surface);
+  padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0}
+ul.small li{margin:4px 0}
+svg{max-width:100%;height:auto;display:block;margin:16px 0}
+svg .box{fill:var(--surface);stroke:var(--border);stroke-width:1.4}
+svg .bad{fill:var(--surface);stroke:var(--red);stroke-width:2}
+svg .good{fill:var(--surface);stroke:var(--green);stroke-width:2}
+svg .txt{fill:var(--text);font:12px -apple-system,sans-serif}
+svg .id{fill:var(--text);font:11.5px ui-monospace,Menlo,monospace}
+svg .idr{fill:var(--red);font:bold 11.5px ui-monospace,Menlo,monospace}
+svg .idg{fill:var(--green);font:bold 11.5px ui-monospace,Menlo,monospace}
+svg .note{fill:var(--dim);font:11.5px -apple-system,sans-serif}
+svg .hdr{fill:var(--accent);font:bold 13px -apple-system,sans-serif}
+svg .row{fill:var(--text);font:bold 12.5px -apple-system,sans-serif}
+svg a text{text-decoration:underline;fill:var(--accent);font:11px ui-monospace,Menlo,monospace}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+  document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head>
+<body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+  function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+  function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
+    b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
+      else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+  document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+<div class="wrap">
+
+<h1>What RL does with a Gym row that does not come back, after #4501</h1>
+<p class="sub"><a href="https://github.com/NVIDIA-NeMo/RL/pull/4501">NVIDIA-NeMo/RL #4501</a>
+(harden Gym turn recovery), built on <a href="https://github.com/NVIDIA-NeMo/RL/pull/4500">#4500</a>.
+Permalinks pin the PR head <code>e36be156</code>; "before" links pin the #4500 base <code>dccc3fb1</code>.</p>
+
+<div class="status">
+<dl>
+  <dt>Before</dt>
+  <dd>In #4500, a row RL had to send again kept its old rollout ID, even if Gym was still running the first copy. One failed row ended the whole stream. A row refused during a checkpoint waited for the whole stream to end.</dd>
+  <dt>This PR</dt>
+  <dd>Re-sends a lost or failed row under a new rollout ID and queues the old one for Gym to stop. Keeps the stream going past one failed row. Re-sends a refused row on its own, right away.</dd>
+  <dt>Status</dt>
+  <dd><span class="verdict good">Done in this PR.</span> All 7 review threads were fixed and resolved at <code>e36be156</code>. Unit and functional CI have not run on that head yet.</dd>
+</dl>
+</div>
+
+<nav class="chain">
+  <span class="here">what #4501 changes</span>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4501-resend-retired-id.html">the retired-ID bug (fixed)</a>
+</nav>
+<p class="chainnote">Two pages on this PR, one question each — this one: what happens to each row that goes missing.</p>
+
+<div class="bg"><b>Background.</b> Dotted words have a short explanation: hover or tap them.
+For how turn recovery works overall, see the <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4500-turn-recovery.html">#4500 page</a>.
+<ul>
+<li>RL sends one prompt's rows to Gym in one <span class="tip" tabindex="0" data-tip="Gym's /run call. RL sends several rows (one per sibling rollout), and Gym runs each row as its own task and streams each result back as it finishes.">streamed request</span>. Each row carries a <span class="tip" tabindex="0" data-tip="A string like &lt;group&gt;_g1_a&lt;hex&gt;: row 1 of a prompt group, plus a random part for the attempt. A new attempt gets new random hex, so a new ID.">rollout ID</span>.</li>
+<li>The <span class="tip" tabindex="0" data-tip="RolloutRecoveryLedger: per prompt group and per row, a list of attempts, each marked reserved, dispatched, abandoned or sealed. A result is saved only if its attempt is still marked dispatched.">recovery ledger</span> remembers each row's current attempt, so a checkpoint knows which Gym episodes to save.</li>
+<li>Ending the stream does not stop Gym. A row Gym already started keeps running until RL <span class="tip" tabindex="0" data-tip="Gym's checkpoint retire call. #4500 already keeps a queue of episodes to stop and sends it at the start of the next checkpoint.">retires</span> it.</li>
+</ul></div>
+
+<p>Every row ends one of four ways. The new code tells them apart in <a href="https://github.com/NVIDIA-NeMo/RL/blob/e36be156f97108a471f3c786710a02978f77c7b0/nemo_rl/experience/rollout_manager.py#L1242-L1455"><code>_stream_rows</code></a>, and decides what to re-send in <a href="https://github.com/NVIDIA-NeMo/RL/blob/e36be156f97108a471f3c786710a02978f77c7b0/nemo_rl/experience/rollout_manager.py#L1497-L1647"><code>_run_rollouts</code></a>. The rule is simple: <b>a row Gym started gets a new ID before it is sent again</b>, and a row Gym never started keeps its ID.</p>
+
+<svg viewBox="0 0 940 446" role="img" aria-label="Four rows of one prompt group, what #4500 did with each and what #4501 does">
+<text class="note" x="14" y="16">One prompt group, 4 rows, max_gym_row_attempts = 2 (the default is 1). IDs from a unit-test run, shortened.</text>
+<text class="hdr" x="176" y="36">Before (#4500)</text>
+<text class="hdr" x="556" y="36">After (#4501)</text>
+<!-- row 0 -->
+<text class="row" x="14" y="66">row 0</text>
+<text class="note" x="14" y="83">result arrives</text>
+<rect class="box" x="176" y="46" width="750" height="44" rx="7"/>
+<text class="txt" x="190" y="73">Same in both: the result is saved under the row's ID.</text>
+<!-- row 1 -->
+<text class="row" x="14" y="122">row 1</text>
+<text class="note" x="14" y="139">lost: the stream</text>
+<text class="note" x="14" y="154">ended without it</text>
+<rect class="bad" x="176" y="102" width="372" height="84" rx="7"/>
+<text class="txt" x="190" y="122">the next attempt re-sends it under the same ID</text>
+<text class="idr" x="190" y="140">4639ddc8…_g1_ad53c1…</text>
+<text class="txt" x="190" y="158">while Gym may still run the first copy</text>
+<rect class="good" x="556" y="102" width="370" height="84" rx="7"/>
+<text class="txt" x="570" y="122">old attempt marked abandoned, queued for Gym</text>
+<text class="txt" x="570" y="139">to stop at the next checkpoint; re-sent as</text>
+<text class="idg" x="570" y="157">4639ddc8…_g1_ad67c4…</text>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/e36be156f97108a471f3c786710a02978f77c7b0/nemo_rl/experience/rollout_recovery.py#L937-L973"><text x="570" y="177">replace_dropped_dispatch</text></a>
+<!-- row 2 -->
+<text class="row" x="14" y="218">row 2</text>
+<text class="note" x="14" y="235">Gym's run failed</text>
+<text class="note" x="14" y="250">(network-type error)</text>
+<rect class="bad" x="176" y="198" width="372" height="84" rx="7"/>
+<text class="txt" x="190" y="218">the error is raised at once, ending the stream;</text>
+<text class="txt" x="190" y="235">rows still running in Gym are re-sent under</text>
+<text class="txt" x="190" y="252">their same IDs, so two copies can run</text>
+<rect class="good" x="556" y="198" width="370" height="84" rx="7"/>
+<text class="txt" x="570" y="218">reported as one failed row; the others keep</text>
+<text class="txt" x="570" y="235">streaming. Raised once the stream ends, then</text>
+<text class="txt" x="570" y="252">re-sent under a new ID, like row 1</text>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/e36be156f97108a471f3c786710a02978f77c7b0/nemo_rl/experience/rollout_manager.py#L1365-L1381"><text x="570" y="273">GymRowFailure, L1365</text></a>
+<!-- row 3 -->
+<text class="row" x="14" y="314">row 3</text>
+<text class="note" x="14" y="331">refused: a checkpoint</text>
+<text class="note" x="14" y="346">had closed admission</text>
+<rect class="bad" x="176" y="294" width="372" height="84" rx="7"/>
+<text class="txt" x="190" y="314">waits for the whole stream to end first. If a</text>
+<text class="txt" x="190" y="331">group verifier (GenRM) waits for this row, the</text>
+<text class="txt" x="190" y="348">stream cannot end until the group times out</text>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/dccc3fb187ffdb26d06b45ae55d94b50cd120d97/nemo_rl/experience/rollout_manager.py#L1489-L1506"><text x="190" y="369">re-send after the stream, base L1489</text></a>
+<rect class="good" x="556" y="294" width="370" height="84" rx="7"/>
+<text class="txt" x="570" y="314">re-sent on its own once admission reopens,</text>
+<text class="txt" x="570" y="331">while the other rows keep streaming. Same ID:</text>
+<text class="txt" x="570" y="348">Gym never started it. No attempt is used up.</text>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/e36be156f97108a471f3c786710a02978f77c7b0/nemo_rl/experience/rollout_manager.py#L1360-L1364"><text x="570" y="369">submit(...), L1363</text></a>
+<!-- legend -->
+<rect x="14" y="400" width="14" height="14" rx="3" class="bad"/><text class="note" x="34" y="412">a problem in #4500</text>
+<rect x="164" y="400" width="14" height="14" rx="3" class="good"/><text class="note" x="184" y="412">what #4501 does</text>
+<rect x="304" y="400" width="14" height="14" rx="3" class="box"/><text class="note" x="324" y="412">the same in both</text>
+<text class="note" x="14" y="436">With the default of 1 attempt, rows 1 and 2 are not re-sent: the group fails, and Gym stops them at the next checkpoint.</text>
+</svg>
+
+<h2>How the code does it</h2>
+<p class="where"><b>Where it lands: RL only.</b>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/e36be156f97108a471f3c786710a02978f77c7b0/nemo_rl/experience/rollout_manager.py#L1242-L1488"><code>rollout_manager.py</code></a> (<code>_stream_rows</code>, <code>_replace_unreturned_rows</code>),
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/e36be156f97108a471f3c786710a02978f77c7b0/nemo_rl/experience/rollout_recovery.py#L937-L973"><code>rollout_recovery.py</code></a> (new attempt per lost row), and
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/e36be156f97108a471f3c786710a02978f77c7b0/nemo_rl/environments/nemo_gym.py#L1402-L1411"><code>nemo_gym.py</code></a> (yields a failed row instead of raising).
+<b>No Gym change:</b> the queue of episodes to stop, and the retire call at the next checkpoint, already exist in #4500.</p>
+
+<pre class="diff"><span class="hunk">@@ rollout_manager.py L1355-L1364 · _stream_rows, row 3: Gym refused the row</span>
+                     admission_closed_rows.add(rowidx)
+                     if item.timing_metrics is not None:
+                         env_timing_metrics = item.timing_metrics
+<span class="add">+                    if self._stats is not None:
++                        self._stats.record_gym_admission_closed()
++                    # Re-sent on its own rather than after this stream ends: the
++                    # admitted rows may sit in a cohort verifier, such as GenRM,
++                    # that waits for this very row before any of them returns.
++                    submit([inputs_by_rowidx[rowidx]], refusal_streak + 1)</span>
+                     continue
+<span class="hunk">@@ rollout_manager.py L1373-L1381 · _stream_rows, row 2: one row failed (new branch)</span>
+<span class="add">+                    if classify_rollout_failure(item.error) is not FailureClass.INFRA:
++                        # The prompt fails as a whole; its other rows cannot save it.
++                        raise item.error
++                    # Raised once the stream ends. The other rows keep running in
++                    # Gym either way; ending the stream now would only re-send them
++                    # while they still run.
++                    if row_failure is None:
++                        row_failure = item.error
++                    continue</span>
+<span class="hunk">@@ rollout_manager.py L1482-L1488 · _replace_unreturned_rows, rows 1 and 2 before a re-send</span>
+<span class="add">+        replaced = await dispatch_recorder.replace_dropped(
++            [row["_rowidx"] for row in unreturned]
++        )
++        if replaced is None:
++            return
++        for row in unreturned:
++            row["_ng_rollout_id"] = replaced.rollout_ids[row["_rowidx"]]</span></pre>
+<p>In order: a refused row starts its own small stream straight away (<a href="https://github.com/NVIDIA-NeMo/RL/blob/e36be156f97108a471f3c786710a02978f77c7b0/nemo_rl/experience/rollout_manager.py#L1433-L1449"><code>submit</code></a> runs each one as a separate task). A network-type failure on one row is held until the stream ends. Any other failure still fails the whole prompt at once. Before the next attempt, every row Gym started but never returned gets a fresh attempt in the ledger: <a href="https://github.com/NVIDIA-NeMo/RL/blob/e36be156f97108a471f3c786710a02978f77c7b0/nemo_rl/experience/rollout_recovery.py#L937-L973"><code>replace_dropped_dispatch</code></a> marks the old one abandoned and queues its Gym episode to be stopped. The row is then stamped with the new ID. The old re-send-after-the-stream loop in #4500 (<a href="https://github.com/NVIDIA-NeMo/RL/blob/dccc3fb187ffdb26d06b45ae55d94b50cd120d97/nemo_rl/experience/rollout_manager.py#L1484-L1506">base L1484-L1506</a>) is gone.</p>
+
+<h2>Two smaller changes</h2>
+<ul class="small">
+<li><b>Restore check.</b> A checkpoint now records which Gym servers saved state. On restore, RL refuses to start if one of them is missing, and names it (<a href="https://github.com/NVIDIA-NeMo/RL/blob/e36be156f97108a471f3c786710a02978f77c7b0/nemo_rl/environments/gym_checkpoint_adapter.py#L394-L421"><code>restore</code></a>). Gym already rejects the other mismatches itself. The checkpoint file's schema goes to <a href="https://github.com/NVIDIA-NeMo/RL/blob/e36be156f97108a471f3c786710a02978f77c7b0/nemo_rl/environments/gym_checkpoint_coordinator.py#L43">version 2</a>, and an older file gets a clear "unsupported version" error.</li>
+<li><b>A cheaper checkpoint wait.</b> A checkpoint waits for replies already on their way back from Gym. It now checks only those episodes, every 50 ms (<a href="https://github.com/NVIDIA-NeMo/RL/blob/e36be156f97108a471f3c786710a02978f77c7b0/nemo_rl/algorithms/single_controller.py#L4899-L4909">L4899-L4909</a>, <a href="https://github.com/NVIDIA-NeMo/RL/blob/e36be156f97108a471f3c786710a02978f77c7b0/nemo_rl/experience/rollout_recovery.py#L680-L707"><code>gym_episodes_still_held</code></a>), instead of scanning every live rollout each time.</li>
+</ul>
+
+<div class="hl"><b>So what.</b> Once Gym has started a row, RL never sends it again under the same ID. That ends the two-copies problem and the crash shown on the <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4501-resend-retired-id.html">retired-ID page</a>. The cost: an abandoned row keeps running in Gym, and keeps calling the policy, until the next checkpoint stops it. #4500 already accepts that cost for abandoned groups. With the default of 1 row attempt, nothing is re-sent at all; this matters only for runs that raise <code>max_gym_row_attempts</code>, plus every run that hits a checkpoint refusal.</div>
+
+</div>
+</body>
+</html>
