@@ -37,6 +37,16 @@ code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;
 .status dd{margin:0;font-size:14px}
 .verdict{font-weight:700}
 .verdict.open{color:var(--red)}
+.verdict.good{color:var(--green)}
+nav.chain{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 6px;padding:0}
+nav.chain a,nav.chain span{display:inline-block;padding:5px 11px;border:1px solid var(--border);
+  border-radius:20px;background:var(--surface);text-decoration:none;color:var(--accent);
+  font-size:12.5px;line-height:1.3;white-space:nowrap}
+nav.chain a:hover{background:var(--surface2)}
+nav.chain span.here{background:var(--accent);color:var(--bg);border-color:var(--accent);font-weight:600}
+p.chainnote{color:var(--dim);font-size:12px;margin:0 0 18px}
+.hl{border-left:3px solid var(--green);background:var(--surface);
+  padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0}
 .bg{border:1px dashed var(--border);border-radius:8px;padding:8px 14px;margin:0 0 16px;font-size:14px}
 .bg ul{margin:4px 0;padding-left:20px}
 .tip{border-bottom:1px dotted var(--dim);cursor:help;position:relative;outline:none}
@@ -87,18 +97,24 @@ svg a text{text-decoration:underline;fill:var(--accent);font:11.5px ui-monospace
 <h1>A Gym row dropped on the last attempt is re-sent under the ID Gym just retired</h1>
 <p class="sub">Review illustration for
 <a href="https://github.com/NVIDIA-NeMo/RL/pull/4501">NVIDIA-NeMo/RL #4501</a>
-(harden Gym turn recovery). All permalinks pin the PR head <code>cf124ff</code>.</p>
+(harden Gym turn recovery). This page shows the bug as it was at <code>cf124ff</code>, the head the review looked at; its permalinks pin that commit.</p>
 
 <div class="status">
 <dl>
   <dt>Before</dt>
   <dd>When a Gym stream ended early, a row it never returned was re-sent under the same rollout ID, while Gym might still be running the first copy.</dd>
   <dt>This PR</dt>
-  <dd>Marks those rows as given up, tells Gym to stop them, and re-sends them under a new rollout ID — but only when another row attempt is left.</dd>
+  <dd>Marks those rows as given up, has Gym stop the old copy, and re-sends them under a new rollout ID when another row attempt is left.</dd>
   <dt>Status</dt>
-  <dd><span class="verdict open">Open — introduced by this PR, not fixed.</span> On the last row attempt (the default) one path still re-sends the row under its old ID, and the run raises. Raised in the review.</dd>
+  <dd><span class="verdict good">Fixed in this PR, at <code>e36be156</code>.</span> The author first applied the fix below, then removed the re-send that caused the bug: a refused row is now re-sent on its own, inside the stream, so a lost row is never swept along with it. A test now covers this exact case (<a href="https://github.com/NVIDIA-NeMo/RL/blob/e36be156f97108a471f3c786710a02978f77c7b0/tests/unit/experience/test_rollout_generation_failures.py#L1553"><code>test_a_short_clean_end_on_the_last_attempt_is_missing_rows_not_a_reused_id</code></a>).</dd>
 </dl>
 </div>
+
+<nav class="chain">
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4501-lost-rows.html">what #4501 changes</a>
+  <span class="here">the retired-ID bug (fixed)</span>
+</nav>
+<p class="chainnote">Two pages on this PR, one question each — this one: the bug the review found, now fixed.</p>
 
 <div class="bg"><b>Background.</b> Dotted words have a short explanation: hover or tap them.
 <ul>
@@ -164,11 +180,11 @@ svg a text{text-decoration:underline;fill:var(--accent);font:11.5px ui-monospace
 
 <p>On the base branch this row stayed <i>dispatched</i> and sealed normally, so the crash is new in this PR. A test reproduced it: events <code>dispatch {2: g7_g2_ac5a…}</code> → <code>retire {g7_g2_ac5a…}</code> → <code>dispatch {1: …, 2: g7_g2_ac5a…}</code> (same ID), ledger row 2 = <code>[abandoned]</code>.</p>
 
-<h2>What would fix it — proposed, not in the PR</h2>
+<h2>The fix the review proposed — applied, then replaced</h2>
 <p class="where"><b>Where the fix lands: RL only, one function.</b>
 <a href="https://github.com/NVIDIA-NeMo/RL/blob/cf124ff9eaea61d5e0bac38f76becfc18924ae8b/nemo_rl/experience/rollout_manager.py#L1625-L1632"><code>rollout_manager.py</code> · <code>_run_rollouts</code></a>.
 <b>No Gym change:</b> Gym already ignores a retire for an episode it no longer has.</p>
-<p>Nothing below is implemented. Treat a short clean end like a stream error, so it spends the attempt and the admission retry cannot re-send a row that was just given up on.</p>
+<p>The author applied this in <code>71fc9871</code>. A later commit, <code>e36be156</code>, removed the admission re-send loop altogether, which also made this guard unnecessary; see <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4501-lost-rows.html">what #4501 changes</a>. The proposal was: treat a short clean end like a stream error, so it spends the attempt and the admission retry cannot re-send a row that was just given up on.</p>
 <pre class="diff"><span class="hunk">@@ rollout_manager.py L1625-L1632 · _run_rollouts (else: branch, clean stream end)</span>
                          await self._drop_unreturned_rows(
                              nemo_gym_env,
@@ -190,7 +206,7 @@ svg a text{text-decoration:underline;fill:var(--accent);font:11.5px ui-monospace
 <p>With <code>stream_failed</code> set, the <a href="https://github.com/NVIDIA-NeMo/RL/blob/cf124ff9eaea61d5e0bac38f76becfc18924ae8b/nemo_rl/experience/rollout_manager.py#L1638"><code>if not stream_failed</code></a> guard skips the admission retry and the loop moves to <code>attempt += 1</code>. Checked with a repro in both modes (sibling and prompt-group); the full test suite was not run with it. Two tempting alternatives do not work: forcing <code>replace=True</code> raises under prompt-group recovery (<a href="https://github.com/NVIDIA-NeMo/RL/blob/cf124ff9eaea61d5e0bac38f76becfc18924ae8b/nemo_rl/experience/rollout_recovery.py#L890-L893">it rejects replacing one sibling</a>), and it would give the row a free re-send only when a refusal happens at the same time.</p>
 <p class="cref">🔴 <a href="https://github.com/NVIDIA-NeMo/RL/pull/4501#discussion_r4262411916">review comment — rollout_manager.py:1625</a></p>
 
-<div class="warn"><b>So what.</b> With default settings, any stream that ends short while a checkpoint is refusing rows turns a recoverable infra failure into a <code>ValueError</code> in the rollout worker. Gym refuses rows at admission only while it is taking a checkpoint, so this shows up exactly in runs that use Gym checkpointing. Please add a test with a short clean end and an admission refusal in the same stream: one attempt should give the "missing rows" error, two attempts should finish with row 2 under a new ID.</div>
+<div class="hl"><b>So what.</b> At <code>cf124ff</code>, with default settings, a stream that ended short while a checkpoint was refusing rows turned a recoverable infra failure into a <code>ValueError</code> in the rollout worker. At <code>e36be156</code> the same case ends in the normal "missing rows" error with one attempt, and with two attempts the row is re-sent under a new ID. Nothing is left to do here.</div>
 
 </div>
 </body>
