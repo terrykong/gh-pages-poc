@@ -219,27 +219,27 @@ CPU off the data path. In the author's 86-node run it cut put time per call from
 <code>simple</code>, with get about the same (1091 vs 1032 ms).</p>
 
 <h2>Open review items</h2>
-<p>None of these breaks the data path in the author's runs. They are what the review asks to change before merge.</p>
+<p>None of these breaks the data path in the author's runs. They are what the review asks to change before merge. Each links to its review comment.</p>
 <div class="warn" id="open-items">
 <ol>
 <li><b>A put can block every other get in its process.</b> The client has one lock for all NIXL and ZMQ calls, and
 a put keeps it while it sleeps between retries
 (<a href="https://github.com/NVIDIA-NeMo/RL/blob/738312b7b9b61b2c504486386dd7ad9525087604/nemo_rl/data_plane/adapters/tq_nixl.py#L476-L489">tq_nixl.py:476</a>).
 With the SSD tier on, a put that spills waits there for its whole disk write. Ask: drop the lock only while sleeping.
-<span class="cref" id="cref-C1"></span></li>
+<span class="cref" id="cref-C1"><a href="https://github.com/NVIDIA-NeMo/RL/pull/4539#discussion_r4371763531">C1 · tq_nixl.py:476</a></span></li>
 <li><b>The default placement puts a unit on a CPU-only Ray head.</b> With <code>storage_unit_placement: all</code> the PR's
 own node picker, which means "GPU nodes", is skipped
 (<a href="https://github.com/NVIDIA-NeMo/RL/blob/738312b7b9b61b2c504486386dd7ad9525087604/nemo_rl/data_plane/adapters/transfer_queue.py#L973">transfer_queue.py:973</a>),
 so every alive node gets a unit with 16 GiB of pinned memory. One-line fix.
-<span class="cref" id="cref-C2"></span></li>
+<span class="cref" id="cref-C2"><a href="https://github.com/NVIDIA-NeMo/RL/pull/4539#discussion_r4371763541">C2 · transfer_queue.py:973</a></span></li>
 <li><b>The end-to-end NIXL tests never run in CI.</b> They skip unless <code>UCX_TLS</code> is set, and CI never sets it
 (<a href="https://github.com/NVIDIA-NeMo/RL/blob/738312b7b9b61b2c504486386dd7ad9525087604/tests/unit/data_plane/conftest.py#L130-L143">conftest.py:130</a>).
 Restore onto a different unit count and unit-death handling have no automated test today.
-<span class="cref" id="cref-C3"></span></li>
+<span class="cref" id="cref-C3"><a href="https://github.com/NVIDIA-NeMo/RL/pull/4539#discussion_r4371763555">C3 · conftest.py:139</a></span></li>
 <li><b>Config shape.</b> The <code>ssd</code> and <code>nixl</code> blocks are untyped dicts, so a typo is ignored and SSD on
 without a directory writes to <code>/tmp</code>. The placement setting takes one word where the other backends take a list,
 which will break configs when NIXL moves to the shared planner.
-<span class="cref" id="cref-C5"></span> <span class="cref" id="cref-C6"></span></li>
+<span class="cref" id="cref-C5"><a href="https://github.com/NVIDIA-NeMo/RL/pull/4539#discussion_r4371763565">C5 · interfaces.py:171</a></span> <span class="cref" id="cref-C6"><a href="https://github.com/NVIDIA-NeMo/RL/pull/4539#discussion_r4371763570">C6 · interfaces.py:146</a></span></li>
 </ol>
 </div>
 
