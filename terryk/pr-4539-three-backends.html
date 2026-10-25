@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NVIDIA-NeMo/RL #4539 — how the new nixl data plane moves a row, next to simple and mooncake_cpu</title>
+<style>
+:root{--bg:#0d1117;--surface:#161b22;--surface2:#1c2128;--border:#30363d;--text:#e6edf3;--dim:#8b949e;
+  --accent:#58a6ff;--green:#3fb950;--red:#f85149;--orange:#d29922}
+:root[data-theme="light"]{--bg:#ffffff;--surface:#f6f8fa;--surface2:#eaeef2;--border:#d0d7de;--text:#1f2328;
+  --dim:#59636e;--accent:#0969da;--green:#1a7f37;--red:#cf222e;--orange:#9a6700}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:28px 16px 70px}
+h1{font-size:22px;margin:0 0 8px;line-height:1.3}
+h2{font-size:18px;margin:30px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
+.sub{color:var(--dim);font-size:13.5px;margin:0 0 16px}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);
+  border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;
+  font:13px/1 ui-monospace,Menlo,monospace;cursor:pointer}
+.status{border:1px solid var(--border);border-radius:10px;background:var(--surface);padding:2px 16px 10px;margin:0 0 20px}
+.status dl{display:grid;grid-template-columns:max-content 1fr;gap:4px 14px;margin:12px 0 0}
+.status dt{color:var(--dim);font-size:12px;text-transform:uppercase;letter-spacing:.04em;white-space:nowrap;padding-top:2px}
+.status dd{margin:0;font-size:14px}
+.verdict{font-weight:700}
+.verdict.good{color:var(--green)}
+.verdict.open{color:var(--orange)}
+.bg{border-left:4px solid var(--dim);background:var(--surface);padding:8px 14px;margin:0 0 16px;font-size:14px}
+.hl{border-left:3px solid var(--accent);background:var(--surface);padding:10px 16px;margin:16px 0;border-radius:0 8px 8px 0}
+.warn{border-left:3px solid var(--orange);background:var(--surface);padding:10px 16px;margin:16px 0;border-radius:0 8px 8px 0}
+.warn ol{margin:6px 0 0;padding-left:22px}
+.warn li{margin:6px 0}
+.cref{font-size:12.5px;white-space:nowrap}
+.cref a{display:inline-block;padding:2px 9px;border:1px solid var(--border);border-radius:16px;background:var(--surface2);
+  font:12px ui-monospace,Menlo,monospace}
+.cref a:hover{text-decoration:none;background:var(--surface)}
+.tip{border-bottom:1px dotted var(--dim);cursor:help;position:relative;outline:none}
+.tip:hover::after,.tip:focus::after{content:attr(data-tip);position:absolute;left:0;top:1.7em;z-index:60;
+  width:max-content;max-width:min(340px,80vw);white-space:normal;background:var(--surface2);color:var(--text);
+  border:1px solid var(--border);border-radius:6px;padding:7px 10px;font:13px/1.45 -apple-system,sans-serif;
+  font-weight:400;box-shadow:0 4px 14px rgba(0,0,0,.3)}
+.tw{overflow-x:auto}
+table{border-collapse:collapse;width:100%;font-size:13.5px;margin:8px 0}
+th,td{border:1px solid var(--border);padding:6px 9px;text-align:left;vertical-align:top}
+th{background:var(--surface);font-weight:600}
+td.k{color:var(--dim);white-space:nowrap}
+td.new{background:var(--surface)}
+svg{max-width:100%;height:auto;display:block;margin:14px 0}
+svg .box{fill:var(--surface);stroke:var(--border);stroke-width:1.2}
+svg .unit{fill:var(--surface2);stroke:var(--border);stroke-width:1.2}
+svg .cpu{fill:var(--orange);fill-opacity:.16;stroke:var(--orange);stroke-width:1.4}
+svg .rec{fill:var(--dim);fill-opacity:.14;stroke:var(--dim);stroke-width:1.2;stroke-dasharray:3 2}
+svg .lane{fill:none;stroke:var(--border);stroke-width:1}
+svg .t{fill:var(--text);font:12px -apple-system,sans-serif}
+svg .tb{fill:var(--text);font:bold 13.5px -apple-system,sans-serif}
+svg .m{fill:var(--text);font:11.5px ui-monospace,Menlo,monospace}
+svg .n{fill:var(--dim);font:11.5px -apple-system,sans-serif}
+svg .go{fill:var(--green);font:bold 11.5px -apple-system,sans-serif}
+svg .og{fill:var(--orange);font:bold 11.5px -apple-system,sans-serif}
+svg .rdma{stroke:var(--green);stroke-width:3;fill:none}
+svg .tcp{stroke:var(--orange);stroke-width:3;fill:none}
+svg .ctl{stroke:var(--dim);stroke-width:1.3;stroke-dasharray:5 3;fill:none}
+svg .hg{fill:var(--green)} svg .ho{fill:var(--orange)} svg .hd{fill:var(--dim)}
+svg a text{text-decoration:underline;fill:var(--accent);font:11px ui-monospace,Menlo,monospace}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+  document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head>
+<body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+  function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+  function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
+    b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
+      else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+  document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+<div class="wrap">
+
+<h1>How the new <code>nixl</code> data plane moves a row, next to <code>simple</code> and <code>mooncake_cpu</code></h1>
+<p class="sub">Explainer for <a href="https://github.com/NVIDIA-NeMo/RL/pull/4539">NVIDIA-NeMo/RL #4539</a>
+(<code>data_plane.backend: nixl</code>). NeMo-RL permalinks pin the PR head <code>738312b</code>; TransferQueue
+links pin <code>c516143</code>, the version the PR uses.</p>
+
+<div class="status">
+<dl>
+  <dt>Before</dt>
+  <dd>Two storage backends. <code>simple</code> sends row bytes over ZMQ to CPU storage units. <code>mooncake_cpu</code> moves them over RDMA, with a Mooncake master service that tracks where every key is.</dd>
+  <dt>This PR</dt>
+  <dd>Adds a third, opt-in backend: rows are placed by row number like <code>simple</code>, but the bytes move over RDMA like Mooncake, and no master service is needed.</dd>
+  <dt>Status</dt>
+  <dd><span class="verdict good">Works in the author's 86-node runs</span> (0 hash mismatches, faster put than <code>simple</code>; numbers in the PR description).
+  <span class="verdict open">Open review items</span> — see the last section.</dd>
+</dl>
+</div>
+
+<p class="bg"><b>Background.</b> The data plane moves rollout rows (prompts, responses, logprobs, …) between the
+driver, the training workers and the generation workers. NeMo-RL uses TransferQueue (TQ) for this. TQ asks a
+<span class="tip" tabindex="0" data-tip="A plug-in that decides where row bytes live and how they are copied. TQ calls its put_data / get_data / clear_data.">storage backend</span>
+to keep the bytes, and every row has a
+<span class="tip" tabindex="0" data-tip="TQ's global row number (global_idx). It is the same number in every process, so every process can compute where a row lives without asking anyone.">global row number</span>.
+A put or get names keys like <code>5@responses</code> (row 5, field <code>responses</code>).
+Dotted words have a short explanation: hover or tap them.</p>
+
+<h2>One put and one get, three ways</h2>
+<p>Same example in all three: a client puts rows 5 and 7, field <code>responses</code>, each a
+<code>tensor[6]</code> of int64, on a job with 3 storage units.</p>
+
+<svg viewBox="0 0 940 640" role="img" aria-label="Three lanes. simple: the client sends bytes over ZMQ to the unit chosen by row number mod 3, and the unit's CPU receives them. mooncake_cpu: the client asks the Mooncake master, then RDMA-writes into a segment the master picks. nixl: the client asks the unit chosen by row number for space, RDMA-writes into it, then commits; the unit records the row.">
+  <!-- legend -->
+  <line class="rdma" x1="16" y1="18" x2="52" y2="18"/><text class="t" x="58" y="22">row bytes over RDMA (no CPU copy)</text>
+  <line class="tcp" x1="282" y1="18" x2="318" y2="18"/><text class="t" x="324" y="22">row bytes over ZMQ, through a CPU</text>
+  <line class="ctl" x1="548" y1="18" x2="584" y2="18"/><text class="t" x="590" y="22">small control message</text>
+  <rect class="rec" x="760" y="9" width="22" height="16" rx="3"/><text class="t" x="788" y="22">location record</text>
+
+  <!-- ===== lane 1: simple ===== -->
+  <rect class="lane" x="6" y="38" width="928" height="186" rx="8"/>
+  <text class="tb" x="18" y="60">simple</text>
+  <text class="n" x="74" y="60">rows go to unit (row number mod 3) · nobody records where</text>
+  <rect class="box" x="18" y="74" width="196" height="96" rx="6"/>
+  <text class="t" x="30" y="94">client (driver or worker)</text>
+  <text class="m" x="30" y="114">put 5@responses</text>
+  <text class="m" x="30" y="130">    7@responses</text>
+  <text class="n" x="30" y="150">5 % 3 = 2 · 7 % 3 = 1</text>
+  <rect class="cpu" x="676" y="74" width="246" height="42" rx="6"/>
+  <text class="t" x="688" y="92">SimpleStorageUnit 1 · CPU unpickles</text>
+  <text class="m" x="688" y="108">{responses: {7: tensor[6]}}</text>
+  <rect class="cpu" x="676" y="128" width="246" height="42" rx="6"/>
+  <text class="t" x="688" y="146">SimpleStorageUnit 2 · CPU unpickles</text>
+  <text class="m" x="688" y="162">{responses: {5: tensor[6]}}</text>
+  <path class="tcp" d="M214 98 L664 98"/><polygon class="ho" points="664,92 676,98 664,104"/>
+  <text class="og" x="300" y="91">ZMQ put {7@responses: tensor[6]}</text>
+  <path class="tcp" d="M214 150 L664 150"/><polygon class="ho" points="664,144 676,150 664,156"/>
+  <text class="og" x="300" y="143">ZMQ put {5@responses: tensor[6]}</text>
+  <text class="n" x="18" y="194">get: same route; each unit sends its rows back over ZMQ.</text>
+  <a href="https://github.com/Ascend/TransferQueue/blob/c51614308b68c8d7a87c9b3ef62d59e14c69bde2/transfer_queue/storage/managers/simple_storage_manager.py#L218-L278"><text x="18" y="213">simple_storage_manager.py:218 put_data</text></a>
+
+  <!-- ===== lane 2: mooncake_cpu ===== -->
+  <rect class="lane" x="6" y="236" width="928" height="186" rx="8"/>
+  <text class="tb" x="18" y="258">mooncake_cpu</text>
+  <text class="n" x="124" y="258">a master service picks a segment and records it · RDMA moves the bytes</text>
+  <rect class="box" x="18" y="272" width="196" height="96" rx="6"/>
+  <text class="t" x="30" y="292">client (driver or worker)</text>
+  <text class="m" x="30" y="312">batch_upsert_from(</text>
+  <text class="m" x="30" y="328">  keys, ptrs, sizes)</text>
+  <rect class="rec" x="360" y="272" width="200" height="44" rx="6"/>
+  <text class="t" x="372" y="290">Mooncake master</text>
+  <text class="m" x="372" y="307">5@responses → seg B</text>
+  <path class="ctl" d="M214 292 L348 292"/><polygon class="hd" points="348,287 360,292 348,297"/>
+  <text class="n" x="228" y="284">where?</text>
+  <rect class="unit" x="676" y="272" width="246" height="42" rx="6"/>
+  <text class="t" x="688" y="290">segment A (a client or a</text>
+  <text class="t" x="688" y="306">MooncakeStorageUnit)</text>
+  <rect class="unit" x="676" y="326" width="246" height="42" rx="6"/>
+  <text class="t" x="688" y="344">segment B</text>
+  <text class="m" x="688" y="360">5@responses (48 B)</text>
+  <path class="rdma" d="M214 348 L664 348"/><polygon class="hg" points="664,342 676,348 664,354"/>
+  <text class="go" x="300" y="341">transfer engine: RDMA WRITE</text>
+  <text class="n" x="18" y="392">get: ask the master where each key is, then RDMA READ into the client's buffer.</text>
+  <a href="https://github.com/Ascend/TransferQueue/blob/c51614308b68c8d7a87c9b3ef62d59e14c69bde2/transfer_queue/storage/clients/mooncake_client.py#L137"><text x="18" y="411">mooncake_client.py:137 put</text></a>
+
+  <!-- ===== lane 3: nixl ===== -->
+  <rect class="lane" x="6" y="434" width="928" height="200" rx="8"/>
+  <text class="tb" x="18" y="456">nixl (new)</text>
+  <text class="n" x="104" y="456">rows go to unit (row number mod 3) like simple · RDMA moves the bytes like Mooncake</text>
+  <rect class="box" x="18" y="470" width="196" height="110" rx="6"/>
+  <text class="t" x="30" y="490">client (driver or worker)</text>
+  <text class="m" x="30" y="510">put 5@responses</text>
+  <text class="m" x="30" y="526">    7@responses</text>
+  <text class="n" x="30" y="546">one blob per owner unit</text>
+  <rect class="rec" x="676" y="470" width="246" height="50" rx="6"/>
+  <text class="t" x="688" y="488">NixlStorageUnit 1 · row index</text>
+  <text class="m" x="688" y="506">{7: {responses: blob}}</text>
+  <rect class="rec" x="676" y="530" width="246" height="50" rx="6"/>
+  <text class="t" x="688" y="548">NixlStorageUnit 2 · row index</text>
+  <text class="m" x="688" y="566">{5: {responses: blob}}</text>
+  <path class="ctl" d="M214 486 L664 538"/><polygon class="hd" points="662,532 676,540 661,544"/>
+  <text class="n" x="236" y="478">1 · alloc(nbytes) → offset in the unit's pinned slab</text>
+  <path class="rdma" d="M214 552 L664 552"/><polygon class="hg" points="664,546 676,552 664,558"/>
+  <text class="go" x="300" y="545">2 · NIXL RDMA WRITE, row bytes + index</text>
+  <path class="ctl" d="M214 572 L664 572"/><polygon class="hd" points="664,567 676,572 664,577"/>
+  <text class="n" x="300" y="590">3 · commit(blob_id): the unit records the row</text>
+  <text class="n" x="18" y="606">get: resolve_keys on every owner unit at once (pins, returns offset/size/dtype/shape) → one RDMA READ per unit → unpin.</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/738312b7b9b61b2c504486386dd7ad9525087604/nemo_rl/data_plane/nixl/blobstore.py#L154-L253"><text x="18" y="625">blobstore.py:154 put_segments</text></a>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/738312b7b9b61b2c504486386dd7ad9525087604/nemo_rl/data_plane/adapters/tq_nixl.py#L540-L596"><text x="240" y="625">tq_nixl.py:540 _get_once</text></a>
+</svg>
+
+<p>The unit only hands out space, keeps the row index, and pins blobs while a reader copies them. The client moves
+the bytes itself, one-sided over RDMA
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/738312b7b9b61b2c504486386dd7ad9525087604/nemo_rl/data_plane/nixl/blobstore.py#L154-L253">put_segments</a>,
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/738312b7b9b61b2c504486386dd7ad9525087604/nemo_rl/data_plane/adapters/tq_nixl.py#L540-L596">_get_once</a>).
+Each row's owner is <code>row % N</code>
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/738312b7b9b61b2c504486386dd7ad9525087604/nemo_rl/data_plane/adapters/tq_nixl.py#L328-L330">owner()</a>),
+so a client that joins later finds rows without asking anyone.</p>
+
+<h2>Where they meet, and what still differs</h2>
+<p>All three are TQ storage managers, so everything above them is shared: the TQ controller and NeMo-RL's data-plane
+client. <code>mooncake_cpu</code> and <code>nixl</code> also share
+<a href="https://github.com/Ascend/TransferQueue/blob/c51614308b68c8d7a87c9b3ef62d59e14c69bde2/transfer_queue/storage/managers/base.py#L635-L711">KVStorageManager.put_data / get_data</a>,
+which turns a batch into <code>row@field</code> keys and calls the backend's <code>put</code> / <code>get</code>.
+They split there: <code>MooncakeStoreClient</code> vs
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/738312b7b9b61b2c504486386dd7ad9525087604/nemo_rl/data_plane/adapters/tq_nixl.py#L248">NixlKVClient</a>.
+<code>simple</code> has its own manager.</p>
+<div class="tw"><table>
+<tr><th></th><th>simple</th><th>mooncake_cpu</th><th>nixl (new)</th></tr>
+<tr><td class="k">who picks the place</td><td>row % N units</td><td>Mooncake master</td><td class="new">row % N units</td></tr>
+<tr><td class="k">who moves bytes</td><td>ZMQ over TCP, through the unit's CPU</td><td>Mooncake transfer engine, RDMA</td><td class="new">the client, NIXL/UCX, RDMA only — units refuse to start otherwise</td></tr>
+<tr><td class="k">who records where</td><td>nobody (the hash is enough)</td><td>Mooncake master</td><td class="new">the owner unit's row index; the TQ controller stores nothing</td></tr>
+<tr><td class="k">default unit count</td><td>none — <code>num_storage_units</code> is required</td><td>2 per selected node</td><td class="new">1 per node (<code>num_storage_units: null</code>)</td></tr>
+<tr><td class="k">placement setting</td><td>list of clusters, e.g. <code>[inference]</code></td><td>same as simple</td><td class="new">one word: <code>inference | train | all</code>, its own node picker</td></tr>
+<tr><td class="k">extras</td><td>—</td><td>—</td><td class="new">opt-in SSD tier for puts RAM cannot take; checkpoint restore onto a different unit count</td></tr>
+</table></div>
+<p class="hl"><b>Why keep all three.</b> <code>simple</code> needs no RDMA hardware. <code>mooncake_cpu</code> needs the Mooncake
+master. <code>nixl</code> needs RDMA and gives up running anywhere else. In return it skips the master and keeps the unit's
+CPU off the data path. In the author's 86-node run it cut put time per call from 1326 ms to 422 ms against
+<code>simple</code>, with get about the same (1091 vs 1032 ms).</p>
+
+<h2>Open review items</h2>
+<p>None of these breaks the data path in the author's runs. They are what the review asks to change before merge.</p>
+<div class="warn" id="open-items">
+<ol>
+<li><b>A put can block every other get in its process.</b> The client has one lock for all NIXL and ZMQ calls, and
+a put keeps it while it sleeps between retries
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/738312b7b9b61b2c504486386dd7ad9525087604/nemo_rl/data_plane/adapters/tq_nixl.py#L476-L489">tq_nixl.py:476</a>).
+With the SSD tier on, a put that spills waits there for its whole disk write. Ask: drop the lock only while sleeping.
+<span class="cref" id="cref-C1"></span></li>
+<li><b>The default placement puts a unit on a CPU-only Ray head.</b> With <code>storage_unit_placement: all</code> the PR's
+own node picker, which means "GPU nodes", is skipped
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/738312b7b9b61b2c504486386dd7ad9525087604/nemo_rl/data_plane/adapters/transfer_queue.py#L973">transfer_queue.py:973</a>),
+so every alive node gets a unit with 16 GiB of pinned memory. One-line fix.
+<span class="cref" id="cref-C2"></span></li>
+<li><b>The end-to-end NIXL tests never run in CI.</b> They skip unless <code>UCX_TLS</code> is set, and CI never sets it
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/738312b7b9b61b2c504486386dd7ad9525087604/tests/unit/data_plane/conftest.py#L130-L143">conftest.py:130</a>).
+Restore onto a different unit count and unit-death handling have no automated test today.
+<span class="cref" id="cref-C3"></span></li>
+<li><b>Config shape.</b> The <code>ssd</code> and <code>nixl</code> blocks are untyped dicts, so a typo is ignored and SSD on
+without a directory writes to <code>/tmp</code>. The placement setting takes one word where the other backends take a list,
+which will break configs when NIXL moves to the shared planner.
+<span class="cref" id="cref-C5"></span> <span class="cref" id="cref-C6"></span></li>
+</ol>
+</div>
+
+</div>
+</body>
+</html>
