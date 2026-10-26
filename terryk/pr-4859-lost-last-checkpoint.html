@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NVIDIA-NeMo/RL #4859 — why a run that ends early keeps its last checkpoint unpublished</title>
+<style>
+:root{--bg:#0d1117;--surface:#161b22;--surface2:#1c2128;--border:#30363d;--text:#e6edf3;--dim:#8b949e;
+  --accent:#58a6ff;--green:#3fb950;--red:#f85149;--orange:#d29922}
+:root[data-theme="light"]{--bg:#ffffff;--surface:#f6f8fa;--surface2:#eaeef2;--border:#d0d7de;--text:#1f2328;
+  --dim:#59636e;--accent:#0969da;--green:#1a7f37;--red:#cf222e;--orange:#9a6700}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:28px 16px 70px}
+h1{font-size:22px;margin:0 0 8px;line-height:1.3}
+h2{font-size:18px;margin:30px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
+.sub{color:var(--dim);font-size:13.5px;margin:0 0 14px}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);
+  border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;
+  font:13px/1 ui-monospace,monospace;cursor:pointer}
+.status{border:1px solid var(--border);border-radius:10px;background:var(--surface);padding:4px 14px 12px;margin:0 0 18px;overflow-x:auto}
+.status table{border-collapse:collapse;width:100%;font-size:13.5px;margin-top:8px}
+.status th,.status td{text-align:left;vertical-align:top;padding:5px 8px;border-bottom:1px solid var(--border)}
+.status th{color:var(--dim);font-size:12px;text-transform:uppercase;letter-spacing:.04em;white-space:nowrap}
+.status tr:last-child td,.status tr:last-child th{border-bottom:none}
+.verdict{font-weight:700}
+.verdict.open{color:var(--red)}
+nav.chain{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 6px;padding:0}
+nav.chain a,nav.chain span{display:inline-block;padding:5px 11px;border:1px solid var(--border);
+  border-radius:20px;background:var(--surface);text-decoration:none;color:var(--accent);
+  font-size:12.5px;line-height:1.3;white-space:nowrap}
+nav.chain a:hover{background:var(--surface2)}
+nav.chain span.here{background:var(--accent);color:var(--bg);border-color:var(--accent);font-weight:600}
+p.chainnote{color:var(--dim);font-size:12px;margin:0 0 18px}
+.warn{border-left:4px solid var(--red);background:var(--surface);padding:10px 14px;margin:16px 0;border-radius:0 8px 8px 0}
+.where{border-left:4px solid var(--accent);background:var(--surface);padding:6px 12px;margin:6px 0 10px}
+.cref{margin:6px 0 0;font-size:13px}
+.cref a{display:inline-block;padding:4px 10px;border:1px solid var(--border);border-radius:16px;background:var(--surface);font:12.5px ui-monospace,Menlo,monospace}
+.diff{font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--surface);
+  border:1px solid var(--border);border-radius:8px;padding:12px;overflow-x:auto;white-space:pre;margin:10px 0}
+.diff .add{color:var(--green)}
+.diff .del{color:var(--red)}
+.diff .hunk{color:var(--accent)}
+ol li{margin:3px 0}
+svg{max-width:100%;height:auto;display:block;margin:14px 0}
+svg .box{fill:var(--surface);stroke:var(--border);stroke-width:1.4}
+svg .bad{fill:var(--surface);stroke:var(--red);stroke-width:2}
+svg .ok{fill:var(--surface);stroke:var(--green);stroke-width:2}
+svg .poll{fill:var(--surface2);stroke:var(--dim);stroke-width:1.4}
+svg .lbl{fill:var(--text);font:12px ui-monospace,Menlo,monospace}
+svg .lane{fill:var(--text);font:bold 13px -apple-system,sans-serif}
+svg .col{fill:var(--dim);font:bold 12px -apple-system,sans-serif}
+svg .note{fill:var(--dim);font:11.5px -apple-system,sans-serif}
+svg .red{fill:var(--red);font:bold 12.5px ui-monospace,Menlo,monospace}
+svg .grn{fill:var(--green);font:bold 12.5px ui-monospace,Menlo,monospace}
+svg .arrow{stroke:var(--dim);stroke-width:1.4;fill:none;marker-end:url(#ah)}
+svg a text{text-decoration:underline;fill:var(--accent);font:11px ui-monospace,Menlo,monospace}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+  document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head>
+<body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+  function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+  function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
+    b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
+      else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+  document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+<div class="wrap">
+
+<h1>Why a run that ends when its data runs out leaves its last checkpoint unpublished</h1>
+<p class="sub"><a href="https://github.com/NVIDIA-NeMo/RL/pull/4859">NVIDIA-NeMo/RL #4859</a>, flag
+<code>async_rl.defer_async_checkpoint_finalize: true</code>. All permalinks pin the PR head <code>0a4103fb</code>.</p>
+
+<div class="status">
+<table>
+<tr><th></th><th>SFT v2</th><th>SingleController (GRPO / PPO)</th></tr>
+<tr><th>main</th><td colspan="2">Every exit publishes the last save: <code>run()</code>'s cleanup calls <code>CheckpointManager.shutdown()</code>, which waits for the background thread that finalizes and renames it.</td></tr>
+<tr><th>This PR (flag on)</th><td>Only a normal exit finalizes. An error after a save leaves it as <code>tmp_step_N/</code>.</td><td>Same for errors, <b>and</b> for the normal end of an epoch-limited run: the loop leaves through an early <code>return</code> that skips the final finalize.</td></tr>
+<tr><th>After review fixes</th><td>Finalize the pending save first in <code>run()</code>'s cleanup (C2).</td><td>Finalize the pending save in <code>run()</code>'s cleanup, before <code>shutdown()</code> (C1).</td></tr>
+<tr><th>Status</th><td colspan="2"><span class="verdict open">Open — not fixed in this PR.</span> Raised in review comments C1 and C2. Default runs (flag off) are not affected.</td></tr>
+</table>
+</div>
+
+<nav class="chain">
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4859-overlap-write.html">1 · write overlaps training</a>
+  <span class="here">2 · lost last checkpoint</span>
+</nav>
+<p class="chainnote">Two pages on this PR, one question each — this one: which exits lose the last save.</p>
+
+<p>With the flag on, a save is published only by
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/0a4103fb6305cbd41d34fbcac1d4699c12c76eb3/nemo_rl/algorithms/single_controller.py#L5393-L5417"><code>_finish_pending_save</code></a>.
+The train loop calls it at the top of each step and once more, blocking, after the loop
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/0a4103fb6305cbd41d34fbcac1d4699c12c76eb3/nemo_rl/algorithms/single_controller.py#L3906">L3906</a>).
+But a run limited by epochs ends differently: when the data is used up, the last step is marked final and saves
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/0a4103fb6305cbd41d34fbcac1d4699c12c76eb3/nemo_rl/algorithms/single_controller.py#L3725-L3727">L3725</a>),
+the loop goes round once more, finds nothing to train, and leaves through a plain
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/0a4103fb6305cbd41d34fbcac1d4699c12c76eb3/nemo_rl/algorithms/single_controller.py#L3115"><code>return</code></a>
+that skips L3906. The GRPO example config ends this way: <code>max_num_epochs: 1</code>, <code>max_num_steps: 1000000</code>.</p>
+
+<h2>The last two steps of a 2-step run, with and without the flag</h2>
+
+<svg viewBox="0 0 900 330" role="img" aria-label="Two timelines. Main: step 2 saves, the loop returns, shutdown waits for the background finalize, disk has step_1 and step_2. Flag on: step 2 saves as pending, the next pass polls False and returns, shutdown has nothing to wait for, disk has step_1 and tmp_step_2.">
+  <defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10z" fill="var(--dim)"/></marker></defs>
+  <text class="col" x="150" y="22">step 2 — data used up, saves</text>
+  <text class="col" x="400" y="22">loop goes round once more</text>
+  <text class="col" x="660" y="22">run() cleanup</text>
+
+  <text class="lane" x="12" y="66">main</text>
+  <rect class="box" x="140" y="46" width="230" height="32" rx="6"/>
+  <text class="lbl" x="150" y="66">save → thread will finalize</text>
+  <path class="arrow" d="M372 62 L392 62"/>
+  <rect class="box" x="396" y="46" width="230" height="32" rx="6"/>
+  <text class="lbl" x="406" y="66">nothing to train → return</text>
+  <path class="arrow" d="M628 62 L648 62"/>
+  <rect class="ok" x="652" y="46" width="236" height="32" rx="6"/>
+  <text class="lbl" x="662" y="66">shutdown() waits → finalize</text>
+  <text class="note" x="140" y="100">disk at exit:</text>
+  <text class="grn" x="230" y="100">step_1/  step_2/</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/0a4103fb6305cbd41d34fbcac1d4699c12c76eb3/nemo_rl/utils/checkpoint.py#L508-L513"><text x="652" y="98">shutdown() joins the thread</text></a>
+
+  <text class="lane" x="12" y="166">flag on</text>
+  <rect class="box" x="140" y="146" width="230" height="32" rx="6"/>
+  <text class="lbl" x="150" y="166">save → marked pending</text>
+  <path class="arrow" d="M372 162 L392 162"/>
+  <rect class="poll" x="396" y="146" width="90" height="32" rx="6"/>
+  <text class="lbl" x="404" y="166">poll→False</text>
+  <rect class="bad" x="492" y="146" width="134" height="32" rx="6"/>
+  <text class="lbl" x="500" y="166">return (L3115)</text>
+  <path class="arrow" d="M628 162 L648 162"/>
+  <rect class="bad" x="652" y="146" width="236" height="32" rx="6"/>
+  <text class="lbl" x="662" y="166">shutdown(): nothing to wait</text>
+  <text class="note" x="140" y="200">disk at exit:</text>
+  <text class="grn" x="230" y="200">step_1/</text>
+  <text class="red" x="300" y="200">tmp_step_2/</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/0a4103fb6305cbd41d34fbcac1d4699c12c76eb3/nemo_rl/algorithms/single_controller.py#L3906"><text x="396" y="198">skipped: L3906 blocking finalize</text></a>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/0a4103fb6305cbd41d34fbcac1d4699c12c76eb3/nemo_rl/algorithms/single_controller.py#L956-L958"><text x="652" y="198">cleanup ignores the pending save</text></a>
+
+  <rect class="ok" x="12" y="236" width="16" height="12"/><text class="note" x="34" y="246">last save published</text>
+  <rect class="bad" x="190" y="236" width="16" height="12"/><text class="note" x="212" y="246">where the pending save is dropped</text>
+  <rect class="poll" x="430" y="236" width="16" height="12"/><text class="note" x="452" y="246">quick check, write not done yet</text>
+  <text class="note" x="12" y="282">The process still exits 0. The workers' final metadata write and barrier never run, so renaming</text>
+  <text class="note" x="12" y="298">tmp_step_2/ by hand does not give a complete checkpoint. Resume starts from step_1.</text>
+  <text class="note" x="12" y="318">Reproduced on CPU: the existing exhaustion test, run with the flag on, ends with {step_1, tmp_step_2}.</text>
+</svg>
+
+<ol>
+<li>Step 2 is the last step because the data is used up, so it saves. With the flag on, the save is only
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/0a4103fb6305cbd41d34fbcac1d4699c12c76eb3/nemo_rl/algorithms/single_controller.py#L5377-L5380">marked pending</a>.</li>
+<li>The loop condition only checks <code>max_num_steps</code>, so the loop runs once more. Its first poll comes right after the save, so the write is not done: <code>False</code>.</li>
+<li>No batch is left, so the loop <a href="https://github.com/NVIDIA-NeMo/RL/blob/0a4103fb6305cbd41d34fbcac1d4699c12c76eb3/nemo_rl/algorithms/single_controller.py#L3115">returns</a> and never reaches the blocking finalize after it.</li>
+<li><code>run()</code>'s cleanup calls <a href="https://github.com/NVIDIA-NeMo/RL/blob/0a4103fb6305cbd41d34fbcac1d4699c12c76eb3/nemo_rl/algorithms/single_controller.py#L958"><code>CheckpointManager.shutdown()</code></a>. The manager was never told about the pending save, so it does nothing.</li>
+</ol>
+<p>An error in the step after a save takes the same route to the cleanup, in both the SingleController and
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/0a4103fb6305cbd41d34fbcac1d4699c12c76eb3/nemo_rl/algorithms/sft_v2.py#L257-L266">SFT v2</a>,
+and drops the save the same way. On main, that cleanup publishes it.</p>
+<p class="cref">🔴 <span>review comment C1 — single_controller.py:3906</span> · <span>review comment C2 — sft_v2.py:255</span></p>
+
+<h2>The fix — proposed in the review, not in the PR</h2>
+<p class="where"><b>Where the fix lands: RL only, two functions.</b> Nothing below is implemented in the PR. Finalize a
+still-pending save in each <code>run()</code>'s cleanup, before <code>shutdown()</code>. One spot covers every exit:
+the early <code>return</code>, errors, and cancellation. The existing finalize after the loop stays, and the cleanup call is
+a no-op when nothing is pending.</p>
+<pre class="diff"><span class="hunk">@@ single_controller.py L956-L958 · SingleControllerActor._run_pumps (finally)</span>
+             finally:
+                 self._logger.finish()
+<span class="add">+                try:
++                    # Exits that skip the train pump's own final finalize (data used
++                    # up, errors, cancellation) must still publish a deferred save.
++                    await self._finish_pending_save(blocking=True)
++                except Exception as e:  # teardown must not mask the original failure
++                    print(f"Error finalizing deferred checkpoint: {e}", flush=True)</span>
+                 await asyncio.to_thread(self._checkpointer.shutdown)
+<span class="hunk">@@ sft_v2.py L255-L259 · SFTSingleControllerActor.run</span>
+<span class="del">-                self._finish_pending_save(blocking=True)
+</span>                 return vars(self._save_state).copy()
+         finally:
+             for cleanup, name in (
+<span class="add">+                # Publish a deferred save on every exit, including errors.
++                (
++                    lambda: self._finish_pending_save(blocking=True),
++                    "pending checkpoint finalize",
++                ),</span>
+                 (self._close_loaders, "loader close"),
+                 (self._logger.finish, "logger close"),
+                 (self._checkpointer.shutdown, "checkpoint close"),</pre>
+<ol>
+<li>Both additions call the PR's own <code>_finish_pending_save(blocking=True)</code>: wait for the write on every worker, then rename the folder. This is what main's cleanup already does through <code>shutdown()</code>, so a stuck worker hangs here exactly as it does today.</li>
+<li>The SingleController addition goes before <code>shutdown()</code>, so the rename is done before the manager's final cleanup, like a normal exit.</li>
+<li>The SFT v2 entry reuses the existing loop, which turns a failure into a warning, so it never hides the error that ended the run.</li>
+</ol>
+
+<div class="warn"><b>So what.</b> With the flag on, every epoch-limited SingleController run (the GRPO example's default)
+finishes with exit code 0 and an unusable last checkpoint, and resume goes back one save interval. Any error in the step
+after a save does the same, for both loops. The PR's tests miss it because they all stop at <code>max_num_steps</code>.
+The fix is a few lines in each cleanup, plus a test: the existing exhaustion test run with the flag on.</div>
+
+</div>
+</body>
+</html>

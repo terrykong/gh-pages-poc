@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NVIDIA-NeMo/RL #4859 — how a deferred finalize lets the checkpoint write overlap training</title>
+<style>
+:root{--bg:#0d1117;--surface:#161b22;--surface2:#1c2128;--border:#30363d;--text:#e6edf3;--dim:#8b949e;
+  --accent:#58a6ff;--green:#3fb950;--red:#f85149;--orange:#d29922}
+:root[data-theme="light"]{--bg:#ffffff;--surface:#f6f8fa;--surface2:#eaeef2;--border:#d0d7de;--text:#1f2328;
+  --dim:#59636e;--accent:#0969da;--green:#1a7f37;--red:#cf222e;--orange:#9a6700}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:28px 16px 70px}
+h1{font-size:22px;margin:0 0 8px;line-height:1.3}
+h2{font-size:18px;margin:30px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
+.sub{color:var(--dim);font-size:13.5px;margin:0 0 14px}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);
+  border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;
+  font:13px/1 ui-monospace,monospace;cursor:pointer}
+.status{border:1px solid var(--border);border-radius:10px;background:var(--surface);padding:4px 14px 12px;margin:0 0 18px;overflow-x:auto}
+.status table{border-collapse:collapse;width:100%;font-size:13.5px;margin-top:8px}
+.status th,.status td{text-align:left;vertical-align:top;padding:5px 8px;border-bottom:1px solid var(--border)}
+.status th{color:var(--dim);font-size:12px;text-transform:uppercase;letter-spacing:.04em;white-space:nowrap}
+.status tr:last-child td,.status tr:last-child th{border-bottom:none}
+.verdict{font-weight:700}
+.verdict.good{color:var(--green)}
+.verdict.open{color:var(--red)}
+nav.chain{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 6px;padding:0}
+nav.chain a,nav.chain span{display:inline-block;padding:5px 11px;border:1px solid var(--border);
+  border-radius:20px;background:var(--surface);text-decoration:none;color:var(--accent);
+  font-size:12.5px;line-height:1.3;white-space:nowrap}
+nav.chain a:hover{background:var(--surface2)}
+nav.chain span.here{background:var(--accent);color:var(--bg);border-color:var(--accent);font-weight:600}
+p.chainnote{color:var(--dim);font-size:12px;margin:0 0 18px}
+.bg{border-left:4px solid var(--dim);background:var(--surface);padding:8px 14px;margin:0 0 14px;font-size:14px}
+.hl{border-left:4px solid var(--green);background:var(--surface);padding:10px 14px;margin:16px 0;border-radius:0 8px 8px 0}
+.cref{margin:6px 0 0;font-size:13px}
+.cref a{display:inline-block;padding:4px 10px;border:1px solid var(--border);border-radius:16px;background:var(--surface);font:12.5px ui-monospace,Menlo,monospace}
+.tip{border-bottom:1px dotted var(--dim);cursor:help;position:relative;outline:none}
+.tip:hover::after,.tip:focus::after{content:attr(data-tip);position:absolute;left:0;top:1.7em;z-index:60;
+  width:max-content;max-width:min(340px,80vw);white-space:normal;background:var(--surface2);color:var(--text);
+  border:1px solid var(--border);border-radius:6px;padding:7px 10px;font:13px/1.45 -apple-system,sans-serif;
+  font-weight:400;box-shadow:0 4px 14px rgba(0,0,0,.3)}
+ol li{margin:3px 0}
+svg{max-width:100%;height:auto;display:block;margin:14px 0}
+svg .box{fill:var(--surface);stroke:var(--border);stroke-width:1.4}
+svg .bad{fill:var(--surface);stroke:var(--red);stroke-width:2}
+svg .ok{fill:var(--surface);stroke:var(--green);stroke-width:2}
+svg .cheap{fill:var(--surface);stroke:var(--orange);stroke-width:2}
+svg .poll{fill:var(--surface2);stroke:var(--dim);stroke-width:1.4}
+svg .write{fill:var(--accent);opacity:.35}
+svg .lbl{fill:var(--text);font:12px ui-monospace,Menlo,monospace}
+svg .lane{fill:var(--text);font:bold 13px -apple-system,sans-serif}
+svg .col{fill:var(--dim);font:bold 12px -apple-system,sans-serif}
+svg .note{fill:var(--dim);font:11.5px -apple-system,sans-serif}
+svg .red{fill:var(--red);font:bold 12px -apple-system,sans-serif}
+svg .grn{fill:var(--green);font:bold 12px -apple-system,sans-serif}
+svg .sep{stroke:var(--border);stroke-dasharray:4 4}
+svg a text{text-decoration:underline;fill:var(--accent);font:11px ui-monospace,Menlo,monospace}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+  document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head>
+<body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+  function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+  function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
+    b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
+      else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+  document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+<div class="wrap">
+
+<h1>How waiting for the checkpoint write at the next step boundary lets it overlap training</h1>
+<p class="sub"><a href="https://github.com/NVIDIA-NeMo/RL/pull/4859">NVIDIA-NeMo/RL #4859</a> — opt-in flags
+<code>sft.defer_async_checkpoint_finalize</code> and <code>async_rl.defer_async_checkpoint_finalize</code>.
+All permalinks pin the PR head <code>0a4103fb</code>.</p>
+
+<div class="status">
+<table>
+<tr><th></th><th>SFT v2</th><th>SingleController (GRPO / PPO)</th></tr>
+<tr><th>main</th><td colspan="2">After an async save, a background thread runs the <em>blocking</em> finalize on the policy workers. The next training step queues behind the whole disk write.</td></tr>
+<tr><th>This PR (flag on)</th><td colspan="2">The save is only marked pending. At the start of each step the controller asks the workers "is the write done?" without waiting, and finalizes once it is. The write overlaps the next step.</td></tr>
+<tr><th>After review fixes</th><td>+ finalize a pending save in <code>run()</code>'s cleanup, so an error does not drop it (C2).</td><td>+ the same in <code>run()</code>'s cleanup, which also covers runs that end because the data ran out (C1); reject the flag together with rollout snapshots (C3).</td></tr>
+<tr><th>Status</th><td colspan="2"><span class="verdict good">Works as described on the normal path.</span> <span class="verdict open">Two exit paths lose the last checkpoint — open in the review</span> (<a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4859-lost-last-checkpoint.html">page 2</a>). v1 loops are untouched; SFT v1 rejects the flag.</td></tr>
+</table>
+</div>
+
+<nav class="chain">
+  <span class="here">1 · write overlaps training</span>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4859-lost-last-checkpoint.html">2 · lost last checkpoint</a>
+</nav>
+<p class="chainnote">Two pages on this PR, one question each — this one: what the flag changes.</p>
+
+<div class="bg"><b>Background.</b> With Megatron <code>async_save</code>, each policy worker hands the checkpoint
+files to a background writer and returns. <span class="tip" tabindex="0" data-tip="Waits for every rank's background write, writes the final metadata, and runs a barrier across all ranks. Only after this is the checkpoint complete.">Finalize</span>
+is the step that waits for that write to end on every rank. After it, NeMo-RL renames <code>tmp_step_N/</code> to
+<code>step_N/</code>, the name resume looks for. A Ray actor runs one call at a time, so any call that waits inside a
+worker blocks the calls queued behind it. Dotted words have a short explanation: hover or tap them.</div>
+
+<p>On main, the save hands the folder to
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/0a4103fb6305cbd41d34fbcac1d4699c12c76eb3/nemo_rl/utils/checkpoint.py#L436-L492"><code>CheckpointManager.begin_finalization(path, wait_fn=finalize_async_save)</code></a>,
+which starts a thread that calls the workers' blocking
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/0a4103fb6305cbd41d34fbcac1d4699c12c76eb3/nemo_rl/models/policy/workers/megatron_policy_worker.py#L5132-L5156"><code>finalize_async_save</code></a>.
+That call reaches each worker first, so the next step's training call waits behind the write.
+With the flag on, the save only records the folder as pending
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/0a4103fb6305cbd41d34fbcac1d4699c12c76eb3/nemo_rl/algorithms/sft_v2.py#L464-L465">SFT v2</a>,
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/0a4103fb6305cbd41d34fbcac1d4699c12c76eb3/nemo_rl/algorithms/single_controller.py#L5377-L5380">SingleController</a>).
+Each step then starts with a quick, non-waiting check,
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/0a4103fb6305cbd41d34fbcac1d4699c12c76eb3/nemo_rl/models/policy/workers/megatron_policy_worker.py#L5158-L5177"><code>poll_async_save</code></a>.</p>
+
+<h2>Same save, two ways to wait for it</h2>
+
+<svg viewBox="0 0 900 400" role="img" aria-label="Two timelines over steps 2 to 4. Main: step 3 starts with an 8.1 second blocking finalize. Flag on: step 3 starts with a poll that returns False and trains while the write runs; step 4's poll returns True and finalizes in about 1 second.">
+  <text class="col" x="200" y="22">step 2 — saves</text>
+  <text class="col" x="440" y="22">step 3</text>
+  <text class="col" x="690" y="22">step 4</text>
+  <line class="sep" x1="390" y1="30" x2="390" y2="330"/>
+  <line class="sep" x1="640" y1="30" x2="640" y2="330"/>
+
+  <text class="lane" x="12" y="62">main</text>
+  <text class="note" x="12" y="78">background</text>
+  <text class="note" x="12" y="92">thread waits</text>
+  <rect class="box" x="160" y="44" width="220" height="30" rx="6"/>
+  <text class="lbl" x="172" y="64">train 2 → save_checkpoint</text>
+  <rect class="bad" x="400" y="44" width="120" height="30" rx="6"/>
+  <text class="lbl" x="408" y="58">finalize, waits</text>
+  <text class="red" x="408" y="71">8.1 s</text>
+  <rect class="box" x="526" y="44" width="106" height="30" rx="6"/>
+  <text class="lbl" x="536" y="64">train 3</text>
+  <rect class="box" x="650" y="44" width="230" height="30" rx="6"/>
+  <text class="lbl" x="662" y="64">train 4</text>
+  <rect class="write" x="330" y="82" width="190" height="10" rx="3"/>
+  <text class="note" x="160" y="91">disk write →</text>
+  <text class="lbl" x="160" y="116">tmp_step_2/</text>
+  <text class="lbl" x="526" y="116">→ step_2/</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/0a4103fb6305cbd41d34fbcac1d4699c12c76eb3/nemo_rl/utils/checkpoint.py#L475-L476"><text x="160" y="134">thread: wait_fn() blocks the workers</text></a>
+
+  <text class="lane" x="12" y="192">flag on</text>
+  <text class="note" x="12" y="208">controller</text>
+  <text class="note" x="12" y="222">polls each step</text>
+  <rect class="box" x="160" y="174" width="220" height="30" rx="6"/>
+  <text class="lbl" x="172" y="194">train 2 → save_checkpoint</text>
+  <rect class="poll" x="400" y="174" width="52" height="30" rx="6"/>
+  <text class="lbl" x="408" y="194">poll</text>
+  <rect class="ok" x="458" y="174" width="174" height="30" rx="6"/>
+  <text class="lbl" x="470" y="194">train 3</text>
+  <rect class="cheap" x="650" y="174" width="104" height="30" rx="6"/>
+  <text class="lbl" x="656" y="188">poll+finalize</text>
+  <text class="lbl" x="656" y="200">~1.0 s</text>
+  <rect class="box" x="760" y="174" width="120" height="30" rx="6"/>
+  <text class="lbl" x="770" y="194">train 4</text>
+  <rect class="write" x="330" y="212" width="190" height="10" rx="3"/>
+  <text class="note" x="160" y="221">disk write →</text>
+  <text class="lbl" x="160" y="246">pending: tmp_step_2/</text>
+  <text class="lbl" x="400" y="246">→ False</text>
+  <text class="lbl" x="650" y="246">→ True, then step_2/</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/0a4103fb6305cbd41d34fbcac1d4699c12c76eb3/nemo_rl/algorithms/sft_v2.py#L471-L488"><text x="160" y="264">_finish_pending_save(blocking=False)</text></a>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/0a4103fb6305cbd41d34fbcac1d4699c12c76eb3/nemo_rl/models/policy/workers/megatron_policy_worker.py#L5176"><text x="400" y="282">maybe_finalize_async_save(blocking=False)</text></a>
+
+  <rect class="bad" x="160" y="306" width="16" height="12"/><text class="note" x="182" y="316">step waits for the write</text>
+  <rect class="ok" x="340" y="306" width="16" height="12"/><text class="note" x="362" y="316">training runs during the write</text>
+  <rect class="cheap" x="560" y="306" width="16" height="12"/><text class="note" x="582" y="316">short finalize, write already done</text>
+  <rect class="write" x="160" y="330" width="16" height="10"/><text class="note" x="182" y="340">background disk write</text>
+  <text class="note" x="12" y="372">Times are the PR's 32-node SFT v2 run: 8.1 s before, ~1.0 s with the flag.</text>
+  <text class="note" x="12" y="388">The next save and the end of training still finalize blocking, as Megatron-Bridge does.</text>
+</svg>
+
+<ol>
+<li>Step 2 saves. Each worker starts its background write and returns at once — the same on both paths.</li>
+<li><b>Main:</b> the background thread's <a href="https://github.com/NVIDIA-NeMo/RL/blob/0a4103fb6305cbd41d34fbcac1d4699c12c76eb3/nemo_rl/models/policy/lm_policy.py#L1545-L1552">blocking finalize</a> reaches the workers before step 3's training call, so step 3 waits the full write.</li>
+<li><b>Flag on:</b> step 3 starts with <a href="https://github.com/NVIDIA-NeMo/RL/blob/0a4103fb6305cbd41d34fbcac1d4699c12c76eb3/nemo_rl/models/policy/lm_policy.py#L1554-L1567"><code>Policy.poll_async_save()</code></a>. All ranks agree "not done" in one quick check, so it returns <code>False</code> and step 3 trains while the write runs.</li>
+<li>Step 4's check finds the write done, so the workers run the short finalize and the controller renames the folder through the same <a href="https://github.com/NVIDIA-NeMo/RL/blob/0a4103fb6305cbd41d34fbcac1d4699c12c76eb3/nemo_rl/algorithms/single_controller.py#L5393-L5417"><code>begin_finalization(path)</code></a>, now without a <code>wait_fn</code>.</li>
+</ol>
+
+<h2>Where the two paths meet, and what still differs</h2>
+<p>Both end in <a href="https://github.com/NVIDIA-NeMo/RL/blob/0a4103fb6305cbd41d34fbcac1d4699c12c76eb3/nemo_rl/utils/checkpoint.py#L436-L492"><code>CheckpointManager.begin_finalization</code></a>,
+which renames the folder and prunes old checkpoints. The only difference is <b>who waits for the write</b>: on main a thread
+does, at a time the training loop does not control; with the flag on, the loop does, at a step boundary on every rank at once.
+That matters because the check runs a
+<span class="tip" tabindex="0" data-tip="NVRx sums 'still writing' across all ranks with an all-reduce on the default process group, then runs the finalize callbacks and a barrier. Every rank must make this call at the same point.">collective across all ranks</span>.
+Megatron-Bridge's own loop does the same check at the top of each iteration
+(<a href="https://github.com/NVIDIA-NeMo/Megatron-Bridge/blob/7e9dcd609edf2bb9478d3fa4d9b9f8ee3875c16e/src/megatron/bridge/training/train.py#L407-L409">train.py#L408</a>).
+The flag is opt-in because one thing gets worse: the save stays <code>tmp_step_2/</code> until a later step boundary, so any exit
+that skips that boundary must finalize on its own. Two exits do not — see
+<a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4859-lost-last-checkpoint.html">page 2</a>.</p>
+
+<div class="hl"><b>So what.</b> For SFT v2 the PR measured the wait after a save drop from 8.1 s to about 1.0 s at 32 nodes.
+The SingleController has no numbers yet. There, with <code>overlap_param_gather</code> on, the weight sync before generation
+already finalizes the write, so part of the wait may just move into weight-sync time rather than go away.
+The review asks for one non-colocated GRPO run with the flag off and on.
+<p class="cref">🟡 review comment C4 — single_controller_utils/config.py</p></div>
+
+</div>
+</body>
+</html>
