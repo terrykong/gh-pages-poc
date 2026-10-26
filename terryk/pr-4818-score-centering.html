@@ -120,15 +120,23 @@ vLLM's probability for K candidates at every position. Dotted words have a short
 The loss for that token is −A·log p(y), so one training step moves each logit z<sub>k</sub> by A times the derivative of log p(y).
 Because p comes from a softmax over the logits, that derivative is short:</p>
 <div class="tex">\log p(y) = z_y - \log \sum_j e^{z_j} \quad\Longrightarrow\quad \frac{\partial \log p(y)}{\partial z_k} = \mathbf{1}[k = y] - p_k</div>
-<p style="font-size:14px">The first part gives +1 to the sampled token only. The second part, the derivative of the
-log-sum, is −p<sub>k</sub> for every token. So the push is "the sampled token minus the trainer's own distribution".
+<p style="font-size:14px">The first part is +1 on the sampled id only; write it as a one-hot vector
+e<sub>y</sub> (1 at id y, 0 everywhere else). The second part is −p<sub>k</sub> on every id. So the push is
+e<sub>y</sub> − p: "one-hot at the sampled id" minus "the trainer's probabilities". Every number in it is the
+trainer's; this is plain calculus, not importance sampling. vLLM's only role is choosing which id gets the 1.
 With y = 17 and trainer probabilities 0.60, 0.15 and 0.25 for the rest, that is +0.40, −0.15, −0.25: the top row below.
-(The clipped loss multiplies this by its ratio; with IS off and an unclipped token at ratio 1, the factor is 1.)
-Split it in two. The <b class="t2">signal</b> is "the sampled token minus what vLLM expected to sample". It averages to
-exactly zero over vLLM's sampling, so it only moves the model when a token did better or worse than vLLM expected.
-The rest is a <b class="t4">pull toward vLLM</b>: vLLM's distribution minus the trainer's. It is the same whichever
-token was sampled. So every token with A&nbsp;&gt;&nbsp;0 drags the trainer toward vLLM, and every token with A&nbsp;&lt;&nbsp;0
-pushes it away, whether or not that token earned its reward.</p>
+(The clipped loss multiplies this by its ratio; with IS off and an unclipped token at ratio 1, the factor is 1.)</p>
+<p style="font-size:14px">Now add vLLM's distribution q and subtract it again. Nothing changes; it only regroups the same push:</p>
+<div class="tex">\underbrace{e_y - p}_{\text{plain push}} \;=\; \underbrace{\htmlClass{t2}{(e_y - q)}}_{\text{signal}} \;+\; \underbrace{\htmlClass{t4}{(q - p)}}_{\text{pull toward vLLM}}</div>
+<p style="font-size:14px">Why q? Because y was drawn from q, so the one-hot e<sub>y</sub>, averaged over vLLM's draws, is
+exactly q. (Here: id 17 gets picked 72% of the time, id 4 18%, the rest 10%.)</p>
+<ul class="syms">
+  <li>The <b class="t2">signal</b> e<sub>y</sub> − q is "the id vLLM actually picked" minus "what vLLM picks on average".
+  Both sides are vLLM's on purpose: it averages to exactly zero, so it only moves the model through A, when a token did better or worse than average.</li>
+  <li>The <b class="t4">pull toward vLLM</b> q − p is vLLM's distribution minus the trainer's. It has no y in it, so it is the same
+  push whichever id was sampled. Every token with A&nbsp;&gt;&nbsp;0 drags the trainer toward vLLM, and every token with
+  A&nbsp;&lt;&nbsp;0 pushes it away, whether or not that token earned its reward.</li>
+</ul>
 <svg viewBox="0 0 960 346" role="img" aria-label="The plain update for the sampled token splits into a signal part and a pull toward vLLM. Score centering keeps the signal and removes the pull.">
   <text class="row" x="430" y="20" text-anchor="middle">id 17 (sampled)</text>
   <text class="row" x="600" y="20" text-anchor="middle">id 4</text>
