@@ -292,6 +292,24 @@ and c = m − α·p. Same example as above: q = 0.72, 0.18 and p = 0.60, 0.15 at
 <tr><td><b>ICEPOP</b>, bounds [0.5, 2]<br><code>type: icepop</code></td><td>p/q if inside the bounds, else 0</td><td>p<sub>v</sub> if p/q inside, else 0 (here: inside)</td><td>1 if 1/ρ inside, else 0 (1/ρ = 2.5: outside → 0)</td><td><b>0.60, 0.15</b><br>= p − 0·p</td></tr>
 <tr><td><b>ICEPOP</b>, bounds [0.5, 3]</td><td>same</td><td>p<sub>v</sub></td><td>1 (2.5 is inside)</td><td><b>0, 0</b></td></tr>
 </table>
+<p style="font-size:14px;margin-bottom:2px"><b>The whole per-token loss in each mode.</b> y is the sampled id,
+<span class="t1">first part = the existing clipped loss</span>, <span class="t2">second part = the score-centering term</span>.
+r = p(y)/p<sub>old</sub>(y) is the PPO ratio; u = p<sub>old</sub>(y)/q(y) is the vLLM-to-trainer weight
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/f0d9860e0da96c487dc8d4bd2ec683b56ef4b4e2/nemo_rl/algorithms/loss/loss_functions.py#L938-L1010">loss_functions.py L938</a>); ε is the PPO clip.
+The KL term, if on, is unchanged and left out. Each ℓ is then averaged over tokens.</p>
+<p style="font-size:13.5px;margin:10px 0 0"><b>IS off</b></p>
+<div class="tex">\ell = \htmlClass{t1}{\max\!\big(-A\,r,\; -A\,\operatorname{clip}(r,1{-}\epsilon,1{+}\epsilon)\big)} \;+\; \htmlClass{t2}{A\sum_{v\in H}\mathrm{sg}\big[\,q_v - \rho\,p_v\,\big]\log p_v}</div>
+<p style="font-size:13.5px;margin:10px 0 0"><b>Plain IS</b></p>
+<div class="tex">\ell = \htmlClass{t1}{\mathrm{sg}[u]\cdot\max\!\big(-A\,r,\; -A\,\operatorname{clip}(r,1{-}\epsilon,1{+}\epsilon)\big)} \;+\; \htmlClass{t2}{A\sum_{v\in H}\mathrm{sg}\big[\,p_v - p_v\,\big]\log p_v} \;=\; \htmlClass{t1}{\mathrm{sg}[u]\cdot\max\!\big(-A\,r,\; -A\,\operatorname{clip}(r,1{-}\epsilon,1{+}\epsilon)\big)}</div>
+<p style="font-size:13.5px;margin:10px 0 0"><b>TIS [lo, hi]</b></p>
+<div class="tex">\ell = \htmlClass{t1}{\mathrm{sg}\big[\operatorname{clip}(u,\,lo,\,hi)\big]\cdot\max\!\big(-A\,r,\; -A\,\operatorname{clip}(r,1{-}\epsilon,1{+}\epsilon)\big)} \;+\; \htmlClass{t2}{A\sum_{v\in H}\mathrm{sg}\big[\operatorname{clip}(p_v,\,lo\,q_v,\,hi\,q_v) - \operatorname{clip}(1,\,lo\,\rho,\,hi\,\rho)\,p_v\big]\log p_v}</div>
+<p style="font-size:13.5px;margin:10px 0 0"><b>ICEPOP [lo, hi]</b></p>
+<div class="tex">\ell = \htmlClass{t1}{\mathrm{sg}\big[u\cdot\mathbf{1}[lo \le u \le hi]\big]\cdot\max\!\big(-A\,r,\; -A\,\operatorname{clip}(r,1{-}\epsilon,1{+}\epsilon)\big)} \;+\; \htmlClass{t2}{A\sum_{v\in H}\mathrm{sg}\big[p_v\,\mathbf{1}[lo \le \tfrac{p_v}{q_v} \le hi] - \mathbf{1}[lo \le \tfrac{1}{\rho} \le hi]\,p_v\big]\log p_v}</div>
+<p style="font-size:14px">Read across a row: whatever weight the mode puts on the main loss (nothing, u, a clamped u, or a cut-off u),
+the second part uses the same rule on vLLM's candidates, so the pull it removes is the one that mode's main loss creates (exact on the top-K ids, estimated on the rest).
+Plain IS is the case where the main loss creates no pull, so the second part is zero. The code computes the second part with the
+current p where the main part uses p<sub>old</sub>; on the first step of a batch they are equal.</p>
+
 <p style="font-size:14px">Bounds come from <code>truncated_importance_sampling_ratio_min</code> and <code>truncated_importance_sampling_ratio</code>
 (<a href="https://github.com/NVIDIA-NeMo/RL/blob/f0d9860e0da96c487dc8d4bd2ec683b56ef4b4e2/nemo_rl/algorithms/loss/score_centering.py#L65-L87">the four branches</a>).
 <b>The PPO catch:</b> the table assumes the main loss really applies weight w. PPO clipping sets the main loss's gradient to 0 on a
