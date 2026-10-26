@@ -242,26 +242,48 @@ true vLLM rest = 0.08 / 0.02:</p>
 </table>
 <p style="font-size:14px">The two recorded ids are exact in both rows. What sets the error is how much mass vLLM puts outside its own top-K, not whether the two rankings match.</p>
 
-<p style="font-size:14px;margin-bottom:4px"><b>In the code</b>, it is one extra loss term. It is computed separately at every generated position t, then averaged over positions exactly like the main loss.</p>
+<p style="font-size:14px;margin-bottom:4px"><b>In the code: how the added term is built.</b> The goal is a loss whose gradient is
+exactly minus the pull, so the two cancel. Work at one position t (dropping t from the names); the code does this at every
+generated position and then averages, like the main loss.</p>
+<ol style="font-size:14px;margin-top:4px">
+<li><b>Write the pull for every id.</b> On average over what vLLM samples, the main loss pushes each id v along
+∇log p<sub>v</sub> with weight <b>q<sub>v</sub> · w<sub>v</sub></b>: how often vLLM picks v, times the weight w the main loss gives
+v when it is picked. With IS off w = 1, so the weight is just q<sub>v</sub>.</li>
+<li><b>Name the two kinds of weight.</b> For the top-K ids, q<sub>v</sub> is recorded, so the weight is known exactly: call it
+<b>m<sub>v</sub></b> ("head weight", m<sub>v</sub> = q<sub>v</sub>·w<sub>v</sub>). For every other id, q<sub>v</sub> is only estimated as
+ρ·p<sub>v</sub>, so its weight is p<sub>v</sub> times a single factor: call that factor <b>α</b> ("rest factor", α = ρ·w; with IS off α = ρ).
+m and α are not new physics. They are just q·w written for the two groups of ids.</li>
+<li><b>Move the "rest" onto the top-K ids.</b> Summing α·p<sub>v</sub>·∇log p<sub>v</sub> over ~152,000 ids is expensive. But the trainer's
+probabilities always add up to 1, so Σ<sub>all v</sub> p<sub>v</sub>∇log p<sub>v</sub> = ∇(Σ p<sub>v</sub>) = ∇1 = 0. So the rest's sum is
+exactly minus the same sum over the top-K ids. The whole pull becomes a sum over the K ids only, with one number per id:
+<b>c<sub>v</sub> = m<sub>v</sub> − α·p<sub>v</sub></b>.</li>
+<li><b>Turn that into a loss.</b> To get gradient Σ c<sub>v</sub>∇log p<sub>v</sub>, use the loss Σ c<sub>v</sub>·log p<sub>v</sub> and treat each
+c<sub>v</sub> as a fixed number. That is what <b>sg</b> (stop-gradient, <code>.detach()</code>) means. c contains p, so without sg its own
+dependence on p would add extra gradient and the term would no longer equal the pull. It is the same reason A is detached in
+policy gradient. c is not an importance-sampling ratio.</li>
+</ol>
+<p style="font-size:14px"><b>Why log p and not p<sub>old</sub>?</b> The pull was worked out for the first optimizer step on a batch, where
+r = p / p<sub>old</sub> = 1 and the main loss's gradient is −A·w·∇log p(y), with no ratio. The correction copies that case: it uses
+the current p and has no r. After more steps on the same batch r ≠ 1, or a token gets clipped. Then the main loss's real pull
+changes but the correction does not, so they cancel only roughly (the "PPO catch" below). The PR's guide says the same: the main
+term uses the previous policy, the correction uses the current one.</p>
 <ul class="syms">
-  <li><b>H<sub>t</sub></b> (<code>sampler_topk_token_ids</code>): <b>vLLM's</b> top-K token ids at position t, not the trainer's. The trainer looks up its own probability at those same ids, so both sides talk about the same tokens even when the trainer's own top-K would be different.</li>
-  <li><b>q<sub>t</sub>(v)</b> (<code>sampler_topk_logprobs</code>): vLLM's probability for each id in H<sub>t</sub> when it sampled. Fixed data, no gradient.</li>
-  <li><b>p<sub>t</sub>(v)</b> (<code>policy_logprobs_at_sampler_topk</code>): the trainer's probability at the same ids, over the full vocabulary. Gradients flow through log p.</li>
-  <li><b>A<sub>t</sub></b>: the token's advantage. <b>ρ<sub>t</sub></b>: vLLM's mass outside H<sub>t</sub> ÷ the trainer's mass outside H<sub>t</sub>.</li>
+  <li><b>H<sub>t</sub></b> (<code>sampler_topk_token_ids</code>): <b>vLLM's</b> top-K ids at position t. The trainer reads its own probability at these ids.</li>
+  <li><b>q<sub>t</sub>(v)</b> (<code>sampler_topk_logprobs</code>): vLLM's probability for each id in H<sub>t</sub>. Fixed data.</li>
+  <li><b>p<sub>t</sub>(v)</b> (<code>policy_logprobs_at_sampler_topk</code>): the trainer's current probability at those ids, over the full vocabulary. Gradients flow through log p.</li>
+  <li><b>A<sub>t</sub></b>: the advantage. <b>ρ<sub>t</sub></b>: vLLM's leftover mass ÷ the trainer's leftover mass.</li>
+  <li><b>m<sub>t,v</sub></b>: head weight, q·w for a top-K id. <b>α<sub>t</sub></b>: rest factor, the weight per unit of trainer probability on every other id. <b>c<sub>t,v</sub> = m − α·p</b>, held fixed.</li>
 </ul>
 <div class="tex">\mathcal{L}_{\text{new}} = \underbrace{\htmlClass{t1}{\mathcal{L}_{\text{clipped PG}}}}_{\text{(1) unchanged}} \;+\; \underbrace{\htmlClass{t2}{\operatorname{mean}_t\, A_t \sum_{v \in H_t} \mathrm{sg}\!\left[c_{t,v}\right] \log p_t(v)}}_{\text{(2) new}}, \qquad \htmlClass{t3}{c_{t,v} = m_{t,v} - \alpha_t\, p_t(v)}</div>
 <p style="font-size:14px">Shapes: ids <code>[B, S, K]</code> → trainer log-probs at those ids <code>[B, S−1, K]</code> → sum over K
 (<a href="https://github.com/NVIDIA-NeMo/RL/blob/f0d9860e0da96c487dc8d4bd2ec683b56ef4b4e2/nemo_rl/algorithms/loss/score_centering.py#L89-L91">score_centering.py L89</a>)
 → <code>[B, S−1]</code> → × A, then the same masked mean over tokens as the main loss
 (<a href="https://github.com/NVIDIA-NeMo/RL/blob/f0d9860e0da96c487dc8d4bd2ec683b56ef4b4e2/nemo_rl/algorithms/loss/loss_functions.py#L1092-L1102">loss_functions.py L1092</a>).
-Prompt and tool positions are masked out. <span class="t2">(2)</span> is built so its gradient on the logits is the red row above, which cancels the pull.
-Only <span class="t3">c</span> depends on the importance-sampling mode, through m and α.</p>
+Prompt and tool positions are masked out. The IS mode changes only w, and so only m and α.</p>
 
 <h2>What each importance-sampling mode changes</h2>
-<p style="font-size:14px">Each mode weights the main loss's sampled token by a different factor w. Averaged over what vLLM samples,
-that weight leaves a pull of m on each top-K id and α·p on every other token. c is exactly that leftover pull, written on the
-top-K ids only: the "− α·p" is the rest-of-vocab part, moved onto the top-K ids because the trainer's probabilities sum to 1.
-Same example as above: q = 0.72, 0.18 and p = 0.60, 0.15 at ids 17 and 4, ρ = 0.4.</p>
+<p style="font-size:14px">Each mode changes w, the weight the main loss gives the sampled token. Steps 1–2 above then give m and α,
+and c = m − α·p. Same example as above: q = 0.72, 0.18 and p = 0.60, 0.15 at ids 17 and 4, ρ = 0.4.</p>
 <table>
 <tr><th>Mode (<code>loss_fn</code> settings)</th><th>Main loss weights the sampled token by w</th><th>Head m<sub>v</sub></th><th>Rest α</th><th>c at ids 17, 4</th></tr>
 <tr><td><b>IS off</b><br><code>use_importance_sampling_correction: false</code></td><td>1</td><td>q<sub>v</sub></td><td>ρ</td><td><b>0.48, 0.12</b><br>= q − 0.4·p</td></tr>
