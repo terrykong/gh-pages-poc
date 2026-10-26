@@ -116,16 +116,24 @@ is the existing path that ships the sampled token ids from vLLM to the trainer. 
 vLLM's probability for K candidates at every position. Dotted words have a short explanation: hover or tap them.</div>
 
 <h2>Why: the plain update hides a pull toward vLLM</h2>
-<p style="font-size:14px">Policy gradient raises the log-probability of the sampled token y, scaled by its advantage A.
-The loss for that token is −A·log p(y), so one training step moves each logit z<sub>k</sub> by A times the derivative of log p(y).
-Because p comes from a softmax over the logits, that derivative is short:</p>
+<p style="font-size:14px"><b>Step 1, the loss NeMo-RL computes.</b> For one sampled token y, the clipped loss is
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/f0d9860e0da96c487dc8d4bd2ec683b56ef4b4e2/nemo_rl/algorithms/loss/clipped_pg.py#L142-L167"><code>clipped_pg.py</code> L142–L167</a>):</p>
+<div class="tex">\ell = \mathrm{sg}[w]\cdot \max\!\big(-A\,r,\; -A\,\operatorname{clip}(r,\,1-\epsilon,\,1+\epsilon)\big), \qquad r = \frac{p(y)}{p_{\text{old}}(y)} = e^{\log p(y) - \log p_{\text{old}}(y)}</div>
+<p style="font-size:14px">p is the trainer now (it gets gradients). p<sub>old</sub> is the trainer when the batch's log-probs were taken
+(fixed data). w = p<sub>old</sub>(y) / q(y) is the vLLM-to-trainer importance weight, detached
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/f0d9860e0da96c487dc8d4bd2ec683b56ef4b4e2/nemo_rl/algorithms/loss/loss_functions.py#L916-L918">loss_functions.py L916</a>); with IS off, w = 1.</p>
+<p style="font-size:14px"><b>Step 2, its gradient.</b> Only log p(y) carries gradient. Because r = e<sup>log p(y) − const</sup>,
+the derivative of r is r times the derivative of log p(y). So for a token that is not clipped, the gradient is
+−A·w·r·∇log p(y). For a clipped token, the max picks the clamped term, which is a constant, so the gradient is 0.
+On the first optimizer step for a batch, p = p<sub>old</sub>, so r = 1. With IS off, w = 1 too. What is left is
+−A·∇log p(y): the same gradient as the simple loss −A·log p(y). That is all "raise log p(y), scaled by A" means.</p>
+<p style="font-size:14px"><b>Step 3, ∇log p(y) on the logits.</b> p is a softmax over the logits z, so:</p>
 <div class="tex">\log p(y) = z_y - \log \sum_j e^{z_j} \quad\Longrightarrow\quad \frac{\partial \log p(y)}{\partial z_k} = \mathbf{1}[k = y] - p_k</div>
 <p style="font-size:14px">The first part is +1 on the sampled id only; write it as a one-hot vector
 e<sub>y</sub> (1 at id y, 0 everywhere else). The second part is −p<sub>k</sub> on every id. So the push is
 e<sub>y</sub> − p: "one-hot at the sampled id" minus "the trainer's probabilities". Every number in it is the
 trainer's; this is plain calculus, not importance sampling. vLLM's only role is choosing which id gets the 1.
-With y = 17 and trainer probabilities 0.60, 0.15 and 0.25 for the rest, that is +0.40, −0.15, −0.25: the top row below.
-(The clipped loss multiplies this by its ratio; with IS off and an unclipped token at ratio 1, the factor is 1.)</p>
+With y = 17 and trainer probabilities 0.60, 0.15 and 0.25 for the rest, that is +0.40, −0.15, −0.25: the top row below.</p>
 <p style="font-size:14px">Now add vLLM's distribution q and subtract it again. Nothing changes; it only regroups the same push:</p>
 <div class="tex">\underbrace{e_y - p}_{\text{plain push}} \;=\; \underbrace{\htmlClass{t2}{(e_y - q)}}_{\text{signal}} \;+\; \underbrace{\htmlClass{t4}{(q - p)}}_{\text{pull toward vLLM}}</div>
 <p style="font-size:14px">Why q? Because y was drawn from q, so the one-hot e<sub>y</sub>, averaged over vLLM's draws, is
