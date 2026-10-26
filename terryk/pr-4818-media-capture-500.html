@@ -102,7 +102,7 @@ one line in <code>vllm_worker_async.py</code>. Permalinks pin head <code>f0d9860
 automatically (<a href="https://github.com/NVIDIA-NeMo/RL/blob/f0d9860e0da96c487dc8d4bd2ec683b56ef4b4e2/nemo_rl/algorithms/single_controller_utils/setup.py#L1282">setup.py:1282</a>).
 Then every captured call gets a <code>CapturedMedia(items, tensors)</code>
 (<a href="https://github.com/NVIDIA-NeMo/RL/blob/f0d9860e0da96c487dc8d4bd2ec683b56ef4b4e2/nemo_rl/models/generation/vllm/vllm_worker_async.py#L753-L768"><code>_capture_request_media</code></a>).
-<code>tensors</code> holds only the images that are <i>new</i> in this call; an image from an earlier turn is kept, not resent.
+<code>tensors</code> holds only the images that are <i>new</i> in this call. Gym sends the whole conversation, so an earlier turn's image is in the prompt again, but that earlier call already staged it: it is only checked, not staged again (<a href="https://github.com/NVIDIA-NeMo/RL/blob/f0d9860e0da96c487dc8d4bd2ec683b56ef4b4e2/nemo_rl/data/captured_media.py#L380-L411">captured_media.py L380</a>).
 So when a call adds no image, <code>tensors</code> is <code>None</code>
 (<a href="https://github.com/NVIDIA-NeMo/RL/blob/f0d9860e0da96c487dc8d4bd2ec683b56ef4b4e2/nemo_rl/data/captured_media.py#L395-L411"><code>capture_processed_media</code></a>,
 type <a href="https://github.com/NVIDIA-NeMo/RL/blob/f0d9860e0da96c487dc8d4bd2ec683b56ef4b4e2/nemo_rl/data/captured_media.py#L141"><code>dict | None</code></a>).</div>
@@ -132,7 +132,7 @@ with score centering off because the copy runs on every captured call.</p>
   <text class="code" x="472" y="112">attachments = dict(state.media.tensors)</text>
   <text class="okt" x="472" y="129">→ {"imgs", "imgs_sizes"} · staged ✓</text>
 
-  <text class="row" x="12" y="168">TURN 2 · follow-up text; img0 is kept from turn 1, nothing new</text>
+  <text class="row" x="12" y="168">TURN 2 · follow-up text; img0 is in the prompt but already staged</text>
   <rect class="box" x="10" y="174" width="940" height="34" rx="6"/>
   <text class="code" x="22" y="195">state.media = CapturedMedia(items=(), tensors=None)</text>
   <rect class="ok" x="10" y="214" width="430" height="84" rx="6"/>
@@ -159,6 +159,12 @@ with score centering off because the copy runs on every captured call.</p>
 head raises <code>TypeError</code> and leaves no capture state behind. The existing VLM token-capture functional
 tests send one image per call, so they never build a call with <code>tensors=None</code>.</p>
 
+<p style="font-size:14px;margin-bottom:4px"><b>Which calls crash.</b> Every captured call that adds no new image. Two patterns:</p>
+<table style="border-collapse:collapse;width:100%;font-size:13.5px;margin:6px 0 14px">
+<tr><th style="border:1px solid var(--border);padding:6px 9px;text-align:left;background:var(--surface)">Images arrive on turns</th><th style="border:1px solid var(--border);padding:6px 9px;text-align:left;background:var(--surface)">Calls with no new image (crash)</th><th style="border:1px solid var(--border);padding:6px 9px;text-align:left;background:var(--surface)">Rollout dies at</th></tr>
+<tr><td style="border:1px solid var(--border);padding:6px 9px">1, 5, 10</td><td style="border:1px solid var(--border);padding:6px 9px">2, 3, 4, 6, 7, 8, 9 (earlier images are in the prompt but already staged)</td><td style="border:1px solid var(--border);padding:6px 9px">turn 2</td></tr>
+<tr><td style="border:1px solid var(--border);padding:6px 9px">6, 7, 8 (text before that)</td><td style="border:1px solid var(--border);padding:6px 9px">1, 2, 3, 4, 5 (no images at all yet)</td><td style="border:1px solid var(--border);padding:6px 9px">turn 1</td></tr>
+</table>
 <h2>The fix</h2>
 <p class="where"><b>Where the fix lands: RL only, one line plus a unit test.</b>
 <a href="https://github.com/NVIDIA-NeMo/RL/blob/f0d9860e0da96c487dc8d4bd2ec683b56ef4b4e2/nemo_rl/models/generation/vllm/vllm_worker_async.py#L968"><code>vllm_worker_async.py</code> L968</a>.
