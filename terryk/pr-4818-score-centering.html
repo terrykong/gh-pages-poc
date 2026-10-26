@@ -83,7 +83,7 @@ svg a text{text-decoration:underline;fill:var(--accent)}
 
 <h1>What score centering adds to token capture and to the policy-gradient loss</h1>
 <p class="sub"><a href="https://github.com/NVIDIA-NeMo/RL/pull/4818">NVIDIA-NeMo/RL #4818</a>
-(adds <code>loss_fn.score_centering</code> and <code>token_capture.top_logprobs</code>). Permalinks pin head <code>0dc043c7</code>.</p>
+(adds <code>loss_fn.score_centering</code> and <code>token_capture.top_logprobs</code>). Permalinks pin head <code>f0d9860e</code>.</p>
 
 <div class="status"><dl>
   <dt>Before</dt>
@@ -91,7 +91,7 @@ svg a text{text-decoration:underline;fill:var(--accent)}
   <dt>This PR</dt>
   <dd>vLLM also returns its top-K candidates per token. They travel with the tokens to the trainer, and the loss adds one term that subtracts the update vLLM's distribution would cause on its own. Off by default.</dd>
   <dt>Status</dt>
-  <dd><span class="verdict open">New feature, in review.</span> The math checks out for all four importance-sampling modes, and the trainer-side gather was checked at TP=2, CP=2 on CPU. Open: a regression in the existing image-capture path (next page), Python extraction on the vLLM event loop, setup checks, and no GPU or convergence numbers yet.</dd>
+  <dd><span class="verdict open">New feature, in review.</span> The math checks out for all four importance-sampling modes, and GPU CI passes, including the score-centering smoke run and the TP/CP gather checks. Open: a regression in the existing image-capture path (next page), Python extraction on the vLLM event loop, setup checks, and no throughput or convergence numbers yet.</dd>
 </dl></div>
 
 <nav class="chain">
@@ -115,11 +115,11 @@ vLLM's probability for K candidates at every position. Dotted words have a short
 </ul>
 <div class="tex">\mathcal{L}_{\text{new}} = \underbrace{\htmlClass{t1}{\mathcal{L}_{\text{clipped PG}}}}_{\text{(1) unchanged}} \;+\; \underbrace{\htmlClass{t2}{A \sum_{v \in \text{top-}K} \mathrm{sg}\!\left[c_v\right] \log p_v}}_{\text{(2) new}}, \qquad \htmlClass{t3}{c_v = q_v - \rho\, p_v}\ \ \text{(IS off)}</div>
 <p style="font-size:14px"><span class="t1">(1)</span> is the existing clipped loss, untouched
-(<a href="https://github.com/NVIDIA-NeMo/RL/blob/0dc043c7fad7594b00d6046658dcd5c9bab8f7f3/nemo_rl/algorithms/loss/loss_functions.py#L1080-L1105"><code>ClippedPGLossFn</code> adds the term after it</a>).
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/f0d9860e0da96c487dc8d4bd2ec683b56ef4b4e2/nemo_rl/algorithms/loss/loss_functions.py#L1080-L1105"><code>ClippedPGLossFn</code> adds the term after it</a>).
 <span class="t2">(2)</span>'s gradient is A times "vLLM's expected direction": exact on the top-K head, and the tail modeled as ρ·p.
 Since the sampled token was drawn from vLLM, that expected pull cancels on average, which is the drift the paper removes.
 <span class="t3">c<sub>v</sub></span> changes with the IS mode: plain IS gives c = 0 (no correction), TIS clamps both parts, ICEPOP drops out-of-bounds parts
-(<a href="https://github.com/NVIDIA-NeMo/RL/blob/0dc043c7fad7594b00d6046658dcd5c9bab8f7f3/nemo_rl/algorithms/loss/score_centering.py#L60-L91"><code>compute_score_centering_term</code></a>).
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/f0d9860e0da96c487dc8d4bd2ec683b56ef4b4e2/nemo_rl/algorithms/loss/score_centering.py#L60-L91"><code>compute_score_centering_term</code></a>).
 It is exact only when the PPO ratio is 1; on a clipped token the base term is 0 but the correction still acts.</p>
 
 <h2>One token, both paths, same example</h2>
@@ -136,7 +136,7 @@ It is exact only when the PPO ratio is 1; on a clipped token the base term is 0 
   <text class="data" x="22" y="87">Gym sends; RL captures the call</text>
   <rect class="diffb" x="460" y="54" width="490" height="40" rx="6"/>
   <text class="code" x="472" y="72">{…, logprobs:true, top_logprobs:2}</text>
-  <a href="https://github.com/NVIDIA-NeMo/RL/blob/0dc043c7fad7594b00d6046658dcd5c9bab8f7f3/nemo_rl/environments/nemo_gym.py#L847-L855"><text class="code" x="472" y="87">nemo_gym.py: Gym sampling_overrides</text></a>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/f0d9860e0da96c487dc8d4bd2ec683b56ef4b4e2/nemo_rl/environments/nemo_gym.py#L847-L855"><text class="code" x="472" y="87">nemo_gym.py: Gym sampling_overrides</text></a>
 
   <text class="row" x="12" y="118">2 · vLLM WORKER STAGES THE CALL</text>
   <rect class="box" x="10" y="124" width="430" height="56" rx="6"/>
@@ -146,10 +146,10 @@ It is exact only when the PPO ratio is 1; on a clipped token the base term is 0 
   <rect class="diffb" x="460" y="124" width="490" height="56" rx="6"/>
   <text class="code" x="472" y="142">+ sampler_topk_token_ids [3,2] = [[17,4],…] int32</text>
   <text class="code" x="472" y="158">+ sampler_topk_logprobs [3,2] = [[-0.33,-1.71],…] f32</text>
-  <a href="https://github.com/NVIDIA-NeMo/RL/blob/0dc043c7fad7594b00d6046658dcd5c9bab8f7f3/nemo_rl/models/generation/score_centering.py#L75-L139"><text class="code" x="472" y="172">extract_score_centering_samples (Python, per entry)</text></a>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/f0d9860e0da96c487dc8d4bd2ec683b56ef4b4e2/nemo_rl/models/generation/score_centering.py#L80-L144"><text class="code" x="472" y="172">extract_score_centering_samples (Python, per entry)</text></a>
 
   <rect class="same" x="10" y="190" width="940" height="34" rx="6"/>
-  <a href="https://github.com/NVIDIA-NeMo/RL/blob/0dc043c7fad7594b00d6046658dcd5c9bab8f7f3/nemo_rl/data_plane/tq_token_sink.py#L455-L503"><text class="code" x="22" y="212">TQTokenSink.stage(...) — tokens, images and top-K go in the same single put</text></a>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/f0d9860e0da96c487dc8d4bd2ec683b56ef4b4e2/nemo_rl/data_plane/tq_token_sink.py#L455-L503"><text class="code" x="22" y="212">TQTokenSink.stage(...) — tokens, images and top-K go in the same single put</text></a>
   <text class="okt" x="842" y="212">same code</text>
 
   <text class="row" x="12" y="248">3 · CPU FINALIZER BUILDS THE ROW</text>
@@ -158,7 +158,7 @@ It is exact only when the PPO ratio is 1; on a clipped token the base term is 0 
   <text class="data" x="22" y="287">prompt + generated tokens</text>
   <rect class="diffb" x="460" y="254" width="490" height="40" rx="6"/>
   <text class="code" x="472" y="272">+ top-K columns [8,2]; 5 prompt rows = 0</text>
-  <a href="https://github.com/NVIDIA-NeMo/RL/blob/0dc043c7fad7594b00d6046658dcd5c9bab8f7f3/nemo_rl/experience/rollout_reassembler.py#L437-L455"><text class="code" x="472" y="287">rollout_reassembler.py: zero-fill + shape check</text></a>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/f0d9860e0da96c487dc8d4bd2ec683b56ef4b4e2/nemo_rl/experience/rollout_reassembler.py#L437-L457"><text class="code" x="472" y="287">rollout_reassembler.py: zero-fill + shape check</text></a>
 
   <text class="row" x="12" y="318">4 · TRAINER FORWARD</text>
   <rect class="box" x="10" y="324" width="430" height="40" rx="6"/>
@@ -166,37 +166,39 @@ It is exact only when the PPO ratio is 1; on a clipped token the base term is 0 
   <text class="data" x="22" y="357">log p(sampled token)</text>
   <rect class="diffb" x="460" y="324" width="490" height="40" rx="6"/>
   <text class="code" x="472" y="342">+ log p at ids [17,4] = [-0.51, -1.90]  [B,7,2]</text>
-  <a href="https://github.com/NVIDIA-NeMo/RL/blob/0dc043c7fad7594b00d6046658dcd5c9bab8f7f3/nemo_rl/distributed/model_utils.py#L1706"><text class="code" x="472" y="357">get_policy_logprobs_at_sampler_topk (TP/CP gather)</text></a>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/f0d9860e0da96c487dc8d4bd2ec683b56ef4b4e2/nemo_rl/distributed/model_utils.py#L1706"><text class="code" x="472" y="357">get_policy_logprobs_at_sampler_topk (TP/CP gather)</text></a>
 
   <text class="row" x="12" y="388">5 · LOSS</text>
   <rect class="same" x="10" y="394" width="940" height="34" rx="6"/>
-  <a href="https://github.com/NVIDIA-NeMo/RL/blob/0dc043c7fad7594b00d6046658dcd5c9bab8f7f3/nemo_rl/algorithms/loss/loss_functions.py#L277"><text class="code" x="22" y="416">ClippedPGLossFn — the clipped policy-gradient term, unchanged</text></a>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/f0d9860e0da96c487dc8d4bd2ec683b56ef4b4e2/nemo_rl/algorithms/loss/loss_functions.py#L277"><text class="code" x="22" y="416">ClippedPGLossFn — the clipped policy-gradient term, unchanged</text></a>
   <text class="okt" x="842" y="416">same code</text>
   <rect class="box" x="10" y="436" width="430" height="40" rx="6"/>
   <text class="data" x="22" y="460">(nothing more)</text>
   <rect class="diffb" x="460" y="436" width="490" height="40" rx="6"/>
   <text class="code" x="472" y="454">+ A · Σ c·log p,  c = q − ρp = [0.48, 0.12]</text>
-  <a href="https://github.com/NVIDIA-NeMo/RL/blob/0dc043c7fad7594b00d6046658dcd5c9bab8f7f3/nemo_rl/algorithms/loss/loss_functions.py#L1080-L1105"><text class="code" x="472" y="469">metric: score_centering_head_mass = 0.9</text></a>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/f0d9860e0da96c487dc8d4bd2ec683b56ef4b4e2/nemo_rl/algorithms/loss/loss_functions.py#L1080-L1105"><text class="code" x="472" y="469">metric: score_centering_head_mass = 0.9</text></a>
 
   <rect x="620" y="492" width="14" height="10" class="same"/><text class="data" x="640" y="501">shared code</text>
   <rect x="740" y="492" width="14" height="10" class="diffb"/><text class="data" x="760" y="501">added by this PR</text>
 </svg>
 
 <p style="font-size:14px"><b>Where they meet:</b> both lanes use the same staging write
-(<a href="https://github.com/NVIDIA-NeMo/RL/blob/0dc043c7fad7594b00d6046658dcd5c9bab8f7f3/nemo_rl/data_plane/tq_token_sink.py#L455-L503"><code>TQTokenSink.stage</code></a>),
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/f0d9860e0da96c487dc8d4bd2ec683b56ef4b4e2/nemo_rl/data_plane/tq_token_sink.py#L455-L503"><code>TQTokenSink.stage</code></a>),
 the same finalizer and the same loss object. After the merge point, only two things differ: two extra
 columns per token (fetched by the trainer only when centering is on,
-<a href="https://github.com/NVIDIA-NeMo/RL/blob/0dc043c7fad7594b00d6046658dcd5c9bab8f7f3/nemo_rl/algorithms/single_controller.py#L324-L338"><code>_train_fields_for_step</code></a>),
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/f0d9860e0da96c487dc8d4bd2ec683b56ef4b4e2/nemo_rl/algorithms/single_controller.py#L324-L338"><code>_train_fields_for_step</code></a>),
 and one added loss term. Setup rejects the cases it cannot handle: non-vLLM generation, filtered sampling
 (<code>top_p&lt;1</code>, <code>top_k</code>), and non-unit temperature without processed logprobs.</p>
 
 <div class="warn"><b>What it costs.</b> The two columns are 8·T·K bytes per row (32 MiB for a 32K-token row at K=128),
 stored and moved twice. On the vLLM side, the per-entry Python extraction runs on the server's event loop:
 on CPU it took 0.83 s at 8K tokens and 2.7 s at 32K tokens with K=128, during which that server answers no other request.
-No GPU throughput, memory or convergence numbers exist yet. The review asks for those, plus a guard so
+CI shows it runs; no throughput, memory or convergence numbers exist yet. The review asks for those, plus a guard so
 <code>top_logprobs&gt;0</code> without centering is not paid for nothing.
 The PR also changed the existing image-capture path, and that change breaks multi-turn VLM runs even with centering off:
-<a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4818-media-capture-500.html">see the next page</a>.</div>
+<a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4818-media-capture-500.html">see the next page</a>.
+<p class="cref">🟠 <a href="https://github.com/NVIDIA-NeMo/RL/pull/4818#discussion_r4373053460">review comment C2 — vllm_worker_async.py:1411</a>
+&nbsp; 🟡 <a href="https://github.com/NVIDIA-NeMo/RL/pull/4818#discussion_r4373053483">review comment C6 — config.py:1376</a></p></div>
 
 </div>
 </body>
