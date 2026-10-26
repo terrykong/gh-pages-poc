@@ -128,6 +128,14 @@ the derivative of r is r times the derivative of log p(y). So for a token that i
 −A·w·r·∇log p(y). For a clipped token, the max picks the clamped term, which is a constant, so the gradient is 0.
 On the first optimizer step for a batch, p = p<sub>old</sub>, so r = 1. With IS off, w = 1 too. What is left is
 −A·∇log p(y): the same gradient as the simple loss −A·log p(y). That is all "raise log p(y), scaled by A" means.</p>
+<p style="font-size:14px"><b>Careful: "r = 1" is a value, not a constant.</b> Plugging r = 1 into the loss <i>before</i> taking the
+gradient gives −w·A, a number with no p in it and no gradient. That is the wrong order. r is a function,
+r(θ) = p<sub>θ</sub>(y) / p<sub>old</sub>(y): the top moves with the weights, the bottom is a frozen number. At the current weights it
+happens to equal 1, but its slope is not 0. Same as f(x) = x / 3 at x = 3: the value is 1, the slope is 1/3. So take the gradient
+first (−A·w·r·∇log p(y)), then plug in r = 1. NeMo-RL does exactly this with <code>force_on_policy_ratio</code>:
+<code>r = exp(log p − log p.detach())</code> is exactly 1 in value, but its gradient is ∇log p
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/f0d9860e0da96c487dc8d4bd2ec683b56ef4b4e2/nemo_rl/algorithms/loss/clipped_pg.py#L139">clipped_pg.py L139</a>). In torch, −A·r with that r and −A·log p(y)
+give the same gradient to every digit.</p>
 <p style="font-size:14px"><b>Step 3, ∇log p(y) on the logits.</b> p is a softmax over the logits z, so:</p>
 <div class="tex">\log p(y) = z_y - \log \sum_j e^{z_j} \quad\Longrightarrow\quad \frac{\partial \log p(y)}{\partial z_k} = \mathbf{1}[k = y] - p_k</div>
 <p style="font-size:14px">The first part is +1 on the sampled id only; write it as a one-hot vector
