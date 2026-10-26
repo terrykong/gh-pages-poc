@@ -116,8 +116,14 @@ is the existing path that ships the sampled token ids from vLLM to the trainer. 
 vLLM's probability for K candidates at every position. Dotted words have a short explanation: hover or tap them.</div>
 
 <h2>Why: the plain update hides a pull toward vLLM</h2>
-<p style="font-size:14px">Policy gradient raises the sampled token's log-probability in proportion to its advantage A.
-On the logits, that push is "the sampled token minus the trainer's own distribution" (top row).
+<p style="font-size:14px">Policy gradient raises the log-probability of the sampled token y, scaled by its advantage A.
+The loss for that token is −A·log p(y), so one training step moves each logit z<sub>k</sub> by A times the derivative of log p(y).
+Because p comes from a softmax over the logits, that derivative is short:</p>
+<div class="tex">\log p(y) = z_y - \log \sum_j e^{z_j} \quad\Longrightarrow\quad \frac{\partial \log p(y)}{\partial z_k} = \mathbf{1}[k = y] - p_k</div>
+<p style="font-size:14px">The first part gives +1 to the sampled token only. The second part, the derivative of the
+log-sum, is −p<sub>k</sub> for every token. So the push is "the sampled token minus the trainer's own distribution".
+With y = 17 and trainer probabilities 0.60, 0.15 and 0.25 for the rest, that is +0.40, −0.15, −0.25: the top row below.
+(The clipped loss multiplies this by its ratio; with IS off and an unclipped token at ratio 1, the factor is 1.)
 Split it in two. The <b class="t2">signal</b> is "the sampled token minus what vLLM expected to sample". It averages to
 exactly zero over vLLM's sampling, so it only moves the model when a token did better or worse than vLLM expected.
 The rest is a <b class="t4">pull toward vLLM</b>: vLLM's distribution minus the trainer's. It is the same whichever
@@ -171,19 +177,39 @@ To do that the trainer needs vLLM's probabilities, which is why the PR records v
 The "rest of vocab" part is estimated by scaling the trainer's own probabilities by ρ = vLLM's leftover mass ÷ the
 trainer's leftover mass (0.10 ÷ 0.25 = 0.4 here).</p>
 
-<p style="font-size:14px;margin-bottom:4px"><b>In the code</b>, it is one extra loss term:</p>
+<p style="font-size:14px;margin-bottom:4px"><b>In the code</b>, it is one extra loss term. It is computed separately at every generated position t, then averaged over positions exactly like the main loss.</p>
 <ul class="syms">
-  <li><b>p</b> (<code>policy_logprobs_at_sampler_topk</code>, exponentiated): the trainer's probability. Gradients flow through it.</li>
-  <li><b>q</b> (<code>sampler_topk_logprobs</code>): vLLM's probability for its top-K candidates when it sampled. Fixed data.</li>
-  <li><b>A</b>: the token's advantage. <b>ρ</b>: vLLM's mass outside its top-K ÷ the trainer's mass outside those same ids.</li>
+  <li><b>H<sub>t</sub></b> (<code>sampler_topk_token_ids</code>): <b>vLLM's</b> top-K token ids at position t, not the trainer's. The trainer looks up its own probability at those same ids, so both sides talk about the same tokens even when the trainer's own top-K would be different.</li>
+  <li><b>q<sub>t</sub>(v)</b> (<code>sampler_topk_logprobs</code>): vLLM's probability for each id in H<sub>t</sub> when it sampled. Fixed data, no gradient.</li>
+  <li><b>p<sub>t</sub>(v)</b> (<code>policy_logprobs_at_sampler_topk</code>): the trainer's probability at the same ids, over the full vocabulary. Gradients flow through log p.</li>
+  <li><b>A<sub>t</sub></b>: the token's advantage. <b>ρ<sub>t</sub></b>: vLLM's mass outside H<sub>t</sub> ÷ the trainer's mass outside H<sub>t</sub>.</li>
 </ul>
-<div class="tex">\mathcal{L}_{\text{new}} = \underbrace{\htmlClass{t1}{\mathcal{L}_{\text{clipped PG}}}}_{\text{(1) unchanged}} \;+\; \underbrace{\htmlClass{t2}{A \sum_{v \in \text{top-}K} \mathrm{sg}\!\left[c_v\right] \log p_v}}_{\text{(2) new}}, \qquad \htmlClass{t3}{c_v = q_v - \rho\, p_v}\ \ \text{(IS off)}</div>
-<p style="font-size:14px"><span class="t1">(1)</span> is the existing clipped loss, untouched
-(<a href="https://github.com/NVIDIA-NeMo/RL/blob/f0d9860e0da96c487dc8d4bd2ec683b56ef4b4e2/nemo_rl/algorithms/loss/loss_functions.py#L1080-L1105"><code>ClippedPGLossFn</code> adds the term after it</a>).
-<span class="t2">(2)</span> is built so its gradient on the logits is exactly the red row above, which cancels the pull.
-<span class="t3">c<sub>v</sub></span> changes with the IS mode: plain IS gives c = 0 (IS already removes the pull), TIS clamps both parts, ICEPOP drops out-of-bounds parts
-(<a href="https://github.com/NVIDIA-NeMo/RL/blob/f0d9860e0da96c487dc8d4bd2ec683b56ef4b4e2/nemo_rl/algorithms/loss/score_centering.py#L60-L91"><code>compute_score_centering_term</code></a>).
-The cancellation is exact only when the PPO ratio is 1. On a clipped token the base term is 0 but the correction still acts.</p>
+<div class="tex">\mathcal{L}_{\text{new}} = \underbrace{\htmlClass{t1}{\mathcal{L}_{\text{clipped PG}}}}_{\text{(1) unchanged}} \;+\; \underbrace{\htmlClass{t2}{\operatorname{mean}_t\, A_t \sum_{v \in H_t} \mathrm{sg}\!\left[c_{t,v}\right] \log p_t(v)}}_{\text{(2) new}}, \qquad \htmlClass{t3}{c_{t,v} = m_{t,v} - \alpha_t\, p_t(v)}</div>
+<p style="font-size:14px">Shapes: ids <code>[B, S, K]</code> → trainer log-probs at those ids <code>[B, S−1, K]</code> → sum over K
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/f0d9860e0da96c487dc8d4bd2ec683b56ef4b4e2/nemo_rl/algorithms/loss/score_centering.py#L89-L91">score_centering.py L89</a>)
+→ <code>[B, S−1]</code> → × A, then the same masked mean over tokens as the main loss
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/f0d9860e0da96c487dc8d4bd2ec683b56ef4b4e2/nemo_rl/algorithms/loss/loss_functions.py#L1092-L1102">loss_functions.py L1092</a>).
+Prompt and tool positions are masked out. <span class="t2">(2)</span> is built so its gradient on the logits is the red row above, which cancels the pull.
+Only <span class="t3">c</span> depends on the importance-sampling mode, through m and α.</p>
+
+<h2>What each importance-sampling mode changes</h2>
+<p style="font-size:14px">Each mode weights the main loss's sampled token by a different factor w. Averaged over what vLLM samples,
+that weight leaves a pull of m on each top-K id and α·p on every other token. c is exactly that leftover pull, written on the
+top-K ids only: the "− α·p" is the rest-of-vocab part, moved onto the top-K ids because the trainer's probabilities sum to 1.
+Same example as above: q = 0.72, 0.18 and p = 0.60, 0.15 at ids 17 and 4, ρ = 0.4.</p>
+<table>
+<tr><th>Mode (<code>loss_fn</code> settings)</th><th>Main loss weights the sampled token by w</th><th>Head m<sub>v</sub></th><th>Rest α</th><th>c at ids 17, 4</th></tr>
+<tr><td><b>IS off</b><br><code>use_importance_sampling_correction: false</code></td><td>1</td><td>q<sub>v</sub></td><td>ρ</td><td><b>0.48, 0.12</b><br>= q − 0.4·p</td></tr>
+<tr><td><b>Plain IS</b><br>correction on, <code>truncated_importance_sampling_type: null</code></td><td>p/q</td><td>p<sub>v</sub></td><td>1</td><td><b>0, 0</b><br>IS already removes the pull</td></tr>
+<tr><td><b>TIS</b>, bounds [0.5, 2]<br><code>type: tis</code></td><td>clamp(p/q, 0.5, 2)</td><td>clamp(p<sub>v</sub>, 0.5q<sub>v</sub>, 2q<sub>v</sub>) = p<sub>v</sub> here</td><td>clamp(1, 0.5ρ, 2ρ) = 0.8</td><td><b>0.12, 0.03</b><br>= p − 0.8·p</td></tr>
+<tr><td><b>ICEPOP</b>, bounds [0.5, 2]<br><code>type: icepop</code></td><td>p/q if inside the bounds, else 0</td><td>p<sub>v</sub> if p/q inside, else 0 (here: inside)</td><td>1 if 1/ρ inside, else 0 (1/ρ = 2.5: outside → 0)</td><td><b>0.60, 0.15</b><br>= p − 0·p</td></tr>
+<tr><td><b>ICEPOP</b>, bounds [0.5, 3]</td><td>same</td><td>p<sub>v</sub></td><td>1 (2.5 is inside)</td><td><b>0, 0</b></td></tr>
+</table>
+<p style="font-size:14px">Bounds come from <code>truncated_importance_sampling_ratio_min</code> and <code>truncated_importance_sampling_ratio</code>
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/f0d9860e0da96c487dc8d4bd2ec683b56ef4b4e2/nemo_rl/algorithms/loss/score_centering.py#L65-L87">the four branches</a>).
+<b>The PPO catch:</b> the table assumes the main loss really applies weight w. PPO clipping sets the main loss's gradient to 0 on a
+clipped token, but c does not know that, so the correction still pushes there. The cancellation is exact only when the PPO ratio is 1,
+for example with one optimizer step per batch and <code>force_on_policy_ratio: true</code>.</p>
 
 <h2>One token, both paths, same example</h2>
 <p style="font-size:13.5px;color:var(--dim)">Example: K = 2, a response of 3 tokens after a 5-token prompt (row length 8). At the token shown, vLLM's top-2 are ids 17 and 4 with q = 0.72, 0.18 (head 0.9); the trainer has p = 0.6, 0.15 at those ids (head 0.75), so ρ = 0.1 ÷ 0.25 = 0.4. Values computed with the real function.</p>
