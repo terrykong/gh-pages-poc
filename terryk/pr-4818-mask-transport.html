@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NVIDIA-NeMo/RL #4818 — how a replayed sampling mask would reach the trainer once token capture is on</title>
+<style>
+:root{--bg:#0d1117;--surface:#161b22;--surface2:#1c2128;--border:#30363d;--text:#e6edf3;--dim:#8b949e;
+  --accent:#58a6ff;--green:#3fb950;--red:#f85149;--orange:#d29922}
+:root[data-theme="light"]{--bg:#ffffff;--surface:#f6f8fa;--surface2:#eaeef2;--border:#d0d7de;--text:#1f2328;
+  --dim:#59636e;--accent:#0969da;--green:#1a7f37;--red:#cf222e;--orange:#9a6700}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:28px 20px 70px}
+h1{font-size:22px;margin:0 0 8px;line-height:1.3}
+h2{font-size:18px;margin:30px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
+.sub{color:var(--dim);font-size:13.5px;margin:0 0 16px}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);
+  border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;
+  font:13px/1 ui-monospace,Menlo,monospace;cursor:pointer}
+.status{border:1px solid var(--border);border-radius:10px;background:var(--surface);padding:2px 16px 10px;margin:0 0 20px}
+.status dl{display:grid;grid-template-columns:max-content 1fr;gap:4px 14px;margin:12px 0 0}
+.status dt{color:var(--dim);font-size:12px;text-transform:uppercase;letter-spacing:.04em;white-space:nowrap;padding-top:2px}
+.status dd{margin:0;font-size:14px}
+.verdict{font-weight:700}
+.verdict.open{color:var(--orange)}
+nav.chain{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 6px;padding:0}
+nav.chain a,nav.chain span{display:inline-block;padding:5px 11px;border:1px solid var(--border);
+  border-radius:20px;background:var(--surface);text-decoration:none;color:var(--accent);
+  font-size:12.5px;line-height:1.3;white-space:nowrap}
+nav.chain a:hover{background:var(--surface2)}
+nav.chain span.here{background:var(--accent);color:var(--bg);border-color:var(--accent);font-weight:600}
+p.chainnote{color:var(--dim);font-size:12px;margin:0 0 18px}
+.bg{border-left:4px solid var(--accent);background:var(--surface);padding:8px 14px;margin:0 0 16px;font-size:14px}
+.warn{border-left:3px solid var(--orange);background:var(--surface);padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0}
+.where{border-left:4px solid var(--accent);background:var(--surface);padding:6px 12px;margin:6px 0 10px}
+.tip{border-bottom:1px dotted var(--dim);cursor:help;position:relative;outline:none}
+.tip:hover::after,.tip:focus::after{content:attr(data-tip);position:absolute;left:0;top:1.7em;z-index:60;
+  width:max-content;max-width:min(340px,80vw);white-space:normal;background:var(--surface2);color:var(--text);
+  border:1px solid var(--border);border-radius:6px;padding:7px 10px;font:13px/1.45 -apple-system,sans-serif;
+  font-weight:400;box-shadow:0 4px 14px rgba(0,0,0,.3)}
+.diff{font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--surface);
+  border:1px solid var(--border);border-radius:8px;padding:12px;overflow-x:auto;white-space:pre;margin:10px 0}
+.diff .add{color:var(--green)}
+.diff .hunk{color:var(--accent)}
+.diff .cm{color:var(--dim)}
+svg{max-width:100%;height:auto;display:block;margin:14px 0}
+svg .box{fill:var(--surface);stroke:var(--border);stroke-width:1.3}
+svg .same{fill:var(--surface);stroke:var(--green);stroke-width:2}
+svg .diffb{fill:var(--surface);stroke:var(--accent);stroke-width:1.6}
+svg .bad{fill:var(--surface);stroke:var(--red);stroke-width:2.2}
+svg .code{fill:var(--text);font:11px ui-monospace,Menlo,monospace}
+svg .data{fill:var(--dim);font:10.5px ui-monospace,Menlo,monospace}
+svg .hdr{fill:var(--accent);font:bold 13.5px -apple-system,sans-serif}
+svg .row{fill:var(--dim);font:bold 11px -apple-system,sans-serif}
+svg .okt{fill:var(--green);font:bold 11px -apple-system,sans-serif}
+svg .badt{fill:var(--red);font:bold 11px -apple-system,sans-serif}
+svg .ln{stroke:var(--border);stroke-width:1}
+svg a text{text-decoration:underline;fill:var(--accent)}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+  document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head>
+<body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+  function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+  function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
+    b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
+      else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+  document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+<div class="wrap">
+
+<h1>How a replayed sampling mask would reach the trainer once token capture is on</h1>
+<p class="sub"><a href="https://github.com/NVIDIA-NeMo/RL/pull/3937">#3937</a> (sampling mask replay, draft, head <code>0d62c9a4</code>)
+next to <a href="https://github.com/NVIDIA-NeMo/RL/pull/4818">#4818</a> (score centering, head <code>f0d9860e</code>). Gym checked at
+<code>bbf3cff4</code> (#4818's pin) and <code>d8f4db46</code> (Gym#4930 merged).</p>
+
+<div class="status"><dl>
+  <dt>Before</dt>
+  <dd>#3937 carries vLLM's mask inside Gym's HTTP response. That works only when token capture is off. Gym has no code for the field yet.</dd>
+  <dt>This PR</dt>
+  <dd>#4818 builds a second route: per-token tensors staged by the vLLM worker into the data plane, never passing through Gym. A mask has the same shape.</dd>
+  <dt>Status</dt>
+  <dd><span class="verdict open">Proposed — not implemented.</span> No PR moves a mask through token capture today. This page shows where it would go.</dd>
+</dl></div>
+
+<nav class="chain">
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4818-score-centering.html">what it adds</a>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4818-media-capture-500.html">image-capture crash</a>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4818-two-top-ks.html">two top-ks</a>
+  <span class="here">moving a mask</span>
+</nav>
+<p class="chainnote">Four pages on this PR, one question each — this one: which route a sampling mask can take.</p>
+
+<div class="bg"><b>Background.</b> A
+<span class="tip" tabindex="0" data-tip="For each generated token: the token ids that survived vLLM's top-k/top-p cut. vLLM 0.29 returns it when started with return_sampling_mask=True.">sampling mask</span>
+is one short list of token ids per generated token. In
+<span class="tip" tabindex="0" data-tip="SingleController + Gym mode where the vLLM worker writes each call's exact token ids straight into the data plane (TransferQueue). Gym only gets a receipt; a CPU finalizer rebuilds the training row.">token capture</span>
+mode, the driver no longer reads per-token data out of Gym's reply: it
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/f0d9860e0da96c487dc8d4bd2ec683b56ef4b4e2/nemo_rl/environments/nemo_gym.py#L1143-L1150">switches to receipt mode</a>
+and skips the function #3937 reads the mask in. Dotted words have a short explanation: hover or tap them.</div>
+
+<h2>Same 3 generated tokens, both routes</h2>
+<p style="font-size:13.5px;color:var(--dim)">Example: <code>top_k=4</code>, <code>top_p=0.8</code>. Supports of size 3, 2 and 1 for the 3 tokens. #4818's lane uses K=2 recorded candidates.</p>
+
+<svg viewBox="0 0 960 470" role="img" aria-label="Left: #3937 sends the mask in the HTTP reply through Gym, which has no code for it, and the driver reads it only when token capture is off. Right: #4818 stages per-token tensors from the vLLM worker into the data plane; Gym only sees a receipt. A mask could take the right route.">
+  <text class="hdr" x="215" y="22" text-anchor="middle">#3937 route: inside Gym's reply</text>
+  <text class="hdr" x="705" y="22" text-anchor="middle">#4818 route: staged by the vLLM worker</text>
+  <line class="ln" x1="450" y1="8" x2="450" y2="462"/>
+
+  <text class="row" x="12" y="48">1 · vLLM WORKER</text>
+  <rect class="box" x="10" y="54" width="430" height="58" rx="6"/>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/0d62c9a47e2de7b98c51d2cba232bd02f36e0a30/nemo_rl/models/generation/vllm/utils.py#L416"><text class="code" x="22" y="72">attach_sampling_masks_to_chat_response_choices</text></a>
+  <text class="data" x="22" y="89">message.sampling_mask =</text>
+  <text class="data" x="22" y="104">  [[17,4,9], [8,23], [5]]   (JSON lists)</text>
+  <rect class="diffb" x="460" y="54" width="490" height="58" rx="6"/>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/f0d9860e0da96c487dc8d4bd2ec683b56ef4b4e2/nemo_rl/models/generation/vllm/vllm_worker_async.py#L968-L982"><text class="code" x="472" y="72">_finish_request_capture → attachments</text></a>
+  <text class="data" x="472" y="89">sampler_topk_token_ids [3,2] int32, logprobs [3,2] f32</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/f0d9860e0da96c487dc8d4bd2ec683b56ef4b4e2/nemo_rl/data_plane/tq_token_sink.py#L455"><text class="code" x="472" y="104">TQTokenSink.stage: one put with tokens + images</text></a>
+
+  <text class="row" x="12" y="138">2 · GYM</text>
+  <rect class="bad" x="10" y="144" width="430" height="58" rx="6"/>
+  <text class="code" x="22" y="162">reply JSON must keep "sampling_mask"</text>
+  <text class="badt" x="22" y="179">Gym has no code for it (bbf3cff4, d8f4db46)</text>
+  <text class="data" x="22" y="194">→ this is the "ask Gym" part</text>
+  <rect class="same" x="460" y="144" width="490" height="58" rx="6"/>
+  <text class="code" x="472" y="162">Gym gets only a receipt (capture acknowledged)</text>
+  <text class="okt" x="472" y="179">tensors never pass through Gym</text>
+  <text class="data" x="472" y="194">no Gym change needed</text>
+
+  <text class="row" x="12" y="228">3 · RL DRIVER / FINALIZER</text>
+  <rect class="bad" x="10" y="234" width="430" height="74" rx="6"/>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/0d62c9a47e2de7b98c51d2cba232bd02f36e0a30/nemo_rl/environments/nemo_gym.py#L908"><text class="code" x="22" y="252">_postprocess_nemo_gym_to_nemo_rl_result pops it</text></a>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/0d62c9a47e2de7b98c51d2cba232bd02f36e0a30/nemo_rl/environments/nemo_gym.py#L230"><text class="code" x="22" y="268">_tensorize_sampling_mask → ids [3,4], sizes [3,2,1]</text></a>
+  <text class="badt" x="22" y="285">with token capture ON this function never runs:</text>
+  <text class="badt" x="22" y="300">the mask is lost</text>
+  <rect class="diffb" x="460" y="234" width="490" height="74" rx="6"/>
+  <text class="code" x="472" y="252">CPU finalizer builds row columns [8,2]</text>
+  <text class="data" x="472" y="268">5 prompt rows zero-filled; shape checked</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/f0d9860e0da96c487dc8d4bd2ec683b56ef4b4e2/nemo_rl/experience/rollout_reassembler.py#L449"><text class="code" x="472" y="285">rejects topk_length_mismatch</text></a>
+
+  <text class="row" x="12" y="334">4 · TRAINER</text>
+  <rect class="box" x="10" y="340" width="430" height="44" rx="6"/>
+  <text class="code" x="22" y="358">logits outside the mask → -inf, then log_softmax</text>
+  <text class="data" x="22" y="374">same support as vLLM</text>
+  <rect class="box" x="460" y="340" width="490" height="44" rx="6"/>
+  <text class="code" x="472" y="358">gathers trainer log-probs at the 2 ids</text>
+  <text class="data" x="472" y="374">score-centering loss term</text>
+
+  <rect class="same" x="10" y="398" width="940" height="34" rx="6"/>
+  <text class="code" x="22" y="420">Both end as a per-token [tokens, width] int32 id column in the training batch.</text>
+
+  <rect x="560" y="444" width="14" height="10" class="bad"/><text class="data" x="580" y="453">gap / needs work</text>
+  <rect x="690" y="444" width="14" height="10" class="diffb"/><text class="data" x="710" y="453">#4818's route</text>
+  <rect x="810" y="444" width="14" height="10" class="same"/><text class="data" x="830" y="453">works as is</text>
+</svg>
+
+<h2>What replay on the token-capture route needs — proposed, not in any PR</h2>
+<p class="where"><b>Where it would land: RL only.</b> Copy #4818's pattern for its two columns.
+<b>No Gym change</b> in token-capture mode: the tensors skip Gym, and <code>top_k</code> is pinned on the vLLM server
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/0d62c9a47e2de7b98c51d2cba232bd02f36e0a30/nemo_rl/models/generation/vllm/vllm_worker_async.py#L754-L763">#3937 does this</a>,
+because Gym's Responses API cannot send <code>top_k</code>). Gym needs work only for the token-capture-off route.</p>
+<p style="font-size:14px">Nothing below is implemented. It is a sketch of where each piece would go.</p>
+<pre class="diff"><span class="hunk">@@ vllm_worker_async.py · _finish_request_capture, next to #4818's sampler_topk attach (L968-L973)</span>
+<span class="add">+        if self._return_sampling_mask_enabled():  # helper from #3937
++            # vLLM's per-token support, padded to top_k; sizes mark the real length.
++            attachments.update(
++                sampling_mask_token_ids=mask_ids,   # int32 [3, 4] = [[17,4,9,0],[8,23,0,0],[5,0,0,0]]
++                sampling_mask_sizes=mask_sizes,     # int32 [3]    = [3, 2, 1]
++            )</span>
+<span class="hunk">@@ setup.py · partition fields, as #4818 adds SAMPLER_TOPK_FIELDS (L341-L342, L371)</span>
+<span class="add">+    + (list(SAMPLING_MASK_FIELDS) if sampling_mask_replay else [])</span>
+<span class="hunk">@@ rollout_reassembler.py · finalizer, as #4818 zero-fills top-K rows</span>
+<span class="add">+    # prompt/tool rows get size 0; generated rows must equal the call's token count</span></pre>
+
+<p style="font-size:14px"><b>A possible shortcut, not tested.</b> With <code>logprobs_mode=processed_logprobs</code>, vLLM computes
+the reported log-probs over the filtered logits, so tokens the filter cut come back as <code>-inf</code>
+(<a href="https://github.com/vllm-project/vllm/blob/v0.29.0/vllm/config/model.py#L255-L261">model.py L255</a>,
+<a href="https://github.com/vllm-project/vllm/blob/v0.29.0/docs/training/sampling_mask.md">sampling_mask.md</a>).
+So #4818's own columns with <code>top_logprobs = top_k</code> would already hold the support: the ids whose log-prob is finite.
+Two things stop that today: #4818's extraction rejects any non-finite log-prob
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/f0d9860e0da96c487dc8d4bd2ec683b56ef4b4e2/nemo_rl/models/generation/score_centering.py#L80-L144"><code>extract_score_centering_samples</code></a>),
+and setup forbids filters with score centering. Ties at the top-k edge would also need checking.</p>
+
+<div class="warn"><b>So what.</b> Asking Gym to carry the mask only helps runs with token capture off. For token-capture
+runs, the mask should ride the route #4818 just built, and Gym needs no change. #3937 is a draft from August,
+written against an older main, so it needs a rebase either way. #4818 is not the place to add this, but its staging
+slot for per-token columns is the piece mask replay would reuse.</div>
+
+</div>
+</body>
+</html>

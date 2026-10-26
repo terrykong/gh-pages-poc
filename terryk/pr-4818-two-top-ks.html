@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NVIDIA-NeMo/RL #4818 — two different "top-k"s: recorded candidates vs the sampling filter</title>
+<style>
+:root{--bg:#0d1117;--surface:#161b22;--surface2:#1c2128;--border:#30363d;--text:#e6edf3;--dim:#8b949e;
+  --accent:#58a6ff;--green:#3fb950;--red:#f85149;--orange:#d29922}
+:root[data-theme="light"]{--bg:#ffffff;--surface:#f6f8fa;--surface2:#eaeef2;--border:#d0d7de;--text:#1f2328;
+  --dim:#59636e;--accent:#0969da;--green:#1a7f37;--red:#cf222e;--orange:#9a6700}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:28px 20px 70px}
+h1{font-size:22px;margin:0 0 8px;line-height:1.3}
+h2{font-size:18px;margin:30px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
+.sub{color:var(--dim);font-size:13.5px;margin:0 0 16px}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);
+  border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;
+  font:13px/1 ui-monospace,Menlo,monospace;cursor:pointer}
+.status{border:1px solid var(--border);border-radius:10px;background:var(--surface);padding:2px 16px 10px;margin:0 0 20px}
+.status dl{display:grid;grid-template-columns:max-content 1fr;gap:4px 14px;margin:12px 0 0}
+.status dt{color:var(--dim);font-size:12px;text-transform:uppercase;letter-spacing:.04em;white-space:nowrap;padding-top:2px}
+.status dd{margin:0;font-size:14px}
+.verdict{font-weight:700}
+.verdict.open{color:var(--orange)}
+nav.chain{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 6px;padding:0}
+nav.chain a,nav.chain span{display:inline-block;padding:5px 11px;border:1px solid var(--border);
+  border-radius:20px;background:var(--surface);text-decoration:none;color:var(--accent);
+  font-size:12.5px;line-height:1.3;white-space:nowrap}
+nav.chain a:hover{background:var(--surface2)}
+nav.chain span.here{background:var(--accent);color:var(--bg);border-color:var(--accent);font-weight:600}
+p.chainnote{color:var(--dim);font-size:12px;margin:0 0 18px}
+.bg{border-left:4px solid var(--accent);background:var(--surface);padding:8px 14px;margin:0 0 16px;font-size:14px}
+.warn{border-left:3px solid var(--orange);background:var(--surface);padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0}
+.tip{border-bottom:1px dotted var(--dim);cursor:help;position:relative;outline:none}
+.tip:hover::after,.tip:focus::after{content:attr(data-tip);position:absolute;left:0;top:1.7em;z-index:60;
+  width:max-content;max-width:min(340px,80vw);white-space:normal;background:var(--surface2);color:var(--text);
+  border:1px solid var(--border);border-radius:6px;padding:7px 10px;font:13px/1.45 -apple-system,sans-serif;
+  font-weight:400;box-shadow:0 4px 14px rgba(0,0,0,.3)}
+table{border-collapse:collapse;width:100%;font-size:13.5px;margin:10px 0}
+th,td{border:1px solid var(--border);padding:6px 9px;text-align:left;vertical-align:top}
+th{background:var(--surface)}
+.no{color:var(--red);font-weight:600}.yes{color:var(--green);font-weight:600}
+svg{max-width:100%;height:auto;display:block;margin:14px 0}
+svg .chip{fill:var(--surface);stroke:var(--border);stroke-width:1.2}
+svg .in{fill:var(--surface);stroke:var(--green);stroke-width:2}
+svg .out{fill:var(--surface2);stroke:var(--border);stroke-width:1;stroke-dasharray:3 3}
+svg .rec{fill:var(--surface);stroke:var(--accent);stroke-width:3}
+svg .drop{fill:var(--surface);stroke:var(--red);stroke-width:2.5}
+svg .code{fill:var(--text);font:11px ui-monospace,Menlo,monospace}
+svg .data{fill:var(--dim);font:10.5px ui-monospace,Menlo,monospace}
+svg .num{fill:var(--text);font:bold 12px ui-monospace,Menlo,monospace}
+svg .pr{fill:var(--dim);font:10.5px ui-monospace,Menlo,monospace}
+svg .hdr{fill:var(--accent);font:bold 13.5px -apple-system,sans-serif}
+svg .row{fill:var(--dim);font:bold 11px -apple-system,sans-serif}
+svg .okt{fill:var(--green);font:bold 11.5px -apple-system,sans-serif}
+svg .badt{fill:var(--red);font:bold 11.5px -apple-system,sans-serif}
+svg .bluet{fill:var(--accent);font:bold 11.5px -apple-system,sans-serif}
+svg .ln{stroke:var(--border);stroke-width:1}
+svg .star{fill:var(--orange);font:bold 13px -apple-system,sans-serif}
+svg a text{text-decoration:underline;fill:var(--accent)}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+  document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head>
+<body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+  function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+  function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
+    b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
+      else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+  document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+<div class="wrap">
+
+<h1>Two different "top-k"s: the K candidates score centering records, and the top-k/top-p filter that mask replay copies</h1>
+<p class="sub"><a href="https://github.com/NVIDIA-NeMo/RL/pull/4818">NVIDIA-NeMo/RL #4818</a> (score centering) next to
+<a href="https://github.com/NVIDIA-NeMo/RL/pull/3937">#3937</a> (sampling mask replay, draft) and vLLM 0.29.0's
+<a href="https://github.com/vllm-project/vllm/blob/v0.29.0/docs/training/sampling_mask.md">sampling-mask feature</a>.
+Permalinks pin #4818 head <code>f0d9860e</code> and #3937 head <code>0d62c9a4</code>.</p>
+
+<div class="status"><dl>
+  <dt>Before</dt>
+  <dd>On the Gym/HTTP path, the top-k sampling filter is forced off and top-p is allowed. The trainer rebuilds the top-p cut from its own probabilities. No vLLM sampling mask is sent anywhere.</dd>
+  <dt>This PR</dt>
+  <dd>#4818 records vLLM's K most likely candidates per token. That is data for a loss term, not a filter. It requires both filters off.</dd>
+  <dt>Status</dt>
+  <dd><span class="verdict open">Pre-existing, untouched by #4818.</span> Replaying the filter's exact support is a separate feature, in draft #3937. #4818 neither adds nor blocks it.</dd>
+</dl></div>
+
+<nav class="chain">
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4818-score-centering.html">what it adds</a>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4818-media-capture-500.html">image-capture crash</a>
+  <span class="here">two top-ks</span>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4818-mask-transport.html">moving a mask</a>
+</nav>
+<p class="chainnote">Four pages on this PR, one question each — this one: which "top-k" is which.</p>
+
+<div class="bg"><b>Background.</b> At each generated token vLLM has a probability for every token in the vocabulary.
+A <span class="tip" tabindex="0" data-tip="top_k keeps only the k most likely tokens; top_p keeps the smallest set of most likely tokens whose probabilities add up to at least p. vLLM then samples only from what is kept.">sampling filter</span>
+(<code>top_k</code>, <code>top_p</code>) cuts that list before sampling; the tokens that survive are the
+<i>support</i>. Separately, vLLM can <i>report</i> the probabilities of its K most likely tokens
+(<span class="tip" tabindex="0" data-tip="OpenAI request field. vLLM returns, for every generated token, the ids and log-probabilities of its K most likely tokens. It does not change what gets sampled.">top_logprobs=K</span>)
+without cutting anything. #4818's "top-k" is the second kind. Dotted words have a short explanation: hover or tap them.</div>
+
+<h2>One generated token, three setups</h2>
+<p style="font-size:13.5px;color:var(--dim)">Six-token vocabulary. vLLM's probabilities q and the trainer's p differ slightly, as they always do in practice.
+vLLM sampled token 9. Supports were computed with NeMo-RL's own
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/f0d9860e0da96c487dc8d4bd2ec683b56ef4b4e2/nemo_rl/algorithms/logits_sampling_utils.py#L256"><code>apply_top_k_top_p</code></a>, which copies vLLM's rule.</p>
+
+<svg viewBox="0 0 960 560" role="img" aria-label="Three rows show one token. Score centering records ids 17 and 4 with no filter. Today with top_p 0.8, vLLM keeps 17, 4 and 9 but the trainer rebuilds only 17 and 4, so sampled token 9 is dropped from the loss. With mask replay, the trainer uses vLLM's support and token 9 is kept.">
+  <text class="row" x="12" y="20">token id</text>
+  <text class="num" x="216" y="20" text-anchor="middle">17</text><text class="num" x="296" y="20" text-anchor="middle">4</text>
+  <text class="num" x="376" y="20" text-anchor="middle">9</text><text class="num" x="456" y="20" text-anchor="middle">31</text>
+  <text class="num" x="536" y="20" text-anchor="middle">2</text><text class="num" x="616" y="20" text-anchor="middle">50</text>
+  <text class="star" x="376" y="36" text-anchor="middle">★ sampled</text>
+
+  <!-- ROW 1 -->
+  <line class="ln" x1="10" y1="46" x2="950" y2="46"/>
+  <text class="hdr" x="12" y="66">1 · #4818 score centering: top_logprobs=2, no filter</text>
+  <text class="row" x="12" y="96">vLLM q</text>
+  <rect class="rec" x="186" y="78" width="60" height="28" rx="5"/><text class="code" x="216" y="96" text-anchor="middle">.45</text>
+  <rect class="rec" x="266" y="78" width="60" height="28" rx="5"/><text class="code" x="296" y="96" text-anchor="middle">.25</text>
+  <rect class="in" x="346" y="78" width="60" height="28" rx="5"/><text class="code" x="376" y="96" text-anchor="middle">.15</text>
+  <rect class="in" x="426" y="78" width="60" height="28" rx="5"/><text class="code" x="456" y="96" text-anchor="middle">.08</text>
+  <rect class="in" x="506" y="78" width="60" height="28" rx="5"/><text class="code" x="536" y="96" text-anchor="middle">.05</text>
+  <rect class="in" x="586" y="78" width="60" height="28" rx="5"/><text class="code" x="616" y="96" text-anchor="middle">.02</text>
+  <text class="bluet" x="664" y="90">records 2 ids + logprobs:</text>
+  <text class="data" x="664" y="105">ids [17, 4], logprobs [-0.80, -1.39]</text>
+  <text class="data" x="12" y="130">Sampling uses all 6 tokens. The 2 recorded candidates are only read later by the loss:</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/f0d9860e0da96c487dc8d4bd2ec683b56ef4b4e2/nemo_rl/algorithms/single_controller_utils/config.py#L1419-L1427"><text class="code" x="12" y="146">setup rejects any top_p &lt; 1 or top_k with score centering (config.py L1419)</text></a>
+
+  <!-- ROW 2 -->
+  <line class="ln" x1="10" y1="160" x2="950" y2="160"/>
+  <text class="hdr" x="12" y="180">2 · Today, Gym/HTTP path: top_p=0.8 (top_k is forced off)</text>
+  <text class="row" x="12" y="210">vLLM q</text>
+  <rect class="in" x="186" y="192" width="60" height="28" rx="5"/><text class="code" x="216" y="210" text-anchor="middle">.45</text>
+  <rect class="in" x="266" y="192" width="60" height="28" rx="5"/><text class="code" x="296" y="210" text-anchor="middle">.25</text>
+  <rect class="in" x="346" y="192" width="60" height="28" rx="5"/><text class="code" x="376" y="210" text-anchor="middle">.15</text>
+  <rect class="out" x="426" y="192" width="60" height="28" rx="5"/><text class="pr" x="456" y="210" text-anchor="middle">.08</text>
+  <rect class="out" x="506" y="192" width="60" height="28" rx="5"/><text class="pr" x="536" y="210" text-anchor="middle">.05</text>
+  <rect class="out" x="586" y="192" width="60" height="28" rx="5"/><text class="pr" x="616" y="210" text-anchor="middle">.02</text>
+  <text class="data" x="664" y="204">support {17, 4, 9}</text>
+  <text class="data" x="664" y="219">running sum .45 → .70 → .85 ≥ .8</text>
+  <text class="row" x="12" y="250">trainer p</text>
+  <rect class="in" x="186" y="232" width="60" height="28" rx="5"/><text class="code" x="216" y="250" text-anchor="middle">.50</text>
+  <rect class="in" x="266" y="232" width="60" height="28" rx="5"/><text class="code" x="296" y="250" text-anchor="middle">.32</text>
+  <rect class="drop" x="346" y="232" width="60" height="28" rx="5"/><text class="code" x="376" y="250" text-anchor="middle">.10</text>
+  <rect class="out" x="426" y="232" width="60" height="28" rx="5"/><text class="pr" x="456" y="250" text-anchor="middle">.05</text>
+  <rect class="out" x="506" y="232" width="60" height="28" rx="5"/><text class="pr" x="536" y="250" text-anchor="middle">.02</text>
+  <rect class="out" x="586" y="232" width="60" height="28" rx="5"/><text class="pr" x="616" y="250" text-anchor="middle">.01</text>
+  <text class="data" x="664" y="244">rebuilt support {17, 4}</text>
+  <text class="data" x="664" y="259">running sum .50 → .82 ≥ .8</text>
+  <text class="badt" x="12" y="284">Sampled token 9 is outside the trainer's own cut → its log-prob is -inf → the token is dropped from the loss.</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/f0d9860e0da96c487dc8d4bd2ec683b56ef4b4e2/nemo_rl/models/generation/vllm/vllm_worker_async.py#L1521-L1526"><text class="code" x="12" y="302">server forces request.top_k = -1</text></a>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/f0d9860e0da96c487dc8d4bd2ec683b56ef4b4e2/nemo_rl/algorithms/loss/loss_input.py#L308"><text class="code" x="280" y="302">policy_support_mask</text></a>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/f0d9860e0da96c487dc8d4bd2ec683b56ef4b4e2/nemo_rl/algorithms/loss/loss_functions.py#L834"><text class="code" x="440" y="302">token_mask *= support (loss_functions.py L834)</text></a>
+
+  <!-- ROW 3 -->
+  <line class="ln" x1="10" y1="316" x2="950" y2="316"/>
+  <text class="hdr" x="12" y="336">3 · Mask replay (#3937, draft): top_k=4, top_p=0.8, vLLM returns its support</text>
+  <text class="row" x="12" y="366">vLLM q</text>
+  <rect class="in" x="186" y="348" width="60" height="28" rx="5"/><text class="code" x="216" y="366" text-anchor="middle">.45</text>
+  <rect class="in" x="266" y="348" width="60" height="28" rx="5"/><text class="code" x="296" y="366" text-anchor="middle">.25</text>
+  <rect class="in" x="346" y="348" width="60" height="28" rx="5"/><text class="code" x="376" y="366" text-anchor="middle">.15</text>
+  <rect class="out" x="426" y="348" width="60" height="28" rx="5"/><text class="pr" x="456" y="366" text-anchor="middle">.08</text>
+  <rect class="out" x="506" y="348" width="60" height="28" rx="5"/><text class="pr" x="536" y="366" text-anchor="middle">.05</text>
+  <rect class="out" x="586" y="348" width="60" height="28" rx="5"/><text class="pr" x="616" y="366" text-anchor="middle">.02</text>
+  <text class="bluet" x="664" y="360">returns sampling_mask:</text>
+  <text class="data" x="664" y="375">[17, 4, 9]  (padded to width 4)</text>
+  <text class="row" x="12" y="406">trainer p</text>
+  <rect class="in" x="186" y="388" width="60" height="28" rx="5"/><text class="code" x="216" y="406" text-anchor="middle">.50</text>
+  <rect class="in" x="266" y="388" width="60" height="28" rx="5"/><text class="code" x="296" y="406" text-anchor="middle">.32</text>
+  <rect class="in" x="346" y="388" width="60" height="28" rx="5"/><text class="code" x="376" y="406" text-anchor="middle">.10</text>
+  <rect class="out" x="426" y="388" width="60" height="28" rx="5"/><text class="pr" x="456" y="406" text-anchor="middle">.05</text>
+  <rect class="out" x="506" y="388" width="60" height="28" rx="5"/><text class="pr" x="536" y="406" text-anchor="middle">.02</text>
+  <rect class="out" x="586" y="388" width="60" height="28" rx="5"/><text class="pr" x="616" y="406" text-anchor="middle">.01</text>
+  <text class="data" x="664" y="400">uses vLLM's support {17, 4, 9}</text>
+  <text class="data" x="664" y="415">renormalizes p over those 3</text>
+  <text class="okt" x="12" y="440">Token 9 stays in the loss, and both sides normalize over the same 3 tokens.</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/0d62c9a47e2de7b98c51d2cba232bd02f36e0a30/nemo_rl/models/policy/sampling_mask_replay.py#L27-L71"><text class="code" x="12" y="458">#3937 configure_vllm_for_sampling_mask_replay: needs top_k &gt; 0</text></a>
+  <a href="https://github.com/vllm-project/vllm/blob/v0.29.0/vllm/v1/engine/input_processor.py#L104-L115"><text class="code" x="500" y="458">vLLM 0.29: replay requires top_k &gt; 0</text></a>
+
+  <line class="ln" x1="10" y1="478" x2="950" y2="478"/>
+  <rect x="20" y="496" width="22" height="14" class="in"/><text class="data" x="48" y="507">kept by the filter</text>
+  <rect x="190" y="496" width="22" height="14" class="out"/><text class="data" x="218" y="507">cut by the filter</text>
+  <rect x="350" y="496" width="22" height="14" class="rec"/><text class="data" x="378" y="507">recorded (score centering)</text>
+  <rect x="580" y="496" width="22" height="14" class="drop"/><text class="data" x="608" y="507">sampled, but dropped by trainer</text>
+  <text class="data" x="20" y="540">K=2 recorded candidates · top_k=4 · top_p=0.8 · vocabulary of 6</text>
+</svg>
+
+<h2>So which filter is supported where?</h2>
+<table>
+<tr><th></th><th>top_k filter</th><th>top_p filter</th><th>How the trainer gets the support</th></tr>
+<tr><td>Gym/HTTP path today</td><td class="no">forced off (-1)</td><td class="yes">allowed</td><td>rebuilt from the trainer's own probabilities (row 2)</td></tr>
+<tr><td>#4818 score centering</td><td class="no">rejected</td><td class="no">rejected</td><td>no filter, so no support. Its "K" is <code>top_logprobs</code></td></tr>
+<tr><td>#3937 mask replay (draft)</td><td class="yes">required, &gt; 0</td><td class="yes">allowed with top_k</td><td>vLLM's exact support, sent with the tokens (row 3)</td></tr>
+</table>
+<p style="font-size:14px">The "top-p is not supported yet" you heard comes from mask replay, not from #4818. vLLM's replay
+<a href="https://github.com/vllm-project/vllm/blob/v0.29.0/docs/training/sampling_mask.md">requires <code>top_k &gt; 0</code></a>:
+"pure top-p can produce vocab-sized masks". So top-p works only together with top-k, never alone.
+#4818 forbids both filters for a different reason. Its loss models vLLM's probabilities outside the K recorded tokens as
+a rescaled copy of the trainer's full softmax. A filter would set those probabilities to zero, which breaks that model.</p>
+
+<div class="warn"><b>So what.</b> #4818 does not move a sampling mask, and it does not need Gym's help with one. Its K candidates
+would only meet mask replay if the two were combined later, and the loss would then need rework to model the tail
+inside the kept support. The real gap is row 2. Today, a sampled token that the trainer's own top-p cut excludes
+is dropped from the loss; the only trace is the
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/f0d9860e0da96c487dc8d4bd2ec683b56ef4b4e2/nemo_rl/algorithms/loss/loss_functions.py#L1187"><code>policy_support_excluded_tokens</code></a> count. The fix is mask replay (#3937), and the next page shows how its mask would have to
+travel once token capture is on.</div>
+
+</div>
+</body>
+</html>
