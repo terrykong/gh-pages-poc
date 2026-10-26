@@ -107,6 +107,15 @@ So when a call adds no image, <code>tensors</code> is <code>None</code>
 (<a href="https://github.com/NVIDIA-NeMo/RL/blob/f0d9860e0da96c487dc8d4bd2ec683b56ef4b4e2/nemo_rl/data/captured_media.py#L395-L411"><code>capture_processed_media</code></a>,
 type <a href="https://github.com/NVIDIA-NeMo/RL/blob/f0d9860e0da96c487dc8d4bd2ec683b56ef4b4e2/nemo_rl/data/captured_media.py#L141"><code>dict | None</code></a>).</div>
 
+<p style="font-size:14px"><b>Why a score-centering PR touched image capture.</b> Score centering has to ship vLLM's top-K tensors
+from the vLLM worker to the data plane. The PR's first version did that with a second, separate write, and its own self-review
+flagged that a failure there was only logged. The fix, commit
+<a href="https://github.com/NVIDIA-NeMo/RL/commit/0be78315e117999d583fdfc3453778ce8c2f0bfc">0be78315e</a>, moved the top-K tensors into the
+existing single write, through the <code>attachments</code> mapping. Until then, that mapping only ever held image tensors. To add two
+more keys, the code copies the image mapping with <code>dict(...)</code>. That copy assumes the image tensors are always a mapping,
+but they are <code>None</code> whenever a call adds no new image. The crash is collateral damage from sharing that slot, and it fires
+with score centering off because the copy runs on every captured call.</p>
+
 <h2>Two turns of one rollout, before and after</h2>
 <svg viewBox="0 0 960 400" role="img" aria-label="Turn 1 sends an image and works before and after. Turn 2 adds no image, so tensors is None; before the PR it staged, after the PR dict(None) raises and the request returns HTTP 500.">
   <text class="hdr" x="215" y="22" text-anchor="middle">before (base f0639c60)</text>
