@@ -90,7 +90,7 @@ links pin <code>c516143</code>, the version the PR uses.</p>
   <dt>Before</dt>
   <dd>Two storage backends. <code>simple</code> sends row bytes over ZMQ to CPU storage units. <code>mooncake_cpu</code> moves them over RDMA, with a Mooncake master service that tracks where every key is.</dd>
   <dt>This PR</dt>
-  <dd>Adds a third, opt-in backend: rows are placed by row number like <code>simple</code>, but the bytes move over RDMA like Mooncake, and no master service is needed.</dd>
+  <dd>Adds a third, opt-in TQ storage backend, written in NeMo-RL (<a href="#fit">how it fits with TQ</a>). Rows are placed by row number like <code>simple</code>, but the bytes move over RDMA like Mooncake, and no master service is needed.</dd>
   <dt>Status</dt>
   <dd><span class="verdict good">Works in the author's 86-node runs</span> (0 hash mismatches, faster put than <code>simple</code>; numbers in the PR description).
   <span class="verdict open">Open review items</span> — see the last section.</dd>
@@ -104,6 +104,26 @@ to keep the bytes, and every row has a
 <span class="tip" tabindex="0" data-tip="TQ's global row number (global_idx). It is the same number in every process, so every process can compute where a row lives without asking anyone.">global row number</span>.
 A put or get names keys like <code>5@responses</code> (row 5, field <code>responses</code>).
 Dotted words have a short explanation: hover or tap them.</p>
+
+<div class="hl" id="fit"><b>How <code>nixl</code> fits with TransferQueue.</b> It is a TQ storage backend that plugs into TQ. It does not go around TQ. It is new code, though, and it lives in NeMo-RL rather than in TQ.
+<ul style="margin:6px 0 0;padding-left:20px">
+<li><b>Does it go around TQ? No.</b> NeMo-RL picks it the same way it picks the other two, by naming a TQ backend: <code>storage_backend: "NixlStore"</code>
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/738312b7b9b61b2c504486386dd7ad9525087604/nemo_rl/data_plane/adapters/transfer_queue.py#L962-L979">transfer_queue.py:962</a>).
+Every put and get still goes through TQ. After each put, TQ's controller is still told which rows and fields are ready
+(<a href="https://github.com/Ascend/TransferQueue/blob/c51614308b68c8d7a87c9b3ef62d59e14c69bde2/transfer_queue/storage/managers/base.py#L689">base.py:689</a>).
+The only thing the controller no longer keeps is <i>where</i> the bytes are.</li>
+<li><b>Is it a NIXL backend for TQ? Yes.</b> It registers in the same three TQ plug-in tables that TQ's own backends use:
+the client (<a href="https://github.com/NVIDIA-NeMo/RL/blob/738312b7b9b61b2c504486386dd7ad9525087604/nemo_rl/data_plane/adapters/tq_nixl.py#L247-L248">tq_nixl.py:247</a>),
+the startup code that launches the units (<a href="https://github.com/NVIDIA-NeMo/RL/blob/738312b7b9b61b2c504486386dd7ad9525087604/nemo_rl/data_plane/adapters/tq_nixl.py#L731-L732">:731</a>),
+and the manager (<a href="https://github.com/NVIDIA-NeMo/RL/blob/738312b7b9b61b2c504486386dd7ad9525087604/nemo_rl/data_plane/adapters/tq_nixl.py#L784-L785">:784</a>).
+TQ's Mooncake backend registers in those same tables
+(<a href="https://github.com/Ascend/TransferQueue/blob/c51614308b68c8d7a87c9b3ef62d59e14c69bde2/transfer_queue/storage/managers/mooncake_manager.py#L22">mooncake_manager.py:22</a>).
+The manager is a subclass of TQ's <code>KVStorageManager</code> and reuses its put and get. It replaces only two things: clearing rows, and checkpoints.</li>
+<li><b>Is it custom? Yes, below the plug-in line.</b> The storage units, the client, the byte layout and the row index are all new NeMo-RL code under
+<code>nemo_rl/data_plane/</code>. TQ at the pinned version has no NIXL storage backend. Its <code>RayStore</code> can hand tensors to Ray's own NIXL transport
+(<a href="https://github.com/Ascend/TransferQueue/blob/c51614308b68c8d7a87c9b3ef62d59e14c69bde2/transfer_queue/storage/clients/ray_storage_client.py#L78">ray_storage_client.py:78</a>), but that is a different thing.
+This PR does not change TQ itself.</li>
+</ul></div>
 
 <h2>One put and one get, three ways</h2>
 <p>Same example in all three: a client puts rows 5 and 7, field <code>responses</code>, each a
