@@ -203,9 +203,31 @@ That is why it is noise from the point of view of learning, and why score center
 <p style="font-size:14px">The pull is zero only when vLLM and the trainer agree exactly. They rarely do: they use different
 kernels and precision, and in async runs vLLM's weights trail the trainer's by a step or more. Score centering subtracts
 the pull and keeps only the signal, so on the logits the update becomes A × (sampled token − vLLM's distribution).
-To do that the trainer needs vLLM's probabilities, which is why the PR records vLLM's top-K tokens. The top-K part is exact.
-The "rest of vocab" part is estimated by scaling the trainer's own probabilities by ρ = vLLM's leftover mass ÷ the
-trainer's leftover mass (0.10 ÷ 0.25 = 0.4 here).</p>
+To subtract the pull, the trainer needs q, vLLM's probability for every token.</p>
+
+<p style="font-size:14px"><b>Why only the top-K, not the full vocabulary.</b> The exact pull needs q over the
+whole vocabulary at every position. That is too big to move: about 152,000 numbers per token, roughly 18.5 GiB for one
+32K-token response in fp32. So the PR records only vLLM's K most likely tokens per position: about 32 MiB per response at
+K = 128. It is a trade-off for size. The K recorded tokens are exact. Everything else is an estimate.</p>
+<p style="font-size:14px"><b>How the rest is estimated.</b> For the tokens outside the top-K, vLLM tells us only one thing:
+their total, 1 − (sum of the top-K), which is 0.10 here. It does not say how that 0.10 is split between those tokens. The PR
+assumes vLLM splits it in the same proportions as the trainer does, and scales the trainer's numbers to the right total:</p>
+<table>
+<tr><th></th><th>id 17</th><th>id 4</th><th>token a</th><th>token b</th></tr>
+<tr><td>vLLM q (recorded)</td><td>0.72</td><td>0.18</td><td colspan="2" style="text-align:center">only the total is known: 0.10</td></tr>
+<tr><td>trainer p</td><td>0.60</td><td>0.15</td><td>0.15</td><td>0.10</td></tr>
+<tr><td>estimate of vLLM's q</td><td>0.72 (exact)</td><td>0.18 (exact)</td><td>0.4 × 0.15 = 0.06</td><td>0.4 × 0.10 = 0.04</td></tr>
+</table>
+<p style="font-size:14px">The scale factor is ρ = vLLM's leftover ÷ the trainer's leftover = 0.10 ÷ 0.25 = 0.4. If vLLM really
+split it 0.08 / 0.02, the estimate is off in its shape but still has the right total. Both splits add up to the same
+leftover, so the total error is at most twice the leftover mass. The run logs that mass as 1 − <code>score_centering_head_mass</code>. A larger K shrinks it.</p>
+<p style="font-size:14px"><b>What if vLLM samples with a <code>top_k = K</code> filter?</b> Then vLLM can only pick those K tokens.
+With <code>processed_logprobs</code> they sum to 1, so the leftover is 0, ρ = 0, and the recorded K tokens are vLLM's whole
+distribution, with nothing estimated. That case is not available today: the Gym/HTTP path forces <code>top_k</code> off, and
+this PR rejects <code>top_k</code> with score centering
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/f0d9860e0da96c487dc8d4bd2ec683b56ef4b4e2/nemo_rl/algorithms/single_controller_utils/config.py#L1419-L1427">config.py L1419</a>).
+It would also need the trainer to use the same K tokens, which is what
+<a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4818-two-top-ks.html">sampling-mask replay</a> provides.</p>
 
 <p style="font-size:14px;margin-bottom:4px"><b>In the code</b>, it is one extra loss term. It is computed separately at every generated position t, then averaged over positions exactly like the main loss.</p>
 <ul class="syms">
