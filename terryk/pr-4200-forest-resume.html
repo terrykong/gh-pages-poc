@@ -60,7 +60,8 @@ document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoad
 <dt>Status</dt><dd><span class="verdict good">Implemented in this PR.</span> <span class="verdict open">Two open review items:</span> a new unit test fails at head, and resume does not check that the forest setting or the padding size still match the checkpoint.</dd>
 </dl></div>
 
-<div class="bg"><b>Background.</b> With <span class="tip" tabindex="0" data-tip="token_capture.forest_training: one agent rollout can become several training rows, one per stretch of model calls between context compactions.">forest training</span>, one agent rollout can turn into several training rows. Gym reports every model call; RL keeps a <span class="tip" tabindex="0" data-tip="RolloutSelection: the IDs of the model replies picked for training, one flag pair per reply, and whether the rollout was cut off.">selection</span> of which replies to train on. A <span class="tip" tabindex="0" data-tip="RolloutRecoveryLedger: an in-memory record of every prompt group not yet trained, saved to rollout_recovery.pt at each checkpoint.">recovery ledger</span> tracks groups still being generated; finished groups wait in the <span class="tip" tabindex="0" data-tip="TQReplayBuffer: holds finished groups' rows until the trainer takes them. Saved with the TQ snapshot.">replay buffer</span>. Dotted words have a short explanation: hover or tap them.</div>
+<div class="bg"><b>Background.</b> With <span class="tip" tabindex="0" data-tip="token_capture.forest_training: one agent rollout can become several training rows, one per stretch of model calls between context compactions.">forest training</span>, one agent rollout can turn into several training rows. Gym reports every model call; RL keeps a <span class="tip" tabindex="0" data-tip="RolloutSelection: the IDs of the model replies picked for training, one flag pair per reply, and whether the rollout was cut off.">selection</span> of which replies to train on. A <span class="tip" tabindex="0" data-tip="RolloutRecoveryLedger: an in-memory record of every prompt group not yet trained, saved to rollout_recovery.pt at each checkpoint.">recovery ledger</span> tracks groups still being generated; finished groups wait in the <span class="tip" tabindex="0" data-tip="TQReplayBuffer: holds finished groups' rows until the trainer takes them. Saved with the TQ snapshot.">replay buffer</span>. Dotted words have a short explanation: hover or tap them.
+<p style="margin:8px 0 0"><b>What the ledger is.</b> An RL object, not a Gym one: <a href="https://github.com/NVIDIA-NeMo/RL/blob/c9c1b020c5caeeaa8ed0af7cb843b319d10da820/nemo_rl/experience/rollout_recovery.py#L431"><code>RolloutRecoveryLedger</code></a> in <code>nemo_rl/experience/rollout_recovery.py</code>. The RL <a href="https://github.com/NVIDIA-NeMo/RL/blob/c9c1b020c5caeeaa8ed0af7cb843b319d10da820/nemo_rl/experience/rollout_manager.py#L1737">rollout manager</a> owns one. It is RL's notebook of every prompt group that has been sent to Gym but not yet trained on: for each rollout, which attempt is current, whether it finished, its reward, and the receipt Gym sent back. Gym only supplies the receipt; it keeps no ledger. RL writes the ledger to <code>rollout_recovery.pt</code> at each checkpoint and reads it on resume.</p></div>
 
 <p>At a checkpoint, two things are saved. Groups still generating go into the ledger: one record per rollout (a <em>sibling</em>), holding Gym's <span class="tip" tabindex="0" data-tip="ng_receipt: Gym's list of stored model calls (the manifest) for one rollout.">receipt</span>, the reward, and now the selection (<a href="https://github.com/NVIDIA-NeMo/RL/blob/c9c1b020c5caeeaa8ed0af7cb843b319d10da820/nemo_rl/experience/rollout_recovery.py#L198"><code>logical_selection</code></a>, written in <a href="https://github.com/NVIDIA-NeMo/RL/blob/c9c1b020c5caeeaa8ed0af7cb843b319d10da820/nemo_rl/experience/rollout_recovery.py#L1031"><code>state_dict</code></a>, recovery schema 4). Finished groups are saved as rows in the replay buffer; forest rows carry owner tags that say which rollout each row belongs to. On resume, <a href="https://github.com/NVIDIA-NeMo/RL/blob/c9c1b020c5caeeaa8ed0af7cb843b319d10da820/nemo_rl/experience/rollout_recovery.py#L548"><code>prepare_for_restart</code></a> keeps finished siblings and regenerates the rest. The retry path now reads the selection back from the ledger (<a href="https://github.com/NVIDIA-NeMo/RL/blob/c9c1b020c5caeeaa8ed0af7cb843b319d10da820/nemo_rl/experience/rollout_manager.py#L2477-L2484"><code>rollout_manager.py</code></a>) instead of from the request.</p>
 
@@ -127,7 +128,14 @@ document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoad
 <p class="cref">🔴 <a href="https://github.com/NVIDIA-NeMo/RL/pull/4200#discussion_r4319616131">C2 review comment — single_controller.py:1222-1234 (mode and padding check)</a></p>
 
 <h2>The code that does it</h2>
-<p class="where"><b>Where the change lands: RL only.</b> <a href="https://github.com/NVIDIA-NeMo/RL/blob/c9c1b020c5caeeaa8ed0af7cb843b319d10da820/nemo_rl/experience/rollout_recovery.py#L389"><code>rollout_recovery.py</code></a> saves and checks the selection; <a href="https://github.com/NVIDIA-NeMo/RL/blob/c9c1b020c5caeeaa8ed0af7cb843b319d10da820/nemo_rl/experience/rollout_manager.py#L2477-L2484"><code>rollout_manager.py</code></a> reads it back; the startup ban is deleted. <b>No Gym change:</b> the receipt Gym already sends is enough.</p>
+<p class="where"><b>Where the change lands: RL only.</b> <b>No Gym change:</b> the receipt Gym already sends is enough.</p>
+<p>The PR makes four changes:</p>
+<ol>
+<li><b>Ledger saves the selection.</b> <a href="https://github.com/NVIDIA-NeMo/RL/blob/c9c1b020c5caeeaa8ed0af7cb843b319d10da820/nemo_rl/experience/rollout_recovery.py#L198"><code>logical_selection</code></a> is a new field on each attempt record (file format 3 → 4), and <a href="https://github.com/NVIDIA-NeMo/RL/blob/c9c1b020c5caeeaa8ed0af7cb843b319d10da820/nemo_rl/experience/rollout_manager.py#L2477-L2484"><code>rollout_manager.py</code></a> reads it from there instead of from a dict that lived only in one request. First hunk below.</li>
+<li><b>Replay buffer reloads forest rows.</b> <a href="https://github.com/NVIDIA-NeMo/RL/blob/c9c1b020c5caeeaa8ed0af7cb843b319d10da820/nemo_rl/algorithms/async_utils/replay_buffer.py#L1867"><code>load_state_dict</code></a> accepts groups whose rows carry owner tags, instead of insisting on one row per rollout. Step 4 in the figure.</li>
+<li><b>Forest groups get the normal retry limits.</b> Before, a forest group never retried: a data error stopped the run, and an infra error dropped the group. Both happened because the selection would have been lost on a retry. Now forest groups retry like any other group. The only error that still stops the run is an unresolved capture write (<code>UnresolvedCaptureAcknowledgement</code>), and that now applies to every capture run, not just forest runs. Second hunk.</li>
+<li><b>The three bans are deleted:</b> checkpointing on, mid-rollout snapshots on, and resuming from an existing checkpoint. Last two hunks.</li>
+</ol>
 <pre class="diff"><span class="hunk">@@ rollout_manager.py L2477-L2484 · _generate_for_finalization_attempt</span>
                  logical_selections=(
 <span class="del">-                    tuple(rollout_selections[i] for i in range(len(rollout_ids)))
@@ -138,9 +146,36 @@ document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoad
 +                        ).siblings
 +                    )</span>
                      if self._forest_training
+<span class="hunk">@@ rollout_manager.py (base L2243-L2259, head L2244-L2252) · generate_for_finalization</span>
+             except Exception as error:
+<span class="del">-                if (
+-                    self._forest_training
+-                    and classify_rollout_failure(error) is not FailureClass.INFRA
+-                ):
+</span><span class="add">+                if isinstance(error, UnresolvedCaptureAcknowledgement):</span>
+                     raise
+                 reason = type(error).__name__
+                 if classify_rollout_failure(error) is FailureClass.INFRA:
+                     infra_attempts += 1
+                     last_infra_error = error
+<span class="del">-                    # Forest selections are request-local until checkpoint recovery
+-                    # persists them. Drop this abandoned group through the usual
+-                    # bounded policy; do not redispatch and lose sealed selections.
+-                    if self._forest_training:
+-                        break
+</span>                     if infra_attempts &gt;= policy.max_infra_attempts:
+                         break
 <span class="hunk">@@ config.py (base L1516-L1521) · validate_single_controller_config</span>
 <span class="del">-        if master_config.checkpointing["enabled"]:
--            raise ValueError("Forest checkpoint/resume is not supported initially")</span></pre>
+-            raise ValueError("Forest checkpoint/resume is not supported initially")
+-        if master_config.rollout_checkpointing.snapshot_attempt_interval_s is not None:
+-            raise ValueError(
+-                "Forest rollout checkpoint/resume is not supported initially"
+-            )</span>
+<span class="hunk">@@ setup.py (base L1349-L1350) · setup_single_controller</span>
+     trainer_checkpoint_path = checkpointer.get_latest_checkpoint_path()
+<span class="del">-    if token_capture_cfg.forest_training and trainer_checkpoint_path is not None:
+-        raise ValueError("Forest checkpoint/resume is not supported initially")</span></pre>
 <p>Also in the PR: every Megatron resume now restores the saved random-number state (<a href="https://github.com/NVIDIA-NeMo/RL/blob/c9c1b020c5caeeaa8ed0af7cb843b319d10da820/nemo_rl/models/megatron/setup.py#L1984"><code>load_rng</code></a>), for all algorithms, not only forest runs.</p>
 <p class="cref">🟡 <a href="https://github.com/NVIDIA-NeMo/RL/pull/4200#discussion_r4319616151">C5 review comment — single-controller.md:213 (RNG on every resume)</a></p>
 
