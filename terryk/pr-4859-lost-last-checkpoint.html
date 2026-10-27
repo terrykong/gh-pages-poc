@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>NVIDIA-NeMo/RL #4859 — why a run that ends early keeps its last checkpoint unpublished</title>
+<title>NVIDIA-NeMo/RL #4859 — how teardown now publishes a deferred checkpoint</title>
 <style>
 :root{--bg:#0d1117;--surface:#161b22;--surface2:#1c2128;--border:#30363d;--text:#e6edf3;--dim:#8b949e;
   --accent:#58a6ff;--green:#3fb950;--red:#f85149;--orange:#d29922}
@@ -29,6 +29,7 @@ code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;font:13px ui
 .status tr:last-child td,.status tr:last-child th{border-bottom:none}
 .verdict{font-weight:700}
 .verdict.open{color:var(--red)}
+.verdict.good{color:var(--green)}
 nav.chain{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 6px;padding:0}
 nav.chain a,nav.chain span{display:inline-block;padding:5px 11px;border:1px solid var(--border);
   border-radius:20px;background:var(--surface);text-decoration:none;color:var(--accent);
@@ -73,17 +74,17 @@ svg a text{text-decoration:underline;fill:var(--accent);font:11px ui-monospace,M
   document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
 <div class="wrap">
 
-<h1>Why a run that ends when its data runs out leaves its last checkpoint unpublished</h1>
+<h1>Why a run that ended when its data ran out left its last checkpoint unpublished, and how teardown fixes it</h1>
 <p class="sub"><a href="https://github.com/NVIDIA-NeMo/RL/pull/4859">NVIDIA-NeMo/RL #4859</a>, flag
-<code>async_rl.defer_async_checkpoint_finalize: true</code>. All permalinks pin the PR head <code>0a4103fb</code>.</p>
+<code>async_rl.defer_async_checkpoint_finalize: true</code>. The bug links pin <code>0a4103fb</code>, the head first reviewed; the fix links pin the current head <code>8841e8e4</code>.</p>
 
 <div class="status">
 <table>
 <tr><th></th><th>SFT v2</th><th>SingleController (GRPO / PPO)</th></tr>
 <tr><th>main</th><td colspan="2">Every exit publishes the last save: <code>run()</code>'s cleanup calls <code>CheckpointManager.shutdown()</code>, which waits for the background thread that finalizes and renames it.</td></tr>
-<tr><th>This PR (flag on)</th><td>Only a normal exit finalizes. An error after a save leaves it as <code>tmp_step_N/</code>.</td><td>Same for errors, <b>and</b> for the normal end of an epoch-limited run: the loop leaves through an early <code>return</code> that skips the final finalize.</td></tr>
-<tr><th>After review fixes</th><td>Finalize the pending save first in <code>run()</code>'s cleanup (C2).</td><td>Finalize the pending save in <code>run()</code>'s cleanup, before <code>shutdown()</code> (C1).</td></tr>
-<tr><th>Status</th><td colspan="2"><span class="verdict open">Open — not fixed in this PR.</span> Raised in review comments C1 and C2. Default runs (flag off) are not affected.</td></tr>
+<tr><th>First push (flag on)</th><td>Only a normal exit finalizes. An error after a save leaves it as <code>tmp_step_N/</code>.</td><td>Same for errors, <b>and</b> for the normal end of an epoch-limited run: the loop leaves through an early <code>return</code> that skips the final finalize.</td></tr>
+<tr><th>Now (5f93e1bae)</th><td>The cleanup loop publishes the pending save first, before checkpoint close.</td><td>Teardown publishes the pending save right after the pumps stop, before checkpoint close, in its own try/except.</td></tr>
+<tr><th>Status</th><td colspan="2"><span class="verdict good">Fixed by this PR</span> in 5f93e1bae. One narrow case is left: a cancel while waiting for the checkpoint lock (review comment C7, below). Default runs (flag off) were never affected.</td></tr>
 </table>
 </div>
 
@@ -93,7 +94,7 @@ svg a text{text-decoration:underline;fill:var(--accent);font:11px ui-monospace,M
 </nav>
 <p class="chainnote">Two pages on this PR, one question each — this one: which exits lose the last save.</p>
 
-<p>With the flag on, a save is published only by
+<p>As first pushed, with the flag on, a save was published only by
 <a href="https://github.com/NVIDIA-NeMo/RL/blob/0a4103fb6305cbd41d34fbcac1d4699c12c76eb3/nemo_rl/algorithms/single_controller.py#L5393-L5417"><code>_finish_pending_save</code></a>.
 The train loop calls it at the top of each step and once more, blocking, after the loop
 (<a href="https://github.com/NVIDIA-NeMo/RL/blob/0a4103fb6305cbd41d34fbcac1d4699c12c76eb3/nemo_rl/algorithms/single_controller.py#L3906">L3906</a>).
@@ -159,46 +160,57 @@ that skips L3906. The GRPO example config ends this way: <code>max_num_epochs: 1
 <p>An error in the step after a save takes the same route to the cleanup, in both the SingleController and
 <a href="https://github.com/NVIDIA-NeMo/RL/blob/0a4103fb6305cbd41d34fbcac1d4699c12c76eb3/nemo_rl/algorithms/sft_v2.py#L257-L266">SFT v2</a>,
 and drops the save the same way. On main, that cleanup publishes it.</p>
-<p class="cref">🔴 <a href="https://github.com/NVIDIA-NeMo/RL/pull/4859#discussion_r4380671228">review comment C1 — single_controller.py:3906</a> <a href="https://github.com/NVIDIA-NeMo/RL/pull/4859#discussion_r4380671241">review comment C2 — sft_v2.py:258</a></p>
 
-<h2>The fix — proposed in the review, not in the PR</h2>
-<p class="where"><b>Where the fix lands: RL only, two functions.</b> Nothing below is implemented in the PR. Finalize a
-still-pending save in each <code>run()</code>'s cleanup, before <code>shutdown()</code>. One spot covers every exit:
-the early <code>return</code>, errors, and cancellation. The existing finalize after the loop stays, and the cleanup call is
-a no-op when nothing is pending.</p>
-<pre class="diff"><span class="hunk">@@ single_controller.py L956-L958 · SingleControllerActor._run_pumps (finally)</span>
-             finally:
-                 self._logger.finish()
-<span class="add">+                try:
-+                    # Exits that skip the train pump's own final finalize (data used
-+                    # up, errors, cancellation) must still publish a deferred save.
-+                    await self._finish_pending_save(blocking=True)
-+                except Exception as e:  # teardown must not mask the original failure
-+                    print(f"Error finalizing deferred checkpoint: {e}", flush=True)</span>
-                 await asyncio.to_thread(self._checkpointer.shutdown)
-<span class="hunk">@@ sft_v2.py L255-L259 · SFTSingleControllerActor.run</span>
-<span class="del">-                self._finish_pending_save(blocking=True)
-</span>                 return vars(self._save_state).copy()
+
+<h2>The fix — landed in this PR (5f93e1bae)</h2>
+<p class="where"><b>Where the fix lands: RL only, two functions.</b> Each loop now publishes a still-pending save in its
+teardown, before checkpoint close. One spot covers every exit: the early <code>return</code>, errors, and cancellation.
+The finalize after the loop stays; the teardown call does nothing once no save is pending.</p>
+<pre class="diff"><span class="hunk">@@ <a href="https://github.com/NVIDIA-NeMo/RL/blob/8841e8e42d52f37bffb85ed80b1ec9e9552afc3c/nemo_rl/algorithms/single_controller.py#L941-L951">single_controller.py L941-L951</a> · SingleControllerActor._run_pumps (finally)</span>
+             for task in tasks:
+                 task.cancel()
+             await asyncio.gather(*tasks, return_exceptions=True)
+<span class="add">+            try:
++                # With the train pump stopped, publish a save that
++                # defer_async_checkpoint_finalize left pending: a failure or an
++                # orderly rollout-checkpoint stop ends the pump before its own
++                # blocking finalize. Before checkpoint close, which joins the rename.
++                await self._finish_pending_save(blocking=True)
++            except Exception as e:  # teardown must not mask the original failure
++                print(f"Error publishing the pending checkpoint: {e}", flush=True)</span>
+             if self._engine_supervisor is not None:
+<span class="hunk">@@ <a href="https://github.com/NVIDIA-NeMo/RL/blob/8841e8e42d52f37bffb85ed80b1ec9e9552afc3c/nemo_rl/algorithms/sft_v2.py#L257-L265">sft_v2.py L257-L265</a> · SFTSingleControllerActor.run (finally)</span>
          finally:
              for cleanup, name in (
-<span class="add">+                # Publish a deferred save on every exit, including errors.
+<span class="add">+                # A save deferred by defer_async_checkpoint_finalize is published only
++                # here when the run raised after it. Before checkpoint close, so that
++                # close joins the rename this starts.
 +                (
 +                    lambda: self._finish_pending_save(blocking=True),
-+                    "pending checkpoint finalize",
++                    "pending checkpoint publish",
 +                ),</span>
-                 (self._close_loaders, "loader close"),
-                 (self._logger.finish, "logger close"),
-                 (self._checkpointer.shutdown, "checkpoint close"),</pre>
+                 (self._close_loaders, "loader close"),</pre>
 <ol>
-<li>Both additions call the PR's own <code>_finish_pending_save(blocking=True)</code>: wait for the write on every worker, then rename the folder. This is what main's cleanup already does through <code>shutdown()</code>, so a stuck worker hangs here exactly as it does today.</li>
-<li>The SingleController addition goes before <code>shutdown()</code>, so the rename is done before the manager's final cleanup, like a normal exit.</li>
-<li>The SFT v2 entry reuses the existing loop, which turns a failure into a warning, so it never hides the error that ended the run.</li>
+<li>Both call the PR's own <code>_finish_pending_save(blocking=True)</code>: wait for the write on every worker, then rename the folder. Main's cleanup already did this through <code>shutdown()</code>, so a stuck worker hangs here exactly as it does on main.</li>
+<li>Both run before checkpoint close, so the close waits for the rename.</li>
+<li>A failure in either only prints or warns, so it never hides the error that ended the run.</li>
+<li>Checked on CPU: the existing exhaustion test, run with the flag on, now ends with <code>{step_1, step_2}</code>.</li>
 </ol>
 
-<div class="warn"><b>So what.</b> With the flag on, every epoch-limited SingleController run (the GRPO example's default)
-finishes with exit code 0 and an unusable last checkpoint, and resume goes back one save interval. Any error in the step
-after a save does the same, for both loops. The PR's tests miss it because they all stop at <code>max_num_steps</code>.
-The fix is a few lines in each cleanup, plus a test: the existing exhaustion test run with the flag on.</div>
+<h2>What is left — proposed in the review, not in the PR</h2>
+<p><a href="https://github.com/NVIDIA-NeMo/RL/blob/8841e8e42d52f37bffb85ed80b1ec9e9552afc3c/nemo_rl/algorithms/single_controller.py#L5430-L5433"><code>_finish_pending_save</code></a> clears the pending
+save <em>before</em> waiting for the checkpoint lock. If teardown cancels the train pump during that wait, the workers have
+already finalized, but the new teardown publish finds nothing pending and <code>tmp_step_N/</code> stays. Nothing below is
+implemented: clearing it inside the lock, right after the rename starts, closes the gap.</p>
+<pre class="diff"><span class="hunk">@@ single_controller.py L5430-L5433 · SingleControllerActor._finish_pending_save</span>
+         checkpoint_path, step = self._pending_checkpoint
+<span class="del">-        self._pending_checkpoint = None
+</span>         async with self._checkpoint_save_lock:
+             self._checkpointer.begin_finalization(checkpoint_path)
+<span class="add">+            # Cleared only once published: a cancel while waiting for the lock
++            # leaves it for the teardown publish.
++            self._pending_checkpoint = None</span></pre>
+<p class="cref">🟡 <a href="https://github.com/NVIDIA-NeMo/RL/pull/4859#discussion_r4395387829">review comment C7 — single_controller.py:5433</a></p>
 
 </div>
 </body>

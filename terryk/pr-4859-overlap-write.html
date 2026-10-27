@@ -79,15 +79,15 @@ svg a text{text-decoration:underline;fill:var(--accent);font:11px ui-monospace,M
 <h1>How waiting for the checkpoint write at the next step boundary lets it overlap training</h1>
 <p class="sub"><a href="https://github.com/NVIDIA-NeMo/RL/pull/4859">NVIDIA-NeMo/RL #4859</a> — opt-in flags
 <code>sft.defer_async_checkpoint_finalize</code> and <code>async_rl.defer_async_checkpoint_finalize</code>.
-All permalinks pin the PR head <code>0a4103fb</code>.</p>
+Permalinks pin <code>0a4103fb</code>, the head first reviewed; the normal path is unchanged at the current head <code>8841e8e4</code>.</p>
 
 <div class="status">
 <table>
 <tr><th></th><th>SFT v2</th><th>SingleController (GRPO / PPO)</th></tr>
 <tr><th>main</th><td colspan="2">After an async save, a background thread runs the <em>blocking</em> finalize on the policy workers. The next training step queues behind the whole disk write.</td></tr>
 <tr><th>This PR (flag on)</th><td colspan="2">The save is only marked pending. At the start of each step the controller asks the workers "is the write done?" without waiting, and finalizes once it is. The write overlaps the next step.</td></tr>
-<tr><th>After review fixes</th><td>+ finalize a pending save in <code>run()</code>'s cleanup, so an error does not drop it (C2).</td><td>+ the same in <code>run()</code>'s cleanup, which also covers runs that end because the data ran out (C1); reject the flag together with rollout snapshots (C3).</td></tr>
-<tr><th>Status</th><td colspan="2"><span class="verdict good">Works as described on the normal path.</span> <span class="verdict open">Two exit paths lose the last checkpoint — open in the review</span> (<a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4859-lost-last-checkpoint.html">page 2</a>). v1 loops are untouched; SFT v1 rejects the flag.</td></tr>
+<tr><th>Since review</th><td>Teardown now publishes a pending save, so an error does not drop it (5f93e1bae).</td><td>The same, which also covers runs that end because the data ran out (5f93e1bae). Still open: reject the flag together with rollout snapshots (C3).</td></tr>
+<tr><th>Status</th><td colspan="2"><span class="verdict good">Works as described; the lost-checkpoint exits are fixed in this PR</span> (<a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4859-lost-last-checkpoint.html">page 2</a>). v1 loops are untouched; SFT v1 rejects the flag.</td></tr>
 </table>
 </div>
 
@@ -187,7 +187,7 @@ That matters because the check runs a
 Megatron-Bridge's own loop does the same check at the top of each iteration
 (<a href="https://github.com/NVIDIA-NeMo/Megatron-Bridge/blob/7e9dcd609edf2bb9478d3fa4d9b9f8ee3875c16e/src/megatron/bridge/training/train.py#L407-L409">train.py#L408</a>).
 The flag is opt-in because one thing gets worse: the save stays <code>tmp_step_2/</code> until a later step boundary, so any exit
-that skips that boundary must finalize on its own. Two exits do not — see
+that skips that boundary must finalize on its own. Two exits did not at first; teardown now covers them — see
 <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4859-lost-last-checkpoint.html">page 2</a>.</p>
 
 <div class="hl"><b>So what.</b> For SFT v2 the PR measured the wait after a save drop from 8.1 s to about 1.0 s at 32 nodes.
