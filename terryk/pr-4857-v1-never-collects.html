@@ -163,15 +163,25 @@ A worker that turns GC off but never trains never collects. A worker that isn't 
 <h2>The fix — proposed, not in the PR</h2>
 <p>Nothing below is implemented.</p>
 <p class="where"><b>Where the fix lands: RL only.</b>
-<a href="https://github.com/NVIDIA-NeMo/RL/blob/b4c6733bc557de1de6104a0b07ed6bdff8e5585b/nemo_rl/models/policy/teacher_worker_group.py#L176-L183"><code>teacher_worker_group.py</code></a>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/b4c6733bc557de1de6104a0b07ed6bdff8e5585b/nemo_rl/models/policy/teacher_worker_group.py#L159-L173"><code>teacher_worker_group.py</code></a>
 for C2, and <a href="https://github.com/NVIDIA-NeMo/RL/blob/b4c6733bc557de1de6104a0b07ed6bdff8e5585b/nemo_rl/models/value/workers/megatron_value_worker.py#L231"><code>megatron_value_worker.py</code></a>
 plus a shared mixin for C4. No Megatron change.</p>
-<pre class="diff"><span class="hunk">@@ teacher_worker_group.py L182-L183 · teacher config builder</span>
-         if "router_replay" in cfg:
-             cfg["router_replay"]["enabled"] = False
-<span class="add">+        # A frozen teacher never trains, so it would never reach the manual
-+        # GC collect; keep automatic GC on.
+<pre class="diff"><span class="hunk">@@ teacher_worker_group.py L159-L165 · teacher config builder</span>
+         cfg["megatron_cfg"]["expert_model_parallel_size"] = (
+             teacher_cfg.expert_model_parallel_size
+         )
+<span class="add">+        # The student's manual_gc is for its training steps; a teacher never trains.
 +        cfg["megatron_cfg"]["manual_gc"] = False</span>
+
+         # Apply any additional megatron config overrides from teacher config.
+         for key, value in teacher_cfg.megatron_cfg_overrides.items():
+             cfg["megatron_cfg"][key] = value
+<span class="add">+        if cfg["megatron_cfg"]["manual_gc"]:
++            raise ValueError(
++                f"Teacher '{self.alias}': manual_gc is not supported on teachers. "
++                "They never run a training step, so GC would be disabled with "
++                "nothing ever collecting."
++            )</span>
 <span class="hunk">@@ megatron_value_worker.py L231 · class line (mixin holds the three policy-worker helpers)</span>
 <span class="del">-class MegatronValueWorkerImpl(TQWorkerMixin, AbstractPolicyWorker):
 </span><span class="add">+class MegatronValueWorkerImpl(ManualGCMixin, TQWorkerMixin, AbstractPolicyWorker):</span>
@@ -189,8 +199,10 @@ plus a shared mixin for C4. No Megatron change.</p>
                          grad_norm, mp_group=pg_collection.mp
                      )
 <span class="add">+                    self._maybe_run_manual_gc()</span></pre>
-<p>The teacher hunk keeps the frozen teacher on normal GC, next to where the builder already turns off other
-student-only features. The value-worker hunks copy what the policy worker does: enable at the end of setup, then
+<p>The teacher hunk handles two cases. A <code>manual_gc: true</code> copied from the student is reset, so the
+frozen teacher keeps normal GC. A <code>manual_gc: true</code> set on purpose for a teacher (through
+<code>default_teacher_cfg</code> or <code>teacher_overrides</code>) raises at setup instead of being silently
+dropped, because a teacher has no training step to collect after. The value-worker hunks copy what the policy worker does: enable at the end of setup, then
 collect once per optimizer step, so every value rank pauses at the same point. The value worker also needs the
 early config check at the top of <code>__init__</code>, and <code>ppo_math_1B.yaml</code> needs the two keys under
 <code>value.megatron_cfg</code>. <code>ManualGCMixin</code> is a proposed name.</p>
