@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>NVIDIA-NeMo/RL #4857 — why manual_gc never collects on v1 training</title>
+<title>NVIDIA-NeMo/RL #4857 — where manual_gc still doesn't collect</title>
 <style>
 :root{--bg:#0d1117;--surface:#161b22;--surface2:#1c2128;--border:#30363d;--text:#e6edf3;--dim:#8b949e;
   --accent:#58a6ff;--green:#3fb950;--red:#f85149;--orange:#d29922}
@@ -77,43 +77,39 @@ svg a text{text-decoration:underline;fill:var(--accent);font:11.5px ui-monospace
   document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
 <div class="wrap">
 
-<h1>Why <code>manual_gc</code> turns GC off for good on v1 training</h1>
+<h1>Where <code>manual_gc</code> still doesn't collect, or doesn't apply</h1>
 <p class="sub"><a href="https://github.com/NVIDIA-NeMo/RL/pull/4857">NVIDIA-NeMo/RL #4857</a>
-· permalinks pin the PR head <code>cdd9b68</code>.</p>
+· permalinks pin the PR head <code>b4c6733</code>.</p>
 
 <div class="status">
 <dl>
   <dt>Before</dt>
-  <dd>No <code>manual_gc</code> flag. Python's automatic GC runs on every path.</dd>
+  <dd>No <code>manual_gc</code> flag. Python's automatic GC runs in every worker.</dd>
   <dt>This PR</dt>
-  <dd>Turns GC off in every Megatron policy worker at startup, but collects only inside <code>finish_train_step</code>, which only v2 trainers call.</dd>
+  <dd>Turns GC off in every Megatron policy worker at the end of setup, and collects every N optimizer steps in both <code>train()</code> (v1) and <code>finish_train_step</code> (v2). The v1 half landed in <code>b4c6733</code>.</dd>
   <dt>Status</dt>
-  <dd><span class="verdict open">Open — not fixed in this PR.</span> Raised in the review; the one-line fix is below.</dd>
+  <dd><span class="verdict open">Partly fixed.</span> v1 and v2 trainers now collect. OPD/MOPD teachers still never collect (C2), and the PPO value worker ignores the flag (C4). Both are in the review.</dd>
 </dl>
 </div>
 
 <nav class="chain">
   <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4857-manual-gc.html">1 · what manual_gc does</a>
-  <span class="here">2 · where it never collects</span>
+  <span class="here">2 · where it still falls short</span>
 </nav>
-<p class="chainnote">Two pages on this PR. This one: which trainers never reach the collection.</p>
+<p class="chainnote">Two pages on this PR. This one: which workers get the collection.</p>
 
-<p>The flag has two halves. Startup turns automatic GC off for every Megatron policy worker
-(<a href="https://github.com/NVIDIA-NeMo/RL/blob/cdd9b68d0f0393979091d5d96ac05e4885ca135c/nemo_rl/models/policy/workers/megatron_policy_worker.py#L888"><code>__init__</code> L888</a>).
-The periodic collection runs in one place only:
-<a href="https://github.com/NVIDIA-NeMo/RL/blob/cdd9b68d0f0393979091d5d96ac05e4885ca135c/nemo_rl/models/policy/workers/megatron_policy_worker.py#L2266"><code>finish_train_step</code> L2266</a>.
-That method is part of the
-<span class="tip" tabindex="0" data-tip="v2 = the newer trainers (run_sft_v2.py, the single controller) that drive a step as begin / train micro-batches / finish. v1 = the older trainers that call one train() per step.">v2</span>
-step API. The v1 trainers call the worker's
-<a href="https://github.com/NVIDIA-NeMo/RL/blob/cdd9b68d0f0393979091d5d96ac05e4885ca135c/nemo_rl/models/policy/workers/megatron_policy_worker.py#L1335"><code>train()</code></a>
-instead, which runs its own optimizer step and never reaches L2266. <code>examples/run_sft.py</code>, the command in the PR description, is
-<a href="https://github.com/NVIDIA-NeMo/RL/blob/cdd9b68d0f0393979091d5d96ac05e4885ca135c/nemo_rl/algorithms/sft.py#L740">v1</a>.</p>
+<p>The flag has two halves. The end of setup turns automatic GC off for every Megatron policy worker
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/b4c6733bc557de1de6104a0b07ed6bdff8e5585b/nemo_rl/models/policy/workers/megatron_policy_worker.py#L1161"><code>__init__</code> L1161</a>).
+The periodic collection runs after an optimizer step, in
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/b4c6733bc557de1de6104a0b07ed6bdff8e5585b/nemo_rl/models/policy/workers/megatron_policy_worker.py#L1571"><code>train()</code> L1571</a> and
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/b4c6733bc557de1de6104a0b07ed6bdff8e5585b/nemo_rl/models/policy/workers/megatron_policy_worker.py#L2273"><code>finish_train_step</code> L2273</a>.
+A worker that turns GC off but never trains never collects. A worker that isn't a policy worker never reads the flag at all.</p>
 
-<h2>Which paths collect, with <code>manual_gc_interval: 2</code> over 5 steps</h2>
+<h2>Which workers collect, with <code>manual_gc_interval: 2</code> over 5 steps</h2>
 
-<svg viewBox="0 0 900 400" role="img" aria-label="Five trainer paths. v2 SFT and single-controller GRPO reach finish_train_step and collect after steps 2 and 4. v1 SFT and RM call train() and collect zero times. DPO, v1 GRPO, distillation and grpo_sync call train() and only collect through other existing calls, every step. OPD teachers never collect.">
+<svg viewBox="0 0 900 400" role="img" aria-label="Four worker paths at b4c6733. v2 trainers and v1 trainers both collect after steps 2 and 4. OPD and MOPD teacher workers copy the student's config, turn GC off, and collect zero times. The PPO value worker ignores the flag and keeps automatic GC, which fires on each rank at different times.">
   <defs><marker id="ah" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" style="fill:var(--dim)"/></marker></defs>
-  <text class="hdr" x="14" y="22">trainer</text><text class="hdr" x="268" y="22">worker method</text><text class="hdr" x="548" y="22">collections in steps 1 … 5</text>
+  <text class="hdr" x="14" y="22">trainer / worker</text><text class="hdr" x="268" y="22">worker method</text><text class="hdr" x="548" y="22">collections in steps 1 … 5</text>
   <text class="note" x="548" y="40">1</text><text class="note" x="608" y="40">2</text><text class="note" x="668" y="40">3</text><text class="note" x="728" y="40">4</text><text class="note" x="788" y="40">5</text>
 
   <!-- row 1 v2 -->
@@ -121,78 +117,89 @@ instead, which runs its own optimizer step and never reaches L2266. <code>exampl
   <text class="lbl" x="24" y="72">run_sft_v2.py</text><text class="note" x="24" y="90">single-controller GRPO / PPO</text>
   <path class="arr" d="M234 76 L264 76"/>
   <rect class="box ok" x="268" y="54" width="240" height="44" rx="6"/>
-  <a href="https://github.com/NVIDIA-NeMo/RL/blob/cdd9b68d0f0393979091d5d96ac05e4885ca135c/nemo_rl/algorithms/sft_v2.py#L329"><text x="278" y="72">finish_train_step()</text></a>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/b4c6733bc557de1de6104a0b07ed6bdff8e5585b/nemo_rl/models/policy/workers/megatron_policy_worker.py#L2273"><text x="278" y="72">finish_train_step()</text></a>
   <text class="note" x="278" y="90">counts steps, collects every 2nd</text>
   <circle class="okf gcdot" cx="612" cy="76" r="9"/><circle class="okf gcdot" cx="732" cy="76" r="9"/>
   <text class="note" x="830" y="80">2 ✓</text>
 
-  <!-- row 2 v1 SFT/RM -->
-  <rect class="box bad" x="14" y="116" width="220" height="44" rx="6"/>
-  <text class="lbl" x="24" y="134">run_sft.py, run_rm.py</text><text class="note" x="24" y="152">v1 SFT / RM — the PR's example</text>
+  <!-- row 2 v1 -->
+  <rect class="box ok" x="14" y="116" width="220" height="44" rx="6"/>
+  <text class="lbl" x="24" y="134">run_sft.py, run_rm.py</text><text class="note" x="24" y="152">DPO, v1 GRPO — fixed in b4c6733</text>
   <path class="arr" d="M234 138 L264 138"/>
-  <rect class="box bad" x="268" y="116" width="240" height="44" rx="6"/>
-  <a href="https://github.com/NVIDIA-NeMo/RL/blob/cdd9b68d0f0393979091d5d96ac05e4885ca135c/nemo_rl/models/policy/workers/megatron_policy_worker.py#L1335"><text x="278" y="134">train()</text></a>
-  <text class="note" x="278" y="152">no collect anywhere in the step</text>
-  <text class="lbl" x="548" y="143" style="fill:var(--red)">—      —      —      —      —</text>
-  <text class="note" x="830" y="142" style="fill:var(--red)">0 ✗</text>
+  <rect class="box ok" x="268" y="116" width="240" height="44" rx="6"/>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/b4c6733bc557de1de6104a0b07ed6bdff8e5585b/nemo_rl/models/policy/workers/megatron_policy_worker.py#L1571"><text x="278" y="134">train()</text></a>
+  <text class="note" x="278" y="152">collects after optimizer.step()</text>
+  <circle class="okf gcdot" cx="612" cy="138" r="9"/><circle class="okf gcdot" cx="732" cy="138" r="9"/>
+  <text class="note" x="830" y="142">2 ✓</text>
 
-  <!-- row 3 masked -->
-  <rect class="box meh" x="14" y="178" width="220" height="44" rx="6"/>
-  <text class="lbl" x="24" y="196">DPO, v1 GRPO,</text><text class="note" x="24" y="214">distillation, grpo_sync</text>
+  <!-- row 3 OPD teacher -->
+  <rect class="box bad" x="14" y="178" width="220" height="44" rx="6"/>
+  <text class="lbl" x="24" y="196">OPD / MOPD teachers</text><text class="note" x="24" y="214">copy the student's config — C2</text>
   <path class="arr" d="M234 200 L264 200"/>
-  <rect class="box meh" x="268" y="178" width="240" height="44" rx="6"/>
-  <text class="lbl" x="278" y="196">train()</text>
-  <a href="https://github.com/NVIDIA-NeMo/RL/blob/cdd9b68d0f0393979091d5d96ac05e4885ca135c/nemo_rl/models/policy/workers/megatron_policy_worker.py#L4647"><text x="278" y="214">+ prepare_for_lp_inference</text></a>
-  <circle class="mehf gcdot" cx="552" cy="200" r="9"/><circle class="mehf gcdot" cx="612" cy="200" r="9"/><circle class="mehf gcdot" cx="672" cy="200" r="9"/><circle class="mehf gcdot" cx="732" cy="200" r="9"/><circle class="mehf gcdot" cx="792" cy="200" r="9"/>
-  <text class="note" x="830" y="198">5</text><text class="note" x="812" y="214">N ignored</text>
+  <rect class="box bad" x="268" y="178" width="240" height="44" rx="6"/>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/b4c6733bc557de1de6104a0b07ed6bdff8e5585b/nemo_rl/models/policy/teacher_worker_group.py#L146"><text x="278" y="196">deepcopy(policy_config)</text></a>
+  <text class="note" x="278" y="214">get_logprobs only, never trains</text>
+  <text class="lbl" x="548" y="205" style="fill:var(--red)">—      —      —      —      —</text>
+  <text class="note" x="830" y="204" style="fill:var(--red)">0 ✗</text>
 
-  <!-- row 4 OPD teacher -->
-  <rect class="box bad" x="14" y="240" width="220" height="44" rx="6"/>
-  <text class="lbl" x="24" y="258">OPD teacher workers</text><text class="note" x="24" y="276">copy the student's config</text>
+  <!-- row 4 value worker -->
+  <rect class="box meh" x="14" y="240" width="220" height="44" rx="6"/>
+  <text class="lbl" x="24" y="258">PPO value worker</text><text class="note" x="24" y="276">never reads the flag — C4</text>
   <path class="arr" d="M234 262 L264 262"/>
-  <rect class="box bad" x="268" y="240" width="240" height="44" rx="6"/>
-  <a href="https://github.com/NVIDIA-NeMo/RL/blob/cdd9b68d0f0393979091d5d96ac05e4885ca135c/nemo_rl/models/policy/teacher_worker_group.py#L145"><text x="278" y="258">deepcopy(policy_config)</text></a>
-  <text class="note" x="278" y="276">get_logprobs only, never trains</text>
-  <text class="lbl" x="548" y="267" style="fill:var(--red)">—      —      —      —      —</text>
-  <text class="note" x="830" y="266" style="fill:var(--red)">0 ✗</text>
+  <rect class="box meh" x="268" y="240" width="240" height="44" rx="6"/>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/b4c6733bc557de1de6104a0b07ed6bdff8e5585b/nemo_rl/models/value/workers/megatron_value_worker.py#L501"><text x="278" y="258">value train()</text></a>
+  <text class="note" x="278" y="276">automatic GC, rank by rank</text>
+  <circle class="mehf gcdot" cx="571" cy="256" r="6"/><circle class="mehf gcdot" cx="644" cy="270" r="6"/><circle class="mehf gcdot" cx="700" cy="254" r="6"/><circle class="mehf gcdot" cx="771" cy="268" r="6"/>
+  <text class="note" x="830" y="266">auto</text>
 
   <!-- legend -->
   <circle class="okf" cx="22" cy="318" r="7"/><text class="note" x="36" y="322">manual_gc collect, all ranks together</text>
-  <circle class="mehf" cx="292" cy="318" r="7"/><text class="note" x="306" y="322">collect from older code that already ran each step</text>
+  <circle class="mehf" cx="292" cy="318" r="6"/><text class="note" x="306" y="322">automatic GC: one rank at a time</text>
   <text class="lbl" x="620" y="322" style="fill:var(--red)">—</text><text class="note" x="640" y="322">no collect: garbage piles up</text>
-  <text class="note" x="14" y="356">In every row GC was switched off at startup. Red rows never turn it back on and never collect,</text>
-  <text class="note" x="14" y="374">so objects that point at each other (and any GPU tensors they hold) stay in memory for the whole run.</text>
+  <text class="note" x="14" y="356">Red: GC is off and never runs, so objects that point at each other (and any GPU tensors they hold)</text>
+  <text class="note" x="14" y="374">stay in memory for the whole run. Gray: no leak, but the other ranks still wait on each pause.</text>
 </svg>
 
 <h2>The fix — proposed, not in the PR</h2>
 <p>Nothing below is implemented.</p>
-<p class="where"><b>Where the fix lands: RL only, two files.</b>
-<a href="https://github.com/NVIDIA-NeMo/RL/blob/cdd9b68d0f0393979091d5d96ac05e4885ca135c/nemo_rl/models/policy/workers/megatron_policy_worker.py#L1655-L1660"><code>megatron_policy_worker.py</code> <code>train()</code></a>
-and <a href="https://github.com/NVIDIA-NeMo/RL/blob/cdd9b68d0f0393979091d5d96ac05e4885ca135c/nemo_rl/models/policy/teacher_worker_group.py#L175-L185"><code>teacher_worker_group.py</code></a>.
-No Megatron change: its own <code>manual_gc</code> already collects inside its training loop.</p>
-<pre class="diff"><span class="hunk">@@ megatron_policy_worker.py L1655-L1660 · train(), once per call</span>
-         if not eval_mode:
-             ...
-             self.scheduler.step(increment=gbs)
-<span class="add">+            # One train() call is one training step, same as one finish_train_step.
-+            self._maybe_run_manual_gc()</span>
-<span class="hunk">@@ teacher_worker_group.py L175-L185 · teacher config builder</span>
+<p class="where"><b>Where the fix lands: RL only.</b>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/b4c6733bc557de1de6104a0b07ed6bdff8e5585b/nemo_rl/models/policy/teacher_worker_group.py#L176-L183"><code>teacher_worker_group.py</code></a>
+for C2, and <a href="https://github.com/NVIDIA-NeMo/RL/blob/b4c6733bc557de1de6104a0b07ed6bdff8e5585b/nemo_rl/models/value/workers/megatron_value_worker.py#L231"><code>megatron_value_worker.py</code></a>
+plus a shared mixin for C4. No Megatron change.</p>
+<pre class="diff"><span class="hunk">@@ teacher_worker_group.py L182-L183 · teacher config builder</span>
          if "router_replay" in cfg:
              cfg["router_replay"]["enabled"] = False
 <span class="add">+        # A frozen teacher never trains, so it would never reach the manual
 +        # GC collect; keep automatic GC on.
-+        cfg["megatron_cfg"]["manual_gc"] = False</span></pre>
-<p>The first hunk sits right after the barrier every rank passes at the end of
-<code>train()</code>, so all ranks still collect together. It also covers <code>grpo_sync</code>, which reaches the same <code>train()</code>.
-v1 and v2 never both run for one step, so no step is counted twice.
-The second hunk keeps the frozen teacher on normal GC, next to where the builder already turns off other
-student-only features.</p>
-<p class="cref">🔴 <a href="https://github.com/NVIDIA-NeMo/RL/pull/4857#discussion_r4380514997">C1 review comment — megatron_policy_worker.py:2266</a></p>
-<p class="cref">🟠 <a href="https://github.com/NVIDIA-NeMo/RL/pull/4857#discussion_r4380515015">C2 review comment — teacher configs (anchored at :2285)</a></p>
++        cfg["megatron_cfg"]["manual_gc"] = False</span>
+<span class="hunk">@@ megatron_value_worker.py L231 · class line (mixin holds the three policy-worker helpers)</span>
+<span class="del">-class MegatronValueWorkerImpl(TQWorkerMixin, AbstractPolicyWorker):
+</span><span class="add">+class MegatronValueWorkerImpl(ManualGCMixin, TQWorkerMixin, AbstractPolicyWorker):</span>
+<span class="hunk">@@ megatron_value_worker.py L490 · end of __init__</span>
+         print(f"MegatronValueWorker initialized on rank {self.rank}")
+<span class="add">+        # Setup ran with automatic GC; switch to lockstep collection now.
++        self._maybe_enable_manual_gc()</span>
+<span class="hunk">@@ megatron_value_worker.py L609-L620 · train(), once per optimizer step</span>
+                 if not eval_mode:
+                     update_successful, grad_norm, num_zeros_in_grad = (
+                         self.optimizer.step()
+                     )
+                     ...
+                     grad_norm = reduce_max_stat_across_model_parallel_group(
+                         grad_norm, mp_group=pg_collection.mp
+                     )
+<span class="add">+                    self._maybe_run_manual_gc()</span></pre>
+<p>The teacher hunk keeps the frozen teacher on normal GC, next to where the builder already turns off other
+student-only features. The value-worker hunks copy what the policy worker does: enable at the end of setup, then
+collect once per optimizer step, so every value rank pauses at the same point. The value worker also needs the
+early config check at the top of <code>__init__</code>, and <code>ppo_math_1B.yaml</code> needs the two keys under
+<code>value.megatron_cfg</code>. <code>ManualGCMixin</code> is a proposed name.</p>
+<p class="cref">🟠 <a href="https://github.com/NVIDIA-NeMo/RL/pull/4857#discussion_r4394345685">C2 review comment — teacher configs (anchored at megatron_policy_worker.py:2311)</a></p>
+<p class="cref">🟡 <a href="https://github.com/NVIDIA-NeMo/RL/pull/4857#discussion_r4394348023">C4 review comment — value worker (anchored at policy/__init__.py:392)</a></p>
 
-<div class="warn"><b>So what.</b> With the flag on, the PR's own example (<code>run_sft.py</code>) runs the whole job with no garbage collection.
-Host memory, and GPU memory held by leftover objects, grows with every step. Any speedup measured that way is "no GC at all", not "GC together".
-Until the <code>train()</code> line lands, only v2 trainers should use the flag.</div>
+<div class="warn"><b>So what.</b> With the flag on, MOPD runs every teacher with no garbage collection, so teacher host memory
+grows for the whole job. PPO gets the lockstep collect on the policy ranks only, and the value ranks keep stalling each other.
+Until C2 lands, don't turn the flag on for OPD/MOPD runs.</div>
 
 </div>
 </body>

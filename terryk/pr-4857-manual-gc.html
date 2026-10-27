@@ -78,22 +78,22 @@ svg a text{text-decoration:underline;fill:var(--accent);font:11.5px ui-monospace
 
 <h1>How <code>manual_gc</code> makes every rank collect garbage at the same moment</h1>
 <p class="sub"><a href="https://github.com/NVIDIA-NeMo/RL/pull/4857">NVIDIA-NeMo/RL #4857</a>
-· permalinks pin the PR head <code>cdd9b68</code>.</p>
+· permalinks pin the PR head <code>b4c6733</code>.</p>
 
 <div class="status">
 <dl>
   <dt>Before</dt>
   <dd>Python garbage collection runs on its own schedule in each Megatron training process. A ~1 s collection on one rank makes all the other ranks wait for it at the next sync.</dd>
   <dt>This PR</dt>
-  <dd>Adds an opt-in flag, <code>policy.megatron_cfg.manual_gc</code>. It turns automatic GC off, and every rank collects together once every <code>manual_gc_interval</code> training steps.</dd>
+  <dd>Adds an opt-in flag, <code>policy.megatron_cfg.manual_gc</code>. It turns automatic GC off, and every rank collects together once every <code>manual_gc_interval</code> optimizer steps, on both v1 (<code>train()</code>) and v2 (<code>finish_train_step</code>) trainers.</dd>
   <dt>Status</dt>
-  <dd><span class="verdict open">Open — works on v2 trainers only.</span> On v1 trainers, including the PR's own <code>run_sft.py</code> example, GC is switched off and the collection never runs. See <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4857-v1-never-collects.html">page 2</a>.</dd>
+  <dd><span class="verdict open">Partly fixed.</span> v1 and v2 trainers collect as of <code>b4c6733</code>. OPD/MOPD teachers turn GC off and never collect, and the PPO value worker ignores the flag. See <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4857-v1-never-collects.html">page 2</a>.</dd>
 </dl>
 </div>
 
 <nav class="chain">
   <span class="here">1 · what manual_gc does</span>
-  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4857-v1-never-collects.html">2 · where it never collects</a>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4857-v1-never-collects.html">2 · where it still falls short</a>
 </nav>
 <p class="chainnote">Two pages on this PR. This one: what the flag does and how it compares to automatic GC.</p>
 
@@ -149,7 +149,7 @@ turn GC off at startup, then collect on every rank at the same step boundary.</p
   <rect class="work" x="92" y="310" width="196" height="20"/><rect class="work" x="292" y="310" width="200" height="20"/><rect class="gcok" x="492" y="310" width="56" height="20"/><rect class="work" x="552" y="310" width="196" height="20"/>
   <text class="gcl" x="506" y="268">GC</text><text class="gcl" x="506" y="296">GC</text><text class="gcl" x="506" y="324">GC</text>
   <text class="note" x="560" y="350">(rank 3 is the same)</text>
-  <a href="https://github.com/NVIDIA-NeMo/RL/blob/cdd9b68d0f0393979091d5d96ac05e4885ca135c/nemo_rl/models/policy/workers/megatron_policy_worker.py#L2266"><text x="400" y="368">finish_train_step → _maybe_run_manual_gc()</text></a>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/b4c6733bc557de1de6104a0b07ed6bdff8e5585b/nemo_rl/models/policy/workers/megatron_policy_worker.py#L2273"><text x="400" y="368">finish_train_step → _maybe_run_manual_gc()</text></a>
   <text class="note" x="92" y="368">collect after step 2 only:</text>
 
   <!-- legend -->
@@ -160,38 +160,40 @@ turn GC off at startup, then collect on every rank at the same step boundary.</p
 </svg>
 
 <h2>How the PR does it</h2>
-<p>Two small methods on the Megatron policy worker. Startup turns GC off; the end of each finished step counts toward the interval.
-Forked child processes (data workers) get normal GC back.</p>
-<pre class="diff"><span class="hunk">@@ megatron_policy_worker.py L888 · __init__</span>
+<p>Three small methods on the Megatron policy worker. The start of setup checks the config, the end of setup turns GC off,
+and each optimizer step counts toward the interval. Forked child processes (data workers) get normal GC back.</p>
+<pre class="diff"><span class="hunk">@@ megatron_policy_worker.py L891 · start of __init__</span>
          self.timer = Timer(context={"worker": "megatron_policy", "rank": self.rank})
+<span class="add">+        self._manual_gc_interval_from_cfg()  # bad interval fails before slow setup</span>
+<span class="hunk">@@ megatron_policy_worker.py L1161 · end of __init__</span>
+         log_gpu_memory_diagnostics(...)
 <span class="add">+        self._maybe_enable_manual_gc()</span>
-<span class="hunk">@@ megatron_policy_worker.py L2266 · finish_train_step, after a successful step</span>
+<span class="hunk">@@ megatron_policy_worker.py L1571 · v1 train(), after optimizer.step()</span>
+<span class="add">+                    self._maybe_run_manual_gc()</span>
+<span class="hunk">@@ megatron_policy_worker.py L2273 · v2 finish_train_step, after a successful step</span>
 <span class="add">+        self._maybe_run_manual_gc()</span>
          return result
-<span class="hunk">@@ megatron_policy_worker.py L2269-L2296 · new methods</span>
-<span class="add">+        gc.disable()
+<span class="hunk">@@ megatron_policy_worker.py L2276-L2325 · new methods</span>
+<span class="add">+        gc.collect()  # free setup garbage first
++        gc.disable()
 +        os.register_at_fork(after_in_child=gc.enable)  # forked children keep normal GC
-+        gc.collect()
 +        self._manual_gc_interval = interval
 +    ...
 +        self._manual_gc_steps += 1
 +        if self._manual_gc_steps % self._manual_gc_interval == 0:
 +            gc.collect()</span></pre>
 <p>Code:
-<a href="https://github.com/NVIDIA-NeMo/RL/blob/cdd9b68d0f0393979091d5d96ac05e4885ca135c/nemo_rl/models/policy/workers/megatron_policy_worker.py#L2269-L2296"><code>_maybe_enable_manual_gc</code> / <code>_maybe_run_manual_gc</code></a>,
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/b4c6733bc557de1de6104a0b07ed6bdff8e5585b/nemo_rl/models/policy/workers/megatron_policy_worker.py#L2276-L2325"><code>_manual_gc_interval_from_cfg</code> / <code>_maybe_enable_manual_gc</code> / <code>_maybe_run_manual_gc</code></a>,
 config fields in
-<a href="https://github.com/NVIDIA-NeMo/RL/blob/cdd9b68d0f0393979091d5d96ac05e4885ca135c/nemo_rl/models/policy/__init__.py#L390-L397"><code>MegatronConfig</code></a>.
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/b4c6733bc557de1de6104a0b07ed6bdff8e5585b/nemo_rl/models/policy/__init__.py#L390-L400"><code>MegatronConfig</code></a>.
 Same rule as Megatron-Bridge's
-<a href="https://github.com/NVIDIA-NeMo/Megatron-Bridge/blob/7e9dcd609edf2bb9478d3fa4d9b9f8ee3875c16e/src/megatron/bridge/training/train.py#L223-L230">training loop</a>, including <code>0</code> = no periodic collection.
-Some code already calls <code>gc.collect()</code> on every rank at the same point, e.g. before a weight
-<span class="tip" tabindex="0" data-tip="Refit: copying the trained weights from the training workers to the generation engine, once per RL step.">refit</span>
-(<a href="https://github.com/NVIDIA-NeMo/RL/blob/cdd9b68d0f0393979091d5d96ac05e4885ca135c/nemo_rl/models/policy/workers/megatron_policy_worker.py#L4647"><code>prepare_for_lp_inference</code></a>). Those still run with the flag on, so the field comment's "0 = never collect" is too strong.</p>
-<p class="cref">🟡 <a href="https://github.com/NVIDIA-NeMo/RL/pull/4857#discussion_r4380515026">C3 review comment — policy/__init__.py:390</a></p>
+<a href="https://github.com/NVIDIA-NeMo/Megatron-Bridge/blob/7e9dcd609edf2bb9478d3fa4d9b9f8ee3875c16e/src/megatron/bridge/training/train.py#L223-L230">training loop</a>. Unlike Megatron, the PR rejects an interval of <code>0</code>:
+NeMo-RL has no eval-time collect to fall back on, so <code>0</code> would mean GC off with nothing ever collecting.</p>
 
-<div class="hl"><b>So what.</b> On a path that reaches <code>finish_train_step</code> (v2 SFT, single-controller GRPO), the flag turns many scattered, stacked pauses into one shared pause every N steps.
-The trade-off is memory: garbage builds up between collections, so a large interval, or 0, needs a check of host memory.
+<div class="hl"><b>So what.</b> On v1 and v2 policy training, the flag turns many scattered, stacked pauses into one shared pause every N steps.
+The trade-off is memory: garbage builds up between collections, so a large interval needs a check of host memory.
 The PR has no run with the flag on yet; the review asks for step time and memory, flag off vs on.
-On v1 trainers the shared pause never happens at all: <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4857-v1-never-collects.html">page 2</a>.</div>
+OPD/MOPD teachers and the PPO value worker don't get it right yet: <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4857-v1-never-collects.html">page 2</a>.</div>
 
 </div>
 </body>
