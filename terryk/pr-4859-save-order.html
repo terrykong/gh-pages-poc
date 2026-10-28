@@ -28,6 +28,9 @@ code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;font:13px ui
 .status dd{margin:0;font-size:14px}
 .verdict{font-weight:700}
 .verdict.good{color:var(--green)}
+.verdict.open{color:var(--red)}
+.cref{margin:6px 0 0;font-size:13px}
+.cref a{display:inline-block;padding:4px 10px;border:1px solid var(--border);border-radius:16px;background:var(--surface);font:12.5px ui-monospace,Menlo,monospace}
 nav.chain{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 6px;padding:0}
 nav.chain a,nav.chain span{display:inline-block;padding:5px 11px;border:1px solid var(--border);
   border-radius:20px;background:var(--surface);text-decoration:none;color:var(--accent);
@@ -83,7 +86,7 @@ svg a text{text-decoration:underline;fill:var(--accent);font:11px ui-monospace,M
   <dt>This PR</dt>
   <dd>Changes who waits for the policy write (a check at each step boundary instead of that thread). The order of the other saves does not change.</dd>
   <dt>Status</dt>
-  <dd><span class="verdict good">No race — safe as written.</span> The rename needs a mark that is set only after every other part is on disk. No review comment needed.</dd>
+  <dd><span class="verdict good">No race today.</span> The rename needs a mark that is set only after every other part is on disk. <span class="verdict open">Nothing states or checks that rule</span> — review comment C9 proposes a guard.</dd>
 </dl>
 </div>
 
@@ -195,8 +198,12 @@ before it marks the save pending.</p>
 
 <div class="hl"><b>So what.</b> The flag only moves the wait on the policy's background write. The TQ, critic,
 dataloader and replay-buffer saves still pause training for their full length, flag on or off, so on runs with
-<code>save_data_plane</code> or PPO they may be most of the save time. The safety comes from one rule: the pending
-mark is the last line of the save. Keep it last if that function changes.</div>
+<code>save_data_plane</code> or PPO they may be most of the save time. The safety comes from one rule: publishing is
+the last step of the save. Nothing in the code says so or checks it, so the review asks for one publish helper,
+called last, and a test that fails if any file is written into the folder after it. Moving the publish one line up
+already breaks that test with the flag off: the rename removes <code>tmp_step_2/</code> while the dataloader file is
+still being written.
+<p class="cref">🟡 <a href="https://github.com/NVIDIA-NeMo/RL/pull/4859#discussion_r4395600658">review comment C9 — single_controller.py:5398-5412</a></p></div>
 
 </div>
 </body>
