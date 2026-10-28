@@ -93,8 +93,9 @@ svg a text{text-decoration:underline;fill:var(--accent)}
   <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4818-two-top-ks.html">two top-ks</a>
   <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4818-mask-transport.html">moving a mask</a>
   <span class="here">top-p support</span>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4833-vs-4818.html">vs #4833</a>
 </nav>
-<p class="chainnote">Five pages on this PR, one question each — this one: what adding top-p to score centering would take.</p>
+<p class="chainnote">Six pages on this PR, one question each — this one: what adding top-p to score centering would take.</p>
 
 <div class="bg"><b>Background.</b> "Top-p support" means: let vLLM sample with a top-p filter (bounded by a top-k filter) and still use score
 centering. Two things then have to happen, and they are both. The trainer must score tokens over the same kept set vLLM sampled from:
@@ -170,11 +171,12 @@ approximated." It needs a positive <code>top_k</code>, and K at least that large
 <tr><td>Trainer log-prob of the sampled token</td><td>full softmax</td><td>renormalized over the kept slots (the replay), for both the current and old log-probs</td></tr>
 <tr><td>Correction term</td><td>top-K exact, rest estimated</td><td>whole kept set exact; padding slots masked out</td></tr>
 </table>
-<p style="font-size:14px">Two drafts already do this padding-and-masking, both on the routes #4818 does not cover. Community draft
-<a href="https://github.com/NVIDIA-NeMo/RL/pull/4833">#4833</a> covers native vLLM rollouts and Gym without token capture. A team branch
-does the same for Gym without token capture and is planned as a follow-up once #4818 lands. A third design,
-<a href="https://github.com/NVIDIA-NeMo/RL/pull/3937">#3937</a>, gets the kept set from vLLM's separate <code>return_sampling_mask</code>
-instead of from the top-K slots (see the <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4818-mask-transport.html">moving a mask</a> page).</p>
+<p style="font-size:14px">A team branch already does this padding-and-masking for Gym without token capture, and is planned as a
+follow-up once #4818 lands. Two other designs get the kept set from vLLM's separate <code>return_sampling_mask</code> instead of
+from the top-K slots: <a href="https://github.com/NVIDIA-NeMo/RL/pull/3937">#3937</a> (mask replay only) and community draft
+<a href="https://github.com/NVIDIA-NeMo/RL/pull/4833">#4833</a>, which uses it for score centering on native vLLM rollouts and Gym
+without token capture (see the <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4833-vs-4818.html">vs #4833</a> and
+<a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4818-mask-transport.html">moving a mask</a> pages).</p>
 
 <div class="warn"><b>So what.</b> Top-p support is not a new transport. It reuses #4818's top-K columns. What changes is that the vLLM
 worker stops rejecting cut (−inf) slots, and the trainer renormalizes over the kept ones. In return the score-centering estimate becomes
