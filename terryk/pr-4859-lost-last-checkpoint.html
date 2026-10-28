@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>NVIDIA-NeMo/RL #4859 — how teardown now publishes a deferred checkpoint</title>
+<title>NVIDIA-NeMo/RL #4859 — which exits publish a deferred checkpoint</title>
 <style>
 :root{--bg:#0d1117;--surface:#161b22;--surface2:#1c2128;--border:#30363d;--text:#e6edf3;--dim:#8b949e;
   --accent:#58a6ff;--green:#3fb950;--red:#f85149;--orange:#d29922}
@@ -46,6 +46,10 @@ p.chainnote{color:var(--dim);font-size:12px;margin:0 0 18px}
 .diff .add{color:var(--green)}
 .diff .del{color:var(--red)}
 .diff .hunk{color:var(--accent)}
+.exits{border-collapse:collapse;width:100%;font-size:13.5px;margin:12px 0;display:block;overflow-x:auto}
+.exits th,.exits td{text-align:left;vertical-align:top;padding:5px 8px;border-bottom:1px solid var(--border)}
+.exits th{color:var(--dim);font-size:12px}
+.exits td.bad{color:var(--red)}
 ol li{margin:3px 0}
 svg{max-width:100%;height:auto;display:block;margin:14px 0}
 svg .box{fill:var(--surface);stroke:var(--border);stroke-width:1.4}
@@ -74,7 +78,7 @@ svg a text{text-decoration:underline;fill:var(--accent);font:11px ui-monospace,M
   document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
 <div class="wrap">
 
-<h1>Why a run that ended when its data ran out left its last checkpoint unpublished, and how teardown fixes it</h1>
+<h1>Which exits publish the last checkpoint when the flag is on, and which one still does not</h1>
 <p class="sub"><a href="https://github.com/NVIDIA-NeMo/RL/pull/4859">NVIDIA-NeMo/RL #4859</a>, flag
 <code>async_rl.defer_async_checkpoint_finalize: true</code>. The bug links pin <code>0a4103fb</code>, the head first reviewed; the fix links pin the current head <code>8841e8e4</code>.</p>
 
@@ -84,7 +88,7 @@ svg a text{text-decoration:underline;fill:var(--accent);font:11px ui-monospace,M
 <tr><th>main</th><td colspan="2">Every exit publishes the last save: <code>run()</code>'s cleanup calls <code>CheckpointManager.shutdown()</code>, which waits for the background thread that finalizes and renames it.</td></tr>
 <tr><th>First push (flag on)</th><td>Only a normal exit finalizes. An error after a save leaves it as <code>tmp_step_N/</code>.</td><td>Same for errors, <b>and</b> for the normal end of an epoch-limited run: the loop leaves through an early <code>return</code> that skips the final finalize.</td></tr>
 <tr><th>Now (5f93e1bae)</th><td>The cleanup loop publishes the pending save first, before checkpoint close.</td><td>Teardown publishes the pending save right after the pumps stop, before checkpoint close, in its own try/except.</td></tr>
-<tr><th>Status</th><td colspan="2"><span class="verdict good">Fixed by this PR</span> in 5f93e1bae. One narrow case is left: a cancel while waiting for the checkpoint lock (review comment C7, below). Default runs (flag off) were never affected.</td></tr>
+<tr><th>Status</th><td colspan="2"><span class="verdict open">Partly fixed. The flag introduced this bug.</span> 5f93e1bae fixes every common exit (table below). One narrow case is still open: the train loop is stopped while it waits for the checkpoint lock (review comment C7). Runs with the flag off were never affected.</td></tr>
 </table>
 </div>
 
@@ -197,6 +201,16 @@ The finalize after the loop stays; the teardown call does nothing once no save i
 <li>A failure in either only prints or warns, so it never hides the error that ended the run.</li>
 <li>Checked on CPU: the existing exhaustion test, run with the flag on, now ends with <code>{step_1, step_2}</code>.</li>
 </ol>
+<table class="exits">
+<tr><th>How the run ends (flag on)</th><th>What publishes the last save</th><th>Checked</th></tr>
+<tr><td><code>max_num_steps</code> reached</td><td>blocking finalize after the loop (<a href="https://github.com/NVIDIA-NeMo/RL/blob/8841e8e42d52f37bffb85ed80b1ec9e9552afc3c/nemo_rl/algorithms/single_controller.py#L3927">L3927</a>; SFT v2 <a href="https://github.com/NVIDIA-NeMo/RL/blob/8841e8e42d52f37bffb85ed80b1ec9e9552afc3c/nemo_rl/algorithms/sft_v2.py#L255">L255</a>)</td><td>PR's tests</td></tr>
+<tr><td>Save-by-time limit (<code>checkpoint_must_save_by</code>)</td><td>save, then <a href="https://github.com/NVIDIA-NeMo/RL/blob/8841e8e42d52f37bffb85ed80b1ec9e9552afc3c/nemo_rl/algorithms/single_controller.py#L3924-L3927"><code>break</code></a> to the same finalize</td><td>CPU test, flag on</td></tr>
+<tr><td>Data runs out</td><td>teardown publish (<a href="https://github.com/NVIDIA-NeMo/RL/blob/8841e8e42d52f37bffb85ed80b1ec9e9552afc3c/nemo_rl/algorithms/single_controller.py#L949">L949</a>)</td><td>CPU test, flag on</td></tr>
+<tr><td>Error in a later step</td><td>teardown publish (SFT v2: first cleanup entry, <a href="https://github.com/NVIDIA-NeMo/RL/blob/8841e8e42d52f37bffb85ed80b1ec9e9552afc3c/nemo_rl/algorithms/sft_v2.py#L259-L265">L259</a>)</td><td>author's tests (C8 fixes the SFT v2 one)</td></tr>
+<tr><td>Orderly stop after a rollout checkpoint</td><td>teardown publish</td><td>by reading the code</td></tr>
+<tr><td class="bad">Stopped while waiting for the checkpoint lock</td><td class="bad">nothing: the save was already cleared (C7)</td><td>CPU test fails at head</td></tr>
+<tr><td>Process killed (preemption, node loss)</td><td>nothing can run. Flag off loses an unfinished write the same way; flag on adds up to one step after the write lands.</td><td>—</td></tr>
+</table>
 
 <h2>What is left — proposed in the review, not in the PR</h2>
 <p><a href="https://github.com/NVIDIA-NeMo/RL/blob/8841e8e42d52f37bffb85ed80b1ec9e9552afc3c/nemo_rl/algorithms/single_controller.py#L5430-L5433"><code>_finish_pending_save</code></a> clears the pending
