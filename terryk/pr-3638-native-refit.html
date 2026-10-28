@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NVIDIA-NeMo/RL #3638 — how a native MXFP8 linear kernel survives refit</title>
+<style>
+:root{--bg:#0d1117;--surface:#161b22;--surface2:#1c2128;--border:#30363d;--text:#e6edf3;--dim:#8b949e;
+  --accent:#58a6ff;--green:#3fb950;--red:#f85149;--orange:#d29922}
+:root[data-theme="light"]{--bg:#ffffff;--surface:#f6f8fa;--surface2:#eaeef2;--border:#d0d7de;--text:#1f2328;
+  --dim:#59636e;--accent:#0969da;--green:#1a7f37;--red:#cf222e;--orange:#9a6700}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:28px 16px 70px}
+h1{font-size:22px;margin:0 0 8px;line-height:1.3}
+h2{font-size:18px;margin:30px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
+.sub{color:var(--dim);font-size:13.5px;margin:0 0 14px}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);
+  border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;
+  font:13px/1 ui-monospace,monospace;cursor:pointer}
+.status{border:1px solid var(--border);border-radius:10px;background:var(--surface);padding:2px 16px 10px;margin:0 0 20px}
+.status dl{display:grid;grid-template-columns:max-content 1fr;gap:4px 14px;margin:12px 0 0}
+.status dt{color:var(--dim);font-size:12px;text-transform:uppercase;letter-spacing:.04em;white-space:nowrap;padding-top:2px}
+.status dd{margin:0;font-size:14px}
+.verdict{font-weight:700}
+.verdict.good{color:var(--green)}
+.verdict.open{color:var(--red)}
+nav.chain{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 6px;padding:0}
+nav.chain a,nav.chain span{display:inline-block;padding:5px 11px;border:1px solid var(--border);
+  border-radius:20px;background:var(--surface);text-decoration:none;color:var(--accent);
+  font-size:12.5px;line-height:1.3;white-space:nowrap}
+nav.chain a:hover{background:var(--surface2)}
+nav.chain span.here{background:var(--accent);color:var(--bg);border-color:var(--accent);font-weight:600}
+p.chainnote{color:var(--dim);font-size:12px;margin:0 0 18px}
+.bg{border-left:4px solid var(--dim);background:var(--surface);padding:8px 14px;margin:0 0 16px;font-size:14px}
+.hl{border-left:4px solid var(--green);background:var(--surface);padding:10px 14px;margin:16px 0;border-radius:0 8px 8px 0}
+.cmp{border-collapse:collapse;width:100%;font-size:13.5px;margin:12px 0;display:block;overflow-x:auto}
+.cmp th,.cmp td{text-align:left;vertical-align:top;padding:5px 8px;border-bottom:1px solid var(--border)}
+.cmp th{color:var(--dim);font-size:12px}
+.tip{border-bottom:1px dotted var(--dim);cursor:help;position:relative;outline:none}
+.tip:hover::after,.tip:focus::after{content:attr(data-tip);position:absolute;left:0;top:1.7em;z-index:60;
+  width:max-content;max-width:min(340px,80vw);white-space:normal;background:var(--surface2);color:var(--text);
+  border:1px solid var(--border);border-radius:6px;padding:7px 10px;font:13px/1.45 -apple-system,sans-serif;
+  font-weight:400;box-shadow:0 4px 14px rgba(0,0,0,.3)}
+svg{max-width:100%;height:auto;display:block;margin:14px 0}
+svg .box{fill:var(--surface);stroke:var(--border);stroke-width:1.4}
+svg .ok{fill:var(--surface);stroke:var(--green);stroke-width:2}
+svg .split{fill:var(--surface);stroke:var(--orange);stroke-width:2}
+svg .lbl{fill:var(--text);font:12px ui-monospace,Menlo,monospace}
+svg .lane{fill:var(--text);font:bold 13px -apple-system,sans-serif}
+svg .col{fill:var(--dim);font:bold 12px -apple-system,sans-serif}
+svg .note{fill:var(--dim);font:11.5px -apple-system,sans-serif}
+svg .data{fill:var(--orange);font:11px ui-monospace,Menlo,monospace}
+svg .grn{fill:var(--green);font:bold 12px ui-monospace,Menlo,monospace}
+svg .arrow{stroke:var(--dim);stroke-width:1.4;fill:none;marker-end:url(#ah)}
+svg a text{text-decoration:underline;fill:var(--accent);font:11px ui-monospace,Menlo,monospace}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+  document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head>
+<body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+  function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+  function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
+    b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
+      else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+  document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+<div class="wrap">
+
+<h1>How a faster MXFP8 kernel can keep its own weight layout and still take new weights every step</h1>
+<p class="sub"><a href="https://github.com/NVIDIA-NeMo/RL/pull/3638">NVIDIA-NeMo/RL #3638</a> — links pin head <code>83c655cb</code> and vLLM <code>v0.29.0</code>.</p>
+
+<div class="status">
+<dl>
+  <dt>Before</dt>
+  <dd>Asking vLLM for its CuTeDSL dense kernel was silently replaced with CUTLASS, and the TRTLLM dense kernel failed with <code>Unsupported MXFP8 linear kernel for refit</code>. Only CUTLASS could take new weights.</dd>
+  <dt>This PR</dt>
+  <dd>Keeps an explicitly chosen CuTeDSL or TRTLLM kernel, and copies each step's new weights into it through vLLM's layerwise reload. The default (<code>auto</code>) still uses CUTLASS.</dd>
+  <dt>Status</dt>
+  <dd><span class="verdict good">New opt-in feature; works as described.</span> Both kernels pass the GB200 refit test with CUDA graphs on. A side change in this PR has a separate bug: see page 2.</dd>
+</dl>
+</div>
+
+<nav class="chain">
+  <span class="here">1 · native kernel refit</span>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-3638-encoder-cache-reset.html">2 · image cache crash</a>
+</nav>
+<p class="chainnote">Two pages on this PR — this one: how the new path compares with the default one.</p>
+
+<div class="bg"><b>Background.</b> In RL training the rollout engine (vLLM) gets new weights from the trainer every step; that copy is the <b>refit</b>.
+vLLM records <span class="tip" tabindex="0" data-tip="A CUDA graph replays a fixed list of GPU kernels on fixed memory addresses. If a weight tensor is replaced by a new one at a different address, the graph keeps reading the old one.">CUDA graphs</span> that read the weights at fixed GPU addresses, so a refit must write new values into the <i>same</i> tensors, never swap in new ones.
+Dotted words have a short explanation: hover or tap them.</div>
+
+<p>After loading, every MXFP8 dense kernel may rearrange the weight into the layout it reads fastest.
+CUTLASS keeps the trainer's layout, so a refit can write straight into its tensors. The two kernels this PR enables do not:
+<a href="https://github.com/vllm-project/vllm/blob/98dff2a81d747d1dba01a47f939f48c3526d4206/vllm/model_executor/kernels/linear/mxfp8/flashinfer.py#L121-L133">CuTeDSL</a> stores the weight transposed, and
+<a href="https://github.com/vllm-project/vllm/blob/98dff2a81d747d1dba01a47f939f48c3526d4206/vllm/model_executor/kernels/linear/mxfp8/flashinfer.py#L202-L241">TRTLLM</a> pads the rows to a multiple of 128, shuffles them, and flattens the scale.
+So the PR routes these layers through vLLM's
+<a href="https://github.com/vllm-project/vllm/blob/98dff2a81d747d1dba01a47f939f48c3526d4206/vllm/model_executor/model_loader/reload/layerwise.py#L84-L119">layerwise reload</a>:
+load into a temporary trainer-layout copy, let the kernel rearrange it, then copy the result into the tensors the graph reads.</p>
+
+<h2>One dense layer, one refit, both paths</h2>
+<p style="font-size:13.5px;color:var(--dim)">Example layer: weight <code>[4, 256]</code> = [output rows, inputs], one FP8 value each; scale <code>[4, 8]</code> = one 8-bit scale per 32 inputs (256 / 32 = 8).</p>
+
+<svg viewBox="0 0 900 470" role="img" aria-label="Two lanes. Default CUTLASS: trainer weight and scale are written in place, the scale is swizzled into the live tensor, the graph reads the same memory. Native CuTeDSL: the live tensors are set aside, the layer gets a temporary trainer-layout copy, the kernel transposes it, vLLM copies the result back into the set-aside tensors.">
+  <defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10z" fill="var(--dim)"/></marker></defs>
+  <text class="col" x="120" y="20">1 · trainer sends</text>
+  <text class="col" x="320" y="20">2 · where the bytes land</text>
+  <text class="col" x="530" y="20">3 · kernel layout step</text>
+  <text class="col" x="730" y="20">4 · graph reads</text>
+
+  <text class="lane" x="10" y="64">default</text>
+  <text class="note" x="10" y="80">auto → CUTLASS</text>
+  <rect class="box" x="110" y="40" width="185" height="62" rx="6"/>
+  <text class="lbl" x="120" y="60">weight, fp8 [4,256]</text>
+  <text class="lbl" x="120" y="78">…_scale_from_checkpoint</text>
+  <text class="data" x="120" y="94">[4,8]</text>
+  <path class="arrow" d="M297 71 L313 71"/>
+  <rect class="box" x="317" y="40" width="195" height="62" rx="6"/>
+  <text class="lbl" x="327" y="60">written into the live</text>
+  <text class="lbl" x="327" y="78">weight [4,256] in place</text>
+  <text class="data" x="327" y="94">same layout as trainer</text>
+  <path class="arrow" d="M514 71 L528 71"/>
+  <rect class="box" x="532" y="40" width="185" height="62" rx="6"/>
+  <text class="lbl" x="542" y="60">swizzle scale into</text>
+  <text class="lbl" x="542" y="78">live weight_scale</text>
+  <path class="arrow" d="M719 71 L733 71"/>
+  <rect class="ok" x="737" y="40" width="150" height="62" rx="6"/>
+  <text class="grn" x="747" y="66">same addresses</text>
+  <text class="lbl" x="747" y="86">✓</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/83c655cb72fe1a0e6d89e8f4e4c24e7430660310/nemo_rl/models/generation/vllm/quantization/fp8.py#L751-L758"><text x="110" y="120">fp8.py L751 picks the scale name</text></a>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/83c655cb72fe1a0e6d89e8f4e4c24e7430660310/nemo_rl/models/generation/vllm/quantization/fp8.py#L1243-L1248"><text x="532" y="120">fp8.py L1243 in-place scale</text></a>
+
+  <rect class="split" x="10" y="150" width="880" height="34" rx="6"/>
+  <text class="lbl" x="22" y="172">the paths split here:</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/83c655cb72fe1a0e6d89e8f4e4c24e7430660310/nemo_rl/models/generation/vllm/vllm_backend.py#L1752"><text x="190" y="172">_weight_update_lifecycle → _uses_native_layerwise_refit (vllm_backend.py L1752)</text></a>
+
+  <text class="lane" x="10" y="244">native</text>
+  <text class="note" x="10" y="260">linear_backend:</text>
+  <text class="note" x="10" y="275">flashinfer_cutedsl</text>
+  <rect class="box" x="110" y="214" width="185" height="80" rx="6"/>
+  <text class="lbl" x="120" y="234">weight, fp8 [4,256]</text>
+  <text class="lbl" x="120" y="252">…_scale</text>
+  <text class="data" x="120" y="268">[4,8]</text>
+  <text class="note" x="120" y="286">same bytes, other name</text>
+  <path class="arrow" d="M297 254 L313 254"/>
+  <rect class="box" x="317" y="214" width="195" height="80" rx="6"/>
+  <text class="lbl" x="327" y="234">live tensors set aside</text>
+  <text class="data" x="327" y="250">weight [256,4] (transposed)</text>
+  <text class="lbl" x="327" y="268">bytes go to a temp copy</text>
+  <text class="data" x="327" y="284">weight [4,256], scale [4,8]</text>
+  <path class="arrow" d="M514 254 L528 254"/>
+  <rect class="box" x="532" y="214" width="185" height="80" rx="6"/>
+  <text class="lbl" x="542" y="234">kernel rearranges</text>
+  <text class="lbl" x="542" y="252">the temp copy:</text>
+  <text class="data" x="542" y="268">weight.t() → [256,4]</text>
+  <text class="data" x="542" y="284">scale swizzled</text>
+  <path class="arrow" d="M719 254 L733 254"/>
+  <rect class="ok" x="737" y="214" width="150" height="80" rx="6"/>
+  <text class="lbl" x="747" y="234">vLLM copies into</text>
+  <text class="lbl" x="747" y="252">the set-aside</text>
+  <text class="lbl" x="747" y="268">tensors</text>
+  <text class="grn" x="747" y="286">same addresses</text>
+  <a href="https://github.com/vllm-project/vllm/blob/98dff2a81d747d1dba01a47f939f48c3526d4206/vllm/model_executor/model_loader/reload/layerwise.py#L111-L119"><text x="317" y="312">layerwise.py L111 initialize</text></a>
+  <a href="https://github.com/vllm-project/vllm/blob/98dff2a81d747d1dba01a47f939f48c3526d4206/vllm/model_executor/kernels/linear/mxfp8/flashinfer.py#L121-L133"><text x="532" y="312">flashinfer.py L121 CuTeDSL</text></a>
+  <a href="https://github.com/vllm-project/vllm/blob/98dff2a81d747d1dba01a47f939f48c3526d4206/vllm/model_executor/model_loader/reload/layerwise.py#L392-L408"><text x="737" y="312">layerwise.py L392</text></a>
+  <text class="note" x="110" y="340">TRTLLM is the same path; only step 3 differs: rows padded 4 → 128 and shuffled, scale flattened to one dimension.</text>
+
+  <rect class="ok" x="10" y="372" width="16" height="12"/><text class="note" x="32" y="382">the graph keeps reading the same GPU tensors</text>
+  <rect class="split" x="320" y="372" width="16" height="12"/><text class="note" x="342" y="382">the one place the two paths differ</text>
+  <text class="data" x="600" y="382">orange = data at that step</text>
+  <text class="note" x="10" y="418">Both paths get the same quantized bytes from the trainer and end with the graph reading unchanged addresses.</text>
+  <text class="note" x="10" y="436">What differs: the scale's name, and whether the kernel's rearranging step runs on a temporary copy first.</text>
+</svg>
+
+<p>The split is one check in
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/83c655cb72fe1a0e6d89e8f4e4c24e7430660310/nemo_rl/models/generation/vllm/vllm_backend.py#L1609-L1619"><code>_uses_native_layerwise_refit</code></a>:
+it is true when the model has layers whose kernel
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/83c655cb72fe1a0e6d89e8f4e4c24e7430660310/nemo_rl/models/generation/vllm/quantization/fp8.py#L643-L651"><code>uses_native_mxfp8_linear_refit</code></a>
+recognizes. Those layers join the same reload as the BF16 TRTLLM MoE experts that already used it, in one pass, so neither group undoes the other's layout.
+If a reload fails halfway,
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/83c655cb72fe1a0e6d89e8f4e4c24e7430660310/nemo_rl/models/generation/vllm/vllm_backend.py#L117-L132"><code>_abort_layerwise_reload</code></a>
+puts the set-aside tensors back and the worker refuses further refits.</p>
+
+<h2>Why keep both</h2>
+<table class="cmp">
+<tr><th></th><th>default: <code>auto</code> → CUTLASS</th><th>native: <code>flashinfer_cutedsl</code> / <code>flashinfer_trtllm</code></th></tr>
+<tr><td>How to get it</td><td>nothing to set</td><td><code>vllm_kwargs.linear_backend</code> with <code>precision: fp8</code>, <code>is_mx: true</code></td></tr>
+<tr><td>Generation speed</td><td>baseline</td><td>CuTeDSL: +0.9% to +14.5% in the author's GB200 A/B over several MoE models; one async case was slower because of different overlap with refit pauses. No TRTLLM numbers posted.</td></tr>
+<tr><td>Refit transports</td><td>all</td><td>IPC and collective only. NCCL reshard, sparse, NIXL and checkpoint-engine refit are rejected at startup.</td></tr>
+<tr><td>Other limits</td><td>none new</td><td>no FP8 KV cache, no co-trained MTP drafter</td></tr>
+</table>
+
+<div class="hl"><b>So what.</b> The default does not change: <code>auto</code> still swaps CuTeDSL for CUTLASS. If you set
+<code>linear_backend</code> to a native kernel, refit now keeps it, at the cost of a reload pass per step and the transport limits above.
+The feature itself checks out. The separate bug the review found is in the cache reset this PR added to <i>every</i> refit:
+<a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-3638-encoder-cache-reset.html">page 2</a>.</div>
+
+</div>
+</body>
+</html>
