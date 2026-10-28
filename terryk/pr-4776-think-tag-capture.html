@@ -111,7 +111,7 @@ A reasoning model first thinks, then answers: <code>&lt;think&gt; plan &lt;/thin
 When thinking is on, the chat template already puts <code>&lt;think&gt;</code> at the end of the prompt, so the model should write exactly one <code>&lt;/think&gt;</code> and no <code>&lt;think&gt;</code>.
 When thinking is off, the template puts an empty <code>&lt;think&gt;&lt;/think&gt;</code> in the prompt, and the model should write no tags at all.
 The <b>think-tag penalty</b> sets a rollout's reward to 0 when the model breaks this, so training stops rewarding broken output.
-A <span class="tip" tabindex="0" data-tip="One full agent conversation: the prompts, every model reply, every tool result, and the final reward.">rollout</span> comes back from Gym in one of two formats, shown below. Dotted words have a short explanation: hover or tap them.</div>
+A <span class="tip" tabindex="0" data-tip="One full agent conversation: the prompts, every model reply, every tool result, and the final reward.">rollout</span> comes back from Gym in one of two formats, shown below. <b>All of the penalty runs in RL, on both paths.</b> Gym only returns the task reward from its <code>/run</code> call; RL checks the tokens and sets that reward to 0. Dotted words have a short explanation: hover or tap them.</div>
 
 <p>Here is one coding-agent rollout with two turns. In each turn, some new prompt tokens arrive (the task, or a tool result), and then the model writes some tokens.
 The <b>echo path</b> gets this as chat messages: a <code>user</code> message with the new prompt tokens, then an <code>assistant</code> message with what the model wrote.
@@ -135,19 +135,19 @@ Reward starts at 1.0 in every row:</p>
 <tr><td><code>&lt;think&gt;&lt;/think&gt;</code></td><td><code>&lt;/think&gt; ls</code></td><td>1 close, need 0</td><td></td><td class="no">0</td></tr>
 <tr><td><code>&lt;think&gt;&lt;/think&gt;</code></td><td><code>&lt;/think&gt; ls</code>, spelled from plain pieces</td><td>looks ok</td><td>1 close string, allowed up to 1</td><td class="miss">1.0 (missed)</td></tr>
 </table></div>
-<p>Code: <a href="https://github.com/NVIDIA-NeMo/RL/blob/96ec8a36d3dc12e60ec50ca5ce662521be94ba73/nemo_rl/experience/reward_penalties.py#L118-L147"><code>has_malformed_think_tag</code></a> (capture, new) and <a href="https://github.com/NVIDIA-NeMo/RL/blob/96ec8a36d3dc12e60ec50ca5ce662521be94ba73/nemo_rl/experience/rollouts.py#L2301-L2345">the echo check</a> use the same counts.</p>
+<p>On capture, RL's <a href="https://github.com/NVIDIA-NeMo/RL/blob/96ec8a36d3dc12e60ec50ca5ce662521be94ba73/nemo_rl/experience/rollout_reassembler.py#L414-L423">finalizer</a> runs this after rebuilding the token list, and the trainer only sees the final reward. Code: <a href="https://github.com/NVIDIA-NeMo/RL/blob/96ec8a36d3dc12e60ec50ca5ce662521be94ba73/nemo_rl/experience/reward_penalties.py#L118-L147"><code>has_malformed_think_tag</code></a> (capture, new) and <a href="https://github.com/NVIDIA-NeMo/RL/blob/96ec8a36d3dc12e60ec50ca5ce662521be94ba73/nemo_rl/experience/rollouts.py#L2301-L2345">the echo check</a> use the same counts.</p>
 
 <h2>What still differs, and the one gap</h2>
 <div class="tw"><table class="cmp">
 <tr><th></th><th>Echo</th><th>Token capture (this PR)</th></tr>
-<tr><td>Where the tag text comes from</td><td>Gym's text for each reply</td><td>RL turns the tokens back into text with the tokenizer, so it now loads one, only when this penalty is on</td></tr>
-<tr><td>Extra Gym flag</td><td><a href="https://github.com/NVIDIA-NeMo/RL/blob/96ec8a36d3dc12e60ec50ca5ce662521be94ba73/nemo_rl/environments/nemo_gym.py#L563-L597">Gym also flags</a> any tag inside the final answer text</td><td>Not available: there are no messages to flag. The docs say so.</td></tr>
+<tr><td>Where the tag text comes from</td><td>the text Gym sends with each reply</td><td>RL turns the tokens back into text with the tokenizer, so it now loads one, only when this penalty is on</td></tr>
+<tr><td>Extra check on the answer text</td><td>RL also <a href="https://github.com/NVIDIA-NeMo/RL/blob/96ec8a36d3dc12e60ec50ca5ce662521be94ba73/nemo_rl/environments/nemo_gym.py#L563-L597">checks each reply's final answer text</a> and flags any tag in it</td><td>Not done: capture has only tokens, no separate answer text. The docs say so.</td></tr>
 <tr><td>Resume from a checkpoint</td><td>nothing saved</td><td>The tag settings are saved, and a resume with different tags is refused</td></tr>
 </table></div>
 <p><b>The gap</b> is the last table row above: thinking off, and the model spells <code>&lt;/think&gt;</code> from plain pieces. The token count expects 0 and sees 0. The text count allows up to 1 on every turn, even though a thinking-off turn should allow 0. So nothing fires. Echo has the same rule, so this PR does not make anything worse. The fix for both paths: when thinking is off, allow 0 close strings, not 1.</p>
 <p class="cref">↪ <a href="https://github.com/NVIDIA-NeMo/RL/pull/4776#discussion_r4385915432">C3 · review comment — reward_penalties.py:495</a></p>
 
-<div class="hl"><b>So what.</b> Token-capture runs can now use the think-tag penalty, and it judges each turn exactly like echo does. The only real difference is Gym's extra answer-text flag, which capture has no way to get. The shared gap is small and goes into the follow-up issue the author already agreed to file.</div>
+<div class="hl"><b>So what.</b> Token-capture runs can now use the think-tag penalty, and it judges each turn exactly like echo does. The only real difference is echo's extra check on the answer text, which capture has no text for. The shared gap is small and goes into the follow-up issue the author already agreed to file.</div>
 
 </div>
 </body>
