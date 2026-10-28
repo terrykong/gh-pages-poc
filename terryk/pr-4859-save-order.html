@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NVIDIA-NeMo/RL #4859 — can the rename beat the TQ save?</title>
+<style>
+:root{--bg:#0d1117;--surface:#161b22;--surface2:#1c2128;--border:#30363d;--text:#e6edf3;--dim:#8b949e;
+  --accent:#58a6ff;--green:#3fb950;--red:#f85149;--orange:#d29922}
+:root[data-theme="light"]{--bg:#ffffff;--surface:#f6f8fa;--surface2:#eaeef2;--border:#d0d7de;--text:#1f2328;
+  --dim:#59636e;--accent:#0969da;--green:#1a7f37;--red:#cf222e;--orange:#9a6700}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:28px 16px 70px}
+h1{font-size:22px;margin:0 0 8px;line-height:1.3}
+h2{font-size:18px;margin:30px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
+.sub{color:var(--dim);font-size:13.5px;margin:0 0 14px}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);
+  border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;
+  font:13px/1 ui-monospace,monospace;cursor:pointer}
+.status{border:1px solid var(--border);border-radius:10px;background:var(--surface);padding:2px 16px 10px;margin:0 0 20px}
+.status dl{display:grid;grid-template-columns:max-content 1fr;gap:4px 14px;margin:12px 0 0}
+.status dt{color:var(--dim);font-size:12px;text-transform:uppercase;letter-spacing:.04em;white-space:nowrap;padding-top:2px}
+.status dd{margin:0;font-size:14px}
+.verdict{font-weight:700}
+.verdict.good{color:var(--green)}
+nav.chain{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 6px;padding:0}
+nav.chain a,nav.chain span{display:inline-block;padding:5px 11px;border:1px solid var(--border);
+  border-radius:20px;background:var(--surface);text-decoration:none;color:var(--accent);
+  font-size:12.5px;line-height:1.3;white-space:nowrap}
+nav.chain a:hover{background:var(--surface2)}
+nav.chain span.here{background:var(--accent);color:var(--bg);border-color:var(--accent);font-weight:600}
+p.chainnote{color:var(--dim);font-size:12px;margin:0 0 18px}
+.bg{border:1px dashed var(--border);border-radius:8px;padding:10px 14px;margin:0 0 16px;font-size:14px;background:var(--surface)}
+.hl{border-left:4px solid var(--green);background:var(--surface);padding:10px 14px;margin:18px 0;border-radius:0 8px 8px 0}
+.tip{border-bottom:1px dotted var(--dim);cursor:help;position:relative;outline:none}
+.tip:hover::after,.tip:focus::after{content:attr(data-tip);position:absolute;left:0;top:1.7em;z-index:60;
+  width:max-content;max-width:min(340px,80vw);white-space:normal;background:var(--surface2);color:var(--text);
+  border:1px solid var(--border);border-radius:6px;padding:7px 10px;font:13px/1.45 -apple-system,sans-serif;
+  font-weight:400;box-shadow:0 4px 14px rgba(0,0,0,.3)}
+ol li,ul li{margin:4px 0}
+svg{max-width:100%;height:auto;display:block;margin:14px 0}
+svg .box{fill:var(--surface);stroke:var(--border);stroke-width:1.4}
+svg .gate{fill:var(--surface);stroke:var(--accent);stroke-width:2}
+svg .train{fill:var(--surface2);stroke:var(--dim);stroke-width:1.2}
+svg .write{fill:var(--accent);opacity:.28}
+svg .tmp{fill:var(--red);opacity:.16;stroke:var(--red);stroke-width:1.2}
+svg .pub{fill:var(--green);opacity:.22;stroke:var(--green);stroke-width:1.2}
+svg .lbl{fill:var(--text);font:12px -apple-system,sans-serif}
+svg .lblb{fill:var(--text);font:bold 12px -apple-system,sans-serif}
+svg .lane{fill:var(--dim);font:bold 12px -apple-system,sans-serif}
+svg .note{fill:var(--dim);font:11.5px -apple-system,sans-serif}
+svg .mono{fill:var(--text);font:12px ui-monospace,Menlo,monospace}
+svg .rule{stroke:var(--accent);stroke-width:2;stroke-dasharray:4 3}
+svg .brk{stroke:var(--dim);stroke-width:1.2;fill:none}
+svg a text{text-decoration:underline;fill:var(--accent);font:11px ui-monospace,Menlo,monospace}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+  document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head>
+<body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+  function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+  function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
+    b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
+      else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+  document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+<div class="wrap">
+
+<h1>Can the folder rename happen before the TQ, dataloader or critic saves finish?</h1>
+<p class="sub"><a href="https://github.com/NVIDIA-NeMo/RL/pull/4859">NVIDIA-NeMo/RL #4859</a>, flag
+<code>async_rl.defer_async_checkpoint_finalize: true</code>. All permalinks pin the current head <code>8841e8e4</code>.</p>
+
+<div class="status">
+<dl>
+  <dt>Before</dt>
+  <dd>Same order as now. Only the policy write ran in the background; a thread waited for it, then renamed the folder.</dd>
+  <dt>This PR</dt>
+  <dd>Changes who waits for the policy write (a check at each step boundary instead of that thread). The order of the other saves does not change.</dd>
+  <dt>Status</dt>
+  <dd><span class="verdict good">No race — safe as written.</span> The rename needs a mark that is set only after every other part is on disk. No review comment needed.</dd>
+</dl>
+</div>
+
+<nav class="chain">
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4859-overlap-write.html">1 · write overlaps training</a>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4859-lost-last-checkpoint.html">2 · lost last checkpoint</a>
+  <span class="here">3 · rename vs other saves</span>
+</nav>
+<p class="chainnote">Three pages on this PR, one question each — this one: can the rename pull the folder out from under a slow save.</p>
+
+<div class="bg"><b>Background.</b> A SingleController checkpoint is one folder with several parts: policy weights and
+optimizer, the PPO critic, the dataloader position, the replay-buffer files, and a snapshot of
+<span class="tip" tabindex="0" data-tip="TransferQueue: the store that holds rollout data between the rollout and training sides. Its snapshot lets a resumed run keep rollouts already collected.">TQ</span>,
+the data plane. Every part is written into <code>tmp_step_N/</code>. Renaming it to <code>step_N/</code>
+<span class="tip" tabindex="0" data-tip="Resume only looks for step_N folders, so a checkpoint counts only after the rename.">publishes</span>
+the checkpoint. Dotted words have a short explanation: hover or tap them.</div>
+
+<p>Only the policy save runs in the background: with Megatron <code>async_save</code> it
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/8841e8e42d52f37bffb85ed80b1ec9e9552afc3c/nemo_rl/algorithms/single_controller.py#L5359-L5373">returns after copying to host memory</a>,
+and a writer process finishes the disk write. Every other part is awaited inside
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/8841e8e42d52f37bffb85ed80b1ec9e9552afc3c/nemo_rl/algorithms/single_controller.py#L5195-L5412"><code>_save_checkpoint_impl</code></a>.
+The last thing that function does is mark the folder as
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/8841e8e42d52f37bffb85ed80b1ec9e9552afc3c/nemo_rl/algorithms/single_controller.py#L5398-L5401">pending</a>.
+The rename reads that mark, and runs only once the writer also reports the policy write done.</p>
+
+<h2>One save, in the order the code runs it</h2>
+
+<svg viewBox="0 0 900 330" role="img" aria-label="Timeline of one save after step 2. The controller runs TQ save, critic save, policy save, and small files in order, then sets pending. The policy disk write runs in the background from the policy save into step 3. The folder stays tmp_step_2 until the step-4 check renames it to step_2.">
+  <text class="lane" x="100" y="20">the save call: training waits</text>
+  <path class="brk" d="M100 28 V24 H678 V28"/>
+  <text class="lane" x="690" y="20">training goes on</text>
+  <path class="brk" d="M690 28 V24 H886 V28"/>
+
+  <text class="lane" x="12" y="62">controller</text>
+  <rect class="box" x="100" y="38" width="126" height="44" rx="6"><title>Inside the data-plane barrier: rollouts cannot change TQ or the loader meanwhile.</title></rect>
+  <text class="lblb" x="110" y="56">1 · TQ save</text>
+  <text class="lbl" x="110" y="73">awaited, checked</text>
+  <rect class="box" x="232" y="38" width="126" height="44" rx="6"/>
+  <text class="lblb" x="242" y="56">2 · critic save</text>
+  <text class="lbl" x="242" y="73">PPO only, blocking</text>
+  <rect class="box" x="364" y="38" width="126" height="44" rx="6"/>
+  <text class="lblb" x="374" y="56">3 · policy save</text>
+  <text class="lbl" x="374" y="73">returns after copy</text>
+  <rect class="box" x="496" y="38" width="110" height="44" rx="6"/>
+  <text class="lblb" x="506" y="56">4 · loader,</text>
+  <text class="lbl" x="506" y="73">replay files</text>
+  <rect class="gate" x="612" y="38" width="66" height="44" rx="6"/>
+  <text class="lblb" x="618" y="56">5 · mark</text>
+  <text class="lbl" x="618" y="73">pending</text>
+  <rect class="train" x="690" y="38" width="92" height="44" rx="6"/>
+  <text class="lblb" x="700" y="56">step 3</text>
+  <text class="lbl" x="700" y="73">check → no</text>
+  <rect class="train" x="790" y="38" width="96" height="44" rx="6"/>
+  <text class="lblb" x="800" y="56">step 4</text>
+  <text class="lbl" x="800" y="73">check → yes</text>
+
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/8841e8e42d52f37bffb85ed80b1ec9e9552afc3c/nemo_rl/algorithms/single_controller.py#L5317"><text x="110" y="98">L5317</text></a>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/8841e8e42d52f37bffb85ed80b1ec9e9552afc3c/nemo_rl/algorithms/single_controller.py#L5340-L5353"><text x="242" y="98">L5340</text></a>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/8841e8e42d52f37bffb85ed80b1ec9e9552afc3c/nemo_rl/algorithms/single_controller.py#L5361-L5373"><text x="374" y="98">L5361</text></a>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/8841e8e42d52f37bffb85ed80b1ec9e9552afc3c/nemo_rl/algorithms/single_controller.py#L5375-L5397"><text x="506" y="98">L5375</text></a>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/8841e8e42d52f37bffb85ed80b1ec9e9552afc3c/nemo_rl/algorithms/single_controller.py#L5400"><text x="622" y="98">L5400</text></a>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/8841e8e42d52f37bffb85ed80b1ec9e9552afc3c/nemo_rl/algorithms/single_controller.py#L3028-L3032"><text x="700" y="98">L3032</text></a>
+
+  <text class="lane" x="12" y="134">policy writer</text>
+  <rect class="write" x="490" y="116" width="270" height="28" rx="4"/>
+  <text class="lbl" x="500" y="134">disk write, in the background</text>
+  <text class="note" x="764" y="134">done</text>
+
+  <text class="lane" x="12" y="182">folder</text>
+  <rect class="tmp" x="100" y="164" width="730" height="28" rx="4"/>
+  <text class="mono" x="110" y="182">tmp_step_2/ — on disk, but resume ignores it</text>
+  <rect class="pub" x="830" y="164" width="56" height="28" rx="4"/>
+  <text class="mono" x="834" y="182">step_2</text>
+  <line class="rule" x1="830" y1="104" x2="830" y2="200"/>
+  <text class="note" x="560" y="214">rename at the step-4 check: needs the mark</text>
+  <text class="note" x="560" y="229">(step 5) and the writer's "done"</text>
+
+  <rect class="box" x="12" y="252" width="16" height="12"/><text class="note" x="34" y="262">awaited: on disk before the next step</text>
+  <rect class="write" x="290" y="252" width="16" height="12"/><text class="note" x="312" y="262">runs in the background</text>
+  <rect class="tmp" x="470" y="252" width="16" height="12"/><text class="note" x="492" y="262">written, not published</text>
+  <rect class="pub" x="650" y="252" width="16" height="12"/><text class="note" x="672" y="262">published</text>
+  <text class="note" x="12" y="294">Flag off: step 5 starts a thread instead, which waits for the writer and renames as soon as it is done.</text>
+  <text class="note" x="12" y="312">Either way the rename comes after steps 1–4, because nothing starts it before step 5.</text>
+</svg>
+
+<h2>Your two cases, and one more</h2>
+<ul>
+<li><b>Policy write fast, TQ slow.</b> This cannot happen in this order. The TQ save (step 1) is awaited, and the
+adapter checks that the snapshot is complete
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/8841e8e42d52f37bffb85ed80b1ec9e9552afc3c/nemo_rl/data_plane/adapters/transfer_queue.py#L1563-L1566"><code>storage_saved</code> must be true</a>)
+before the policy save (step 3) even starts. A slow TQ save just makes the whole save call longer; training waits for it,
+with the flag on or off.</li>
+<li><b>TQ fast, policy write slow.</b> Steps 1–5 finish, and the folder stays <code>tmp_step_2/</code> while the
+writer works. The check at each step boundary says "no" until the write is done. Nothing else writes into the folder
+by then, so the late rename publishes a complete checkpoint.</li>
+<li><b>Training stops in the middle of a save.</b> The mark in step 5 is never set, so neither the step-boundary check
+nor the teardown publish
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/8841e8e42d52f37bffb85ed80b1ec9e9552afc3c/nemo_rl/algorithms/single_controller.py#L949">L949</a>)
+can rename a half-written folder. It stays <code>tmp_step_2/</code>, and resume uses the previous checkpoint.</li>
+</ul>
+<p>Every caller of the rename runs in the train loop that also runs the save
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/8841e8e42d52f37bffb85ed80b1ec9e9552afc3c/nemo_rl/algorithms/single_controller.py#L3032">step check</a>,
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/8841e8e42d52f37bffb85ed80b1ec9e9552afc3c/nemo_rl/algorithms/single_controller.py#L5187">next save</a>,
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/8841e8e42d52f37bffb85ed80b1ec9e9552afc3c/nemo_rl/algorithms/single_controller.py#L3927">loop exit</a>),
+or in teardown after that loop has stopped. It also takes the same checkpoint lock as the save. SFT v2 follows the same
+order: its loader file is written
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/8841e8e42d52f37bffb85ed80b1ec9e9552afc3c/nemo_rl/algorithms/sft_v2.py#L468-L472">sft_v2.py L468</a>)
+before it marks the save pending.</p>
+
+<div class="hl"><b>So what.</b> The flag only moves the wait on the policy's background write. The TQ, critic,
+dataloader and replay-buffer saves still pause training for their full length, flag on or off, so on runs with
+<code>save_data_plane</code> or PPO they may be most of the save time. The safety comes from one rule: the pending
+mark is the last line of the save. Keep it last if that function changes.</div>
+
+</div>
+</body>
+</html>

@@ -94,8 +94,9 @@ Permalinks pin <code>0a4103fb</code>, the head first reviewed; the normal path i
 <nav class="chain">
   <span class="here">1 · write overlaps training</span>
   <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4859-lost-last-checkpoint.html">2 · lost last checkpoint</a>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4859-save-order.html">3 · rename vs other saves</a>
 </nav>
-<p class="chainnote">Two pages on this PR, one question each — this one: what the flag changes.</p>
+<p class="chainnote">Three pages on this PR, one question each — this one: what the flag changes.</p>
 
 <div class="bg"><b>Background.</b> With Megatron <code>async_save</code>, each policy worker hands the checkpoint
 files to a background writer and returns. <span class="tip" tabindex="0" data-tip="Waits for every rank's background write, writes the final metadata, and runs a barrier across all ranks. Only after this is the checkpoint complete.">Finalize</span>
@@ -113,6 +114,10 @@ With the flag on, the save only records the folder as pending
 <a href="https://github.com/NVIDIA-NeMo/RL/blob/0a4103fb6305cbd41d34fbcac1d4699c12c76eb3/nemo_rl/algorithms/single_controller.py#L5377-L5380">SingleController</a>).
 Each step then starts with a quick, non-waiting check,
 <a href="https://github.com/NVIDIA-NeMo/RL/blob/0a4103fb6305cbd41d34fbcac1d4699c12c76eb3/nemo_rl/models/policy/workers/megatron_policy_worker.py#L5158-L5177"><code>poll_async_save</code></a>.</p>
+<p>Only the policy weights and optimizer overlap: they are the one Megatron async save. The dataloader state,
+the replay-buffer files, the TQ data-plane snapshot and, for PPO, the critic are all written before the save call returns,
+so training waits for them with the flag on or off.
+<a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4859-save-order.html">Page 3</a> shows the order.</p>
 
 <h2>Same save, two ways to wait for it</h2>
 
