@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PR 4776: split the memory commit?</title>
+<style>
+:root{--bg:#0d1117;--surface:#161b22;--surface2:#1c2128;--border:#30363d;--text:#e6edf3;--dim:#8b949e;
+  --accent:#58a6ff;--green:#3fb950;--red:#f85149;--orange:#d29922}
+:root[data-theme="light"]{--bg:#ffffff;--surface:#f6f8fa;--surface2:#eaeef2;--border:#d0d7de;--text:#1f2328;
+  --dim:#59636e;--accent:#0969da;--green:#1a7f37;--red:#cf222e;--orange:#9a6700}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:28px 16px 70px}
+h1{font-size:22px;margin:0 0 8px;line-height:1.3}
+h2{font-size:18px;margin:30px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
+.sub{color:var(--dim);font-size:13.5px;margin:0 0 14px}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);
+  border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;
+  font:13px/1 ui-monospace,monospace;cursor:pointer}
+.status{border:1px solid var(--border);border-radius:10px;background:var(--surface);padding:2px 16px 10px;margin:0 0 20px}
+.status dl{display:grid;grid-template-columns:max-content 1fr;gap:4px 14px;margin:12px 0 0}
+.status dt{color:var(--dim);font-size:12px;text-transform:uppercase;letter-spacing:.04em;white-space:nowrap;padding-top:2px}
+.status dd{margin:0;font-size:14px}
+.verdict{font-weight:700}
+.verdict.good{color:var(--green)}
+.verdict.open{color:var(--red)}
+nav.chain{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 6px;padding:0}
+nav.chain a,nav.chain span{display:inline-block;padding:5px 11px;border:1px solid var(--border);
+  border-radius:20px;background:var(--surface);text-decoration:none;color:var(--accent);
+  font-size:12.5px;line-height:1.3;white-space:nowrap}
+nav.chain a:hover{background:var(--surface2)}
+nav.chain span.here{background:var(--accent);color:var(--bg);border-color:var(--accent);font-weight:600}
+p.chainnote{color:var(--dim);font-size:12px;margin:0 0 18px}
+.bg{border-left:4px solid var(--dim);background:var(--surface);padding:8px 14px;margin:0 0 14px;font-size:14px}
+.hl{border-left:4px solid var(--green);background:var(--surface);padding:10px 14px;margin:16px 0;border-radius:0 8px 8px 0}
+.warn{border-left:4px solid var(--orange);background:var(--surface);padding:10px 14px;margin:16px 0;border-radius:0 8px 8px 0}
+.cref{margin:6px 0 0;font-size:13px}
+.cref a{display:inline-block;padding:4px 10px;border:1px solid var(--border);border-radius:16px;background:var(--surface);font:12.5px ui-monospace,Menlo,monospace}
+.cref a:hover{background:var(--surface2);text-decoration:none}
+.tip{border-bottom:1px dotted var(--dim);cursor:help;position:relative;outline:none}
+.tip:hover::after,.tip:focus::after{content:attr(data-tip);position:absolute;left:0;top:1.7em;z-index:60;
+  width:max-content;max-width:min(340px,80vw);white-space:normal;background:var(--surface2);color:var(--text);
+  border:1px solid var(--border);border-radius:6px;padding:7px 10px;font:13px/1.45 -apple-system,sans-serif;
+  font-weight:400;box-shadow:0 4px 14px rgba(0,0,0,.3)}
+table.cmp{border-collapse:collapse;width:100%;font-size:13.5px;margin:10px 0}
+table.cmp th,table.cmp td{border:1px solid var(--border);padding:6px 9px;text-align:left;vertical-align:top}
+table.cmp th{background:var(--surface);color:var(--dim);font-size:12px;text-transform:uppercase;letter-spacing:.04em}
+.tw{overflow-x:auto}
+svg{max-width:100%;height:auto;display:block;margin:14px 0}
+svg .box{fill:var(--surface);stroke:var(--border);stroke-width:1.4}
+svg .same{fill:var(--surface);stroke:var(--green);stroke-width:2}
+svg .diff{fill:var(--surface);stroke:var(--red);stroke-width:2}
+svg .lbl{fill:var(--text);font:12px ui-monospace,Menlo,monospace}
+svg .lane{fill:var(--text);font:bold 14px -apple-system,sans-serif}
+svg .note{fill:var(--dim);font:11.5px -apple-system,sans-serif}
+svg .red{fill:var(--red);font:bold 12px -apple-system,sans-serif}
+svg .grn{fill:var(--green);font:bold 12px -apple-system,sans-serif}
+svg .arr{stroke:var(--dim);stroke-width:1.4;fill:none;marker-end:url(#ah)}
+svg .ahd{fill:var(--dim)}
+svg a text{text-decoration:underline;fill:var(--accent);font:11px ui-monospace,Menlo,monospace}
+svg .tp{fill:var(--surface2);stroke:var(--border);stroke-width:1.2}
+svg .tm{fill:var(--surface);stroke:var(--accent);stroke-width:1.6}
+svg .tk{fill:var(--text);font:11.5px ui-monospace,Menlo,monospace}
+svg .tag{fill:var(--orange);font:bold 11.5px ui-monospace,Menlo,monospace}
+svg .brk{stroke:var(--dim);stroke-width:1.2;fill:none}
+svg .brkm{stroke:var(--accent);stroke-width:1.6;fill:none}
+svg .acc{fill:var(--accent);font:bold 12px -apple-system,sans-serif}
+svg .okb{fill:var(--surface);stroke:var(--green);stroke-width:1.6}
+svg .bad{fill:var(--surface);stroke:var(--red);stroke-width:2}
+table.cmp td.ok{color:var(--green);font-weight:600}
+table.cmp td.no{color:var(--red);font-weight:600}
+table.cmp td.miss{color:var(--orange);font-weight:600}
+.k{color:var(--orange);font-weight:600}
+blockquote{margin:10px 0;padding:6px 14px;border-left:4px solid var(--border);color:var(--dim);font-size:14px}
+ol.asks li,ul.why li{margin:4px 0}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+  document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head>
+<body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+  function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+  function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
+    b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
+      else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+  document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+
+<div class="wrap">
+<h1>Should the logits-memory change move out of PR #4776 into its own PR?</h1>
+<p class="sub"><a href="https://github.com/NVIDIA-NeMo/RL/pull/4776">NVIDIA-NeMo/RL #4776</a> · the question: <a href="https://github.com/NVIDIA-NeMo/RL/pull/4776#discussion_r4373672607">review thread on model_utils.py:1110</a> · all links pinned to head <code>96ec8a36</code></p>
+<div class="status"><dl>
+<dt>Asked</dt><dd>A reviewer asked the author to split commit <code>4a8997dba</code> into its own PR and add a warning to its docstring, then asked a maintainer for their view.</dd>
+<dt>This PR</dt><dd>Still has the commit; the docstring is not updated yet.</dd>
+<dt>Status</dt><dd><span class="verdict open">Open: waiting on the maintainer's answer.</span> Suggested answer: yes, split it, and add the docstring (staged reply C1).</dd>
+</dl></div>
+<nav class="chain">
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4776-think-tag-capture.html">think-tag check</a>
+  <span class="here">split the memory commit?</span>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4776-logits-reuse.html">how the memory change works</a>
+</nav>
+<p class="chainnote">Three pages on this PR, one question each. This one: should one commit leave the PR.</p>
+
+<div class="bg"><b>What the commit does, in short.</b>
+During training, the loss needs the
+<span class="tip" tabindex="0" data-tip="How likely the model thinks each sampled token was. Computed from the logits: one score per vocabulary word, per token.">logprobs</span> of each token.
+Their backward pass needs a gradient buffer exactly as big as the
+<span class="tip" tabindex="0" data-tip="The model's raw scores: one number per vocabulary word at every token position. For long sequences this is the biggest tensor in the step.">logits</span>.
+Before, it made a new buffer. The commit writes the gradient into the logits' own memory instead, which the PR estimates saves about 12 GiB on its GB200 run.
+The catch: after backward, the logits tensor holds gradient numbers, not logits. Any code that reads it afterwards gets wrong values, and in some cases no error is raised.
+The <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4776-logits-reuse.html">third page</a> draws how this works.</div>
+
+<svg viewBox="0 0 940 314" role="img" aria-label="Four changes in the PR, one moved out"><text class="lane" x="20" y="26">PR #4776 today: four changes</text><text class="lane" x="600" y="26">Suggested: its own PR</text><rect class="okb" x="20" y="40" width="470" height="52" rx="7"/><text class="lbl" x="32" y="61">Think-tag penalty on token capture</text><text class="note" x="32" y="80">commits 97e23867f, c3977d53d · touches: <tspan style="fill:var(--green);font-weight:bold">token capture only</tspan></text><rect class="okb" x="20" y="102" width="470" height="52" rx="7"/><text class="lbl" x="32" y="123">Keep Gym rollout metrics on capture</text><text class="note" x="32" y="142">commits 7dcb8a2e5, 3e4558ff1 · touches: <tspan style="fill:var(--green);font-weight:bold">token capture only</tspan></text><rect class="okb" x="20" y="164" width="470" height="52" rx="7"/><text class="lbl" x="32" y="185">Clear Megatron caches after critic training</text><text class="note" x="32" y="204">commits b78f6dec2 · touches: <tspan style="fill:var(--green);font-weight:bold">critic only</tspan></text><rect class="bad" x="20" y="226" width="470" height="52" rx="7"/><text class="lbl" x="32" y="247">Write the logprob grad into the logits&#x27; memory</text><text class="note" x="32" y="266">commits 4a8997dba · touches: <tspan style="fill:var(--red);font-weight:bold">shared training loss</tspan></text><path class="arr" d="M490 252 C 545 252, 545 120, 596 120"/><text class="note" x="500" y="274">move out</text><rect class="bad" x="600" y="40" width="326" height="118" rx="7"/><text class="lbl" x="612" y="61">What the new PR should add:</text><text class="note" x="612" y="84">1. docstring: logits hold grad after backward</text><text class="note" x="612" y="106">2. use_chunking instead of True</text><text class="note" x="612" y="128">3. a test at TP/CP &gt; 1 with chunking</text><text class="note" x="612" y="150">4. measured peak memory, on vs off</text><rect class="okb" x="20" y="291" width="14" height="14" rx="3"/><text class="note" x="40" y="302">only new code (capture, critic): a bug stays in that feature</text><rect class="bad" x="420" y="291" width="14" height="14" rx="3"/><text class="note" x="440" y="302">shared loss code: a bug could hit any run that turns the flags on</text></svg>
+
+<h2>What was asked</h2>
+<p>The reviewer pointed out that the docstring does not warn that the logits get overwritten, and listed ways a later reader could silently get the gradient instead (reading the logits after backward, or keeping a reference some other way). Then two asks:</p>
+<blockquote>1. Update the docstring. 2. Move this change (4a8997dba2) into its own PR to derisk merging this PR, since it carries this risk. The other three changes can stay here.</blockquote>
+<p>Then the reviewer tagged the maintainer: <i>"wdyt 4a8997dba?"</i> That is the open question: do you agree with the split?</p>
+<p class="cref">↪ <a href="https://github.com/NVIDIA-NeMo/RL/pull/4776#discussion_r4373672607">the reviewer's comment — model_utils.py:1110</a></p>
+
+<h2>Suggested answer: yes, split it</h2>
+<ul class="why">
+<li><b>It is correct today.</b> The review checked every reader of those logits on the one path that turns the flag on (<a href="https://github.com/NVIDIA-NeMo/RL/blob/96ec8a36d3dc12e60ec50ca5ce662521be94ba73/nemo_rl/algorithms/loss/loss_input.py#L519-L540"><code>prepare_packed_loss_input</code></a>). None reads them after the overwrite. A CPU check gave the same gradients with the flag on and off.</li>
+<li><b>But it is the only change that touches the training loss everyone shares.</b> The other three only touch token capture or the critic. If this one causes a memory or accuracy problem, it should be revertible alone.</li>
+<li><b>Nothing in CI runs it.</b> No shipped config turns on the fp32 LM head, and the packing test never sets a chunk size. The 12 GiB is the size of one tensor, not a measurement.</li>
+<li><b>Its own comment is wrong.</b> It says this is the logits' "sole consumer", but <a href="https://github.com/NVIDIA-NeMo/RL/blob/96ec8a36d3dc12e60ec50ca5ce662521be94ba73/nemo_rl/algorithms/loss/loss_input.py#L550-L565">a second logprob call</a> reads the same logits. It is safe only because that call always runs with chunking off. Passing <code>use_chunking</code> instead of <code>True</code> puts that rule in the code.</li>
+<li><b>Splitting is cheap.</b> The commit touches two files and one test, so the rest of the PR can merge without waiting for the new tests and numbers.</li>
+</ul>
+<p>The reply is staged as C1 in your pending review: it agrees with the reviewer and lists asks 2–4 from the figure for the new PR.</p>
+<p class="cref">↪ <a href="https://github.com/NVIDIA-NeMo/RL/pull/4776#discussion_r4385915311">C1 · staged reply — model_utils.py:1110</a></p>
+
+<div class="hl"><b>So what.</b> Answer "agree, split it". The memory saving is real and the code looks right, but it changes code every packed run with an fp32 LM head and chunked logprobs would use, and nothing tests it yet. On its own PR it gets a test at real tensor- and context-parallel sizes and a measured memory number, and the rest of #4776 can merge now.</div>
+
+</div>
+</body>
+</html>

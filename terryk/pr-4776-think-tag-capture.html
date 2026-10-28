@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>NVIDIA-NeMo/RL #4776 — how the think-tag penalty works on token capture vs echo</title>
+<title>PR 4776: think-tag check</title>
 <style>
 :root{--bg:#0d1117;--surface:#161b22;--surface2:#1c2128;--border:#30363d;--text:#e6edf3;--dim:#8b949e;
   --accent:#58a6ff;--green:#3fb950;--red:#f85149;--orange:#d29922}
@@ -63,6 +63,21 @@ svg .grn{fill:var(--green);font:bold 12px -apple-system,sans-serif}
 svg .arr{stroke:var(--dim);stroke-width:1.4;fill:none;marker-end:url(#ah)}
 svg .ahd{fill:var(--dim)}
 svg a text{text-decoration:underline;fill:var(--accent);font:11px ui-monospace,Menlo,monospace}
+svg .tp{fill:var(--surface2);stroke:var(--border);stroke-width:1.2}
+svg .tm{fill:var(--surface);stroke:var(--accent);stroke-width:1.6}
+svg .tk{fill:var(--text);font:11.5px ui-monospace,Menlo,monospace}
+svg .tag{fill:var(--orange);font:bold 11.5px ui-monospace,Menlo,monospace}
+svg .brk{stroke:var(--dim);stroke-width:1.2;fill:none}
+svg .brkm{stroke:var(--accent);stroke-width:1.6;fill:none}
+svg .acc{fill:var(--accent);font:bold 12px -apple-system,sans-serif}
+svg .okb{fill:var(--surface);stroke:var(--green);stroke-width:1.6}
+svg .bad{fill:var(--surface);stroke:var(--red);stroke-width:2}
+table.cmp td.ok{color:var(--green);font-weight:600}
+table.cmp td.no{color:var(--red);font-weight:600}
+table.cmp td.miss{color:var(--orange);font-weight:600}
+.k{color:var(--orange);font-weight:600}
+blockquote{margin:10px 0;padding:6px 14px;border-left:4px solid var(--border);color:var(--dim);font-size:14px}
+ol.asks li,ul.why li{margin:4px 0}
 </style>
 <script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
   document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
@@ -75,103 +90,64 @@ svg a text{text-decoration:underline;fill:var(--accent);font:11px ui-monospace,M
     b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
       else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
   document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+
 <div class="wrap">
-
-<h1>How the malformed think-tag penalty works on token capture, next to the echo path</h1>
-<p class="sub"><a href="https://github.com/NVIDIA-NeMo/RL/pull/4776">NVIDIA-NeMo/RL #4776</a> · all links pinned to head <code>96ec8a36</code></p>
-
-<div class="status">
-<dl>
-  <dt>Before</dt>
-  <dd>With token capture on, setup rejected <code>reward_penalties.penalize_malformed_think_tag</code>. Only the echo path could use it.</dd>
-  <dt>This PR</dt>
-  <dd>The capture finalizer checks every turn's prompt and generation tokens with the same rules the echo path uses.</dd>
-  <dt>Status</dt>
-  <dd><span class="verdict good">Added by this PR; the rules match.</span> One small gap is shared by both paths and goes to the follow-up issue (last section).</dd>
-</dl>
-</div>
-
+<h1>What the think-tag penalty checks, and how this PR runs it on token capture</h1>
+<p class="sub"><a href="https://github.com/NVIDIA-NeMo/RL/pull/4776">NVIDIA-NeMo/RL #4776</a> · commits <a href="https://github.com/NVIDIA-NeMo/RL/pull/4776/commits/97e23867f">97e23867f</a>, <a href="https://github.com/NVIDIA-NeMo/RL/pull/4776/commits/c3977d53d">c3977d53d</a> · all links pinned to head <code>96ec8a36</code></p>
+<div class="status"><dl>
+<dt>Before</dt><dd>The think-tag penalty only worked on the echo path. With token capture on, setup refused it.</dd>
+<dt>This PR</dt><dd>Token capture runs the same per-turn check as echo.</dd>
+<dt>Status</dt><dd><span class="verdict good">Added by this PR, and the check matches echo.</span> One small gap exists on both paths; it goes in a follow-up issue (last section).</dd>
+</dl></div>
 <nav class="chain">
-  <span class="here">think-tag check: capture vs echo</span>
-  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4776-logits-reuse.html">grad written into the logits</a>
+  <span class="here">think-tag check</span>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4776-split-question.html">split the memory commit?</a>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4776-logits-reuse.html">how the memory change works</a>
 </nav>
-<p class="chainnote">Two pages on this PR, one question each. This one covers the new penalty path.</p>
+<p class="chainnote">Three pages on this PR, one question each. This one: the think-tag penalty.</p>
 
-<div class="bg"><b>Background.</b> In GRPO with NeMo-Gym there are two ways to get rollouts back. On the <b>echo</b> path, Gym returns chat messages with token IDs. On the <b>token-capture</b> path, Gym returns the exact token IDs vLLM sampled, plus a list of <span class="tip" tabindex="0" data-tip="For each turn: how many prompt tokens were added (the carry) and how many tokens the model generated. The finalizer cuts the full token row into these pieces.">spans</span>, and a <span class="tip" tabindex="0" data-tip="A Ray actor that rebuilds each rollout's token row, checks it, applies reward penalties, and commits it for training.">finalizer</span> rebuilds the rows. The think-tag penalty sets the reward to 0 when the model writes <code>&lt;think&gt;</code>/<code>&lt;/think&gt;</code> where it should not. Dotted words have a short explanation: hover or tap them.</div>
+<div class="bg"><b>Background.</b>
+A reasoning model first thinks, then answers: <code>&lt;think&gt; plan &lt;/think&gt; answer</code>.
+When thinking is on, the chat template already puts <code>&lt;think&gt;</code> at the end of the prompt, so the model should write exactly one <code>&lt;/think&gt;</code> and no <code>&lt;think&gt;</code>.
+When thinking is off, the template puts an empty <code>&lt;think&gt;&lt;/think&gt;</code> in the prompt, and the model should write no tags at all.
+The <b>think-tag penalty</b> sets a rollout's reward to 0 when the model breaks this, so training stops rewarding broken output.
+A <span class="tip" tabindex="0" data-tip="One full agent conversation: the prompts, every model reply, every tool result, and the final reward.">rollout</span> comes back from Gym in one of two formats, shown below. Dotted words have a short explanation: hover or tap them.</div>
 
-<p>Both paths decide the thinking mode from the prompt. If the prompt ends with an open <code>&lt;think&gt;</code>, thinking is on, and the model must write exactly one <code>&lt;/think&gt;</code> and no <code>&lt;think&gt;</code>. If the prompt's tags are balanced, thinking is off, and the model must write neither. Echo does this per <a href="https://github.com/NVIDIA-NeMo/RL/blob/96ec8a36d3dc12e60ec50ca5ce662521be94ba73/nemo_rl/experience/rollouts.py#L2301-L2326">(user, assistant) message pair</a>. Capture does it per <a href="https://github.com/NVIDIA-NeMo/RL/blob/96ec8a36d3dc12e60ec50ca5ce662521be94ba73/nemo_rl/experience/reward_penalties.py#L497-L515">(carry, generation) span</a> in the new <a href="https://github.com/NVIDIA-NeMo/RL/blob/96ec8a36d3dc12e60ec50ca5ce662521be94ba73/nemo_rl/experience/reward_penalties.py#L118-L147"><code>has_malformed_think_tag</code></a>. In the example below, token 7 is <code>&lt;think&gt;</code> and token 8 is <code>&lt;/think&gt;</code>.</p>
+<p>Here is one coding-agent rollout with two turns. In each turn, some new prompt tokens arrive (the task, or a tool result), and then the model writes some tokens.
+The <b>echo path</b> gets this as chat messages: a <code>user</code> message with the new prompt tokens, then an <code>assistant</code> message with what the model wrote.
+The <b>token-capture path</b> gets the exact token list vLLM saw and sampled, with no messages. Instead, Gym adds a list of
+<span class="tip" tabindex="0" data-tip="In the code these are (call_id, carry_len, generation_len). carry_len = new prompt tokens in this turn; generation_len = tokens the model wrote.">spans</span>:
+one pair of lengths per turn, (new prompt tokens, model tokens). The new code walks the list with those lengths and cuts out the same turns.</p>
 
-<h2>Same rule, different input</h2>
-<div class="tw">
-<svg viewBox="0 0 940 410" role="img" aria-label="Echo and capture paths side by side">
-<defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="ahd" d="M0,0 L10,5 L0,10 z"/></marker></defs>
-<text class="lane" x="20" y="24">Echo path</text>
-<text class="lane" x="490" y="24">Token-capture path (new)</text>
-<!-- row 1 -->
-<rect class="box" x="20" y="38" width="430" height="58" rx="7"/>
-<text class="lbl" x="32" y="58">Gym result: chat messages with token IDs</text>
-<text class="lbl" x="32" y="80">user [.., 7]   assistant [21, 8, 31]</text>
-<rect class="box" x="490" y="38" width="430" height="58" rx="7"/>
-<text class="lbl" x="502" y="58">Gym receipt: one token row + spans</text>
-<text class="lbl" x="502" y="80">row [.., 7, 21, 8, 31]  span (carry=4, gen=3)</text>
-<path class="arr" d="M235,96 L235,120"/><path class="arr" d="M705,96 L705,120"/>
-<!-- row 2 -->
-<rect class="same" x="20" y="122" width="430" height="74" rx="7"/>
-<text class="lbl" x="32" y="142">4a: count tag IDs per (user, assistant)</text>
-<text class="lbl" x="32" y="162">prompt open=1 close=0 → expect (0, 1)</text>
-<text class="lbl" x="32" y="182">generation (0, 1) → ok</text>
-<rect class="same" x="490" y="122" width="430" height="74" rx="7"/>
-<text class="lbl" x="502" y="142">ID check per (carry, generation)</text>
-<text class="lbl" x="502" y="162">carry open=1 close=0 → expect (0, 1)</text>
-<text class="lbl" x="502" y="182">generation (0, 1) → ok</text>
-<path class="arr" d="M235,196 L235,220"/><path class="arr" d="M705,196 L705,220"/>
-<!-- row 3 -->
-<rect class="same" x="20" y="222" width="430" height="74" rx="7"/>
-<text class="lbl" x="32" y="242">4b: text check on each output item</text>
-<text class="lbl" x="32" y="262">"plan&lt;/think&gt; ls"</text>
-<text class="lbl" x="32" y="282">open=0 close=1 → ok (bad: open>0 or close>1)</text>
-<rect class="same" x="490" y="222" width="430" height="74" rx="7"/>
-<text class="lbl" x="502" y="242">text check on decode(generation)</text>
-<text class="lbl" x="502" y="262">"plan&lt;/think&gt; ls"</text>
-<text class="lbl" x="502" y="282">open=0 close=1 → ok (bad: open>0 or close>1)</text>
-<path class="arr" d="M235,296 L235,320"/>
-<!-- row 4 -->
-<rect class="diff" x="20" y="322" width="430" height="58" rx="7"/>
-<text class="lbl" x="32" y="342">+ Gym's has_malformed_thinking flag</text>
-<text class="lbl" x="32" y="362">(any tag in the final answer message)</text>
-<rect class="diff" x="490" y="322" width="430" height="58" rx="7"/>
-<text class="lbl" x="502" y="342">no Gym flag on capture</text>
-<text class="lbl" x="502" y="362">(the guide documents this)</text>
-<!-- links -->
-<a href="https://github.com/NVIDIA-NeMo/RL/blob/96ec8a36d3dc12e60ec50ca5ce662521be94ba73/nemo_rl/experience/rollouts.py#L2301-L2326"><text x="330" y="142">rollouts.py:2301</text></a>
-<a href="https://github.com/NVIDIA-NeMo/RL/blob/96ec8a36d3dc12e60ec50ca5ce662521be94ba73/nemo_rl/experience/rollouts.py#L2334-L2356"><text x="330" y="242">rollouts.py:2334</text></a>
-<a href="https://github.com/NVIDIA-NeMo/RL/blob/96ec8a36d3dc12e60ec50ca5ce662521be94ba73/nemo_rl/environments/nemo_gym.py#L597-L625"><text x="330" y="342">nemo_gym.py:597</text></a>
-<a href="https://github.com/NVIDIA-NeMo/RL/blob/96ec8a36d3dc12e60ec50ca5ce662521be94ba73/nemo_rl/experience/reward_penalties.py#L135-L145"><text x="760" y="142">reward_penalties.py:135</text></a>
-<a href="https://github.com/NVIDIA-NeMo/RL/blob/96ec8a36d3dc12e60ec50ca5ce662521be94ba73/nemo_rl/experience/reward_penalties.py#L146-L147"><text x="760" y="242">reward_penalties.py:146</text></a>
-<rect x="20" y="392" width="12" height="10" class="same"/><text class="note" x="38" y="401">green = same rule on both paths</text>
-<rect x="250" y="392" width="12" height="10" class="diff"/><text class="note" x="268" y="401">red = only one path has it</text>
-</svg>
-</div>
+<svg viewBox="0 0 940 482" role="img" aria-label="One rollout split into turns on both paths"><rect class="tp" x="20" y="64" width="63" height="26" rx="5"/><text class="tk" x="52" y="81" text-anchor="middle">fix bug</text><rect class="tp" x="87" y="64" width="63" height="26" rx="5"/><text class="tag" x="118" y="81" text-anchor="middle">&lt;think&gt;</text><rect class="tm" x="154" y="64" width="42" height="26" rx="5"/><text class="tk" x="175" y="81" text-anchor="middle">plan</text><rect class="tm" x="200" y="64" width="70" height="26" rx="5"/><text class="tag" x="235" y="81" text-anchor="middle">&lt;/think&gt;</text><rect class="tm" x="274" y="64" width="28" height="26" rx="5"/><text class="tk" x="288" y="81" text-anchor="middle">ls</text><rect class="tp" x="328" y="64" width="49" height="26" rx="5"/><text class="tk" x="352" y="81" text-anchor="middle">tool:</text><rect class="tp" x="381" y="64" width="42" height="26" rx="5"/><text class="tk" x="402" y="81" text-anchor="middle">a.py</text><rect class="tp" x="427" y="64" width="49" height="26" rx="5"/><text class="tk" x="452" y="81" text-anchor="middle">asst:</text><rect class="tp" x="480" y="64" width="63" height="26" rx="5"/><text class="tag" x="512" y="81" text-anchor="middle">&lt;think&gt;</text><rect class="tm" x="547" y="64" width="42" height="26" rx="5"/><text class="tk" x="568" y="81" text-anchor="middle">read</text><rect class="tm" x="593" y="64" width="70" height="26" rx="5"/><text class="tag" x="628" y="81" text-anchor="middle">&lt;/think&gt;</text><rect class="tm" x="667" y="64" width="35" height="26" rx="5"/><text class="tk" x="684" y="81" text-anchor="middle">cat</text><rect class="tm" x="706" y="64" width="42" height="26" rx="5"/><text class="tk" x="727" y="81" text-anchor="middle">a.py</text><rect class="tm" x="752" y="64" width="49" height="26" rx="5"/><text class="tk" x="776" y="81" text-anchor="middle">&lt;end&gt;</text><text class="lane" x="20" y="38">Turn 1</text><path class="brk" d="M20 58 v-6 H150 v6"/><text class="note" x="85" y="48" text-anchor="middle">new prompt</text><path class="brkm" d="M154 58 v-6 H302 v6"/><text class="acc" x="228" y="48" text-anchor="middle">model wrote</text><text class="lane" x="328" y="38">Turn 2</text><path class="brk" d="M328 58 v-6 H543 v6"/><text class="note" x="436" y="48" text-anchor="middle">new prompt</text><path class="brkm" d="M547 58 v-6 H801 v6"/><text class="acc" x="674" y="48" text-anchor="middle">model wrote</text><text class="lane" x="20" y="132">Echo path: Gym sends 4 messages</text><rect class="box" x="20" y="142" width="130" height="40" rx="6"/><text class="lbl" x="28" y="159">user</text><text class="note" x="28" y="175">2 tokens</text><rect class="box" x="154" y="142" width="148" height="40" rx="6"/><text class="lbl" x="162" y="159">assistant</text><text class="note" x="162" y="175">3 tokens</text><rect class="box" x="328" y="142" width="215" height="40" rx="6"/><text class="lbl" x="336" y="159">user</text><text class="note" x="336" y="175">4 tokens</text><rect class="box" x="547" y="142" width="254" height="40" rx="6"/><text class="lbl" x="555" y="159">assistant</text><text class="note" x="555" y="175">5 tokens</text><text class="lane" x="20" y="218">Token-capture path: Gym sends one flat token list + a list of lengths</text><rect class="box" x="20" y="228" width="781" height="26" rx="6"/><text class="lbl" x="28" y="245">token_ids: all 14 tokens above, in order, no message boundaries</text><rect class="box" x="20" y="260" width="781" height="26" rx="6"/><text class="lbl" x="28" y="277">spans: [(2, 3), (4, 5)]  =  (new prompt, model wrote) token counts per turn</text><text class="lane" x="20" y="326">Both paths cut out the same turns, then run the same check on each</text><rect class="okb" x="20" y="336" width="282" height="58" rx="6"/><text class="lbl" x="28" y="353">prompt ends in &lt;think&gt; → thinking on</text><text class="lbl" x="28" y="369">need: one &lt;/think&gt;, no &lt;think&gt;</text><text class="grn" x="28" y="386">got: one &lt;/think&gt; → ok</text><rect class="okb" x="328" y="336" width="473" height="58" rx="6"/><text class="lbl" x="336" y="353">prompt ends in &lt;think&gt; → thinking on</text><text class="lbl" x="336" y="369">need: one &lt;/think&gt;, no &lt;think&gt;</text><text class="grn" x="336" y="386">got: one &lt;/think&gt; → ok</text><text class="grn" x="20" y="420">Result: no turn broke the rule, so the reward stays 1.0. One bad turn would set the whole rollout's reward to 0.</text><text class="note" x="20" y="444">code:</text><a href="https://github.com/NVIDIA-NeMo/RL/blob/96ec8a36d3dc12e60ec50ca5ce662521be94ba73/nemo_rl/environments/nemo_gym.py#L1524-L1570"><text x="60" y="444" text-anchor="start">echo builds messages</text></a><a href="https://github.com/NVIDIA-NeMo/RL/blob/96ec8a36d3dc12e60ec50ca5ce662521be94ba73/nemo_rl/experience/reward_penalties.py#L497-L516"><text x="210" y="444" text-anchor="start">capture cuts turns by span</text></a><a href="https://github.com/NVIDIA-NeMo/RL/blob/96ec8a36d3dc12e60ec50ca5ce662521be94ba73/nemo_rl/experience/reward_penalties.py#L118-L147"><text x="400" y="444" text-anchor="start">the check (capture)</text></a><a href="https://github.com/NVIDIA-NeMo/RL/blob/96ec8a36d3dc12e60ec50ca5ce662521be94ba73/nemo_rl/experience/rollouts.py#L2301-L2328"><text x="545" y="444" text-anchor="start">the check (echo)</text></a><rect class="tp" x="20" y="456" width="16" height="14" rx="3"/><text class="note" x="42" y="468">token from the prompt</text><rect class="tm" x="180" y="456" width="16" height="14" rx="3"/><text class="note" x="202" y="468">token the model wrote</text><text class="tag" x="350" y="468">&lt;think&gt;</text><text class="note" x="412" y="468">= one special tag token. Example rollout; 1 box = 1 token.</text></svg>
 
+<h2>The rule, with inputs and outputs</h2>
+<p>For each turn: look at the new prompt to decide if thinking is on, then count the tags the model wrote.
+It counts twice. First it counts the special tag <em>tokens</em>. Then it turns the model's tokens back into text and counts the tag <em>strings</em>, because a model can also spell <code>&lt;/think&gt;</code> out of ordinary pieces like <code>&lt;/</code> <code>think</code> <code>&gt;</code>, which the token count cannot see.
+Reward starts at 1.0 in every row:</p>
 <div class="tw"><table class="cmp">
-<tr><th></th><th>Echo</th><th>Capture (this PR)</th></tr>
-<tr><td>Unit checked</td><td>(user, assistant) message pair</td><td>(carry, generation) token span</td></tr>
-<tr><td>Text for the string check</td><td>Gym's <code>generation_str</code> per output item</td><td><a href="https://github.com/NVIDIA-NeMo/RL/blob/96ec8a36d3dc12e60ec50ca5ce662521be94ba73/nemo_rl/experience/rollout_reassembler.py#L529-L530">tokenizer decode, special tokens kept</a></td></tr>
-<tr><td>Tokenizer needed</td><td>no</td><td>yes: <a href="https://github.com/NVIDIA-NeMo/RL/blob/96ec8a36d3dc12e60ec50ca5ce662521be94ba73/nemo_rl/experience/rollout_reassembler_actor.py#L99-L105">loaded in the finalizer only when this penalty is on</a></td></tr>
-<tr><td>Gym message flag</td><td>used</td><td>not available</td></tr>
-<tr><td>Saved for resume</td><td>n/a</td><td>tag IDs and tag strings, checked on restore</td></tr>
+<tr><th>New prompt ends with</th><th>Model wrote</th><th>Tag tokens</th><th>Tag text</th><th>Reward</th></tr>
+<tr><td><code>&lt;think&gt;</code> (thinking on)</td><td><code>plan &lt;/think&gt; ls</code></td><td>0 open, 1 close: ok</td><td>ok</td><td class="ok">1.0</td></tr>
+<tr><td><code>&lt;think&gt;</code></td><td><code>plan ls</code> (never closed)</td><td>0 close, need 1</td><td></td><td class="no">0</td></tr>
+<tr><td><code>&lt;think&gt;</code></td><td><code>&lt;think&gt; plan &lt;/think&gt; ls</code></td><td>1 open, need 0</td><td></td><td class="no">0</td></tr>
+<tr><td><code>&lt;think&gt;</code></td><td><code>plan &lt;/think&gt; ls</code>, but <code>&lt;think&gt;</code> spelled from plain pieces</td><td>looks ok</td><td>1 <code>&lt;think&gt;</code> string</td><td class="no">0</td></tr>
+<tr><td><code>&lt;think&gt;&lt;/think&gt;</code> (thinking off)</td><td><code>ls</code></td><td>none: ok</td><td>ok</td><td class="ok">1.0</td></tr>
+<tr><td><code>&lt;think&gt;&lt;/think&gt;</code></td><td><code>&lt;/think&gt; ls</code></td><td>1 close, need 0</td><td></td><td class="no">0</td></tr>
+<tr><td><code>&lt;think&gt;&lt;/think&gt;</code></td><td><code>&lt;/think&gt; ls</code>, spelled from plain pieces</td><td>looks ok</td><td>1 close string, allowed up to 1</td><td class="miss">1.0 (missed)</td></tr>
 </table></div>
+<p>Code: <a href="https://github.com/NVIDIA-NeMo/RL/blob/96ec8a36d3dc12e60ec50ca5ce662521be94ba73/nemo_rl/experience/reward_penalties.py#L118-L147"><code>has_malformed_think_tag</code></a> (capture, new) and <a href="https://github.com/NVIDIA-NeMo/RL/blob/96ec8a36d3dc12e60ec50ca5ce662521be94ba73/nemo_rl/experience/rollouts.py#L2301-L2345">the echo check</a> use the same counts.</p>
 
-<p><b>Where they meet:</b> the ID rule and the string rule are the same on both paths. <b>What still differs:</b> only Gym's message-level flag, which capture has no source for. A follow-up issue (asked for in the review) would let both paths share one predicate.</p>
-
-<h2>The one gap both paths share</h2>
-<p>When the tag IDs are known and thinking is <b>off</b>, the ID check expects 0 close tags. The text check still allows 1 (<code>count(close) &gt; 1</code>). So if the model spells <code>&lt;/think&gt;</code> with ordinary tokens (for example <code>" &lt;/"</code>, <code>"think"</code>, <code>"&gt;"</code>), neither check fires:</p>
-<pre class="diff" style="font:12px/1.5 ui-monospace,Menlo,monospace;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:12px;overflow-x:auto">carry      [.., 7, 8]           → open=1 close=1 → thinking off → expect (0, 0)
-generation "Answer &lt;/think&gt;"   → IDs (0, 0) ok · text close=1, allowed up to 1 → <span style="color:var(--red)">not penalized</span></pre>
-<p>Echo has the <a href="https://github.com/NVIDIA-NeMo/RL/blob/96ec8a36d3dc12e60ec50ca5ce662521be94ba73/nemo_rl/experience/rollouts.py#L2353-L2356">same <code>&gt; 1</code> rule</a>. Whether Gym's flag catches it there depends on how vLLM's reasoning parser splits the text, and that was not checked. This PR copies echo's rule, so it does not make anything worse.</p>
+<h2>What still differs, and the one gap</h2>
+<div class="tw"><table class="cmp">
+<tr><th></th><th>Echo</th><th>Token capture (this PR)</th></tr>
+<tr><td>Where the tag text comes from</td><td>Gym's text for each reply</td><td>RL turns the tokens back into text with the tokenizer, so it now loads one, only when this penalty is on</td></tr>
+<tr><td>Extra Gym flag</td><td><a href="https://github.com/NVIDIA-NeMo/RL/blob/96ec8a36d3dc12e60ec50ca5ce662521be94ba73/nemo_rl/environments/nemo_gym.py#L563-L597">Gym also flags</a> any tag inside the final answer text</td><td>Not available: there are no messages to flag. The docs say so.</td></tr>
+<tr><td>Resume from a checkpoint</td><td>nothing saved</td><td>The tag settings are saved, and a resume with different tags is refused</td></tr>
+</table></div>
+<p><b>The gap</b> is the last table row above: thinking off, and the model spells <code>&lt;/think&gt;</code> from plain pieces. The token count expects 0 and sees 0. The text count allows up to 1 on every turn, even though a thinking-off turn should allow 0. So nothing fires. Echo has the same rule, so this PR does not make anything worse. The fix for both paths: when thinking is off, allow 0 close strings, not 1.</p>
 <p class="cref">↪ <a href="https://github.com/NVIDIA-NeMo/RL/pull/4776#discussion_r4385915432">C3 · review comment — reward_penalties.py:495</a></p>
 
-<div class="hl"><b>So what.</b> Token capture can now use the think-tag penalty with the same rules as echo, and the rules are saved so a resume with different tags is refused. The shared gap is small. The fix for both paths: compare the decoded close count with the count the ID check expects (0 or 1), and keep "at most 1" only when the IDs are unknown.</div>
+<div class="hl"><b>So what.</b> Token-capture runs can now use the think-tag penalty, and it judges each turn exactly like echo does. The only real difference is Gym's extra answer-text flag, which capture has no way to get. The shared gap is small and goes into the follow-up issue the author already agreed to file.</div>
 
 </div>
 </body>
