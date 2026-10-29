@@ -147,14 +147,14 @@ The unit also keeps the row index, and it runs a small ZMQ server for control me
 Each value is a <code>tensor[6]</code> of int64 (6 token ids, 48 bytes). The job has 3 storage units, so row 5 belongs to unit 2 (5 % 3) and row 7 to unit 1 (7 % 3).</p>
 
 <h3>Put</h3>
-<svg viewBox="0 0 940 694" role="img" aria-label="Put of rows 5 and 7 in all three backends, as a sequence of messages between client, TQ controller, Mooncake master and storage units.">
+<svg viewBox="0 0 940 714" role="img" aria-label="Put of rows 5 and 7 in all three backends, as a sequence of messages between client, TQ controller, Mooncake master and storage units.">
   <line class="rdma" x1="16" y1="14" x2="50" y2="14"/>
   <text class="t" x="56" y="18" text-anchor="start">row bytes over RDMA</text>
   <line class="tcp" x1="240" y1="14" x2="274" y2="14"/>
   <text class="t" x="280" y="18" text-anchor="start">row bytes over ZMQ, through the unit's CPU</text>
   <line class="ctl" x1="590" y1="14" x2="624" y2="14"/>
   <text class="t" x="630" y="18" text-anchor="start">small control message (no row bytes)</text>
-  <rect class="lane" x="6" y="72" width="928" height="122" rx="8"/>
+  <rect class="lane" x="6" y="72" width="928" height="142" rx="8"/>
   <text class="tb" x="14" y="90">simple</text>
   <path class="ctl" d="M122 112 L327 112"/>
   <polygon class="hd" points="327,107 338,112 327,117"/>
@@ -164,66 +164,70 @@ Each value is a <code>tensor[6]</code> of int64 (6 token ids, 48 bytes). The job
   <text class="n" x="130" y="125">rows 5, 7</text>
   <path class="tcp" d="M122 156 L787 156"/>
   <polygon class="ho" points="787,151 798,156 787,161"/>
-  <text class="og" x="130" y="151">2 · ZMQ: row 7 → unit 1, row 5 → unit 2</text>
-  <text class="n" x="808" y="160" text-anchor="start">unit CPU unpacks</text>
-  <path class="ctl" d="M122 180 L327 180"/>
-  <polygon class="hd" points="327,175 338,180 327,185"/>
-  <text class="n" x="130" y="175">3 · rows 5, 7 now have responses</text>
+  <text class="og" x="130" y="151">2 · ZMQ to unit 1: row 7 (7 % 3 = 1)</text>
+  <text class="n" x="808" y="160" text-anchor="start">both sent at once;</text>
+  <path class="tcp" d="M122 176 L787 176"/>
+  <polygon class="ho" points="787,171 798,176 787,181"/>
+  <text class="og" x="130" y="171">2 · ZMQ to unit 2: row 5 (5 % 3 = 2)</text>
+  <text class="n" x="808" y="180" text-anchor="start">unit CPU unpacks</text>
+  <path class="ctl" d="M122 200 L327 200"/>
+  <polygon class="hd" points="327,195 338,200 327,205"/>
+  <text class="n" x="130" y="195">3 · rows 5, 7 now have responses</text>
   <text class="n" x="570" y="124" text-anchor="middle">not used</text>
-  <rect class="lane" x="6" y="204" width="928" height="190" rx="8"/>
-  <text class="tb" x="14" y="222">mooncake_cpu</text>
-  <path class="ctl" d="M122 244 L327 244"/>
-  <polygon class="hd" points="327,239 338,244 327,249"/>
-  <text class="n" x="130" y="239">1 · which row numbers?</text>
-  <path class="ctl" d="M338 262 L133 262"/>
-  <polygon class="hd" points="133,257 122,262 133,267"/>
-  <text class="n" x="130" y="257">rows 5, 7</text>
-  <path class="ctl" d="M122 288 L557 288"/>
-  <polygon class="hd" points="557,283 568,288 557,293"/>
-  <text class="n" x="130" y="283">2 · where can 2 keys go?</text>
-  <path class="ctl" d="M568 306 L133 306"/>
-  <polygon class="hd" points="133,301 122,306 133,311"/>
-  <text class="n" x="130" y="301">segment B</text>
-  <path class="rdma" d="M122 332 L787 332"/>
-  <polygon class="hg" points="787,327 798,332 787,337"/>
-  <text class="go" x="130" y="327">3 · RDMA WRITE, 2 × 48 B</text>
-  <text class="n" x="808" y="336" text-anchor="start">segment B</text>
-  <path class="ctl" d="M122 356 L557 356"/>
-  <polygon class="hd" points="557,351 568,356 557,361"/>
-  <text class="n" x="130" y="351">4 · done writing</text>
-  <path class="ctl" d="M122 380 L327 380"/>
-  <polygon class="hd" points="327,375 338,380 327,385"/>
-  <text class="n" x="130" y="375">5 · rows 5, 7 now have responses</text>
-  <rect class="lane" x="6" y="404" width="928" height="236" rx="8"/>
-  <text class="tb" x="14" y="422">nixl (new)</text>
-  <path class="ctl" d="M122 444 L327 444"/>
-  <polygon class="hd" points="327,439 338,444 327,449"/>
-  <text class="n" x="130" y="439">1 · which row numbers?</text>
-  <path class="ctl" d="M338 462 L133 462"/>
-  <polygon class="hd" points="133,457 122,462 133,467"/>
-  <text class="n" x="130" y="457">rows 5, 7</text>
-  <path class="ctl" d="M122 488 L787 488"/>
-  <polygon class="hd" points="787,483 798,488 787,493"/>
-  <text class="n" x="130" y="483">2 · alloc: space for row 5 on unit 2</text>
-  <text class="n" x="808" y="492" text-anchor="start">5 % 3 = 2</text>
-  <path class="ctl" d="M798 506 L133 506"/>
-  <polygon class="hd" points="133,501 122,506 133,511"/>
-  <text class="n" x="130" y="501">an offset in unit 2's memory</text>
-  <path class="rdma" d="M122 532 L787 532"/>
-  <polygon class="hg" points="787,527 798,532 787,537"/>
-  <text class="go" x="130" y="527">3 · RDMA WRITE row 5 + its index</text>
-  <text class="n" x="808" y="536" text-anchor="start">no unit CPU</text>
-  <path class="ctl" d="M122 556 L787 556"/>
-  <polygon class="hd" points="787,551 798,556 787,561"/>
-  <text class="n" x="130" y="551">4 · commit</text>
-  <path class="ctl" d="M798 574 L133 574"/>
-  <polygon class="hd" points="133,569 122,574 133,579"/>
-  <text class="n" x="130" y="569">done: row 5 is in unit 2's row index</text>
-  <text class="og" x="130" y="598" text-anchor="start">Row 7 lives on a different unit (7 % 3 = 1), so steps 2–4 repeat there.</text>
-  <path class="ctl" d="M122 626 L327 626"/>
-  <polygon class="hd" points="327,621 338,626 327,631"/>
-  <text class="n" x="130" y="621">5 · rows 5, 7 now have responses</text>
-  <text class="n" x="570" y="456" text-anchor="middle">not used</text>
+  <rect class="lane" x="6" y="224" width="928" height="190" rx="8"/>
+  <text class="tb" x="14" y="242">mooncake_cpu</text>
+  <path class="ctl" d="M122 264 L327 264"/>
+  <polygon class="hd" points="327,259 338,264 327,269"/>
+  <text class="n" x="130" y="259">1 · which row numbers?</text>
+  <path class="ctl" d="M338 282 L133 282"/>
+  <polygon class="hd" points="133,277 122,282 133,287"/>
+  <text class="n" x="130" y="277">rows 5, 7</text>
+  <path class="ctl" d="M122 308 L557 308"/>
+  <polygon class="hd" points="557,303 568,308 557,313"/>
+  <text class="n" x="130" y="303">2 · where can 2 keys go?</text>
+  <path class="ctl" d="M568 326 L133 326"/>
+  <polygon class="hd" points="133,321 122,326 133,331"/>
+  <text class="n" x="130" y="321">segment B</text>
+  <path class="rdma" d="M122 352 L787 352"/>
+  <polygon class="hg" points="787,347 798,352 787,357"/>
+  <text class="go" x="130" y="347">3 · RDMA WRITE, 2 × 48 B</text>
+  <text class="n" x="808" y="356" text-anchor="start">segment B</text>
+  <path class="ctl" d="M122 376 L557 376"/>
+  <polygon class="hd" points="557,371 568,376 557,381"/>
+  <text class="n" x="130" y="371">4 · done writing</text>
+  <path class="ctl" d="M122 400 L327 400"/>
+  <polygon class="hd" points="327,395 338,400 327,405"/>
+  <text class="n" x="130" y="395">5 · rows 5, 7 now have responses</text>
+  <rect class="lane" x="6" y="424" width="928" height="236" rx="8"/>
+  <text class="tb" x="14" y="442">nixl (new)</text>
+  <path class="ctl" d="M122 464 L327 464"/>
+  <polygon class="hd" points="327,459 338,464 327,469"/>
+  <text class="n" x="130" y="459">1 · which row numbers?</text>
+  <path class="ctl" d="M338 482 L133 482"/>
+  <polygon class="hd" points="133,477 122,482 133,487"/>
+  <text class="n" x="130" y="477">rows 5, 7</text>
+  <path class="ctl" d="M122 508 L787 508"/>
+  <polygon class="hd" points="787,503 798,508 787,513"/>
+  <text class="n" x="130" y="503">2 · alloc: space for row 5 on unit 2</text>
+  <text class="n" x="808" y="512" text-anchor="start">5 % 3 = 2</text>
+  <path class="ctl" d="M798 526 L133 526"/>
+  <polygon class="hd" points="133,521 122,526 133,531"/>
+  <text class="n" x="130" y="521">an offset in unit 2's memory</text>
+  <path class="rdma" d="M122 552 L787 552"/>
+  <polygon class="hg" points="787,547 798,552 787,557"/>
+  <text class="go" x="130" y="547">3 · RDMA WRITE row 5 + its index</text>
+  <text class="n" x="808" y="556" text-anchor="start">no unit CPU</text>
+  <path class="ctl" d="M122 576 L787 576"/>
+  <polygon class="hd" points="787,571 798,576 787,581"/>
+  <text class="n" x="130" y="571">4 · commit</text>
+  <path class="ctl" d="M798 594 L133 594"/>
+  <polygon class="hd" points="133,589 122,594 133,599"/>
+  <text class="n" x="130" y="589">done: row 5 is in unit 2's row index</text>
+  <text class="og" x="130" y="618" text-anchor="start">Then steps 2–4 again on unit 1 for row 7 (7 % 3 = 1): one unit after the other.</text>
+  <path class="ctl" d="M122 646 L327 646"/>
+  <polygon class="hd" points="327,641 338,646 327,651"/>
+  <text class="n" x="130" y="641">5 · rows 5, 7 now have responses</text>
+  <text class="n" x="570" y="476" text-anchor="middle">not used</text>
   <rect class="box" x="32" y="34" width="176" height="28" rx="6"/>
   <text class="t" x="120" y="52" text-anchor="middle">client (driver or worker)</text>
   <rect class="box" x="252" y="34" width="176" height="28" rx="6"/>
@@ -232,25 +236,25 @@ Each value is a <code>tensor[6]</code> of int64 (6 token ids, 48 bytes). The job
   <text class="t" x="570" y="52" text-anchor="middle">Mooncake master</text>
   <rect class="box" x="712" y="34" width="176" height="28" rx="6"/>
   <text class="t" x="800" y="52" text-anchor="middle">storage units</text>
-  <line class="life" x1="120" y1="62" x2="120" y2="640"/>
-  <line class="life" x1="340" y1="62" x2="340" y2="640"/>
-  <line class="life" x1="570" y1="62" x2="570" y2="640"/>
-  <line class="life" x1="800" y1="62" x2="800" y2="640"/>
-  <a href="https://github.com/Ascend/TransferQueue/blob/c51614308b68c8d7a87c9b3ef62d59e14c69bde2/transfer_queue/client.py#L349-L362"><text x="14" y="662">client.py:349 put: steps 1, 2</text></a>
-  <a href="https://github.com/Ascend/TransferQueue/blob/c51614308b68c8d7a87c9b3ef62d59e14c69bde2/transfer_queue/storage/managers/base.py#L689-L694"><text x="260" y="662">base.py:689 last step</text></a>
-  <a href="https://github.com/Ascend/TransferQueue/blob/c51614308b68c8d7a87c9b3ef62d59e14c69bde2/transfer_queue/storage/managers/simple_storage_manager.py#L218-L279"><text x="478" y="662">simple_storage_manager.py:218</text></a>
-  <a href="https://github.com/Ascend/TransferQueue/blob/c51614308b68c8d7a87c9b3ef62d59e14c69bde2/transfer_queue/storage/clients/mooncake_client.py#L137"><text x="14" y="682">mooncake_client.py:137 put</text></a>
-  <a href="https://github.com/NVIDIA-NeMo/RL/blob/a8d144113e74ca2e68c597e322e0041cb683af50/nemo_rl/data_plane/nixl/blobstore.py#L154-L291"><text x="260" y="682">blobstore.py:154 nixl steps 2–4</text></a>
+  <line class="life" x1="120" y1="62" x2="120" y2="660"/>
+  <line class="life" x1="340" y1="62" x2="340" y2="660"/>
+  <line class="life" x1="570" y1="62" x2="570" y2="660"/>
+  <line class="life" x1="800" y1="62" x2="800" y2="660"/>
+  <a href="https://github.com/Ascend/TransferQueue/blob/c51614308b68c8d7a87c9b3ef62d59e14c69bde2/transfer_queue/client.py#L349-L362"><text x="14" y="682">client.py:349 put: steps 1, 2</text></a>
+  <a href="https://github.com/Ascend/TransferQueue/blob/c51614308b68c8d7a87c9b3ef62d59e14c69bde2/transfer_queue/storage/managers/base.py#L689-L694"><text x="260" y="682">base.py:689 last step</text></a>
+  <a href="https://github.com/Ascend/TransferQueue/blob/c51614308b68c8d7a87c9b3ef62d59e14c69bde2/transfer_queue/storage/managers/simple_storage_manager.py#L218-L279"><text x="478" y="682">simple_storage_manager.py:218</text></a>
+  <a href="https://github.com/Ascend/TransferQueue/blob/c51614308b68c8d7a87c9b3ef62d59e14c69bde2/transfer_queue/storage/clients/mooncake_client.py#L137"><text x="14" y="702">mooncake_client.py:137 put</text></a>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/a8d144113e74ca2e68c597e322e0041cb683af50/nemo_rl/data_plane/nixl/blobstore.py#L154-L291"><text x="260" y="702">blobstore.py:154 nixl steps 2–4</text></a>
 </svg>
 <h3>Get</h3>
-<svg viewBox="0 0 940 578" role="img" aria-label="Get of rows 5 and 7 in all three backends, as a sequence of messages.">
+<svg viewBox="0 0 940 616" role="img" aria-label="Get of rows 5 and 7 in all three backends, as a sequence of messages.">
   <line class="rdma" x1="16" y1="14" x2="50" y2="14"/>
   <text class="t" x="56" y="18" text-anchor="start">row bytes over RDMA</text>
   <line class="tcp" x1="240" y1="14" x2="274" y2="14"/>
   <text class="t" x="280" y="18" text-anchor="start">row bytes over ZMQ, through the unit's CPU</text>
   <line class="ctl" x1="590" y1="14" x2="624" y2="14"/>
   <text class="t" x="630" y="18" text-anchor="start">small control message (no row bytes)</text>
-  <rect class="lane" x="6" y="72" width="928" height="120" rx="8"/>
+  <rect class="lane" x="6" y="72" width="928" height="158" rx="8"/>
   <text class="tb" x="14" y="90">simple</text>
   <path class="ctl" d="M122 112 L327 112"/>
   <polygon class="hd" points="327,107 338,112 327,117"/>
@@ -260,50 +264,57 @@ Each value is a <code>tensor[6]</code> of int64 (6 token ids, 48 bytes). The job
   <text class="n" x="130" y="125">rows 5, 7 · int64 [6]</text>
   <path class="ctl" d="M122 156 L787 156"/>
   <polygon class="hd" points="787,151 798,156 787,161"/>
-  <text class="n" x="130" y="151">2 · ZMQ: send me row 7 (unit 1), row 5 (unit 2)</text>
-  <path class="tcp" d="M798 176 L133 176"/>
-  <polygon class="ho" points="133,171 122,176 133,181"/>
-  <text class="og" x="130" y="171">the bytes, packed by each unit's CPU</text>
+  <text class="n" x="130" y="151">2 · ZMQ to unit 1: send row 7</text>
+  <text class="n" x="808" y="160" text-anchor="start">both asked at once</text>
+  <path class="ctl" d="M122 174 L787 174"/>
+  <polygon class="hd" points="787,169 798,174 787,179"/>
+  <text class="n" x="130" y="169">2 · ZMQ to unit 2: send row 5</text>
+  <path class="tcp" d="M798 196 L133 196"/>
+  <polygon class="ho" points="133,191 122,196 133,201"/>
+  <text class="og" x="130" y="191">row 7's bytes, packed by unit 1's CPU</text>
+  <path class="tcp" d="M798 214 L133 214"/>
+  <polygon class="ho" points="133,209 122,214 133,219"/>
+  <text class="og" x="130" y="209">row 5's bytes, packed by unit 2's CPU</text>
   <text class="n" x="570" y="124" text-anchor="middle">not used</text>
-  <rect class="lane" x="6" y="202" width="928" height="144" rx="8"/>
-  <text class="tb" x="14" y="220">mooncake_cpu</text>
-  <path class="ctl" d="M122 242 L327 242"/>
-  <polygon class="hd" points="327,237 338,242 327,247"/>
-  <text class="n" x="130" y="237">1 · which rows are ready?</text>
-  <path class="ctl" d="M338 260 L133 260"/>
-  <polygon class="hd" points="133,255 122,260 133,265"/>
-  <text class="n" x="130" y="255">rows 5, 7 · int64 [6]</text>
-  <path class="ctl" d="M122 286 L557 286"/>
-  <polygon class="hd" points="557,281 568,286 557,291"/>
-  <text class="n" x="130" y="281">2 · where are the 2 keys?</text>
-  <path class="ctl" d="M568 304 L133 304"/>
-  <polygon class="hd" points="133,299 122,304 133,309"/>
-  <text class="n" x="130" y="299">segment B</text>
-  <path class="rdma" d="M798 330 L133 330"/>
-  <polygon class="hg" points="133,325 122,330 133,335"/>
-  <text class="go" x="130" y="325">3 · RDMA READ, 2 × 48 B</text>
-  <rect class="lane" x="6" y="356" width="928" height="168" rx="8"/>
-  <text class="tb" x="14" y="374">nixl (new)</text>
-  <path class="ctl" d="M122 396 L327 396"/>
-  <polygon class="hd" points="327,391 338,396 327,401"/>
-  <text class="n" x="130" y="391">1 · which rows are ready?</text>
-  <path class="ctl" d="M338 414 L133 414"/>
-  <polygon class="hd" points="133,409 122,414 133,419"/>
-  <text class="n" x="130" y="409">rows 5, 7 · int64 [6]</text>
-  <path class="ctl" d="M122 440 L787 440"/>
-  <polygon class="hd" points="787,435 798,440 787,445"/>
-  <text class="n" x="130" y="435">2 · resolve_keys, units 1 and 2 at once</text>
-  <text class="n" x="808" y="444" text-anchor="start">pins for 150 s</text>
-  <path class="ctl" d="M798 458 L133 458"/>
-  <polygon class="hd" points="133,453 122,458 133,463"/>
-  <text class="n" x="130" y="453">offset, size, dtype, shape per key</text>
-  <path class="rdma" d="M798 484 L133 484"/>
-  <polygon class="hg" points="133,479 122,484 133,489"/>
-  <text class="go" x="130" y="479">3 · RDMA READ, one per unit</text>
-  <path class="ctl" d="M122 508 L787 508"/>
-  <polygon class="hd" points="787,503 798,508 787,513"/>
-  <text class="n" x="130" y="503">4 · unpin</text>
-  <text class="n" x="570" y="408" text-anchor="middle">not used</text>
+  <rect class="lane" x="6" y="240" width="928" height="144" rx="8"/>
+  <text class="tb" x="14" y="258">mooncake_cpu</text>
+  <path class="ctl" d="M122 280 L327 280"/>
+  <polygon class="hd" points="327,275 338,280 327,285"/>
+  <text class="n" x="130" y="275">1 · which rows are ready?</text>
+  <path class="ctl" d="M338 298 L133 298"/>
+  <polygon class="hd" points="133,293 122,298 133,303"/>
+  <text class="n" x="130" y="293">rows 5, 7 · int64 [6]</text>
+  <path class="ctl" d="M122 324 L557 324"/>
+  <polygon class="hd" points="557,319 568,324 557,329"/>
+  <text class="n" x="130" y="319">2 · where are the 2 keys?</text>
+  <path class="ctl" d="M568 342 L133 342"/>
+  <polygon class="hd" points="133,337 122,342 133,347"/>
+  <text class="n" x="130" y="337">segment B</text>
+  <path class="rdma" d="M798 368 L133 368"/>
+  <polygon class="hg" points="133,363 122,368 133,373"/>
+  <text class="go" x="130" y="363">3 · RDMA READ, 2 × 48 B</text>
+  <rect class="lane" x="6" y="394" width="928" height="168" rx="8"/>
+  <text class="tb" x="14" y="412">nixl (new)</text>
+  <path class="ctl" d="M122 434 L327 434"/>
+  <polygon class="hd" points="327,429 338,434 327,439"/>
+  <text class="n" x="130" y="429">1 · which rows are ready?</text>
+  <path class="ctl" d="M338 452 L133 452"/>
+  <polygon class="hd" points="133,447 122,452 133,457"/>
+  <text class="n" x="130" y="447">rows 5, 7 · int64 [6]</text>
+  <path class="ctl" d="M122 478 L787 478"/>
+  <polygon class="hd" points="787,473 798,478 787,483"/>
+  <text class="n" x="130" y="473">2 · resolve_keys, units 1 and 2 at once</text>
+  <text class="n" x="808" y="482" text-anchor="start">pins for 150 s</text>
+  <path class="ctl" d="M798 496 L133 496"/>
+  <polygon class="hd" points="133,491 122,496 133,501"/>
+  <text class="n" x="130" y="491">offset, size, dtype, shape per key</text>
+  <path class="rdma" d="M798 522 L133 522"/>
+  <polygon class="hg" points="133,517 122,522 133,527"/>
+  <text class="go" x="130" y="517">3 · RDMA READ from unit 1 and unit 2, one each</text>
+  <path class="ctl" d="M122 546 L787 546"/>
+  <polygon class="hd" points="787,541 798,546 787,551"/>
+  <text class="n" x="130" y="541">4 · unpin</text>
+  <text class="n" x="570" y="446" text-anchor="middle">not used</text>
   <rect class="box" x="32" y="34" width="176" height="28" rx="6"/>
   <text class="t" x="120" y="52" text-anchor="middle">client (driver or worker)</text>
   <rect class="box" x="252" y="34" width="176" height="28" rx="6"/>
@@ -312,14 +323,14 @@ Each value is a <code>tensor[6]</code> of int64 (6 token ids, 48 bytes). The job
   <text class="t" x="570" y="52" text-anchor="middle">Mooncake master</text>
   <rect class="box" x="712" y="34" width="176" height="28" rx="6"/>
   <text class="t" x="800" y="52" text-anchor="middle">storage units</text>
-  <line class="life" x1="120" y1="62" x2="120" y2="524"/>
-  <line class="life" x1="340" y1="62" x2="340" y2="524"/>
-  <line class="life" x1="570" y1="62" x2="570" y2="524"/>
-  <line class="life" x1="800" y1="62" x2="800" y2="524"/>
-  <a href="https://github.com/Ascend/TransferQueue/blob/c51614308b68c8d7a87c9b3ef62d59e14c69bde2/transfer_queue/client.py#L375-L411"><text x="14" y="546">client.py:375 get</text></a>
-  <a href="https://github.com/Ascend/TransferQueue/blob/c51614308b68c8d7a87c9b3ef62d59e14c69bde2/transfer_queue/storage/managers/simple_storage_manager.py#L378"><text x="190" y="546">simple_storage_manager.py:378</text></a>
-  <a href="https://github.com/Ascend/TransferQueue/blob/c51614308b68c8d7a87c9b3ef62d59e14c69bde2/transfer_queue/storage/clients/mooncake_client.py#L295"><text x="450" y="546">mooncake_client.py:295</text></a>
-  <a href="https://github.com/NVIDIA-NeMo/RL/blob/a8d144113e74ca2e68c597e322e0041cb683af50/nemo_rl/data_plane/adapters/tq_nixl.py#L539-L595"><text x="14" y="566">tq_nixl.py:539 _get_once (nixl steps 2–4)</text></a>
+  <line class="life" x1="120" y1="62" x2="120" y2="562"/>
+  <line class="life" x1="340" y1="62" x2="340" y2="562"/>
+  <line class="life" x1="570" y1="62" x2="570" y2="562"/>
+  <line class="life" x1="800" y1="62" x2="800" y2="562"/>
+  <a href="https://github.com/Ascend/TransferQueue/blob/c51614308b68c8d7a87c9b3ef62d59e14c69bde2/transfer_queue/client.py#L375-L411"><text x="14" y="584">client.py:375 get</text></a>
+  <a href="https://github.com/Ascend/TransferQueue/blob/c51614308b68c8d7a87c9b3ef62d59e14c69bde2/transfer_queue/storage/managers/simple_storage_manager.py#L378"><text x="190" y="584">simple_storage_manager.py:378</text></a>
+  <a href="https://github.com/Ascend/TransferQueue/blob/c51614308b68c8d7a87c9b3ef62d59e14c69bde2/transfer_queue/storage/clients/mooncake_client.py#L295"><text x="450" y="584">mooncake_client.py:295</text></a>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/a8d144113e74ca2e68c597e322e0041cb683af50/nemo_rl/data_plane/adapters/tq_nixl.py#L539-L595"><text x="14" y="604">tq_nixl.py:539 _get_once (nixl steps 2–4)</text></a>
 </svg>
 
 <div class="hl"><b>How to read it.</b> Step 1 and the last put step are the same in all three backends. The TQ controller hands out row numbers
@@ -331,7 +342,7 @@ and is told when rows are ready, and it never touches the bytes. Only the middle
 </ul>
 So <code>nixl</code> does still send messages before it writes. A put takes 2 small messages per owner unit (alloc, commit), and a get takes 2 (resolve_keys, unpin).
 It is fast for two reasons. First, the big bytes move by RDMA, and the unit's CPU never copies them. Second, only the owner unit is asked, which the client finds by arithmetic.
-Puts go to one owner unit after another. Gets ask every owner unit at once.</div>
+Rows 5 and 7 live on different units, so every backend touches both units here, not just <code>nixl</code>. <code>simple</code> sends to both units at the same time, on put and on get. <code>nixl</code> does the same on a get, but a put finishes unit 2 before it starts unit 1.</div>
 
 <h2>Where they meet, and what still differs</h2>
 <p>All three are TQ storage managers, so everything above them is shared: the TQ controller and NeMo-RL's data-plane
