@@ -167,7 +167,7 @@ with the file slice replaced by bytes already in memory. Three things still diff
 <table>
 <tr><th></th><th>PyTorch</th><th>This PR</th></tr>
 <tr><td>Order items are unpacked</td><td>The order Megatron's plan lists them</td><td>Byte order in the file. Safe for Megatron: its planner <a href="https://github.com/NVIDIA/Megatron-LM/blob/3e95097b4a9ab6ea6b2a39eb2b2b24e4a6dfa54a/megatron/core/dist_checkpointing/strategies/torch.py#L589-L600">pairs <code>resolve_tensor</code> and <code>commit_tensor</code> per item</a>, and the PR keeps that pair together.</td></tr>
-<tr><td>Host memory per rank</td><td>About one item's tensor</td><td>Up to 1&nbsp;GiB read ahead, plus the item's raw bytes, a <code>BytesIO</code> copy of them, and the tensor. Measured for one 1&nbsp;GiB item: 2.79&nbsp;GiB extra peak, against 0.81&nbsp;GiB for PyTorch's reader.</td></tr>
+<tr><td>Host memory per rank</td><td>About one item's tensor</td><td>Up to 1&nbsp;GiB read ahead, plus the item's raw bytes, a <code>BytesIO</code> copy of them, and the tensor. Measured for one 1&nbsp;GiB item: 2.79&nbsp;GiB extra peak, against 0.81&nbsp;GiB for PyTorch's reader. <span class="cref"><a href="https://github.com/NVIDIA-NeMo/RL/pull/4714#discussion_r4418779263">C6 — ckpt_parallel_read.py:14</a></span></td></tr>
 <tr><td>Which readers use it</td><td>All</td><td>Only readers whose <code>fs</code> is PyTorch's local <code>FileSystem</code>: the plain reader and Megatron's cached-metadata reader. <code>msc://</code> (S3) and fsspec readers <a href="https://github.com/NVIDIA-NeMo/RL/blob/d43c1e70df626bb32a7ce64699ec21316d0d5dc3/nemo_rl/models/megatron/ckpt_parallel_read.py#L53-L54">keep PyTorch's code</a>.</td></tr>
 </table>
 
@@ -182,7 +182,9 @@ against 2.11, 2.12 and 2.13 and raises on anything else, because <code>_load_ite
 <div class="warn"><b>Review suggestions (not in the PR yet).</b>
 Read the thread count from <code>policy.megatron_cfg.checkpoint.parallel_read_threads</code>, where the other checkpoint-load settings live and where the PR description already says it is.
 Guard on a hash of PyTorch's <code>read_data</code> source instead of the version list: the method is identical in every torch from 2.10 to 2.15 we checked, so the list would block torch 2.14 even though nothing changed.
-<!--CREFS--></div>
+<p class="cref">🟠 <a href="https://github.com/NVIDIA-NeMo/RL/pull/4714#discussion_r4418779223">C1 config key — ckpt_parallel_read.py:42</a>
+<a href="https://github.com/NVIDIA-NeMo/RL/pull/4714#discussion_r4418779257">C5 source hash — ckpt_parallel_read.py:36</a>
+<a href="https://github.com/NVIDIA-NeMo/RL/pull/4714#discussion_r4418779235">C3 test values — test_ckpt_parallel_read.py:33</a></p></div>
 
 <div class="hl"><b>So what.</b> The author measured 128 ranks, each loading an 8.8&nbsp;GB share on torch 2.11 with 4 threads:
 per-rank read time (median) 7.2&nbsp;→&nbsp;3.7&nbsp;s, slowest rank 11.4&nbsp;→&nbsp;4.8&nbsp;s, and
