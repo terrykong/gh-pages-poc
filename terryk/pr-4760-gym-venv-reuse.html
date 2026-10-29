@@ -184,7 +184,28 @@ With the code as shipped, the last two are always true: setup refuses token capt
 (<a href="https://github.com/NVIDIA-NeMo/RL/blob/ec3c298d2b6688b2f85126f8917e336503933481/nemo_rl/algorithms/single_controller_utils/setup.py#L1284">setup.py L1284</a>),
 and both actors list the same extras. So the default-off flag is the only thing that decides. The review asks for this shape instead (proposed, not in the PR):</p>
 
-<pre class="diff"><span class="hunk">@@ rollout_reassembler_actor.py L180-L212 · create_rollout_reassembler_actors (proposed)</span>
+<pre class="diff"><span class="hunk">@@ actor_environments.py above L43 · new constants in the actor registry (proposed)</span>
+<span class="add">+# Actor names other modules import, so each name is written down only once.
++NEMO_GYM_ACTOR_FQN = "nemo_rl.environments.nemo_gym.NemoGym"
++ROLLOUT_REASSEMBLER_ACTOR_FQN = (
++    "nemo_rl.experience.rollout_reassembler_actor.RolloutReassemblerActor"
++)
+</span> ACTOR_ENVIRONMENTS: dict[str, list[str] | None] = {
+<span class="hunk">@@ actor_environments.py L103, L109 · use them as the keys</span>
+<span class="del">-    "nemo_rl.experience.rollout_reassembler_actor.RolloutReassemblerActor": [
+</span><span class="add">+    ROLLOUT_REASSEMBLER_ACTOR_FQN: [
+</span><span class="del">-    "nemo_rl.environments.nemo_gym.NemoGym": ["nemo_gym"],
+</span><span class="add">+    NEMO_GYM_ACTOR_FQN: ["nemo_gym"],
+</span><span class="hunk">@@ rollout_reassembler_actor.py L38-L43 · import the names instead of copying them</span>
+<span class="del">-_REASSEMBLER_ACTOR_FQN = (
+-    "nemo_rl.experience.rollout_reassembler_actor.RolloutReassemblerActor"
+-)
+-_GYM_ACTOR_FQN = "nemo_rl.environments.nemo_gym.NemoGym"
+</span><span class="add">+from nemo_rl.distributed.actor_environments import (
++    NEMO_GYM_ACTOR_FQN,
++    ROLLOUT_REASSEMBLER_ACTOR_FQN,
++)
+</span><span class="hunk">@@ rollout_reassembler_actor.py L180-L212 · create_rollout_reassembler_actors</span>
 <span class="del">-    runtime_env = None
 -    if try_reuse_gym_env_for_finalizers and gym_is_setup:
 -        ...  # extras check + Python check + log, 31 lines
@@ -193,15 +214,16 @@ and both actors list the same extras. So the default-off flag is the only thing 
 </span><span class="add">+    # Finalizers need the same packages as Gym, so reuse Gym's venv when both
 +    # resolve to the same Python command instead of building a second copy.
 +    from nemo_rl.distributed.ray_actor_environment_registry import get_actor_python_env
-+    from nemo_rl.environments.nemo_gym import NEMO_GYM_ACTOR_FQN
 +
-+    same_env = get_actor_python_env(_REASSEMBLER_ACTOR_FQN) == get_actor_python_env(
-+        NEMO_GYM_ACTOR_FQN
-+    )
++    same_env = get_actor_python_env(
++        ROLLOUT_REASSEMBLER_ACTOR_FQN
++    ) == get_actor_python_env(NEMO_GYM_ACTOR_FQN)
 +    runtime_env = make_actor_runtime_env(
-+        NEMO_GYM_ACTOR_FQN if same_env else _REASSEMBLER_ACTOR_FQN
++        NEMO_GYM_ACTOR_FQN if same_env else ROLLOUT_REASSEMBLER_ACTOR_FQN
 +    )</span></pre>
-<p>The flag, its two YAML keys, the fingerprint entry, the <code>gym_is_setup</code> argument, and the copied Gym name all go away. The Python-command check stays, because users may override a
+<p>The flag, its two YAML keys, the fingerprint entry and the <code>gym_is_setup</code> argument go away. Both actor names live once, in the
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/ec3c298d2b6688b2f85126f8917e336503933481/nemo_rl/distributed/actor_environments.py#L43">actor registry</a>, which is stdlib-only and already imported by this module; <code>nemo_gym.py</code> imports its name from there too.
+The Python-command check stays, because users may override a
 <a href="https://github.com/NVIDIA-NeMo/RL/blob/ec3c298d2b6688b2f85126f8917e336503933481/nemo_rl/distributed/ray_actor_environment_registry.py#L64">registry entry</a> at runtime.</p>
 <p class="cref">🟠 <a href="https://github.com/NVIDIA-NeMo/RL/pull/4760#discussion_r4418569927">review comment C2 — rollout_reassembler_actor.py:180</a></p>
 
