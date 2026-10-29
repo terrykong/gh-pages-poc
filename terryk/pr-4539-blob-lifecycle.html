@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NVIDIA-NeMo/RL #4539 — a row's bytes on a nixl storage unit</title>
+<style>
+:root{--bg:#0d1117;--surface:#161b22;--surface2:#1c2128;--border:#30363d;--text:#e6edf3;--dim:#8b949e;
+  --accent:#58a6ff;--green:#3fb950;--red:#f85149;--orange:#d29922}
+:root[data-theme="light"]{--bg:#ffffff;--surface:#f6f8fa;--surface2:#eaeef2;--border:#d0d7de;--text:#1f2328;
+  --dim:#59636e;--accent:#0969da;--green:#1a7f37;--red:#cf222e;--orange:#9a6700}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:28px 16px 70px}
+h1{font-size:22px;margin:0 0 8px;line-height:1.3}
+h2{font-size:18px;margin:30px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
+.sub{color:var(--dim);font-size:13.5px;margin:0 0 12px}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);
+  border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;
+  font:13px/1 ui-monospace,Menlo,monospace;cursor:pointer}
+nav.chain{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 6px;padding:0}
+nav.chain a,nav.chain span{display:inline-block;padding:5px 11px;border:1px solid var(--border);
+  border-radius:20px;background:var(--surface);text-decoration:none;color:var(--accent);
+  font-size:12.5px;line-height:1.3;white-space:nowrap}
+nav.chain a:hover{background:var(--surface2)}
+nav.chain span.here{background:var(--accent);color:var(--bg);border-color:var(--accent);font-weight:600}
+p.chainnote{color:var(--dim);font-size:12px;margin:0 0 18px}
+.status{border:1px solid var(--border);border-radius:10px;background:var(--surface);padding:2px 16px 10px;margin:0 0 20px}
+.status dl{display:grid;grid-template-columns:max-content 1fr;gap:4px 14px;margin:12px 0 0}
+.status dt{color:var(--dim);font-size:12px;text-transform:uppercase;letter-spacing:.04em;white-space:nowrap;padding-top:2px}
+.status dd{margin:0;font-size:14px}
+.verdict{font-weight:700}
+.verdict.good{color:var(--green)}
+.verdict.open{color:var(--orange)}
+.bg{border-left:4px solid var(--dim);background:var(--surface);padding:8px 14px;margin:0 0 16px;font-size:14px}
+.hl{border-left:3px solid var(--accent);background:var(--surface);padding:10px 16px;margin:16px 0;border-radius:0 8px 8px 0}
+.hl ul{margin:6px 0 0;padding-left:20px}
+.warn{border-left:3px solid var(--orange);background:var(--surface);padding:10px 16px;margin:16px 0;border-radius:0 8px 8px 0}
+.warn ol{margin:6px 0 0;padding-left:22px}
+.warn li{margin:6px 0}
+.cref{font-size:12.5px;white-space:nowrap}
+.cref a{display:inline-block;padding:2px 9px;border:1px solid var(--border);border-radius:16px;background:var(--surface2);
+  font:12px ui-monospace,Menlo,monospace}
+.cref a:hover{text-decoration:none;background:var(--surface)}
+.tip{border-bottom:1px dotted var(--dim);cursor:help;position:relative;outline:none}
+.tip:hover::after,.tip:focus::after{content:attr(data-tip);position:absolute;left:0;top:1.7em;z-index:60;
+  width:max-content;max-width:min(340px,80vw);white-space:normal;background:var(--surface2);color:var(--text);
+  border:1px solid var(--border);border-radius:6px;padding:7px 10px;font:13px/1.45 -apple-system,sans-serif;
+  font-weight:400;box-shadow:0 4px 14px rgba(0,0,0,.3)}
+.tw{overflow-x:auto}
+table{border-collapse:collapse;width:100%;font-size:13.5px;margin:8px 0}
+th,td{border:1px solid var(--border);padding:6px 9px;text-align:left;vertical-align:top}
+th{background:var(--surface);font-weight:600}
+td.k{color:var(--dim);white-space:nowrap}
+td.new{background:var(--surface)}
+h3{font-size:15px;margin:22px 0 2px}
+svg{max-width:100%;height:auto;display:block;margin:10px 0}
+svg .box{fill:var(--surface);stroke:var(--border);stroke-width:1.2}
+svg .lane{fill:none;stroke:var(--border);stroke-width:1}
+svg .life{stroke:var(--dim);stroke-width:1;stroke-dasharray:2 4;opacity:.7}
+svg .t{fill:var(--text);font:12px -apple-system,sans-serif}
+svg .tb{fill:var(--text);font:bold 13.5px -apple-system,sans-serif}
+svg .n{fill:var(--dim);font:11.5px -apple-system,sans-serif}
+svg .go{fill:var(--green);font:bold 11.5px -apple-system,sans-serif}
+svg .og{fill:var(--orange);font:bold 11.5px -apple-system,sans-serif}
+svg .rdma{stroke:var(--green);stroke-width:3;fill:none}
+svg .tcp{stroke:var(--orange);stroke-width:3;fill:none}
+svg .ctl{stroke:var(--dim);stroke-width:1.3;stroke-dasharray:5 3;fill:none}
+svg .hg{fill:var(--green)} svg .ho{fill:var(--orange)} svg .hd{fill:var(--dim)}
+svg a text{text-decoration:underline;fill:var(--accent);font:11px ui-monospace,Menlo,monospace}
+
+svg .st{fill:var(--surface);stroke:var(--green);stroke-width:1.6}
+svg .sr{fill:var(--surface);stroke:var(--red);stroke-width:1.6}
+svg .so{fill:var(--surface);stroke:var(--orange);stroke-width:1.6}
+svg .sg{fill:var(--surface);stroke:var(--dim);stroke-width:1.4;stroke-dasharray:4 3}
+svg .m{fill:var(--text);font:11.5px ui-monospace,Menlo,monospace}
+svg .rd{stroke:var(--red);stroke-width:2.4;fill:none}
+svg .hr{fill:var(--red)}
+svg .gr{stroke:var(--green);stroke-width:2.4;fill:none}
+svg .rt{fill:var(--red);font:bold 11.5px -apple-system,sans-serif}
+.where{border-left:4px solid var(--accent);background:var(--surface);padding:6px 12px;margin:6px 0 10px}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+  document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head>
+<body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+  function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+  function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
+    b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
+      else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+  document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+<div class="wrap">
+
+<h1>What happens to a row's bytes on a <code>nixl</code> storage unit, from alloc to free</h1>
+<p class="sub">Explainer for <a href="https://github.com/NVIDIA-NeMo/RL/pull/4539">NVIDIA-NeMo/RL #4539</a>.
+Permalinks pin the PR head <code>a8d1441</code>.</p>
+<nav class="chain">
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4539-three-backends.html">1 · three backends</a>
+  <span class="here">2 · a row's bytes on a unit</span>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4539-checkpoint-restore.html">3 · checkpoint and restore</a>
+</nav>
+<p class="chainnote">Three pages on this PR, one question each. This one: when may a unit reuse memory.</p>
+
+<div class="status"><dl>
+  <dt>Before</dt><dd>No such code. <code>simple</code> units keep Python objects, and Python frees them. <code>mooncake_cpu</code> leaves this to the Mooncake master.</dd>
+  <dt>This PR</dt><dd>Each <code>nixl</code> unit manages its own block of pinned memory, which other machines write into and read from directly.</dd>
+  <dt>Status</dt><dd><span class="verdict good">New in this PR; the review found no bug in these rules.</span>
+  <span class="verdict open">Two open review items touch it</span> (last section).</dd>
+</dl></div>
+
+<p>Each storage unit owns one big block of pinned memory. A put reserves a piece of it, called a
+<span class="tip" tabindex="0" data-tip="One put's bytes for one unit: every row that put sent to this unit, back to back, plus a small index at the end that names each row and field.">blob</span>.
+The client writes the bytes there by RDMA, and a commit makes the rows visible.
+The hard part is giving the memory back. A region must never go to a new put while an old WRITE might still land in it, or while a reader is still copying it.
+The figure follows row 5 from <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4539-three-backends.html">page 1</a>, which lives on unit 2.</p>
+
+<svg viewBox="0 0 940 452" role="img" aria-label="States of one blob on a storage unit: allocated, published, pinned by readers, released, waiting for pins, free; failed writes retire the space; with the SSD tier the put goes to disk.">
+  <line class="gr" x1="16" y1="16" x2="48" y2="16"/><text class="t" x="54" y="20">normal path</text>
+  <line class="ctl" x1="160" y1="16" x2="192" y2="16"/><text class="t" x="198" y="20">a reader</text>
+  <line class="rd" x1="290" y1="16" x2="322" y2="16"/><text class="t" x="328" y="20">the writer failed</text>
+  <line class="tcp" x1="460" y1="16" x2="492" y2="16"/><text class="t" x="498" y="20">SSD tier (opt-in)</text>
+  <rect class="st" x="20" y="44" width="150" height="76" rx="7"/>
+  <text class="tb" x="30" y="63">1 · allocated</text>
+  <text class="n" x="30" y="80">space reserved;</text>
+  <text class="n" x="30" y="97">readers can't see it</text>
+  <rect class="st" x="262" y="44" width="150" height="76" rx="7"/>
+  <text class="tb" x="272" y="63">2 · published</text>
+  <text class="m" x="272" y="80">rows[5][responses]</text>
+  <text class="m" x="272" y="97">→ this blob, refs 1</text>
+  <rect class="st" x="504" y="44" width="150" height="76" rx="7"/>
+  <text class="tb" x="514" y="63">3 · released</text>
+  <text class="n" x="514" y="80">refs 0: nothing</text>
+  <text class="n" x="514" y="97">points at it now</text>
+  <rect class="st" x="746" y="44" width="150" height="76" rx="7"/>
+  <text class="tb" x="756" y="63">4 · free</text>
+  <text class="n" x="756" y="80">the next alloc may</text>
+  <text class="n" x="756" y="97">hand it out again</text>
+  <path class="gr" d="M170 94 L251 94"/>
+  <polygon class="hg" points="251,89 262,94 251,99"/>
+  <text class="go" x="174" y="74">RDMA WRITE,</text>
+  <text class="go" x="174" y="87">then commit</text>
+  <path class="gr" d="M412 94 L493 94"/>
+  <polygon class="hg" points="493,89 504,94 493,99"/>
+  <text class="go" x="416" y="74">row 5 over-</text>
+  <text class="go" x="416" y="87">written/cleared</text>
+  <path class="gr" d="M654 94 L735 94"/>
+  <polygon class="hg" points="735,89 746,94 735,99"/>
+  <text class="go" x="658" y="74">no reader</text>
+  <text class="go" x="658" y="87">holds a pin</text>
+  <rect class="sg" x="262" y="178" width="150" height="76" rx="7"/>
+  <text class="tb" x="272" y="197">pinned by readers</text>
+  <text class="n" x="272" y="214">for 150 s at most;</text>
+  <text class="n" x="272" y="231">can't be freed</text>
+  <rect class="st" x="504" y="178" width="150" height="76" rx="7"/>
+  <text class="tb" x="514" y="197">waiting</text>
+  <text class="n" x="514" y="214">freed when the last</text>
+  <text class="n" x="514" y="231">reader's pin ends</text>
+  <path class="ctl" d="M312 120 L312 168"/><polygon class="hd" points="307,168 312,178 317,168"/>
+  <path class="ctl" d="M372 178 L372 130"/><polygon class="hd" points="367,130 372,120 377,130"/>
+  <text class="n" x="306" y="150" text-anchor="end">resolve_keys</text>
+  <text class="n" x="378" y="150">unpin</text>
+  <path class="gr" d="M579 120 L579 167"/><polygon class="hg" points="574,167 579,178 584,167"/>
+  <text class="go" x="587" y="150">a pin is still live</text>
+  <path class="gr" d="M654 216 L821 216 L821 131"/>
+  <polygon class="hg" points="816,131 821,120 826,131"/>
+  <text class="go" x="660" y="210">pin ends</text>
+  <path class="rd" d="M95 120 L95 289"/><polygon class="hr" points="90,289 95,300 100,289"/>
+  <text class="rt" x="103" y="182">no commit within 360 s,</text>
+  <text class="rt" x="103" y="197">or the WRITE failed</text>
+  <text class="rt" x="103" y="212">and may still land</text>
+  <rect class="sr" x="14" y="300" width="380" height="76" rx="7"/>
+  <text class="tb" x="24" y="319">retired: never reused</text>
+  <text class="n" x="24" y="336">until the unit restarts; counted in retired_bytes.</text>
+  <text class="n" x="24" y="353">If no WRITE was posted, the space is freed at once.</text>
+  <rect class="so" x="410" y="282" width="516" height="112" rx="8"/>
+  <text class="og" x="422" y="300">SSD tier on, and the unit's RAM is full: the put goes to disk from the start</text>
+  <rect class="box" x="422" y="312" width="114" height="44" rx="6"/>
+  <text class="t" x="429" y="330">WRITE lands in</text><text class="t" x="429" y="346">the IO area</text>
+  <path class="tcp" d="M537 334 L542 334"/><polygon class="ho" points="541,330 548,334 541,338"/>
+  <rect class="box" x="548" y="312" width="114" height="44" rx="6"/>
+  <text class="t" x="555" y="330">one worker thread</text><text class="t" x="555" y="346">writes a file</text>
+  <path class="tcp" d="M663 334 L668 334"/><polygon class="ho" points="667,330 674,334 667,338"/>
+  <rect class="box" x="674" y="312" width="114" height="44" rx="6"/>
+  <text class="t" x="681" y="330">on disk: the</text><text class="t" x="681" y="346">commit says done</text>
+  <path class="tcp" d="M789 334 L794 334"/><polygon class="ho" points="793,330 800,334 793,338"/>
+  <rect class="box" x="800" y="312" width="114" height="44" rx="6"/>
+  <text class="t" x="807" y="330">a read copies it</text><text class="t" x="807" y="346">back, then pins</text>
+  <text class="n" x="422" y="380">While the disk works, commit and resolve_keys answer "pending" and the client asks again.</text>
+  <text class="n" x="14" y="420">nixl_storage_unit.py:</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/a8d144113e74ca2e68c597e322e0041cb683af50/nemo_rl/data_plane/nixl_storage_unit.py#L552-L592"><text x="160" y="420">alloc :552</text></a>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/a8d144113e74ca2e68c597e322e0041cb683af50/nemo_rl/data_plane/nixl_storage_unit.py#L594-L618"><text x="250" y="420">commit :594</text></a>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/a8d144113e74ca2e68c597e322e0041cb683af50/nemo_rl/data_plane/nixl_storage_unit.py#L625-L636"><text x="350" y="420">_publish :625</text></a>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/a8d144113e74ca2e68c597e322e0041cb683af50/nemo_rl/data_plane/nixl_storage_unit.py#L663-L675"><text x="470" y="420">release_rows :663</text></a>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/a8d144113e74ca2e68c597e322e0041cb683af50/nemo_rl/data_plane/nixl_storage_unit.py#L698-L716"><text x="610" y="420">_dispose :698</text></a>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/a8d144113e74ca2e68c597e322e0041cb683af50/nemo_rl/data_plane/nixl_storage_unit.py#L718-L771"><text x="720" y="420">resolve :718</text></a>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/a8d144113e74ca2e68c597e322e0041cb683af50/nemo_rl/data_plane/nixl_storage_unit.py#L331-L358"><text x="160" y="440">_sweep (360 s) :331</text></a>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/a8d144113e74ca2e68c597e322e0041cb683af50/nemo_rl/data_plane/nixl_storage_unit.py#L638-L661"><text x="310" y="440">abort :638</text></a>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/a8d144113e74ca2e68c597e322e0041cb683af50/nemo_rl/data_plane/nixl_storage_unit.py#L395-L422"><text x="410" y="440">_spill :395</text></a>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/a8d144113e74ca2e68c597e322e0041cb683af50/nemo_rl/data_plane/nixl_storage_unit.py#L486-L530"><text x="510" y="440">_stage :486</text></a>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/a8d144113e74ca2e68c597e322e0041cb683af50/nemo_rl/data_plane/nixl_storage_unit.py#L808-L815"><text x="610" y="440">unpin :808</text></a>
+</svg>
+
+<h2>Three rules that stop memory from being reused too early</h2>
+<div class="tw"><table>
+<tr><th>What could go wrong</th><th>The rule</th><th>Code</th></tr>
+<tr><td>A WRITE that failed may still be landing</td><td>That region is <b>retired</b>: never handed out again. The same applies to space a writer reserved and never committed within 360 s.</td>
+<td><a href="https://github.com/NVIDIA-NeMo/RL/blob/a8d144113e74ca2e68c597e322e0041cb683af50/nemo_rl/data_plane/nixl_storage_unit.py#L638-L661">abort :638</a>, <a href="https://github.com/NVIDIA-NeMo/RL/blob/a8d144113e74ca2e68c597e322e0041cb683af50/nemo_rl/data_plane/nixl_storage_unit.py#L331-L358">_sweep :331</a></td></tr>
+<tr><td>A reader is still copying</td><td>Every read <b>pins</b> what it reads for 150 s. A released blob is freed only when its last pin ends. The client also times its own read, and if the read took longer than its pin, it throws the result away and reads again.</td>
+<td><a href="https://github.com/NVIDIA-NeMo/RL/blob/a8d144113e74ca2e68c597e322e0041cb683af50/nemo_rl/data_plane/nixl_storage_unit.py#L698-L716">_dispose :698</a>, <a href="https://github.com/NVIDIA-NeMo/RL/blob/a8d144113e74ca2e68c597e322e0041cb683af50/nemo_rl/data_plane/adapters/tq_nixl.py#L511-L535">tq_nixl.py:511</a></td></tr>
+<tr><td>A checkpoint is still copying</td><td>A blob being saved holds a <b>hold</b>. If it is released meanwhile, it is freed after the copy ends.</td>
+<td><a href="https://github.com/NVIDIA-NeMo/RL/blob/a8d144113e74ca2e68c597e322e0041cb683af50/nemo_rl/data_plane/nixl_storage_unit.py#L690-L696">_drop :690</a>, <a href="https://github.com/NVIDIA-NeMo/RL/blob/a8d144113e74ca2e68c597e322e0041cb683af50/nemo_rl/data_plane/nixl_storage_unit.py#L863-L947">save_shard :863</a></td></tr>
+</table></div>
+<p>The time limits must fit together, and the code checks that they do when it starts
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/a8d144113e74ca2e68c597e322e0041cb683af50/nemo_rl/data_plane/adapters/tq_nixl.py#L111-L131">check_timeouts</a>). A transfer may run for 120 s, so a pin lasts 150 s: 120 s plus a 30 s margin.
+A whole operation may take 240 s, and space that was never committed is retired after 360 s (240 + 120).</p>
+
+<h2>What it costs, and what the review asks</h2>
+<div class="warn"><ol>
+<li><b>Retired memory never comes back.</b> It stays out of use until the unit restarts. This is on purpose: reusing it could put stale bytes in another row.
+It should be rare, since it needs a failed WRITE. The amount shows as <code>retired_bytes</code> in the unit's stats.</li>
+<li><b>A recent read can make a put wait.</b> Memory released while it is pinned stays unusable for up to 150 s. With the SSD tier off and no other room on the unit, the put gets "busy" and retries until a pin ends
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/a8d144113e74ca2e68c597e322e0041cb683af50/nemo_rl/data_plane/nixl_storage_unit.py#L562-L574">alloc :562</a>).</li>
+<li><b>With SSD on, a spilled put blocks this process's gets while it waits for the disk.</b> The client sleeps between "pending" checks while it holds its one lock.
+<span class="cref"><a href="https://github.com/NVIDIA-NeMo/RL/pull/4539#discussion_r4371763531">C1 · tq_nixl.py:476</a></span></li>
+<li><b>None of the failure paths above runs in CI.</b> The end-to-end NIXL tests skip there.
+<span class="cref"><a href="https://github.com/NVIDIA-NeMo/RL/pull/4539#discussion_r4371763555">C3 · conftest.py:139</a></span></li>
+</ol></div>
+
+</div>
+</body>
+</html>
