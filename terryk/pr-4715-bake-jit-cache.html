@@ -179,6 +179,7 @@ Example below: one image baked for two models, then three different runs.</p>
   <li>A tiny Dockerfile copies that folder into the <b>same</b> image that warmed it. Same image matters: the key includes <a href="https://github.com/vllm-project/vllm/blob/v0.29.0/vllm/compilation/backends.py#L1030-L1079">the paths and contents of vLLM's traced source files</a>.</li>
   <li>At job start, each vLLM worker looks for a profile whose manifest matches its own run. It copies only that one into its own writable cache folder. No match, or no folder at all (a normal image): nothing changes.</li>
 </ol>
+<p class="cref"><a href="https://github.com/NVIDIA-NeMo/RL/pull/4715#discussion_r4418781077">C1 — cache_sync.sh:15</a> <a href="https://github.com/NVIDIA-NeMo/RL/pull/4715#discussion_r4418781091">C2 — compile_cache.py:14</a></p>
 
 <h2>What the author would write</h2>
 <p class="where"><b>Where the fix lands: RL only.</b> New: <code>docker/Dockerfile.jit-cache</code>, <code>tools/jit_cache/{warm.py,bake.sh}</code>, <code>nemo_rl/utils/jit_cache.py</code>, a small vLLM patch in
@@ -229,6 +230,8 @@ def restore(backend, run: dict, dest: str) -&gt; str | None:
 <span class="c">#                                        # vLLM's own key still decides hit or miss</span></code></pre>
 <p>Two details the warm-up must get right. It must use the exact <code>policy.model_name</code> string of the real run, because <a href="https://github.com/vllm-project/vllm/blob/v0.29.0/vllm/config/model.py#L412-L470">the model path is part of vLLM's key</a>. A local path and a Hugging Face id for the same weights are two different keys. And the engine should leave <code>TRITON_CACHE_DIR</code> unset, so Triton kernels land inside <code>VLLM_CACHE_ROOT</code> and get baked with it.</p>
 
+<p class="cref"><a href="https://github.com/NVIDIA-NeMo/RL/pull/4715#discussion_r4418781091">C2 — compile_cache.py:14</a> <a href="https://github.com/NVIDIA-NeMo/RL/pull/4715#discussion_r4418781136">C6 — vllm_worker.py:805</a> <a href="https://github.com/NVIDIA-NeMo/RL/pull/4715#discussion_r4418781127">C5 — megatron_policy_worker.py:843</a></p>
+
 <h2>Why it cannot break another model or another user</h2>
 <table>
 <tr><th>Situation</th><th>What happens</th><th>Why</th></tr>
@@ -247,9 +250,10 @@ def restore(backend, run: dict, dest: str) -&gt; str | None:
 <a href="https://github.com/vllm-project/vllm/blob/v0.29.0/vllm/envs.py#L2251-L2340">not on the ignore list</a>.
 NeMo-RL <a href="https://github.com/NVIDIA-NeMo/RL/blob/b2782355db063950c672fe127a390e7d0b7ac8ef/nemo_rl/models/generation/vllm/vllm_worker.py#L614-L619">sets it per engine</a> when TP×PP &gt; 1:
 engine 1 gets <code>"0,1"</code>, engine 2 gets <code>"2,3"</code>. Two keys, so a cache warmed by one engine never hits the other.
-The value only picks GPUs, so it is safe to leave out of the key. vLLM fixed this upstream in <a href="https://github.com/vllm-project/vllm/pull/61211">vllm#61211</a>, but no vLLM release has the fix yet. The PR description mentions a patch for this; the diff does not have it. The rewrite needs it in <code>patches.py</code>.</div>
+The value only picks GPUs, so it is safe to leave out of the key. vLLM fixed this upstream in <a href="https://github.com/vllm-project/vllm/pull/61211">vllm#61211</a>, but no vLLM release has the fix yet. The PR description mentions a patch for this; the diff does not have it. The rewrite needs it in <code>patches.py</code>.
+<p class="cref"><a href="https://github.com/NVIDIA-NeMo/RL/pull/4715#discussion_r4418781096">C3 — vllm_worker.py:343</a> <a href="https://github.com/NVIDIA-NeMo/RL/pull/4715#discussion_r4418781115">C4 — vllm_worker.py:335</a></p></div>
 
-<div class="hl"><b>So what.</b> Baking makes the cache work anywhere the image runs: Slurm, Kubernetes, cloud, with or without a shared filesystem. It also removes the rsync, the locks and the sidecars. The cost is one extra build step per image and some image size per profile. Most of the current diff goes away; the review comments only cover what carries over.</div>
+<div class="hl"><b>So what.</b> Baking makes the cache work anywhere the image runs: Slurm, Kubernetes, cloud, with or without a shared filesystem. It also removes the rsync, the locks and the sidecars. The cost is one extra build step per image and some image size per profile. Most of the current diff goes away; the review comments only cover what carries over. The comment links work for everyone once the review is published.</div>
 
 </div>
 </body>
