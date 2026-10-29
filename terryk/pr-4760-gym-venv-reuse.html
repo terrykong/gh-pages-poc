@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NVIDIA-NeMo/RL #4760 — where finalizers get their Python environment</title>
+<style>
+:root{--bg:#0d1117;--surface:#161b22;--surface2:#1c2128;--border:#30363d;--text:#e6edf3;--dim:#8b949e;
+  --accent:#58a6ff;--green:#3fb950;--red:#f85149;--orange:#d29922}
+:root[data-theme="light"]{--bg:#ffffff;--surface:#f6f8fa;--surface2:#eaeef2;--border:#d0d7de;--text:#1f2328;
+  --dim:#59636e;--accent:#0969da;--green:#1a7f37;--red:#cf222e;--orange:#9a6700}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:28px 16px 70px}
+h1{font-size:22px;margin:0 0 8px;line-height:1.3}
+h2{font-size:18px;margin:30px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
+.sub{color:var(--dim);font-size:13.5px;margin:0 0 14px}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);
+  border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;
+  font:13px/1 ui-monospace,monospace;cursor:pointer}
+.status{border:1px solid var(--border);border-radius:10px;background:var(--surface);padding:2px 16px 10px;margin:0 0 20px}
+.status dl{display:grid;grid-template-columns:max-content 1fr;gap:4px 14px;margin:12px 0 0}
+.status dt{color:var(--dim);font-size:12px;text-transform:uppercase;letter-spacing:.04em;white-space:nowrap;padding-top:2px}
+.status dd{margin:0;font-size:14px}
+.verdict{font-weight:700}
+.verdict.good{color:var(--green)}
+.verdict.open{color:var(--red)}
+.cref{margin:6px 0 0;font-size:13px}
+.cref a{display:inline-block;padding:4px 10px;border:1px solid var(--border);border-radius:16px;background:var(--surface);font:12.5px ui-monospace,Menlo,monospace}
+.cref a:hover{background:var(--surface2);text-decoration:none}
+nav.chain{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 6px;padding:0}
+nav.chain a,nav.chain span{display:inline-block;padding:5px 11px;border:1px solid var(--border);
+  border-radius:20px;background:var(--surface);text-decoration:none;color:var(--accent);
+  font-size:12.5px;line-height:1.3;white-space:nowrap}
+nav.chain a:hover{background:var(--surface2)}
+nav.chain span.here{background:var(--accent);color:var(--bg);border-color:var(--accent);font-weight:600}
+p.chainnote{color:var(--dim);font-size:12px;margin:0 0 18px}
+.bg{border:1px dashed var(--border);border-radius:8px;padding:10px 14px;margin:0 0 16px;font-size:14px;background:var(--surface)}
+.hl{border-left:4px solid var(--orange);background:var(--surface);padding:10px 14px;margin:18px 0;border-radius:0 8px 8px 0}
+.tip{border-bottom:1px dotted var(--dim);cursor:help;position:relative;outline:none}
+.tip:hover::after,.tip:focus::after{content:attr(data-tip);position:absolute;left:0;top:1.7em;z-index:60;
+  width:max-content;max-width:min(340px,80vw);white-space:normal;background:var(--surface2);color:var(--text);
+  border:1px solid var(--border);border-radius:6px;padding:7px 10px;font:13px/1.45 -apple-system,sans-serif;
+  font-weight:400;box-shadow:0 4px 14px rgba(0,0,0,.3)}
+.diff{font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--surface);
+  border:1px solid var(--border);border-radius:8px;padding:12px;overflow-x:auto;white-space:pre;margin:10px 0}
+.diff .add{color:var(--green)}
+.diff .del{color:var(--red)}
+.diff .hunk{color:var(--accent)}
+ol li,ul li{margin:4px 0}
+svg{max-width:100%;height:auto;display:block;margin:14px 0}
+svg .box{fill:var(--surface);stroke:var(--border);stroke-width:1.4}
+svg .boxa{fill:var(--surface);stroke:var(--accent);stroke-width:2}
+svg .disk{fill:var(--surface2);stroke:var(--dim);stroke-width:1.2}
+svg .ok{fill:var(--green);opacity:.20;stroke:var(--green);stroke-width:1.2}
+svg .dup{fill:var(--orange);opacity:.22;stroke:var(--orange);stroke-width:1.2}
+svg .skip{fill:none;stroke:var(--dim);stroke-width:1.2;stroke-dasharray:4 3}
+svg .lbl{fill:var(--text);font:12px -apple-system,sans-serif}
+svg .lblb{fill:var(--text);font:bold 12.5px -apple-system,sans-serif}
+svg .lane{fill:var(--dim);font:bold 13px -apple-system,sans-serif}
+svg .note{fill:var(--dim);font:11.5px -apple-system,sans-serif}
+svg .mono{fill:var(--text);font:11.5px ui-monospace,Menlo,monospace}
+svg .monod{fill:var(--dim);font:11.5px ui-monospace,Menlo,monospace}
+svg .arr{stroke:var(--dim);stroke-width:1.4;fill:none;marker-end:url(#ah)}
+svg .arra{stroke:var(--accent);stroke-width:1.8;fill:none;marker-end:url(#aha)}
+svg a text{text-decoration:underline;fill:var(--accent);font:11px ui-monospace,Menlo,monospace}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+  document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head>
+<body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+  function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+  function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
+    b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
+      else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+  document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+<div class="wrap">
+
+<h1>Where do rollout finalizers get their Python environment, before and with this PR?</h1>
+<p class="sub"><a href="https://github.com/NVIDIA-NeMo/RL/pull/4760">NVIDIA-NeMo/RL #4760</a>, new flag
+<code>token_capture.try_reuse_gym_env_for_finalizers</code>. All permalinks pin head <code>ec3c298d</code>.</p>
+
+<div class="status">
+<dl>
+  <dt>Before</dt>
+  <dd>Finalizers got their own venv folder on every node. It holds the same packages as Gym's folder, so a fresh run builds the same thing twice.</dd>
+  <dt>This PR</dt>
+  <dd>Adds a flag, off by default. When it is on, finalizers start from Gym's folder and their own folder is never built.</dd>
+  <dt>Status</dt>
+  <dd><span class="verdict open">In review.</span> The idea is sound, but the review asks to drop the flag (it gates nothing the registry does not already decide) and to add a timing. The reuse path also has a bug, shown on the next page.</dd>
+</dl>
+</div>
+
+<nav class="chain">
+  <span class="here">1 · reuse vs own venv</span>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4760-force-rebuild.html">2 · force rebuild deletes Gym's venv</a>
+</nav>
+<p class="chainnote">Two pages on this PR, one question each — this one: what the change is and how it compares.</p>
+
+<div class="bg"><b>Background.</b> Each Ray actor type runs in its own Python venv. The extras it needs are listed in
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/ec3c298d2b6688b2f85126f8917e336503933481/nemo_rl/distributed/actor_environments.py#L103-L109"><code>ACTOR_ENVIRONMENTS</code></a>,
+which turns them into a <span class="tip" tabindex="0" data-tip="The command string a Ray worker is launched with, e.g. 'uv run --locked --extra nemo_gym --directory <repo>'. The venv is built from this string alone.">Python command</span>.
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/ec3c298d2b6688b2f85126f8917e336503933481/nemo_rl/utils/venvs.py#L231"><code>make_actor_runtime_env(name)</code></a>
+builds that venv on every node, in a folder named after the actor. The
+<span class="tip" tabindex="0" data-tip="RolloutReassemblerActor: CPU actors that rebuild finished rollouts from token-capture data and write them to the data plane. They import Gym's staging code.">finalizers</span>
+and the Gym actor both list only <code>nemo_gym</code>. Dotted words have a short explanation: hover or tap them.</div>
+
+<p>Both actors resolve to the same command, <code>uv run --locked --extra nemo_gym --directory &lt;repo&gt;</code>
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/ec3c298d2b6688b2f85126f8917e336503933481/nemo_rl/distributed/ray_actor_environment_registry.py#L32-L35">registry</a>,
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/ec3c298d2b6688b2f85126f8917e336503933481/nemo_rl/distributed/virtual_cluster.py#L138-L139">command format</a>).
+So the two folders always hold the same packages; only the folder name differs. Gym's folder is built first, during
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/ec3c298d2b6688b2f85126f8917e336503933481/nemo_rl/environments/nemo_gym.py#L2201">Gym setup</a>.
+With the flag on, the finalizer factory asks for Gym's name instead of its own
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/ec3c298d2b6688b2f85126f8917e336503933481/nemo_rl/experience/rollout_reassembler_actor.py#L203">L203</a>),
+finds <code>bin/python</code> already there, and returns early
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/ec3c298d2b6688b2f85126f8917e336503933481/nemo_rl/utils/venvs.py#L154">venvs.py L154</a>).</p>
+
+<svg viewBox="0 0 900 392" role="img" aria-label="Two columns: before, finalizers build a second identical venv; with the flag, they reuse Gym's venv">
+<defs>
+<marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="var(--dim)"/></marker>
+<marker id="aha" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="var(--accent)"/></marker>
+</defs>
+<text class="lane" x="20" y="22">Before (and flag off)</text>
+<text class="lane" x="470" y="22">This PR, flag on</text>
+
+<!-- left column -->
+<rect class="box" x="20" y="34" width="420" height="58" rx="7"/>
+<text class="lblb" x="32" y="54">1 · Gym setup</text>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/ec3c298d2b6688b2f85126f8917e336503933481/nemo_rl/environments/nemo_gym.py#L2201"><text x="134" y="54">nemo_gym.py#L2201</text></a>
+<text class="mono" x="32" y="78">make_actor_runtime_env("…NemoGym")</text>
+
+<rect class="box" x="20" y="108" width="420" height="58" rx="7"/>
+<text class="lblb" x="32" y="128">2 · Finalizer setup</text>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/ec3c298d2b6688b2f85126f8917e336503933481/nemo_rl/experience/rollout_reassembler_actor.py#L212"><text x="164" y="128">reassembler_actor.py#L212</text></a>
+<text class="mono" x="32" y="152">make_actor_runtime_env("…RolloutReassemblerActor")</text>
+
+<rect class="disk" x="20" y="192" width="420" height="128" rx="7"/>
+<text class="lblb" x="32" y="212">On every node: $NEMO_RL_VENV_DIR/</text>
+<rect class="ok" x="32" y="224" width="396" height="40" rx="5"/>
+<text class="mono" x="42" y="241">…NemoGym/</text>
+<text class="note" x="42" y="257">built by step 1: uv sync, extra nemo_gym</text>
+<rect class="dup" x="32" y="270" width="396" height="40" rx="5"/>
+<text class="mono" x="42" y="287">…RolloutReassemblerActor/</text>
+<text class="note" x="42" y="303">built by step 2: uv sync again, same packages</text>
+
+<!-- right column -->
+<rect class="box" x="470" y="34" width="420" height="58" rx="7"/>
+<text class="lblb" x="482" y="54">1 · Gym setup</text>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/ec3c298d2b6688b2f85126f8917e336503933481/nemo_rl/environments/nemo_gym.py#L2201"><text x="584" y="54">nemo_gym.py#L2201</text></a>
+<text class="mono" x="482" y="78">make_actor_runtime_env("…NemoGym")</text>
+
+<rect class="boxa" x="470" y="108" width="420" height="58" rx="7"/>
+<text class="lblb" x="482" y="128">2 · Finalizer setup</text>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/ec3c298d2b6688b2f85126f8917e336503933481/nemo_rl/experience/rollout_reassembler_actor.py#L203"><text x="614" y="128">reassembler_actor.py#L203</text></a>
+<text class="mono" x="482" y="152">make_actor_runtime_env("…NemoGym")</text>
+
+<rect class="disk" x="470" y="192" width="420" height="128" rx="7"/>
+<text class="lblb" x="482" y="212">On every node: $NEMO_RL_VENV_DIR/</text>
+<rect class="ok" x="482" y="224" width="396" height="40" rx="5"/>
+<text class="mono" x="492" y="241">…NemoGym/</text>
+<text class="note" x="492" y="257">built by step 1; step 2 finds bin/python, returns early</text>
+<rect class="skip" x="482" y="270" width="396" height="40" rx="5"/>
+<text class="monod" x="492" y="287">…RolloutReassemblerActor/</text>
+<text class="note" x="492" y="303">never built</text>
+<path class="arra" d="M840,166 L840,224"/>
+
+<!-- legend + image note -->
+<rect class="ok" x="20" y="340" width="14" height="12" rx="2"/><text class="lbl" x="40" y="351">built once</text>
+<rect class="dup" x="130" y="340" width="14" height="12" rx="2"/><text class="lbl" x="150" y="351">second build of the same packages</text>
+<rect class="skip" x="380" y="340" width="14" height="12" rx="2"/><text class="lbl" x="400" y="351">skipped</text>
+<text class="note" x="20" y="378">Standard Docker image: both folders are pre-built in /opt/ray_venvs, so neither column builds anything at startup.</text>
+</svg>
+
+<h2>What the flag adds, and what the review asks</h2>
+<p>The PR turns reuse on only when all three hold: the flag is set, Gym is set up, and the two actors have the same extras and the same Python command
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/ec3c298d2b6688b2f85126f8917e336503933481/nemo_rl/experience/rollout_reassembler_actor.py#L181-L201">L181–L201</a>).
+With the code as shipped, the last two are always true: setup refuses token capture without Gym
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/ec3c298d2b6688b2f85126f8917e336503933481/nemo_rl/algorithms/single_controller_utils/setup.py#L1284">setup.py L1284</a>),
+and both actors list the same extras. So the default-off flag is the only thing that decides. The review asks for this shape instead (proposed, not in the PR):</p>
+
+<pre class="diff"><span class="hunk">@@ rollout_reassembler_actor.py L180-L212 · create_rollout_reassembler_actors (proposed)</span>
+<span class="del">-    runtime_env = None
+-    if try_reuse_gym_env_for_finalizers and gym_is_setup:
+-        ...  # extras check + Python check + log, 31 lines
+-    if runtime_env is None:
+-        runtime_env = make_actor_runtime_env(_REASSEMBLER_ACTOR_FQN)
+</span><span class="add">+    # Finalizers need the same packages as Gym, so reuse Gym's venv when both
++    # resolve to the same Python command instead of building a second copy.
++    from nemo_rl.distributed.ray_actor_environment_registry import get_actor_python_env
++    from nemo_rl.environments.nemo_gym import NEMO_GYM_ACTOR_FQN
++
++    same_env = get_actor_python_env(_REASSEMBLER_ACTOR_FQN) == get_actor_python_env(
++        NEMO_GYM_ACTOR_FQN
++    )
++    runtime_env = make_actor_runtime_env(
++        NEMO_GYM_ACTOR_FQN if same_env else _REASSEMBLER_ACTOR_FQN
++    )</span></pre>
+<p>The flag, its two YAML keys, the fingerprint entry, the <code>gym_is_setup</code> argument, and the copied Gym name all go away. The Python-command check stays, because users may override a
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/ec3c298d2b6688b2f85126f8917e336503933481/nemo_rl/distributed/ray_actor_environment_registry.py#L64">registry entry</a> at runtime.</p>
+<p class="cref">review comment C2 — rollout_reassembler_actor.py:180 (link added after staging)</p>
+
+<div class="hl"><b>So what.</b> On the standard image this saves about nothing, since both venvs are pre-built
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/ec3c298d2b6688b2f85126f8917e336503933481/docker/Dockerfile#L162">Dockerfile L162</a>).
+It helps runs that build venvs at startup, such as bare <code>uv</code> runs. The review asks for one timing of that case.
+Before turning reuse on by default, the force-rebuild bug on <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4760-force-rebuild.html">page 2</a> must be fixed.</div>
+
+</div>
+</body>
+</html>

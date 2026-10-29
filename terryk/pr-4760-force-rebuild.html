@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NVIDIA-NeMo/RL #4760 — force rebuild deletes Gym's live venv</title>
+<style>
+:root{--bg:#0d1117;--surface:#161b22;--surface2:#1c2128;--border:#30363d;--text:#e6edf3;--dim:#8b949e;
+  --accent:#58a6ff;--green:#3fb950;--red:#f85149;--orange:#d29922}
+:root[data-theme="light"]{--bg:#ffffff;--surface:#f6f8fa;--surface2:#eaeef2;--border:#d0d7de;--text:#1f2328;
+  --dim:#59636e;--accent:#0969da;--green:#1a7f37;--red:#cf222e;--orange:#9a6700}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:28px 16px 70px}
+h1{font-size:22px;margin:0 0 8px;line-height:1.3}
+h2{font-size:18px;margin:30px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
+.sub{color:var(--dim);font-size:13.5px;margin:0 0 14px}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);
+  border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;
+  font:13px/1 ui-monospace,monospace;cursor:pointer}
+.status{border:1px solid var(--border);border-radius:10px;background:var(--surface);padding:2px 16px 10px;margin:0 0 20px}
+.status dl{display:grid;grid-template-columns:max-content 1fr;gap:4px 14px;margin:12px 0 0}
+.status dt{color:var(--dim);font-size:12px;text-transform:uppercase;letter-spacing:.04em;white-space:nowrap;padding-top:2px}
+.status dd{margin:0;font-size:14px}
+.verdict{font-weight:700}
+.verdict.good{color:var(--green)}
+.verdict.open{color:var(--red)}
+.cref{margin:6px 0 0;font-size:13px}
+.cref a{display:inline-block;padding:4px 10px;border:1px solid var(--border);border-radius:16px;background:var(--surface);font:12.5px ui-monospace,Menlo,monospace}
+.cref a:hover{background:var(--surface2);text-decoration:none}
+nav.chain{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 6px;padding:0}
+nav.chain a,nav.chain span{display:inline-block;padding:5px 11px;border:1px solid var(--border);
+  border-radius:20px;background:var(--surface);text-decoration:none;color:var(--accent);
+  font-size:12.5px;line-height:1.3;white-space:nowrap}
+nav.chain a:hover{background:var(--surface2)}
+nav.chain span.here{background:var(--accent);color:var(--bg);border-color:var(--accent);font-weight:600}
+p.chainnote{color:var(--dim);font-size:12px;margin:0 0 18px}
+.bg{border:1px dashed var(--border);border-radius:8px;padding:10px 14px;margin:0 0 16px;font-size:14px;background:var(--surface)}
+.where{border-left:4px solid var(--accent);background:var(--surface);padding:6px 12px;margin:6px 0 10px}
+.hl{border-left:4px solid var(--red);background:var(--surface);padding:10px 14px;margin:18px 0;border-radius:0 8px 8px 0}
+.tip{border-bottom:1px dotted var(--dim);cursor:help;position:relative;outline:none}
+.tip:hover::after,.tip:focus::after{content:attr(data-tip);position:absolute;left:0;top:1.7em;z-index:60;
+  width:max-content;max-width:min(340px,80vw);white-space:normal;background:var(--surface2);color:var(--text);
+  border:1px solid var(--border);border-radius:6px;padding:7px 10px;font:13px/1.45 -apple-system,sans-serif;
+  font-weight:400;box-shadow:0 4px 14px rgba(0,0,0,.3)}
+.diff{font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--surface);
+  border:1px solid var(--border);border-radius:8px;padding:12px;overflow-x:auto;white-space:pre;margin:10px 0}
+.diff .add{color:var(--green)}
+.diff .del{color:var(--red)}
+.diff .hunk{color:var(--accent)}
+ol li,ul li{margin:4px 0}
+svg{max-width:100%;height:auto;display:block;margin:14px 0}
+svg .box{fill:var(--surface);stroke:var(--border);stroke-width:1.4}
+svg .boxa{fill:var(--surface);stroke:var(--accent);stroke-width:2}
+svg .disk{fill:var(--surface2);stroke:var(--dim);stroke-width:1.2}
+svg .ok{fill:var(--green);opacity:.20;stroke:var(--green);stroke-width:1.2}
+svg .dup{fill:var(--orange);opacity:.22;stroke:var(--orange);stroke-width:1.2}
+svg .skip{fill:none;stroke:var(--dim);stroke-width:1.2;stroke-dasharray:4 3}
+svg .lbl{fill:var(--text);font:12px -apple-system,sans-serif}
+svg .lblb{fill:var(--text);font:bold 12.5px -apple-system,sans-serif}
+svg .lane{fill:var(--dim);font:bold 13px -apple-system,sans-serif}
+svg .note{fill:var(--dim);font:11.5px -apple-system,sans-serif}
+svg .mono{fill:var(--text);font:11.5px ui-monospace,Menlo,monospace}
+svg .monod{fill:var(--dim);font:11.5px ui-monospace,Menlo,monospace}
+svg .arr{stroke:var(--dim);stroke-width:1.4;fill:none;marker-end:url(#ah)}
+svg .arra{stroke:var(--accent);stroke-width:1.8;fill:none;marker-end:url(#aha)}
+svg .bad{fill:var(--red);opacity:.20;stroke:var(--red);stroke-width:1.2}
+svg .run{fill:var(--accent);opacity:.18;stroke:var(--accent);stroke-width:1.2}
+svg .tick{stroke:var(--red);stroke-width:2}
+svg .axis{stroke:var(--dim);stroke-width:1}
+svg a text{text-decoration:underline;fill:var(--accent);font:11px ui-monospace,Menlo,monospace}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+  document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head>
+<body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+  function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+  function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
+    b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
+      else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+  document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+<div class="wrap">
+
+<h1>With force rebuild on, does finalizer setup delete the venv Gym is running from?</h1>
+<p class="sub"><a href="https://github.com/NVIDIA-NeMo/RL/pull/4760">NVIDIA-NeMo/RL #4760</a>, flag
+<code>token_capture.try_reuse_gym_env_for_finalizers: true</code> plus env var <code>NRL_FORCE_REBUILD_VENVS=true</code>. All permalinks pin head <code>ec3c298d</code>.</p>
+
+<div class="status">
+<dl>
+  <dt>Before</dt>
+  <dd>Finalizer setup force-rebuilt only its own venv folder, which nothing was running from yet.</dd>
+  <dt>This PR</dt>
+  <dd>With the reuse flag on, finalizer setup builds Gym's folder a second time. With force rebuild on, that second build deletes the folder first.</dd>
+  <dt>Status</dt>
+  <dd><span class="verdict open">Open — not fixed in this PR.</span> Raised as review comment C1, with a proposed fix below. It needs both settings at once.</dd>
+</dl>
+</div>
+
+<nav class="chain">
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4760-gym-venv-reuse.html">1 · reuse vs own venv</a>
+  <span class="here">2 · force rebuild deletes Gym's venv</span>
+</nav>
+<p class="chainnote">Two pages on this PR, one question each — this one: what happens to Gym when the shared venv is rebuilt.</p>
+
+<div class="bg"><b>Background.</b> <span class="tip" tabindex="0" data-tip="An env var. When true, every venv build deletes the venv folder and builds it again from the lock file, instead of reusing a folder that already exists.">NRL_FORCE_REBUILD_VENVS=true</span>
+makes every venv build start from scratch. The bisect scripts set it
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/ec3c298d2b6688b2f85126f8917e336503933481/tools/bisect-run.sh#L20">bisect-run.sh</a>), and so do the
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/ec3c298d2b6688b2f85126f8917e336503933481/infra/examples/rayjob-monolithic.yaml#L38">Kubernetes examples</a>,
+so each commit runs against its own lock file. A venv build runs one
+<span class="tip" tabindex="0" data-tip="_env_builder: a Ray task that runs once on each node and builds the venv folder there.">builder task per node</span>.
+Dotted words have a short explanation: hover or tap them.</div>
+
+<p>Gym setup builds <code>…NemoGym/</code> and starts the Gym actors from it
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/ec3c298d2b6688b2f85126f8917e336503933481/nemo_rl/environments/nemo_gym.py#L2201">nemo_gym.py L2201</a>). Later, with the reuse flag on, finalizer setup calls
+<code>make_actor_runtime_env("…NemoGym")</code> again (<a href="https://github.com/NVIDIA-NeMo/RL/blob/ec3c298d2b6688b2f85126f8917e336503933481/nemo_rl/experience/rollout_reassembler_actor.py#L203">L203</a>).
+With force rebuild on, the builder skips its "folder already exists" return
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/ec3c298d2b6688b2f85126f8917e336503933481/nemo_rl/utils/venvs.py#L154">venvs.py L154</a>) and runs
+<code>shutil.rmtree</code> on the folder (<a href="https://github.com/NVIDIA-NeMo/RL/blob/ec3c298d2b6688b2f85126f8917e336503933481/nemo_rl/utils/venvs.py#L105">L105</a>), then <code>uv venv</code> and <code>uv sync</code>.
+The Gym actors are still running from that folder the whole time.</p>
+
+<svg viewBox="0 0 900 286" role="img" aria-label="Timeline: Gym actors run from the NemoGym folder; finalizer setup deletes and rebuilds it; imports fail during the gap">
+<line class="axis" x1="170" y1="256" x2="880" y2="256"/>
+<text class="note" x="170" y="274">time on one node →</text>
+
+<text class="lane" x="16" y="62">Gym actors</text>
+<rect class="run" x="260" y="44" width="620" height="30" rx="4"/>
+<text class="lbl" x="270" y="64">running from …NemoGym/</text>
+<rect class="bad" x="440" y="44" width="250" height="30" rx="4"/>
+<text class="lblb" x="450" y="64">imports fail</text>
+
+<text class="lane" x="16" y="122">…NemoGym/ folder</text>
+<rect class="ok" x="170" y="104" width="270" height="30" rx="4"/>
+<text class="lbl" x="180" y="124">built by Gym setup</text>
+<rect class="bad" x="440" y="104" width="250" height="30" rx="4"/>
+<text class="lblb" x="450" y="124">deleted, then rebuilt (minutes)</text>
+<rect class="ok" x="690" y="104" width="190" height="30" rx="4"/>
+<text class="lbl" x="700" y="124">back</text>
+<line class="tick" x1="440" y1="38" x2="440" y2="164"/>
+
+<text class="lane" x="16" y="182">Finalizer setup</text>
+<rect class="boxa" x="170" y="164" width="290" height="30" rx="5"/>
+<text class="mono" x="180" y="184">make_actor_runtime_env("…NemoGym")</text>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/ec3c298d2b6688b2f85126f8917e336503933481/nemo_rl/experience/rollout_reassembler_actor.py#L203"><text x="180" y="214">call: reassembler_actor.py#L203</text></a>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/ec3c298d2b6688b2f85126f8917e336503933481/nemo_rl/utils/venvs.py#L154"><text x="180" y="232">skip early return: venvs.py#L154</text></a>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/ec3c298d2b6688b2f85126f8917e336503933481/nemo_rl/utils/venvs.py#L105"><text x="180" y="250">shutil.rmtree: venvs.py#L105</text></a>
+
+<rect class="run" x="560" y="164" width="14" height="12" rx="2"/><text class="lbl" x="580" y="175">actor running</text>
+<rect class="ok" x="700" y="164" width="14" height="12" rx="2"/><text class="lbl" x="720" y="175">folder ready</text>
+<rect class="bad" x="560" y="186" width="14" height="12" rx="2"/><text class="lbl" x="580" y="197">folder gone or half built</text>
+</svg>
+
+<p>The <code>@lru_cache</code> on <a href="https://github.com/NVIDIA-NeMo/RL/blob/ec3c298d2b6688b2f85126f8917e336503933481/nemo_rl/utils/venvs.py#L52"><code>create_local_venv</code></a> does not stop this.
+That cache lives inside one Ray worker process. Setup builds the generation, trainer and Gym venvs in parallel, so each node has several builder workers.
+In a local Ray test that copied this pattern, the later Gym build landed on the worker that held the cached entry only 4 times in 10.</p>
+<p class="cref">review comment C1 — rollout_reassembler_actor.py:203 (link added after staging)</p>
+
+<h2>What would fix it — proposed, not in the PR</h2>
+<p class="where"><b>Where the fix lands: RL only, one function.</b>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/ec3c298d2b6688b2f85126f8917e336503933481/nemo_rl/utils/venvs.py#L186"><code>create_local_venv_on_each_node</code></a> in <code>venvs.py</code>.
+Nothing below is implemented. The driver remembers what it already built in this run, so a second call for the same folder returns the path without touching it.</p>
+
+<pre class="diff"><span class="hunk">@@ venvs.py above L186 · new module-level dict</span>
+<span class="add">+# Venvs already built by this driver: (py_executable, venv path, node IDs) -> python path.
++# A second build of the same folder would let NRL_FORCE_REBUILD_VENVS delete a venv
++# that running actors use.
++_BUILT_VENVS: dict[tuple[str, str, frozenset[str]], str] = {}
++
+</span> def create_local_venv_on_each_node(py_executable: str, venv_name: str):
+<span class="hunk">@@ venvs.py L198-L203 · create_local_venv_on_each_node, after the node list</span>
+     nodes = [
+         n
+         for n in ray.nodes()
+         if n.get("Alive", False) and n.get("Resources", {}).get("CPU", 0) &gt; 0
+     ]
+<span class="add">+    venv_dir = os.path.normpath(os.environ.get("NEMO_RL_VENV_DIR", DEFAULT_VENV_DIR))
++    key = (py_executable, os.path.join(venv_dir, venv_name),
++           frozenset(n["NodeID"] for n in nodes))
++    if key in _BUILT_VENVS:
++        return _BUILT_VENVS[key]
+</span>     num_nodes = len(nodes)
+<span class="hunk">@@ venvs.py L226-L229 · create_local_venv_on_each_node, end</span>
+     ray.util.remove_placement_group(pg)
+     # Return mapping from node IP to venv python path
+<span class="add">+    _BUILT_VENVS[key] = paths[0]
+</span>     return paths[0]</pre>
+<p>The key includes the venv path, so a test that changes <code>NEMO_RL_VENV_DIR</code> still builds. It also includes the node IDs, so a node that joins later still gets the venv.
+Force rebuild then means "rebuild once per run", which is what the bisect scripts want. A second call also skips the per-node placement group and builder tasks.</p>
+
+<div class="hl"><b>So what.</b> Today this needs both the reuse flag and force rebuild. The review (C2) also asks to drop the flag, which makes reuse always on.
+Then every token-capture run with force rebuild would hit this, so the fix is needed either way.
+The symptom is a <code>ModuleNotFoundError</code> or a missing <code>bin/python</code> on the Gym side during startup, which does not look like a venv problem.</div>
+
+</div>
+</body>
+</html>
