@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NVIDIA-NeMo/RL #4714 — how the new checkpoint reader keeps several reads in flight per rank</title>
+<style>
+:root{--bg:#0d1117;--surface:#161b22;--surface2:#1c2128;--border:#30363d;--text:#e6edf3;--dim:#8b949e;
+  --accent:#58a6ff;--green:#3fb950;--red:#f85149;--orange:#d29922}
+:root[data-theme="light"]{--bg:#ffffff;--surface:#f6f8fa;--surface2:#eaeef2;--border:#d0d7de;--text:#1f2328;
+  --dim:#59636e;--accent:#0969da;--green:#1a7f37;--red:#cf222e;--orange:#9a6700}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:28px 20px 70px}
+h1{font-size:22px;margin:0 0 8px;line-height:1.3}
+h2{font-size:18px;margin:30px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
+.sub{color:var(--dim);font-size:13.5px;margin:0 0 16px}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);
+  border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;
+  font:13px/1 ui-monospace,Menlo,monospace;cursor:pointer}
+.status{border:1px solid var(--border);border-radius:10px;background:var(--surface);padding:2px 16px 10px;margin:0 0 20px}
+.status dl{display:grid;grid-template-columns:max-content 1fr;gap:4px 14px;margin:12px 0 0}
+.status dt{color:var(--dim);font-size:12px;text-transform:uppercase;letter-spacing:.04em;white-space:nowrap;padding-top:2px}
+.status dd{margin:0;font-size:14px}
+.verdict{font-weight:700}
+.verdict.good{color:var(--green)}
+.verdict.open{color:var(--orange)}
+.bg{border-left:4px solid var(--dim);background:var(--surface);padding:8px 14px;margin:0 0 16px;font-size:14px}
+.hl{border-left:4px solid var(--accent);background:var(--surface);padding:10px 16px;margin:18px 0;border-radius:0 8px 8px 0}
+.warn{border-left:4px solid var(--orange);background:var(--surface);padding:10px 16px;margin:18px 0;border-radius:0 8px 8px 0}
+table{border-collapse:collapse;font-size:14px;margin:10px 0;width:100%}
+th,td{border:1px solid var(--border);padding:5px 9px;text-align:left;vertical-align:top}
+th{background:var(--surface2)}
+.ok{color:var(--green);font-weight:600}
+.no{color:var(--dim);font-weight:600}
+.cref{margin:6px 0 0;font-size:13px}
+.cref a{display:inline-block;padding:4px 10px;border:1px solid var(--border);border-radius:16px;background:var(--surface);font:12.5px ui-monospace,Menlo,monospace}
+.tip{border-bottom:1px dotted var(--dim);cursor:help;position:relative;outline:none}
+.tip:hover::after,.tip:focus::after{content:attr(data-tip);position:absolute;left:0;top:1.7em;z-index:60;
+  width:max-content;max-width:min(340px,80vw);white-space:normal;background:var(--surface2);color:var(--text);
+  border:1px solid var(--border);border-radius:6px;padding:7px 10px;font:13px/1.45 -apple-system,sans-serif;
+  font-weight:400;box-shadow:0 4px 14px rgba(0,0,0,.3)}
+svg{max-width:100%;height:auto;display:block;margin:14px 0}
+svg .box{fill:var(--surface);stroke:var(--border);stroke-width:1.3}
+svg .rd{fill:var(--accent);fill-opacity:.22;stroke:var(--accent);stroke-width:1.3}
+svg .ld{fill:var(--green);fill-opacity:.22;stroke:var(--green);stroke-width:1.3}
+svg .wt{fill:none;stroke:var(--dim);stroke-width:1.2;stroke-dasharray:4 3}
+svg .diff{fill:none;stroke:var(--red);stroke-width:2}
+svg .lbl{fill:var(--text);font:12px ui-monospace,Menlo,monospace}
+svg .lbl-b{fill:var(--text);font:bold 13px -apple-system,sans-serif}
+svg .note{fill:var(--dim);font:11.5px -apple-system,sans-serif}
+svg .hdr{fill:var(--accent);font:bold 13px -apple-system,sans-serif}
+svg .red{fill:var(--red);font:bold 11.5px -apple-system,sans-serif}
+svg .arr{stroke:var(--dim);stroke-width:1.2;fill:none}
+svg a text{text-decoration:underline;fill:var(--accent);font:11.5px ui-monospace,Menlo,monospace}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+  document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head>
+<body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+  function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+  function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
+    b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
+      else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+  document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+<div class="wrap">
+
+<h1>How the new checkpoint reader keeps several reads in flight per rank</h1>
+<p class="sub"><a href="https://github.com/NVIDIA-NeMo/RL/pull/4714">NVIDIA-NeMo/RL #4714</a>
+(parallel reads for torch_dist checkpoint loads). All NeMo-RL permalinks pin the PR head <code>d43c1e7</code>;
+PyTorch links pin <code>v2.11.0</code>.</p>
+
+<div class="status">
+<dl>
+  <dt>Before</dt>
+  <dd>Each rank reads its share of a Megatron checkpoint one item at a time, through one file stream. One read is in flight at a time.</dd>
+  <dt>This PR</dt>
+  <dd>With <code>NRL_CKPT_READ_THREADS=N</code> (N&nbsp;&gt;&nbsp;1), a thread pool reads the same bytes in 16&nbsp;MB pieces, N at a time, while the main thread unpacks items in file order. Off by default.</dd>
+  <dt>Status</dt>
+  <dd><span class="verdict open">New in this PR, off by default — under review.</span> The review asks to move the setting into the checkpoint config and to make the tests catch wrong-offset reads.</dd>
+</dl>
+</div>
+
+<div class="bg"><b>Background.</b> NeMo-RL's Megatron backend saves checkpoints in the <span class="tip" tabindex="0" data-tip="torch.distributed.checkpoint (DCP). Each rank writes its tensors into .distcp files; a .metadata file records, for every item, which file it is in, its byte offset and its length.">torch_dist format</span>.
+On load, Megatron hands each rank a list of items to read. PyTorch's
+<a href="https://github.com/pytorch/pytorch/blob/v2.11.0/torch/distributed/checkpoint/filesystem.py#L861"><code>FileSystemReader.read_data</code></a>
+reads them. On a shared network filesystem, one request at a time leaves most of the bandwidth unused.
+Dotted words have a short explanation: hover or tap them.</div>
+
+<p>The PR adds <a href="https://github.com/NVIDIA-NeMo/RL/blob/d43c1e70df626bb32a7ce64699ec21316d0d5dc3/nemo_rl/models/megatron/ckpt_parallel_read.py"><code>ckpt_parallel_read.py</code></a>.
+Its <a href="https://github.com/NVIDIA-NeMo/RL/blob/d43c1e70df626bb32a7ce64699ec21316d0d5dc3/nemo_rl/models/megatron/ckpt_parallel_read.py#L40-L74"><code>install()</code></a>
+runs at the start of <a href="https://github.com/NVIDIA-NeMo/RL/blob/d43c1e70df626bb32a7ce64699ec21316d0d5dc3/nemo_rl/models/megatron/setup.py#L2417"><code>setup_model_and_optimizer</code></a>
+and swaps <code>FileSystemReader.read_data</code> for the whole worker process.
+The new version sorts a file's items by byte offset, then
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/d43c1e70df626bb32a7ce64699ec21316d0d5dc3/nemo_rl/models/megatron/ckpt_parallel_read.py#L84-L87">splits each item into 16&nbsp;MB pieces</a> and queues them on the pool.
+The main thread waits for an item's pieces, then
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/d43c1e70df626bb32a7ce64699ec21316d0d5dc3/nemo_rl/models/megatron/ckpt_parallel_read.py#L113-L133">unpacks it with a copy of PyTorch's own per-item code</a>.
+It stops queuing once <a href="https://github.com/NVIDIA-NeMo/RL/blob/d43c1e70df626bb32a7ce64699ec21316d0d5dc3/nemo_rl/models/megatron/ckpt_parallel_read.py#L89-L91">more than 1&nbsp;GiB is read but not yet unpacked</a>.</p>
+
+<h2>One file, three items, both readers</h2>
+
+<p style="font-size:14px;color:var(--dim);margin:0">A real trace on torch 2.13 (CPU): one rank, one file, three items. The PR's limits are scaled down to 4&nbsp;MiB pieces and 8&nbsp;MiB read-ahead so the 12&nbsp;MB tensor splits; the defaults are 16&nbsp;MB and 1&nbsp;GiB. Box widths show order, not measured time.</p>
+
+<svg viewBox="0 0 900 500" role="img" aria-label="Two timelines. PyTorch reads step, emb, norm one after another on one thread. The PR reads the three pieces of emb on three pool threads at once while the main thread unpacks in file order.">
+  <text class="hdr" x="16" y="22">The file __0_0.distcp, items in byte order (not to scale)</text>
+  <rect class="box" x="16" y="34" width="150" height="40" rx="5"/>
+  <text class="lbl" x="26" y="51">step  BytesIO</text><text class="note" x="26" y="67">1,325 B at byte 0</text>
+  <rect class="box" x="172" y="34" width="560" height="40" rx="5"/>
+  <text class="lbl" x="182" y="51">emb  tensor [3,000,000] float32 = 2.0, 3.0, 4.0 …</text><text class="note" x="182" y="67">12,001,577 B at byte 1,325</text>
+  <rect class="box" x="738" y="34" width="146" height="40" rx="5"/>
+  <text class="lbl" x="748" y="51">norm  [3,7] bf16</text><text class="note" x="748" y="67">1,577 B at 12,002,902</text>
+
+  <text class="hdr" x="16" y="108">PyTorch today — one thread, one read in flight</text>
+  <a href="https://github.com/pytorch/pytorch/blob/v2.11.0/torch/distributed/checkpoint/filesystem.py#L871-L875"><text x="420" y="108">filesystem.py:871-875</text></a>
+  <text class="lbl-b" x="16" y="138">main</text>
+  <rect class="rd" x="110" y="122" width="56" height="26" rx="4"/><text class="lbl" x="116" y="140">read</text>
+  <rect class="ld" x="168" y="122" width="40" height="26" rx="4"/><text class="lbl" x="172" y="140">load</text>
+  <rect class="rd" x="210" y="122" width="430" height="26" rx="4"/><text class="lbl" x="220" y="140">read emb: 12.0 MB, one stream, start to end</text>
+  <rect class="ld" x="642" y="122" width="74" height="26" rx="4"/><text class="lbl" x="650" y="140">load emb</text>
+  <rect class="rd" x="718" y="122" width="56" height="26" rx="4"/><text class="lbl" x="724" y="140">read</text>
+  <rect class="ld" x="776" y="122" width="40" height="26" rx="4"/><text class="lbl" x="780" y="140">load</text>
+  <text class="note" x="110" y="166">step</text><text class="note" x="718" y="166">norm</text>
+
+  <text class="hdr" x="16" y="204">This PR, NRL_CKPT_READ_THREADS=4 — reads on the pool, unpacking on main</text>
+  <text class="lbl-b" x="16" y="234">pool 0</text>
+  <rect class="rd" x="110" y="218" width="56" height="26" rx="4"/><text class="lbl" x="116" y="236">step</text>
+  <rect class="rd" x="168" y="218" width="160" height="26" rx="4"/><text class="lbl" x="174" y="236">emb  4 MiB @1,325</text>
+  <rect class="rd" x="560" y="218" width="56" height="26" rx="4"/><text class="lbl" x="566" y="236">norm</text>
+  <text class="lbl-b" x="16" y="270">pool 1</text>
+  <rect class="rd" x="168" y="254" width="160" height="26" rx="4"/><text class="lbl" x="174" y="272">emb  4 MiB @4.2M</text>
+  <text class="lbl-b" x="16" y="306">pool 2</text>
+  <rect class="rd" x="168" y="290" width="160" height="26" rx="4"/><text class="lbl" x="174" y="308">emb  3.4 MiB @8.4M</text>
+  <rect class="diff" x="162" y="212" width="172" height="110" rx="6"/>
+  <text class="red" x="340" y="262">3 reads in flight at once</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/d43c1e70df626bb32a7ce64699ec21316d0d5dc3/nemo_rl/models/megatron/ckpt_parallel_read.py#L84-L87"><text x="340" y="280">ckpt_parallel_read.py:84-87</text></a>
+  <text class="lbl-b" x="16" y="352">main</text>
+  <rect class="ld" x="168" y="336" width="40" height="26" rx="4"/><text class="lbl" x="172" y="354">load</text>
+  <rect class="wt" x="210" y="336" width="118" height="26" rx="4"/><text class="note" x="216" y="353">wait for 3 pieces</text>
+  <rect class="ld" x="330" y="336" width="226" height="26" rx="4"/><text class="lbl" x="338" y="354">load emb (file order)</text>
+  <rect class="ld" x="618" y="336" width="40" height="26" rx="4"/><text class="lbl" x="622" y="354">load</text>
+  <text class="note" x="168" y="380">step</text><text class="note" x="618" y="380">norm</text>
+  <text class="note" x="110" y="400">emb (12 MB) is bigger than the 8 MiB read-ahead, so norm is read only after emb is unpacked.</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/d43c1e70df626bb32a7ce64699ec21316d0d5dc3/nemo_rl/models/megatron/ckpt_parallel_read.py#L89-L91"><text x="110" y="418">read-ahead limit :89-91</text></a>
+
+  <rect class="rd" x="16" y="446" width="18" height="14" rx="3"/><text class="note" x="40" y="458">read bytes from disk</text>
+  <rect class="ld" x="190" y="446" width="18" height="14" rx="3"/><text class="note" x="214" y="458">"load" = transform → torch.load → narrow → copy_ → commit_tensor, same code in both</text>
+  <rect class="wt" x="16" y="470" width="18" height="14" rx="3"/><text class="note" x="40" y="482">waiting</text>
+  <rect class="diff" x="190" y="470" width="18" height="14" rx="3"/><text class="note" x="214" y="482">where the PR differs</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/d43c1e70df626bb32a7ce64699ec21316d0d5dc3/nemo_rl/models/megatron/ckpt_parallel_read.py#L113-L133"><text x="560" y="482">_load_item :113-133</text></a>
+  <a href="https://github.com/pytorch/pytorch/blob/v2.11.0/torch/distributed/checkpoint/filesystem.py#L876-L915"><text x="720" y="482">PyTorch :876-915</text></a>
+</svg>
+
+<p style="font-size:14px">After the load both runs hold the same values: <code>emb</code> = 2.0, 3.0, 4.0 …, <code>norm[0,:3]</code> = 2.0, 3.0, 4.0, <code>step</code> = <code>b"step=7"</code>.</p>
+
+<h2>Where the two paths meet, and what still differs</h2>
+
+<p>They meet at the per-item code. <a href="https://github.com/NVIDIA-NeMo/RL/blob/d43c1e70df626bb32a7ce64699ec21316d0d5dc3/nemo_rl/models/megatron/ckpt_parallel_read.py#L113-L133"><code>_load_item</code></a>
+is PyTorch's <a href="https://github.com/pytorch/pytorch/blob/v2.11.0/torch/distributed/checkpoint/filesystem.py#L876-L915">loop body</a>
+with the file slice replaced by bytes already in memory. Three things still differ after that point:</p>
+
+<table>
+<tr><th></th><th>PyTorch</th><th>This PR</th></tr>
+<tr><td>Order items are unpacked</td><td>The order Megatron's plan lists them</td><td>Byte order in the file. Safe for Megatron: its planner <a href="https://github.com/NVIDIA/Megatron-LM/blob/3e95097b4a9ab6ea6b2a39eb2b2b24e4a6dfa54a/megatron/core/dist_checkpointing/strategies/torch.py#L589-L600">pairs <code>resolve_tensor</code> and <code>commit_tensor</code> per item</a>, and the PR keeps that pair together.</td></tr>
+<tr><td>Host memory per rank</td><td>About one item's tensor</td><td>Up to 1&nbsp;GiB read ahead, plus the item's raw bytes, a <code>BytesIO</code> copy of them, and the tensor. Measured for one 1&nbsp;GiB item: 2.79&nbsp;GiB extra peak, against 0.81&nbsp;GiB for PyTorch's reader.</td></tr>
+<tr><td>Which readers use it</td><td>All</td><td>Only readers whose <code>fs</code> is PyTorch's local <code>FileSystem</code>: the plain reader and Megatron's cached-metadata reader. <code>msc://</code> (S3) and fsspec readers <a href="https://github.com/NVIDIA-NeMo/RL/blob/d43c1e70df626bb32a7ce64699ec21316d0d5dc3/nemo_rl/models/megatron/ckpt_parallel_read.py#L53-L54">keep PyTorch's code</a>.</td></tr>
+</table>
+
+<p>Every Megatron load in a worker runs after <code>install()</code>: policy init and resume, the reference model, the Megatron value model, and later <code>load_checkpoint</code> calls. Automodel runs never call it, so the variable does nothing there.</p>
+
+<h2>Turning it on, and what guards it</h2>
+
+<p>Set <code>NRL_CKPT_READ_THREADS=4</code> in the launch environment; Ray workers inherit it. <code>install()</code> then
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/d43c1e70df626bb32a7ce64699ec21316d0d5dc3/nemo_rl/models/megatron/ckpt_parallel_read.py#L45-L50">checks the torch version</a>
+against 2.11, 2.12 and 2.13 and raises on anything else, because <code>_load_item</code> is a copy of PyTorch's code and must match it.</p>
+
+<div class="warn"><b>Review suggestions (not in the PR yet).</b>
+Read the thread count from <code>policy.megatron_cfg.checkpoint.parallel_read_threads</code>, where the other checkpoint-load settings live and where the PR description already says it is.
+Guard on a hash of PyTorch's <code>read_data</code> source instead of the version list: the method is identical in every torch from 2.10 to 2.15 we checked, so the list would block torch 2.14 even though nothing changed.
+<!--CREFS--></div>
+
+<div class="hl"><b>So what.</b> The author measured 128 ranks, each loading an 8.8&nbsp;GB share on torch 2.11 with 4 threads:
+per-rank read time (median) 7.2&nbsp;→&nbsp;3.7&nbsp;s, slowest rank 11.4&nbsp;→&nbsp;4.8&nbsp;s, and
+<code>setup_model_and_optimizer</code> (median) 37.2&nbsp;→&nbsp;31.6&nbsp;s. The price is extra host memory on every rank while loading, and a copy of PyTorch code that has to be kept in step with each torch upgrade.</div>
+
+</div>
+</body>
+</html>
