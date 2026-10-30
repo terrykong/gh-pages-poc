@@ -181,9 +181,9 @@ against 2.11, 2.12 and 2.13 and raises on anything else, because <code>_load_ite
 
 <div class="warn"><b>Review suggestions (not in the PR yet).</b>
 Read the thread count from <code>policy.megatron_cfg.checkpoint.parallel_read_threads</code>, where the other checkpoint-load settings live and where the PR description already says it is. Set it to 4 in the example configs, so it is on by default and every Megatron nightly that loads a checkpoint tests it; 1 turns it off.
-Guard on a hash of PyTorch's <code>read_data</code> source instead of the version list: the method is identical in every torch from 2.10 to 2.15 we checked, so the list would block torch 2.14 even though nothing changed. If the hash differs, warn and use PyTorch's reader, and pin the hash in a unit test so the torch upgrade that changes it fails CI. PyTorch has no fix to wait for: its own <code>read_data</code> still reads one item at a time, with a TODO asking for this.
+Drop the torch version check and let the comparison test guard upgrades: it runs PyTorch's real reader on whatever torch is installed. After it passes, a hash of PyTorch's <code>read_data</code> source flags upstream changes the test does not cover, and its message says how to update. PyTorch has no fix to wait for: its own <code>read_data</code> still reads one item at a time, with a TODO asking for this.
 <p class="cref">🟠 <a href="https://github.com/NVIDIA-NeMo/RL/pull/4714#discussion_r4418779223">C1 config key — ckpt_parallel_read.py:42</a>
-<a href="https://github.com/NVIDIA-NeMo/RL/pull/4714#discussion_r4418779257">C5 source hash — ckpt_parallel_read.py:36</a>
+<a href="https://github.com/NVIDIA-NeMo/RL/pull/4714#discussion_r4418779257">C5 torch upgrades — ckpt_parallel_read.py:36</a>
 <a href="https://github.com/NVIDIA-NeMo/RL/pull/4714#discussion_r4418779235">C3 test values — test_ckpt_parallel_read.py:33</a></p></div>
 
 <div class="hl"><b>So what.</b> The author measured 128 ranks, each loading an 8.8&nbsp;GB share on torch 2.11 with 4 threads:
