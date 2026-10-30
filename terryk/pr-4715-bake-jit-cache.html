@@ -96,7 +96,7 @@ in a folder named by a hash, the <b>cache key</b>. The key covers the model, the
 <h2>Where the cache lives: shared filesystem vs. the image</h2>
 <p>The PR keeps the cache on a shared network filesystem and syncs it with every node
 (<a href="https://github.com/NVIDIA-NeMo/RL/blob/b2782355db063950c672fe127a390e7d0b7ac8ef/tools/external_gym_vllm/cache_sync.sh#L39-L104"><code>cache_sync.sh</code></a>: copy in, write back every 60 s, a lock per folder, age rules).
-Many NeMo-RL deployments have no such filesystem: Kubernetes without a shared volume, or cloud runs that keep data in S3.
+Many NeMo-RL deployments have no such filesystem: Kubernetes without a shared volume, or cloud runs that keep data in S3. On a large job it is also hard on the filesystem: at start, every node copies the whole cache <a href="https://github.com/NVIDIA-NeMo/RL/blob/b2782355db063950c672fe127a390e7d0b7ac8ef/tools/external_gym_vllm/cache_sync.sh#L40-L51">file by file</a>, so hundreds of nodes open the same small files at once. The repo's own large-model launcher <a href="https://github.com/NVIDIA-NeMo/RL/blob/b2782355db063950c672fe127a390e7d0b7ac8ef/examples/nemo_gym/nemotron-3-ultra/ultra_launch.sh#L635-L638">reads one tarball per cache</a> to avoid exactly that.
 The proposal keeps the same cache in the image instead. A GPU warms it once, the image build bakes it in, and every job copies it to local disk at start.
 Example below: one image baked for two models, then three different runs.</p>
 
@@ -175,7 +175,7 @@ Example below: one image baked for two models, then three different runs.</p>
 </svg>
 </div>
 <ol class="steps">
-  <li>On any machine with a GPU, <code>warm.py</code> starts vLLM through NeMo-RL's own worker once per profile, with <a href="https://github.com/vllm-project/vllm/blob/v0.29.0/vllm/config/load.py#L116-L132">dummy weights</a> (the weights are not part of the key), and saves the cache plus a <code>manifest.json</code>. It then starts once more from the saved copy with <code>VLLM_FORCE_AOT_LOAD=1</code>, which errors on a miss, so a bad bake fails at build time.</li>
+  <li>On any machine with a GPU, <code>warm.py</code> starts vLLM through NeMo-RL's own worker once per profile, with <a href="https://github.com/vllm-project/vllm/blob/v0.29.0/vllm/config/load.py#L116-L132">dummy weights</a> (the weights are not part of the key), and saves the cache plus a <code>manifest.json</code>. It then starts once more from the saved copy with <code>VLLM_FORCE_AOT_LOAD=1</code>, which errors on a miss, so a bad bake fails at build time. If the profile includes the trainer, <code>warm.py</code> also runs one training step (real checkpoint) and saves Megatron's Inductor and Triton caches under <code>megatron/&lt;profile&gt;/</code>.</li>
   <li>A tiny Dockerfile copies that folder into the <b>same</b> image that warmed it. Same image matters: the key includes <a href="https://github.com/vllm-project/vllm/blob/v0.29.0/vllm/compilation/backends.py#L1030-L1079">the paths and contents of vLLM's traced source files</a>.</li>
   <li>At job start, each vLLM worker looks for a profile whose manifest matches its own run. It copies only that one into its own writable cache folder. No match, or no folder at all (a normal image): nothing changes.</li>
 </ol>
@@ -184,7 +184,7 @@ Example below: one image baked for two models, then three different runs.</p>
 <h2>What the author would write</h2>
 <p class="where"><b>Where the fix lands: RL only.</b> New: <code>docker/Dockerfile.jit-cache</code>, <code>tools/jit_cache/{warm.py,bake.sh}</code>, <code>nemo_rl/utils/jit_cache.py</code>, a small vLLM patch in
 <a href="https://github.com/NVIDIA-NeMo/RL/blob/b2782355db063950c672fe127a390e7d0b7ac8ef/nemo_rl/models/generation/vllm/patches.py"><code>patches.py</code></a>, docs in <code>docs/docker.md</code>.
-Deleted: <code>cache_sync.sh</code>, the cache parts of <code>run_in_allocation.sh</code>, the Megatron seeding. <b><code>docker/Dockerfile</code> is not touched</b>, so normal builds stay exactly as they are.</p>
+Deleted: <code>cache_sync.sh</code> and the cache parts of <code>run_in_allocation.sh</code>. The Megatron trainer cache stays, as a second entry in the same design. <b><code>docker/Dockerfile</code> is not touched</b>, so normal builds stay exactly as they are.</p>
 
 <p><b>The bake step</b> follows the empty-stage pattern <code>docker/Dockerfile</code> already uses for
 <a href="https://github.com/NVIDIA-NeMo/RL/blob/b2782355db063950c672fe127a390e7d0b7ac8ef/docker/Dockerfile#L51-L72"><code>uv-cache-seed</code> and <code>custom-setup</code></a>:
@@ -210,17 +210,22 @@ tools/jit_cache/bake.sh --image nvcr.io/nvidia/nemo-rl:&lt;tag&gt; \
 
 <p><b>The runtime check</b> picks one profile, or none. It is generic: each backend lists which cache folders it owns, so SGLang can be added later as one more entry.</p>
 <pre><code><span class="c"># env var -&gt; folder inside a profile. SGLang would add its own entry.</span>
-BACKENDS = {"vllm": {"VLLM_CACHE_ROOT": "vllm"}}
+BACKENDS = {
+    "vllm":     {"VLLM_CACHE_ROOT": "vllm"},
+    "megatron": {"TORCHINDUCTOR_CACHE_DIR": "inductor", "TRITON_CACHE_DIR": "triton"},
+}
 
-def restore(backend, run: dict, dest: str) -&gt; str | None:
+def restore(backend, run: dict, dest: dict[str, str]) -&gt; str | None:
     root = Path(os.environ.get("NRL_JIT_CACHE_DIR", "")) / backend   <span class="c"># the image sets it</span>
-    if not root.is_dir() or non_empty(dest):   <span class="c"># plain image, or the launcher already filled it</span>
+    if not root.is_dir():                      <span class="c"># plain image: nothing to do</span>
         return None
     for prof in sorted(root.iterdir()):
         want = json.loads((prof / "manifest.json").read_text())["match"]
         diff = [k for k in want if want[k] != run.get(k)]
         if not diff:
-            copy_tree(prof / "vllm", dest)      <span class="c"># hardlink when same filesystem, else copy</span>
+            for var, sub in BACKENDS[backend].items():
+                if not non_empty(dest[var]):   <span class="c"># launcher already filled it: leave it</span>
+                    copy_tree(prof / sub, dest[var])
             return prof.name
         log.info("JIT cache %s not used: %s differ", prof.name, diff)
     return None
@@ -241,6 +246,7 @@ def restore(backend, run: dict, dest: str) -&gt; str | None:
 <tr><td>Warmed on GB200, run on H100</td><td class="miss">Compiles, as today</td><td>The GPU name is in the manifest, and in vLLM's own key.</td></tr>
 <tr><td>Image rebuilt with new code</td><td class="miss">Compiles, as today</td><td>The cache lives inside the image that warmed it. A rebuilt image has none until it is baked again, and vLLM's key covers its source files anyway.</td></tr>
 <tr><td>Launcher already filled the engine's cache folder (big-model scripts do)</td><td class="miss">Launcher's files win</td><td><code>restore()</code> only copies into an empty folder.</td></tr>
+<tr><td>Trainer (Megatron) on the same nodes</td><td class="ok">Hits</td><td>Its own <code>megatron/</code> profile and its own folders, set only in the trainer's worker; vLLM's folders are never shared with it.</td></tr>
 <tr><td>Read-only image (Apptainer, enroot)</td><td class="ok">Hits</td><td>The baked files are only read; vLLM writes to the per-engine copy on local disk.</td></tr>
 </table>
 <p>Even when the manifest is wrong, the worst case is a slow start, not a wrong model: vLLM checks its own key, and a different key means it compiles.</p>
