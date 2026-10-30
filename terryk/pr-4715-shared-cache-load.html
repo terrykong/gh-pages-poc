@@ -76,7 +76,7 @@ svg a text{text-decoration:underline}
   <dt>This PR</dt>
   <dd>Keeps compile caches on a shared filesystem as a plain folder tree. Each node copies the files in at start, and every 60 s copies new files back, one by one.</dd>
   <dt>Status</dt>
-  <dd><span class="verdict open">Proposed, not implemented.</span> The review keeps the PR's idea (a shared cache that grows across jobs) but asks to store it as compressed archives. A prototype is being stress-tested.</dd>
+  <dd><span class="verdict open">Proposed, not implemented.</span> The review keeps the PR's idea (a shared cache that grows across jobs) but asks to store it as compressed archives. A ~400-line prototype passed race tests: 8 nodes reading while others publish and a merge runs, a writer killed mid-copy, and 4 nodes each publishing their own files.</dd>
 </dl>
 </div>
 
@@ -174,7 +174,7 @@ release the lock; shared += new
 <tr><td>A reader sees a half-written archive</td><td>Written as <code>.tmp</code>, then renamed; a rename within a folder is atomic, and readers skip <code>.tmp</code>.</td></tr>
 <tr><td>Two nodes send the same kernels</td><td>The lock plus the <code>.idx</code> re-check skip them. If both still send, it is a harmless duplicate: unpacking keeps the first copy, and the content is the same.</td></tr>
 <tr><td>A writer is killed mid-pack</td><td>Only a <code>.tmp</code> is left. It is ignored and cleaned up later.</td></tr>
-<tr><td>Too many small archives over time</td><td>Optional merge: one node combines them into a base archive, lists what it replaced, and deletes old ones only after a grace period. It reads the shared archives, so it already has every node's files.</td></tr>
+<tr><td>Too many small archives over time</td><td>Optional merge (can be a follow-up PR): one process combines them into a base archive, lists what it replaced, and deletes old ones only after a grace period. It uses its <b>own</b> lock, never the writers' lock, so nodes keep publishing while it runs. It reads the shared archives, so it already has every node's files.</td></tr>
 <tr><td>A TP or CP change on the next job</td><td>Kernels whose shapes changed just miss and recompile. Inductor's cache key includes the graph and its input shapes, and it re-checks shape guards on load (<a href="https://github.com/pytorch/pytorch/blob/v2.11.0/torch/_inductor/codecache.py#L1396-L1452">codecache.py</a>). Triton keys on source, compile-time constants and specializations (<a href="https://github.com/triton-lang/triton/blob/v3.6.0/python/triton/compiler/compiler.py#L71-L75">compiler.py</a>).</td></tr>
 </table>
 <h2>The other rows, one example each</h2>
@@ -196,6 +196,7 @@ release the lock; shared += new
 
 <p class="where"><b>Where the change lands: one script,</b> <a href="https://github.com/NVIDIA-NeMo/RL/blob/b2782355db063950c672fe127a390e7d0b7ac8ef/tools/external_gym_vllm/cache_sync.sh"><code>cache_sync.sh</code></a> (or a small Python module that calls <code>tar</code>), plus <code>zstd</code> in the image. The workers' calls and the variables stay the same. The same layout also works on S3, because archives are never changed after they are written.</p>
 <p class="cref">
+<a href="https://github.com/NVIDIA-NeMo/RL/pull/4715#discussion_r4421618524">C16 — cache_sync.sh:40</a>
 <a href="https://github.com/NVIDIA-NeMo/RL/pull/4715#discussion_r4418781127">C5 — megatron_policy_worker.py:841</a>
 <a href="https://github.com/NVIDIA-NeMo/RL/pull/4715#discussion_r4421460968">C10 — cache_sync.sh:95</a>
 <a href="https://github.com/NVIDIA-NeMo/RL/pull/4715#discussion_r4421461510">C15 — compile_cache.py:48</a>
