@@ -202,10 +202,7 @@ release the lock; shared += new
 <a href="https://github.com/NVIDIA-NeMo/RL/pull/4715#discussion_r4421461510">C15 — compile_cache.py:48</a>
 </p>
 
-<div class="warn"><b>One more blocker, separate from load.</b> vLLM 0.29.0's cache key includes
-<a href="https://github.com/vllm-project/vllm/blob/v0.29.0/vllm/envs.py#L1433"><code>VLLM_RAY_BUNDLE_INDICES</code></a>, and NeMo-RL
-<a href="https://github.com/NVIDIA-NeMo/RL/blob/b2782355db063950c672fe127a390e7d0b7ac8ef/nemo_rl/models/generation/vllm/vllm_worker.py#L614-L619">sets it per engine</a> when TP×PP &gt; 1. So with TP&gt;1, no two vLLM engines share a cache, and the shared copy mostly misses until that patch lands.
-<p class="cref"><a href="https://github.com/NVIDIA-NeMo/RL/pull/4715#discussion_r4418781096">C3 — vllm_worker.py:343</a> <a href="https://github.com/NVIDIA-NeMo/RL/pull/4715#discussion_r4418781115">C4 — vllm_worker.py:335</a></p></div>
+<div class="bg"><b>Not covered by this review: vLLM engines with TP&gt;1 share less.</b> vLLM 0.29.0's cache key includes <a href="https://github.com/vllm-project/vllm/blob/v0.29.0/vllm/envs.py#L1433"><code>VLLM_RAY_BUNDLE_INDICES</code></a>, which NeMo-RL <a href="https://github.com/NVIDIA-NeMo/RL/blob/b2782355db063950c672fe127a390e7d0b7ac8ef/nemo_rl/models/generation/vllm/vllm_worker.py#L614-L619">sets per engine</a> when TP×PP &gt; 1. Nothing breaks: an engine that gets the same GPU slots next job still hits, but different engines don't share. vLLM fixes this upstream (<a href="https://github.com/vllm-project/vllm/pull/61211">vllm#61211</a>), so it improves on a later vLLM upgrade with no patch to maintain.<p class="cref"><a href="https://github.com/NVIDIA-NeMo/RL/pull/4715#discussion_r4418781115">C4 — vllm_worker.py:335</a> <a href="https://github.com/NVIDIA-NeMo/RL/pull/4715#discussion_r4418781136">C6 — vllm_worker.py:805</a></p></div>
 
 <div class="hl"><b>So what.</b> The PR's write-back idea (only new files, never overwrite, one writer at a time) stays. Storing each folder as a few compressed archives turns ~352k file opens per job start into tens of large reads per node, and each 60 s pass sends a file at most once. The comment links work for everyone once the review is published.</div>
 
