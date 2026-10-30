@@ -1,0 +1,184 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PR #4715: shared compile cache load</title>
+<style>
+:root{--bg:#0d1117;--surface:#161b22;--surface2:#1c2128;--border:#30363d;--text:#e6edf3;--dim:#8b949e;
+  --accent:#58a6ff;--green:#3fb950;--red:#f85149;--orange:#d29922}
+:root[data-theme="light"]{--bg:#ffffff;--surface:#f6f8fa;--surface2:#eaeef2;--border:#d0d7de;--text:#1f2328;
+  --dim:#59636e;--accent:#0969da;--green:#1a7f37;--red:#cf222e;--orange:#9a6700}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--text);margin:0;font:15px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:28px 18px 60px}
+h1{font-size:26px;line-height:1.25;margin:8px 0 6px}
+h2{font-size:19px;margin:30px 0 8px;border-bottom:1px solid var(--border);padding-bottom:4px}
+a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
+code{font:13px ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--surface2);padding:1px 5px;border-radius:4px}
+p.sub{color:var(--dim);font-size:13px;margin:0 0 16px}
+.status{border:1px solid var(--border);border-radius:10px;background:var(--surface);padding:2px 16px 10px;margin:0 0 20px}
+.status dl{display:grid;grid-template-columns:max-content 1fr;gap:4px 14px;margin:12px 0 0}
+.status dt{color:var(--dim);font-size:12px;text-transform:uppercase;letter-spacing:.04em;white-space:nowrap;padding-top:2px}
+.status dd{margin:0;font-size:14px}
+.verdict{font-weight:700}.verdict.open{color:var(--red)}
+.bg{border-left:4px solid var(--dim);background:var(--surface);padding:8px 14px;margin:0 0 16px;font-size:14px}
+.where{border-left:4px solid var(--accent);background:var(--surface);padding:6px 12px;margin:6px 0 10px;font-size:14px}
+.warn{border:1px solid var(--red);border-left:4px solid var(--red);background:var(--surface);padding:8px 14px;margin:14px 0;font-size:14px}
+.hl{border:1px solid var(--green);border-left:4px solid var(--green);background:var(--surface);padding:10px 14px;margin:22px 0 0}
+ol.steps{padding-left:22px;font-size:14px}ol.steps li{margin:4px 0}
+.fig{overflow-x:auto;margin:10px 0 4px}
+svg{display:block;min-width:760px;width:100%;height:auto}
+svg text{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+svg a text{text-decoration:underline}
+.t{fill:var(--text)}.d{fill:var(--dim)}.g{fill:var(--green)}.r{fill:var(--red)}.ac{fill:var(--accent)}
+.boxg{fill:var(--surface);stroke:var(--green);stroke-width:1.5}
+.boxr{fill:var(--surface);stroke:var(--red);stroke-width:1.5}
+.lane{fill:var(--surface2)}
+.diff{font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--surface);border:1px solid var(--border);
+  border-radius:8px;padding:12px;overflow-x:auto;white-space:pre;margin:10px 0}
+.diff .add{color:var(--green)}.diff .del{color:var(--red)}.diff .hunk{color:var(--accent)}
+.tip{border-bottom:1px dotted var(--dim);cursor:help;position:relative;outline:none}
+.tip:hover::after,.tip:focus::after{content:attr(data-tip);position:absolute;left:0;top:1.7em;z-index:60;
+  width:max-content;max-width:min(340px,80vw);white-space:normal;background:var(--surface2);color:var(--text);
+  border:1px solid var(--border);border-radius:6px;padding:7px 10px;font:13px/1.45 -apple-system,sans-serif;
+  font-weight:400;box-shadow:0 4px 14px rgba(0,0,0,.3)}
+.cref{margin:6px 0 0;font-size:13px}
+.cref a{display:inline-block;padding:4px 10px;border:1px solid var(--border);border-radius:16px;background:var(--surface);
+  font:12.5px ui-monospace,Menlo,monospace;margin:0 4px 4px 0}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);border:1px solid var(--border);
+  color:var(--text);border-radius:20px;padding:6px 12px;font:13px/1 ui-monospace,monospace;cursor:pointer}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+  document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head>
+<body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+  function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+  function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
+    b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
+      else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+  document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+<div class="wrap">
+
+<h1>Who reads and writes the shared compile cache, and how much</h1>
+<p class="sub"><a href="https://github.com/NVIDIA-NeMo/RL/pull/4715">PR #4715</a> · permalinks pinned to head
+<a href="https://github.com/NVIDIA-NeMo/RL/tree/b2782355db063950c672fe127a390e7d0b7ac8ef"><code>b2782355</code></a></p>
+
+<div class="status">
+<dl>
+  <dt>Before</dt>
+  <dd>Every job compiles vLLM and the Megatron trainer from scratch.</dd>
+  <dt>This PR</dt>
+  <dd>Keeps compile caches on a shared filesystem. Each node copies them in at start, and a loop on each node copies new files back every 60 s.</dd>
+  <dt>Status</dt>
+  <dd><span class="verdict open">Open — the review keeps this design but asks for fixes.</span> Nothing in the right-hand column below is implemented yet.</dd>
+</dl>
+</div>
+
+<div class="bg"><b>Background.</b> One script, <a href="https://github.com/NVIDIA-NeMo/RL/blob/b2782355db063950c672fe127a390e7d0b7ac8ef/tools/external_gym_vllm/cache_sync.sh"><code>cache_sync.sh</code></a>, does both directions. <b>Copy-in</b> (<code>seed</code>) copies one cache type, e.g. <code>policy</code> (vLLM) or <code>megatron</code> (trainer), from the shared folder to the node's local disk. <b>Write-back</b> (<code>writeback</code>, run every 60 s by a loop) copies files the node compiled back to the shared folder. A shared filesystem slows down most when many nodes open many small files at once: each open is a request to one
+<span class="tip" tabindex="0" data-tip="The server that tracks file names and folders on a shared filesystem. Every open, list or file lookup goes through it, so millions of small-file operations at once can stall it for everyone.">metadata server</span>.
+An earlier version of this feature was turned off for exactly that. Dotted words have a short explanation: hover or tap them.</div>
+
+<h2>Shared-filesystem traffic, today and after the fixes</h2>
+<p>Worked example: a job on <b>4 nodes</b> with an Ultra-sized cache. The trainer cache measured <b>~82,000 files</b> and the vLLM policy cache ~6,000 files.</p>
+
+<div class="fig">
+<svg viewBox="0 0 940 470" role="img" aria-label="Five moments when nodes touch the shared cache, in this PR and after the review's fixes">
+  <text class="d" x="14" y="22" font-size="12" font-weight="700">WHEN</text>
+  <text class="t" x="160" y="22" font-size="14" font-weight="700">This PR</text>
+  <text class="t" x="556" y="22" font-size="14" font-weight="700">After the review's fixes</text>
+  <!-- row 1 -->
+  <rect class="lane" x="0" y="32" width="940" height="80" rx="6"/>
+  <text class="t" x="14" y="62" font-size="13" font-weight="600">Job start</text><text class="d" x="14" y="80" font-size="12">copy-in</text>
+  <rect class="boxr" x="150" y="40" width="390" height="64" rx="6"/>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/b2782355db063950c672fe127a390e7d0b7ac8ef/tools/external_gym_vllm/cache_sync.sh#L43-L48"><text class="ac" x="162" y="62" font-size="12.5">every node copies the whole folder, file by file</text></a>
+  <text class="r" x="162" y="86" font-size="12.5">4 nodes × 82k files = 328k file opens at once</text>
+  <rect class="boxg" x="546" y="40" width="380" height="64" rx="6"/>
+  <text class="t" x="558" y="62" font-size="12.5">one node per job packs megatron.tar</text>
+  <text class="g" x="558" y="86" font-size="12.5">each node opens 1 file   · C8</text>
+  <!-- row 2 -->
+  <rect class="lane" x="0" y="118" width="940" height="80" rx="6"/>
+  <text class="t" x="14" y="148" font-size="13" font-weight="600">Every 60 s</text><text class="d" x="14" y="166" font-size="12">write-back</text>
+  <rect class="boxr" x="150" y="126" width="390" height="64" rx="6"/>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/b2782355db063950c672fe127a390e7d0b7ac8ef/tools/external_gym_vllm/cache_sync.sh#L57-L61"><text class="ac" x="162" y="148" font-size="12.5">each node re-sends every file it compiled</text></a>
+  <text class="r" x="162" y="172" font-size="12.5">same list each pass, for the whole job</text>
+  <rect class="boxg" x="546" y="126" width="380" height="64" rx="6"/>
+  <text class="t" x="558" y="148" font-size="12.5">a cutoff marker moves forward after each pass</text>
+  <text class="g" x="558" y="172" font-size="12.5">each file is sent once   · C7</text>
+  <!-- row 3 -->
+  <rect class="lane" x="0" y="204" width="940" height="80" rx="6"/>
+  <text class="t" x="14" y="234" font-size="13" font-weight="600">Trainer copy</text><text class="d" x="14" y="252" font-size="12">in background</text>
+  <rect class="boxr" x="150" y="212" width="390" height="64" rx="6"/>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/b2782355db063950c672fe127a390e7d0b7ac8ef/tools/external_gym_vllm/cache_sync.sh#L45-L50"><text class="ac" x="162" y="234" font-size="12.5">"copied" marker is written when the copy ends</text></a>
+  <text class="r" x="162" y="258" font-size="12.5">kernels built during the copy: never sent</text>
+  <rect class="boxg" x="546" y="212" width="380" height="64" rx="6"/>
+  <text class="t" x="558" y="234" font-size="12.5">marker gets the copy's start time</text>
+  <text class="g" x="558" y="258" font-size="12.5">those kernels are sent   · C5</text>
+  <!-- row 4 -->
+  <rect class="lane" x="0" y="290" width="940" height="80" rx="6"/>
+  <text class="t" x="14" y="320" font-size="13" font-weight="600">Node joins</text><text class="d" x="14" y="338" font-size="12">later</text>
+  <rect class="boxr" x="150" y="298" width="390" height="64" rx="6"/>
+  <text class="t" x="162" y="320" font-size="12.5">worker copies in; nobody starts write-back</text>
+  <text class="r" x="162" y="344" font-size="12.5">its new kernels are never shared</text>
+  <rect class="boxg" x="546" y="298" width="380" height="64" rx="6"/>
+  <text class="t" x="558" y="320" font-size="12.5">worker runs node-start: copy + ONE loop</text>
+  <text class="g" x="558" y="344" font-size="12.5">no launcher setup needed   · C10</text>
+  <!-- row 5 -->
+  <rect class="lane" x="0" y="376" width="940" height="80" rx="6"/>
+  <text class="t" x="14" y="406" font-size="13" font-weight="600">Engine spans</text><text class="d" x="14" y="424" font-size="12">2+ nodes</text>
+  <rect class="boxr" x="150" y="384" width="390" height="64" rx="6"/>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/b2782355db063950c672fe127a390e7d0b7ac8ef/nemo_rl/models/generation/vllm/vllm_worker.py#L805"><text class="ac" x="162" y="406" font-size="12.5">only the NeMo-RL actor's node is copied in</text></a>
+  <text class="r" x="162" y="430" font-size="12.5">other nodes' GPUs compile cold every job</text>
+  <rect class="boxg" x="546" y="384" width="380" height="64" rx="6"/>
+  <text class="t" x="558" y="406" font-size="12.5">start-up hook in each vLLM GPU worker</text>
+  <text class="g" x="558" y="430" font-size="12.5">every node copied in   · C15</text>
+</svg>
+</div>
+<p style="font-size:13px;color:var(--dim);margin:2px 0 0">Red = extra load on the shared filesystem, or cache work that is lost. Green = the fix the review asks for. Underlined text links to the code.</p>
+
+<ol class="steps">
+  <li><b>Job start:</b> <code>seed</code> runs <code>rsync -a</code> over the whole type folder on every node. The repo's own large-model launcher <a href="https://github.com/NVIDIA-NeMo/RL/blob/b2782355db063950c672fe127a390e7d0b7ac8ef/examples/nemo_gym/nemotron-3-ultra/ultra_launch.sh#L635-L638">reads one tarball per cache</a> to avoid this.</li>
+  <li><b>Every 60 s:</b> write-back lists files "newer than the copy-in" and older than 1 minute. Nothing records what was already sent, so the list never shrinks, and <code>rsync</code> looks up every listed file on the shared side again. In a local test, 500 files were sent on each of three passes.</li>
+  <li><b>Trainer copy:</b> the Megatron worker copies in the background. Anything it compiles before the copy ends looks older than the marker, so it is skipped this job and every later one.</li>
+  <li><b>Late nodes:</b> only <code>SETUP_COMMAND</code> starts the write-back loop. It needs a stop file that becomes <code>/ENDED</code>, and it starts an extra loop on every <code>ray start</code> retry.</li>
+  <li><b>Multi-node engines:</b> the vLLM start-up hook that would copy in on the engine's other nodes is in the description but not in the diff.</li>
+</ol>
+<p class="cref">
+<a href="https://github.com/NVIDIA-NeMo/RL/pull/4715#discussion_r4421460729">C8 — cache_sync.sh:43</a>
+<a href="https://github.com/NVIDIA-NeMo/RL/pull/4715#discussion_r4421460595">C7 — cache_sync.sh:57</a>
+<a href="https://github.com/NVIDIA-NeMo/RL/pull/4715#discussion_r4418781127">C5 — megatron_policy_worker.py:841</a>
+<a href="https://github.com/NVIDIA-NeMo/RL/pull/4715#discussion_r4421460968">C10 — cache_sync.sh:95</a>
+<a href="https://github.com/NVIDIA-NeMo/RL/pull/4715#discussion_r4421461510">C15 — compile_cache.py:48</a>
+</p>
+
+<h2>The biggest fix, proposed: send each file once</h2>
+<p class="where"><b>Where the fix lands: one function,</b> <a href="https://github.com/NVIDIA-NeMo/RL/blob/b2782355db063950c672fe127a390e7d0b7ac8ef/tools/external_gym_vllm/cache_sync.sh#L53-L70"><code>writeback()</code></a> in <code>cache_sync.sh</code>. Nothing below is implemented; it is the change C7 asks for.</p>
+<pre class="diff"><span class="hunk">@@ cache_sync.sh L57-L59 · writeback</span>
+<span class="del">-  [[ -e "${src}.seeded" ]] &amp;&amp; newer=(-newer "${src}.seeded")
+-  list="$(mktemp)"
+-  (cd "${src}" &amp;&amp; find . -type f -mmin "+${CACHE_SYNC_MIN_AGE_MIN:-1}" "${newer[@]}") &gt;"${list}"
+</span><span class="add">+  # Send each settled file once: list only files between the last successful
++  # pass and "now minus the age limit", then move the cutoff forward.
++  local age=${CACHE_SYNC_MIN_AGE_MIN:-1} since="${src}.cutoff"
++  [[ -e "${since}" ]] || since="${src}.seeded"
++  touch -d "@$(( $(date +%s) - 60 * age ))" "${src}.cutoff.new"
++  list="$(mktemp)"
++  (cd "${src}" &amp;&amp; find . -type f -newer "${since}" ! -newer "${src}.cutoff.new") &gt;"${list}"
+</span><span class="hunk">@@ cache_sync.sh L61-L63 · writeback, after rsync</span>
+     rsync -a --ignore-existing --files-from="${list}" "${src}/" "${dst}/"
+     rc=$?
+<span class="add">+    (( rc == 0 || rc == 24 )) &amp;&amp; mv "${src}.cutoff.new" "${src}.cutoff"</span></pre>
+<p style="font-size:14px">With this, the 4-node example sends the ~82,000 trainer files once over the whole job, instead of re-checking them on every 60 s pass. The same comment also asks for an owner file inside the lock folder, so a slow writer can't delete the next writer's lock.</p>
+
+<div class="warn"><b>One more blocker, separate from load.</b> vLLM 0.29.0's cache key includes
+<a href="https://github.com/vllm-project/vllm/blob/v0.29.0/vllm/envs.py#L1433"><code>VLLM_RAY_BUNDLE_INDICES</code></a>, and NeMo-RL
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/b2782355db063950c672fe127a390e7d0b7ac8ef/nemo_rl/models/generation/vllm/vllm_worker.py#L614-L619">sets it per engine</a> when TP×PP &gt; 1. So with TP&gt;1, no two engines share a cache, and the shared copy mostly misses until that patch lands.
+<p class="cref"><a href="https://github.com/NVIDIA-NeMo/RL/pull/4715#discussion_r4418781096">C3 — vllm_worker.py:343</a> <a href="https://github.com/NVIDIA-NeMo/RL/pull/4715#discussion_r4418781115">C4 — vllm_worker.py:335</a></p></div>
+
+<div class="hl"><b>So what.</b> The write-back idea (only new files, never overwrite, one writer at a time) is sound and better than the earlier attempt. The load problems are fixable in <code>cache_sync.sh</code>: read one tarball per type, and send each file once. Two more changes make the feature safe to turn on for any node: one <code>node-start</code> command run by the worker, and a guide (<a href="https://github.com/NVIDIA-NeMo/RL/pull/4715#discussion_r4421461165">C12</a>) with the script interface a Kubernetes/S3 setup can implement. The comment links work for everyone once the review is published.</div>
+
+</div>
+</body>
+</html>
