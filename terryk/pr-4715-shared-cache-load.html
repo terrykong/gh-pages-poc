@@ -138,8 +138,8 @@ An earlier version of this feature was turned off for exactly that. Dotted words
   <text class="t" x="162" y="398" font-size="12.5">worker copies in; nobody starts write-back</text>
   <text class="r" x="162" y="422" font-size="12.5">its new kernels are never shared</text>
   <rect class="boxg" x="546" y="376" width="380" height="62" rx="6"/>
-  <text class="t" x="558" y="398" font-size="12.5">worker runs node-start: copy + ONE loop</text>
-  <text class="g" x="558" y="422" font-size="12.5">no launcher setup needed   · C10</text>
+  <text class="t" x="558" y="398" font-size="12.5">not asked yet: add a node-start command</text>
+  <text class="d" x="558" y="422" font-size="12.5">to cache_sync.sh when autoscaling lands</text>
   <!-- row 6 -->
   <rect class="lane" x="0" y="452" width="940" height="62" rx="6"/>
   <text class="t" x="14" y="478" font-size="13" font-weight="600">vLLM engine</text><text class="d" x="14" y="496" font-size="12">on 2+ nodes</text>
@@ -186,9 +186,9 @@ release the lock; shared += new
 <tr><td><b>Trainer copy</b><br><span style="color:var(--dim)">background, C5</span></td>
 <td>At 0:00 the trainer starts copying 82k files in the background, which takes about 5 min. At 3:00 step 1 compiles kernel <b>K</b>. At 5:00 the copy ends and the "copied" marker gets the time 5:00. Write-back only sends files newer than the marker, so K (3:00) looks like part of the copy and is never sent, in this job or any later one.</td>
 <td>"New" means "its name is not in any shared <code>.idx</code>". K's name isn't there, so the next pass sends it. Times no longer matter.</td></tr>
-<tr><td><b>Node joins later</b><br><span style="color:var(--dim)">autoscaling, C10</span></td>
+<tr><td><b>Node joins later</b><br><span style="color:var(--dim)">autoscaling</span></td>
 <td>Two hours in, node 5 joins, runs <code>ray start</code>, and gets a vLLM worker. The worker copies the cache in, which works. But only the launcher's <code>SETUP_COMMAND</code> starts the write-back loop, so nothing node 5 compiles is ever shared.</td>
-<td>The worker itself runs <code>node-start</code>: copy in, then start <b>one</b> write-back loop per node. A node lock stops a second worker from starting another loop. Any launcher, or none, works.</td></tr>
+<td>Not asked in this review, since there is no node-join path yet. When autoscaling lands, a small <code>node-start</code> command in <code>cache_sync.sh</code> (copy in, then start <b>one</b> write-back loop per node, behind a node lock) covers it.</td></tr>
 <tr><td><b>vLLM engine on 2+ nodes</b><br><span style="color:var(--dim)">C15</span></td>
 <td>A TP=8 engine on two 4-GPU nodes: the NeMo-RL actor runs on node 1, so only node 1 is copied in. Node 2's GPUs (ranks 4–7) start with an empty cache and compile cold, every job. Write-back skips node 2 too, because it never got a "copied" marker.</td>
 <td>A start-up hook in each vLLM GPU worker process (described in the PR, not in the diff) runs the copy-in on its own node, so node 2 is copied in and publishes its ranks 4–7.</td></tr>
@@ -198,7 +198,6 @@ release the lock; shared += new
 <p class="cref">
 <a href="https://github.com/NVIDIA-NeMo/RL/pull/4715#discussion_r4421618524">C16 — cache_sync.sh:40</a>
 <a href="https://github.com/NVIDIA-NeMo/RL/pull/4715#discussion_r4418781127">C5 — megatron_policy_worker.py:841</a>
-<a href="https://github.com/NVIDIA-NeMo/RL/pull/4715#discussion_r4421460968">C10 — cache_sync.sh:95</a>
 <a href="https://github.com/NVIDIA-NeMo/RL/pull/4715#discussion_r4421461510">C15 — compile_cache.py:48</a>
 </p>
 
