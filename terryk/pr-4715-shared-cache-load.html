@@ -106,7 +106,7 @@ An earlier version of this feature was turned off for exactly that. Dotted words
   <text class="g" x="558" y="86" font-size="12.5">tens of large reads per node, not 88k opens</text>
   <!-- row 2 -->
   <rect class="lane" x="0" y="116" width="940" height="78" rx="6"/>
-  <text class="t" x="14" y="146" font-size="13" font-weight="600">Every 60 s</text><text class="d" x="14" y="164" font-size="12">write-back</text>
+  <text class="t" x="14" y="146" font-size="13" font-weight="600">Every few min</text><text class="d" x="14" y="164" font-size="12">write-back</text>
   <rect class="boxr" x="150" y="124" width="390" height="62" rx="6"/>
   <a href="https://github.com/NVIDIA-NeMo/RL/blob/b2782355db063950c672fe127a390e7d0b7ac8ef/tools/external_gym_vllm/cache_sync.sh#L57-L61"><text class="ac" x="162" y="146" font-size="12.5">each node re-sends every file it compiled</text></a>
   <text class="r" x="162" y="170" font-size="12.5">same full list every pass, for the whole job</text>
@@ -153,7 +153,7 @@ An earlier version of this feature was turned off for exactly that. Dotted words
 </div>
 <p style="font-size:13px;color:var(--dim);margin:2px 0 0">Red = extra load on the shared filesystem, or cache work that is lost. Green = what the review asks for. Underlined text links to the code.</p>
 
-<h2>One 60-second write-back pass, step by step</h2>
+<h2>One write-back pass, step by step</h2>
 <p>Node 2, folder <code>policy/vllm</code>. At job start it unpacked <b>6,000</b> files from the shared archives. Since then its engines compiled <b>50</b> new files: <b>42</b> have not changed for over a minute, <b>8</b> are newer.</p>
 <pre><code><span class="c"># proposed, not implemented: what one pass does, per compiler folder</span>
 local   = files under policy/vllm/ unchanged for &gt; 1 min        <span class="c"># 6,042 = 6,000 unpacked + 42 settled</span>
@@ -174,7 +174,7 @@ release the lock; shared += new
 <tr><td>A reader sees a half-written archive</td><td>Written as <code>.tmp</code>, then renamed; a rename within a folder is atomic, and readers skip <code>.tmp</code>.</td></tr>
 <tr><td>Two nodes send the same kernels</td><td>The lock plus the <code>.idx</code> re-check skip them. If both still send, it is a harmless duplicate: unpacking keeps the first copy, and the content is the same.</td></tr>
 <tr><td>A writer is killed mid-pack</td><td>Only a <code>.tmp</code> is left. It is ignored and cleaned up later.</td></tr>
-<tr><td>Too many small archives over time</td><td>Optional merge (can be a follow-up PR): one process combines them into a base archive, lists what it replaced, and deletes old ones only after a grace period. It uses its <b>own</b> lock, never the writers' lock, so nodes keep publishing while it runs. It reads the shared archives, so it already has every node's files.</td></tr>
+<tr><td>Small archives pile up</td><td>Merge at job start: one process (e.g. the driver) combines them into one archive per folder, lists what it replaced, and deletes old ones only after a grace period. It uses its <b>own</b> lock, never the writers' lock, so nodes keep publishing while it runs. It reads the shared archives, so it already has every node's files.</td></tr>
 <tr><td>A TP or CP change on the next job</td><td>Kernels whose shapes changed just miss and recompile. Inductor's cache key includes the graph and its input shapes, and it re-checks shape guards on load (<a href="https://github.com/pytorch/pytorch/blob/v2.11.0/torch/_inductor/codecache.py#L1396-L1452">codecache.py</a>). Triton keys on source, compile-time constants and specializations (<a href="https://github.com/triton-lang/triton/blob/v3.6.0/python/triton/compiler/compiler.py#L71-L75">compiler.py</a>).</td></tr>
 </table>
 <h2>The other rows, one example each</h2>
@@ -204,7 +204,7 @@ release the lock; shared += new
 
 <div class="bg"><b>Not covered by this review: vLLM engines with TP&gt;1 share less.</b> vLLM 0.29.0's cache key includes <a href="https://github.com/vllm-project/vllm/blob/v0.29.0/vllm/envs.py#L1433"><code>VLLM_RAY_BUNDLE_INDICES</code></a>, which NeMo-RL <a href="https://github.com/NVIDIA-NeMo/RL/blob/b2782355db063950c672fe127a390e7d0b7ac8ef/nemo_rl/models/generation/vllm/vllm_worker.py#L614-L619">sets per engine</a> when TP×PP &gt; 1. Nothing breaks: an engine that gets the same GPU slots next job still hits, but different engines don't share. vLLM fixes this upstream (<a href="https://github.com/vllm-project/vllm/pull/61211">vllm#61211</a>), so it improves on a later vLLM upgrade with no patch to maintain.<p class="cref"><a href="https://github.com/NVIDIA-NeMo/RL/pull/4715#discussion_r4418781115">C4 — vllm_worker.py:335</a> <a href="https://github.com/NVIDIA-NeMo/RL/pull/4715#discussion_r4421801362">C17 — vllm_worker.py:343</a></p></div>
 
-<div class="hl"><b>So what.</b> The PR's write-back idea (only new files, never overwrite, one writer at a time) stays. Storing each folder as a few compressed archives turns ~352k file opens per job start into tens of large reads per node, and each 60 s pass sends a file at most once. The comment links work for everyone once the review is published.</div>
+<div class="hl"><b>So what.</b> The PR's write-back idea (only new files, never overwrite, one writer at a time) stays. Storing each folder as a few compressed archives turns ~352k file opens per job start into tens of large reads per node, and each write-back pass, every few minutes, sends a file at most once. Each job starts from one archive per folder. The comment links work for everyone once the review is published.</div>
 
 </div>
 </body>
