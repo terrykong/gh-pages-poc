@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PR #4674 stack — NeMo-RL's vLLM changes on a stock vLLM server</title>
+<style>
+:root{--bg:#0d1117;--surface:#161b22;--surface2:#1c2128;--border:#30363d;--text:#e6edf3;--dim:#8b949e;
+  --accent:#58a6ff;--green:#3fb950;--red:#f85149;--orange:#d29922}
+:root[data-theme="light"]{--bg:#ffffff;--surface:#f6f8fa;--surface2:#eaeef2;--border:#d0d7de;--text:#1f2328;
+  --dim:#59636e;--accent:#0969da;--green:#1a7f37;--red:#cf222e;--orange:#9a6700}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:28px 20px 70px}
+h1{font-size:22px;margin:0 0 8px;line-height:1.3}
+h2{font-size:18px;margin:30px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+a{color:var(--accent);text-decoration:none} a:hover{text-decoration:underline}
+code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
+.sub{color:var(--dim);font-size:13.5px;margin:0 0 16px}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;font:13px/1 ui-monospace,monospace;cursor:pointer}
+.status{border:1px solid var(--border);border-radius:10px;background:var(--surface);padding:2px 16px 10px;margin:0 0 20px}
+.status dl{display:grid;grid-template-columns:max-content 1fr;gap:4px 14px;margin:12px 0 0}
+.status dt{color:var(--dim);font-size:12px;text-transform:uppercase;letter-spacing:.04em;white-space:nowrap;padding-top:2px}
+.status dd{margin:0;font-size:14px}
+.verdict{font-weight:700} .verdict.open{color:var(--red)}
+nav.chain{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 6px;padding:0}
+nav.chain a,nav.chain span{display:inline-block;padding:5px 11px;border:1px solid var(--border);border-radius:20px;background:var(--surface);text-decoration:none;color:var(--accent);font-size:12.5px;line-height:1.3;white-space:nowrap}
+nav.chain a:hover{background:var(--surface2)}
+nav.chain span.here{background:var(--accent);color:var(--bg);border-color:var(--accent);font-weight:600}
+p.chainnote{color:var(--dim);font-size:12px;margin:0 0 18px}
+.bg{border-left:4px solid var(--accent);background:var(--surface);padding:8px 14px;margin:0 0 16px;font-size:14px}
+.warn{border-left:3px solid var(--orange);background:var(--surface);padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0}
+.where{border-left:4px solid var(--accent);background:var(--surface);padding:6px 12px;margin:6px 0 10px}
+.diff{font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:12px;overflow-x:auto;white-space:pre;margin:10px 0}
+.diff .add{color:var(--green)} .diff .del{color:var(--red)} .diff .hunk{color:var(--accent)}
+.tip{border-bottom:1px dotted var(--dim);cursor:help;position:relative;outline:none}
+.tip:hover::after,.tip:focus::after{content:attr(data-tip);position:absolute;left:0;top:1.7em;z-index:60;width:max-content;max-width:min(340px,80vw);white-space:normal;background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:7px 10px;font:13px/1.45 -apple-system,sans-serif;font-weight:400;box-shadow:0 4px 14px rgba(0,0,0,.3)}
+ol li,ul li{margin:3px 0}
+svg{max-width:100%;height:auto;display:block;margin:14px 0}
+svg .frame{fill:var(--surface);stroke:var(--border);stroke-width:1}
+svg .box{fill:var(--bg);stroke:var(--border);stroke-width:1.2}
+svg .ok{fill:var(--bg);stroke:var(--green);stroke-width:2}
+svg .cp{fill:var(--bg);stroke:var(--orange);stroke-width:2}
+svg .no{fill:var(--bg);stroke:var(--red);stroke-width:2}
+svg .gr{fill:var(--bg);stroke:var(--dim);stroke-width:1.4;stroke-dasharray:5 4}
+svg .hdr{fill:var(--accent);font:bold 13.5px -apple-system,sans-serif}
+svg .hl{fill:var(--text);font:bold 11.5px -apple-system,sans-serif}
+svg .md{fill:var(--dim);font:10.5px ui-monospace,Menlo,monospace}
+svg .okt{fill:var(--green);font:bold 11px -apple-system,sans-serif}
+svg .cpt{fill:var(--orange);font:bold 11px -apple-system,sans-serif}
+svg .not{fill:var(--red);font:bold 11px -apple-system,sans-serif}
+svg .grt{fill:var(--dim);font:bold 11px -apple-system,sans-serif}
+svg .dimt{fill:var(--dim);font:11px -apple-system,sans-serif}
+svg a text{text-decoration:underline;fill:var(--accent)}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head>
+<body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+function wire(){var b=document.getElementById('theme-toggle');if(!b)return;b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+<div class="wrap">
+
+<h1>How NeMo-RL's own changes to vLLM reach a stock vLLM server without importing NeMo-RL, and what gets lost</h1>
+<p class="sub"><a href="https://github.com/NVIDIA-NeMo/RL/pull/4674">#4674</a> at <a href="https://github.com/NVIDIA-NeMo/RL/tree/5d4d76352ab5adf2a00122420baaa9898fbeab93"><code>5d4d7635</code></a> ·
+plugin from <a href="https://github.com/NVIDIA-NeMo/RL/pull/4675">#4675</a> and <a href="https://github.com/NVIDIA-NeMo/RL/pull/4676">#4676</a> at <a href="https://github.com/NVIDIA-NeMo/RL/tree/d10310c6d62c2bbaf4a8d7c9d3fcec015a276efd"><code>d10310c6</code></a> · vLLM <a href="https://github.com/vllm-project/vllm/tree/98dff2a81d747d1dba01a47f939f48c3526d4206">v0.29.0</a></p>
+
+<div class="status"><dl>
+  <dt>Before</dt><dd>NeMo-RL runs vLLM inside its own Ray workers and adds its own code there: a custom chat server, FP8 patches, routed-expert capture, token capture.</dd>
+  <dt>This stack</dt><dd>#4674 runs stock vLLM and turns most of that off. #4675 and #4676 bring part of it back as a separate wheel that loads into <code>vllm serve</code> and never imports NeMo-RL.</dd>
+  <dt>Status</dt><dd><span class="verdict open">Open: router replay and the on-policy checks break with no error, and one copied file already differs from the original.</span> These are review findings on #4675 and #4676, not yet posted.</dd>
+</dl></div>
+
+<nav class="chain">
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4674-stack-overview.html">stack overview</a>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4674-external-vllm.html">refit vs managed vLLM</a>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4674-slurm-launch.html">Slurm launch</a>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4674-feature-gaps.html">what it can't do yet</a>
+  <span class="here">NeMo-RL code in vLLM</span>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4674-colocated-dynamo.html">colocated &amp; Dynamo</a>
+</nav>
+<p class="chainnote">Six pages on this stack, one question each. This one: what NeMo-RL adds inside vLLM, and how a stock server gets it.</p>
+
+<div class="bg"><b>Why NeMo-RL has its own chat server.</b> Gym talks to the model in text. If the server re-tokenizes earlier assistant turns, it can get different token ids than the model actually produced, for example around tool-call whitespace. Training would then score tokens the model never sampled.
+So NeMo-RL's server <span class="tip" tabindex="0" data-tip="Swap the re-rendered history for the exact token ids the model produced earlier, cutting at the matching end-of-turn token, then keep the newly rendered suffix.">splices</span> the exact earlier tokens back into each new prompt (<a href="https://github.com/NVIDIA-NeMo/RL/blob/d10310c6d62c2bbaf4a8d7c9d3fcec015a276efd/nemo_rl/models/generation/openai_server_utils.py#L61-L194"><code>splice_prefix_tokens</code></a>).
+It also checks sampling settings so rollouts stay <span class="tip" tabindex="0" data-tip="Generated by exactly the sampling rule the loss assumes. NeMo-RL forbids top_k and requires top_p to be set, so vLLM can't quietly pick a different value from the model's config.">on-policy</span>, and attaches the experts each token was routed to for MoE <span class="tip" tabindex="0" data-tip="Router replay: the trainer reuses the expert choices vLLM made, so training and generation use the same experts for each token.">router replay</span>.
+Dotted words have a short explanation: hover or tap them.</div>
+
+<p>The external server gets NeMo-RL behavior in two ways. Code that must run inside vLLM is <b>copied</b> into a small wheel whose only dependency is <code>vllm==0.29.0</code>. It loads through vLLM's <a href="https://github.com/NVIDIA-NeMo/RL/blob/d10310c6d62c2bbaf4a8d7c9d3fcec015a276efd/tools/external_rollout_vllm/nemo_rl_vllm_prefix_plugin/pyproject.toml#L12-L13"><code>vllm.endpoint_plugins</code></a> hook and <a href="https://github.com/NVIDIA-NeMo/RL/blob/d10310c6d62c2bbaf4a8d7c9d3fcec015a276efd/tools/external_rollout_vllm/nemo_rl_vllm_prefix_plugin/src/nemo_rl_vllm_prefix_plugin/plugin.py#L60-L160">replaces the chat route</a>.
+Code that needs NeMo-RL's data plane <b>stays on the controller</b>, and the plugin reaches it over HTTP. The figure lists every add-on and where it ended up.</p>
+
+<svg viewBox="0 0 960 520" role="img" aria-label="Each NeMo-RL vLLM add-on and its fate on the external server">
+  <rect class="frame" x="6" y="6" width="948" height="508" rx="10"/>
+  <text class="hdr" x="20" y="30">Managed NeMo-RL vLLM (today)</text>
+  <text class="hdr" x="520" y="30">External vllm serve + plugin wheel</text>
+
+  <!-- row 1 -->
+  <rect class="box" x="20" y="44" width="440" height="46" rx="6"/>
+  <text class="hl" x="30" y="63">Exact-token prefix splice</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/d10310c6d62c2bbaf4a8d7c9d3fcec015a276efd/nemo_rl/models/generation/openai_server_utils.py#L61-L194"><text class="md" x="30" y="81">splice_prefix_tokens: eos set, media cut points</text></a>
+  <rect class="cp" x="520" y="44" width="420" height="46" rx="6"/>
+  <text class="cpt" x="530" y="63">Copied; code already differs</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/d10310c6d62c2bbaf4a8d7c9d3fcec015a276efd/tools/external_rollout_vllm/nemo_rl_vllm_prefix_plugin/src/nemo_rl_vllm_prefix_plugin/prefix.py#L20-L40"><text class="md" x="530" y="81">prefix.py: one eos id, ids only · 3-case parity test</text></a>
+
+  <!-- row 2 -->
+  <rect class="box" x="20" y="100" width="440" height="46" rx="6"/>
+  <text class="hl" x="30" y="119">On-policy sampling checks</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/5d4d76352ab5adf2a00122420baaa9898fbeab93/nemo_rl/models/generation/vllm/vllm_worker_async.py#L1469-L1500"><text class="md" x="30" y="137">assert top_k in (None, -1) · assert top_p is set</text></a>
+  <rect class="no" x="520" y="100" width="420" height="46" rx="6"/>
+  <text class="not" x="530" y="119">Missing</text>
+  <text class="md" x="530" y="137">plugin route has no top_k / top_p check</text>
+
+  <!-- row 3 -->
+  <rect class="box" x="20" y="156" width="440" height="46" rx="6"/>
+  <text class="hl" x="30" y="175">Token capture into TransferQueue</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/5d4d76352ab5adf2a00122420baaa9898fbeab93/nemo_rl/models/generation/vllm/vllm_worker_async.py#L593-L677"><text class="md" x="30" y="193">in-process TQTokenSink + Gym capture core</text></a>
+  <rect class="ok" x="520" y="156" width="420" height="46" rx="6"/>
+  <text class="okt" x="530" y="175">Moved to the controller (#4676)</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/d10310c6d62c2bbaf4a8d7c9d3fcec015a276efd/nemo_rl/models/generation/remote_vllm/token_capture_bridge.py#L15-L45"><text class="md" x="530" y="193">plugin POSTs {ids, logprobs} → bridge → TQ</text></a>
+
+  <!-- row 4 -->
+  <rect class="box" x="20" y="212" width="440" height="46" rx="6"/>
+  <text class="hl" x="30" y="231">Router replay: routed experts</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/5d4d76352ab5adf2a00122420baaa9898fbeab93/nemo_rl/models/generation/vllm/utils.py#L499-L575"><text class="md" x="30" y="249">message.routed_experts = "nrlre1:…" padded, aligned</text></a>
+  <rect class="no" x="520" y="212" width="420" height="46" rx="6"/>
+  <text class="not" x="530" y="231">Broken, no error at startup</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/d10310c6d62c2bbaf4a8d7c9d3fcec015a276efd/tools/external_rollout_vllm/nemo_rl_vllm_prefix_plugin/src/nemo_rl_vllm_prefix_plugin/capture_runtime.py#L197-L203"><text class="md" x="530" y="249">reads message.*; vLLM puts .npy on choice.*</text></a>
+
+  <!-- row 5 -->
+  <rect class="box" x="20" y="268" width="440" height="46" rx="6"/>
+  <text class="hl" x="30" y="287">FP8 / MXFP8 / NVFP4 refit patches</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/5d4d76352ab5adf2a00122420baaa9898fbeab93/nemo_rl/models/generation/vllm/quantization/fp8.py#L141-L191"><text class="md" x="30" y="305">patched into every worker before load</text></a>
+  <rect class="no" x="520" y="268" width="420" height="46" rx="6"/>
+  <text class="not" x="530" y="287">Missing, no check</text>
+  <text class="md" x="530" y="305">preflight never reads the server's quantization</text>
+
+  <!-- row 6 -->
+  <rect class="box" x="20" y="324" width="440" height="46" rx="6"/>
+  <text class="hl" x="30" y="343">vLLM bug-fix patches (patches.py)</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/5d4d76352ab5adf2a00122420baaa9898fbeab93/tools/external_gym_vllm/serve_vllm_on_ray.py#L29-L56"><text class="md" x="30" y="361">judge pools load it with runpy, no nemo_rl import</text></a>
+  <rect class="gr" x="520" y="324" width="420" height="46" rx="6"/>
+  <text class="grt" x="530" y="343">Not applied</text>
+  <text class="md" x="530" y="361">impact on one plain vllm serve not checked</text>
+
+  <!-- row 7 -->
+  <rect class="box" x="20" y="380" width="440" height="46" rx="6"/>
+  <text class="hl" x="30" y="399">ModelOpt quant, draft weights, KV scales</text>
+  <text class="md" x="30" y="417">worker extension + refit</text>
+  <rect class="gr" x="520" y="380" width="420" height="46" rx="6"/>
+  <text class="grt" x="530" y="399">Refused with a clear error</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/5d4d76352ab5adf2a00122420baaa9898fbeab93/nemo_rl/weight_sync/factory.py#L147-L156"><text class="md" x="530" y="417">factory.py: "does not support quant_cfg or draft"</text></a>
+
+  <!-- row 8 -->
+  <rect class="box" x="20" y="436" width="440" height="46" rx="6"/>
+  <text class="hl" x="30" y="455">Colocated CUDA IPC refit</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/5d4d76352ab5adf2a00122420baaa9898fbeab93/nemo_rl/models/generation/vllm/vllm_backend.py#L1599-L1750"><text class="md" x="30" y="473">ZMQ + IPC handles, same GPU</text></a>
+  <rect class="gr" x="520" y="436" width="420" height="46" rx="6"/>
+  <text class="grt" x="530" y="455">Refused (not colocated)</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/5d4d76352ab5adf2a00122420baaa9898fbeab93/nemo_rl/models/generation/remote_vllm/remote_vllm_generation.py#L55-L56"><text class="md" x="530" y="473">"remote_vllm generation cannot be colocated"</text></a>
+
+  <text class="dimt" x="20" y="503">Border: green = works · orange = copied code · red = silently wrong or missing · dashed gray = off, by choice or refused</text>
+</svg>
+
+<h2>The two bugs that would bite first</h2>
+<ol>
+<li><b>Router replay reads the wrong field.</b> Stock vLLM 0.29.0 can return routes. With <code>--enable-return-routed-experts</code>, it puts base64 <code>.npy</code> data on the <b>choice</b>, shaped <code>[tokens − 1, layers, experts per token]</code> (<a href="https://github.com/vllm-project/vllm/blob/98dff2a81d747d1dba01a47f939f48c3526d4206/vllm/entrypoints/openai/chat_completion/protocol.py#L114-L123">protocol.py</a>). The plugin looks on the <b>message</b>, so it always finds nothing. Even with the right field, NeMo-RL expects its own <code>nrlre1</code> envelope with padded, aligned rows, and nothing converts between them.
+Setup also <a href="https://github.com/NVIDIA-NeMo/RL/blob/d10310c6d62c2bbaf4a8d7c9d3fcec015a276efd/nemo_rl/algorithms/single_controller_utils/setup.py#L646-L663">turns route return on only for managed vLLM</a>, but still tells Gym to expect routes. So a router-replay run fails late, inside Gym, instead of at startup.</li>
+<li><b>The on-policy checks are gone.</b> In the managed server, every request passes <a href="https://github.com/NVIDIA-NeMo/RL/blob/5d4d76352ab5adf2a00122420baaa9898fbeab93/nemo_rl/models/generation/vllm/vllm_worker_async.py#L1469-L1500">two asserts</a>: <code>top_k</code> must be unset, and <code>top_p</code> must be set explicitly. Without the second one, vLLM fills an unset <code>top_p</code> from the model's <code>generation_config.json</code>, for example 0.95 for Qwen3. Training then assumes the <code>top_p</code> from NeMo-RL's config (often 1.0), while vLLM actually sampled only from the top 95%. The plugin's route has neither check.</li>
+</ol>
+
+<h2>How to share one copy — proposed, not in any PR</h2>
+<p>Nothing below is implemented. The copying already shows strain. The prefix copy's docstring says <a href="https://github.com/NVIDIA-NeMo/RL/blob/d10310c6d62c2bbaf4a8d7c9d3fcec015a276efd/tools/external_rollout_vllm/nemo_rl_vllm_prefix_plugin/src/nemo_rl_vllm_prefix_plugin/prefix.py#L27-L31">"keep this behaviorally identical"</a>, but NeMo-RL's version now accepts a set of end-of-turn ids and records media cut points. The copy does neither. For text-only vLLM the two still give the same tokens, because managed vLLM passes a single id too. The next caller that relies on the set will find the copy behind, and the <a href="https://github.com/NVIDIA-NeMo/RL/blob/25723333245835cfd5f995bf2187f8d23c50108d/tests/unit/tools/test_vllm_prefix_plugin.py#L110-L132">3-case parity test</a> won't notice.</p>
+<p>Main already has a second way to share code: the judge-pool launcher runs <code>patches.py</code> straight from the source checkout with <code>runpy</code>. That works only because <code>patches.py</code> imports nothing but the standard library. #4675 copies code into a wheel instead. Two ways of sharing code, and neither covers everything.</p>
+<p class="where"><b>Where it lands: RL only.</b> One new in-repo package, for example <code>nemo_rl_vllm_ext/</code>, allowed to import only <code>vllm</code>, numpy and the standard library. It holds the full prefix splice, the sampling checks, the routed-expert codec plus a stock-<code>.npy</code> converter, the chat-route override, the capture client and <code>patches.py</code>.
+Both <code>openai_server_utils.py</code> / <code>vllm_worker_async.py</code> and the wheel import from it, so only one copy exists and the parity test can be deleted.
+<code>vllm serve</code> loads it through <code>vllm.endpoint_plugins</code> and <code>vllm.general_plugins</code>. Managed workers call the same register functions. Today the managed path uses no vLLM plugin entry points at all; it monkey-patches and sets a worker extension class.</p>
+
+<div class="warn"><b>So what.</b> Before #4676 merges, it should either read <code>choice.routed_experts</code> and convert it, or refuse <code>remote_vllm</code> with router replay at startup. #4674's preflight should also refuse a quantized server, since it can read that setting from <code>/server_info</code>. The single shared package is the real fix. Without it, every vLLM upgrade means patching two copies of the same chat route, and the copy that drifts first is the one nobody tests.</div>
+
+</div>
+</body>
+</html>

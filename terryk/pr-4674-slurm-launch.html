@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PR #4674 — starting the trainer and an external vLLM on Slurm</title>
+<style>
+:root{--bg:#0d1117;--surface:#161b22;--surface2:#1c2128;--border:#30363d;--text:#e6edf3;--dim:#8b949e;
+  --accent:#58a6ff;--green:#3fb950;--red:#f85149;--orange:#d29922}
+:root[data-theme="light"]{--bg:#ffffff;--surface:#f6f8fa;--surface2:#eaeef2;--border:#d0d7de;--text:#1f2328;
+  --dim:#59636e;--accent:#0969da;--green:#1a7f37;--red:#cf222e;--orange:#9a6700}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:28px 20px 70px}
+h1{font-size:22px;margin:0 0 8px;line-height:1.3}
+h2{font-size:18px;margin:30px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+a{color:var(--accent);text-decoration:none} a:hover{text-decoration:underline}
+code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
+.sub{color:var(--dim);font-size:13.5px;margin:0 0 16px}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;font:13px/1 ui-monospace,monospace;cursor:pointer}
+.status{border:1px solid var(--border);border-radius:10px;background:var(--surface);padding:2px 16px 10px;margin:0 0 20px}
+.status dl{display:grid;grid-template-columns:max-content 1fr;gap:4px 14px;margin:12px 0 0}
+.status dt{color:var(--dim);font-size:12px;text-transform:uppercase;letter-spacing:.04em;white-space:nowrap;padding-top:2px}
+.status dd{margin:0;font-size:14px}
+.verdict{font-weight:700} .verdict.open{color:var(--red)}
+nav.chain{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 6px;padding:0}
+nav.chain a,nav.chain span{display:inline-block;padding:5px 11px;border:1px solid var(--border);border-radius:20px;background:var(--surface);text-decoration:none;color:var(--accent);font-size:12.5px;line-height:1.3;white-space:nowrap}
+nav.chain a:hover{background:var(--surface2)}
+nav.chain span.here{background:var(--accent);color:var(--bg);border-color:var(--accent);font-weight:600}
+p.chainnote{color:var(--dim);font-size:12px;margin:0 0 18px}
+.bg{border-left:4px solid var(--accent);background:var(--surface);padding:8px 14px;margin:0 0 16px;font-size:14px}
+.warn{border-left:3px solid var(--orange);background:var(--surface);padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0}
+.where{border-left:4px solid var(--accent);background:var(--surface);padding:6px 12px;margin:6px 0 10px}
+.diff{font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:12px;overflow-x:auto;white-space:pre;margin:10px 0}
+.diff .add{color:var(--green)} .diff .del{color:var(--red)} .diff .hunk{color:var(--accent)}
+.tip{border-bottom:1px dotted var(--dim);cursor:help;position:relative;outline:none}
+.tip:hover::after,.tip:focus::after{content:attr(data-tip);position:absolute;left:0;top:1.7em;z-index:60;width:max-content;max-width:min(340px,80vw);white-space:normal;background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:7px 10px;font:13px/1.45 -apple-system,sans-serif;font-weight:400;box-shadow:0 4px 14px rgba(0,0,0,.3)}
+ol li,ul li{margin:3px 0}
+svg{max-width:100%;height:auto;display:block;margin:14px 0}
+svg .frame{fill:var(--surface);stroke:var(--border);stroke-width:1}
+svg .life{stroke:var(--border);stroke-width:1.5;stroke-dasharray:4 4}
+svg .head{fill:var(--bg);stroke:var(--accent);stroke-width:1.6}
+svg .hl{fill:var(--text);font:bold 12px -apple-system,sans-serif}
+svg .hs{fill:var(--dim);font:10.5px -apple-system,sans-serif}
+svg .msg{stroke:var(--accent);stroke-width:1.6;fill:none;marker-end:url(#ah-a)}
+svg .msgr{stroke:var(--orange);stroke-width:2;fill:none;marker-end:url(#ah-o)}
+svg .bad{stroke:var(--red);stroke-width:2;fill:none;marker-end:url(#ah-r)}
+svg .mt{fill:var(--text);font:11px ui-monospace,Menlo,monospace}
+svg .md{fill:var(--dim);font:10.5px ui-monospace,Menlo,monospace}
+svg .num{fill:var(--accent);font:bold 11px -apple-system,sans-serif}
+svg .redt{fill:var(--red);font:bold 11px -apple-system,sans-serif}
+svg .ort{fill:var(--orange);font:bold 11px -apple-system,sans-serif}
+svg .dimt{fill:var(--dim);font:11px -apple-system,sans-serif}
+svg .mk-a{fill:var(--accent)} svg .mk-o{fill:var(--orange)} svg .mk-r{fill:var(--red)}
+svg a text{text-decoration:underline;fill:var(--accent)}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head>
+<body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+function wire(){var b=document.getElementById('theme-toggle');if(!b)return;b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+<marker id="ah-a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="mk-a" d="M0,0 L10,5 L0,10 z"/></marker>
+<marker id="ah-o" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="mk-o" d="M0,0 L10,5 L0,10 z"/></marker>
+<marker id="ah-r" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="mk-r" d="M0,0 L10,5 L0,10 z"/></marker>
+</defs></svg>
+<div class="wrap">
+
+<h1>How the trainer and an external vLLM server start on Slurm, in what order, and who tells whom which address</h1>
+<p class="sub"><a href="https://github.com/NVIDIA-NeMo/RL/pull/4674">#4674</a> at
+<a href="https://github.com/NVIDIA-NeMo/RL/tree/5d4d76352ab5adf2a00122420baaa9898fbeab93"><code>5d4d7635</code></a>
+(capture bridge from <a href="https://github.com/NVIDIA-NeMo/RL/pull/4676">#4676</a> at
+<a href="https://github.com/NVIDIA-NeMo/RL/tree/25723333245835cfd5f995bf2187f8d23c50108d"><code>25723333</code></a>, the top of the stack)</p>
+
+<div class="status"><dl>
+  <dt>Before</dt><dd><code>ray.sub</code> starts Ray and the trainer on one plain Slurm allocation. Main also has a separate two-group launcher for fixed judge models.</dd>
+  <dt>This stack</dt><dd>Adds the client side only. The tests start vLLM by hand on the same node. The docs say scheduler launchers are <a href="https://github.com/NVIDIA-NeMo/RL/blob/25723333245835cfd5f995bf2187f8d23c50108d/tools/external_rollout_vllm/README.md">"intentionally kept outside"</a>.</dd>
+  <dt>Status</dt><dd><span class="verdict open">Open: there is no Slurm launcher, and the trainer does not wait for the server.</span> The two-group layout below is a proposal.</dd>
+</dl></div>
+
+<nav class="chain">
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4674-stack-overview.html">stack overview</a>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4674-external-vllm.html">refit vs managed vLLM</a>
+  <span class="here">Slurm launch</span>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4674-feature-gaps.html">what it can't do yet</a>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4674-vllm-addons.html">NeMo-RL code in vLLM</a>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4674-colocated-dynamo.html">colocated &amp; Dynamo</a>
+</nav>
+<p class="chainnote">Six pages on this stack, one question each. This one: how the processes start.</p>
+
+<div class="bg"><b>Background.</b> A Slurm <span class="tip" tabindex="0" data-tip="One sbatch that asks for two different sets of nodes at once (group 0 and group 1). Each srun picks a group with --het-group=N. Both groups start and end together.">heterogeneous job</span> asks for two node sets in one job.
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/5d4d76352ab5adf2a00122420baaa9898fbeab93/ray.sub"><code>ray.sub</code></a> does not know about groups. It reads the whole job's node list.
+Main already works around this in <a href="https://github.com/NVIDIA-NeMo/RL/blob/5d4d76352ab5adf2a00122420baaa9898fbeab93/tools/external_gym_vllm/run_in_allocation.sh#L824-L831"><code>run_in_allocation.sh</code></a>: it runs <code>ray.sub</code> with the node list cut down to group 0.
+Dotted words have a short explanation: hover or tap them.</div>
+
+<p>The server needs nothing from the trainer to start: it loads the model from Hugging Face weights by itself. Everything else flows from <b>one string</b>, the server's URL.
+The trainer reads it from <a href="https://github.com/NVIDIA-NeMo/RL/blob/25723333245835cfd5f995bf2187f8d23c50108d/examples/configs/grpo_external_vllm_single_controller.yaml#L38-L48"><code>remote_vllm_cfg.base_url</code></a> and hands it to Gym.
+The NCCL address goes the other way: the trainer picks its own node's IP and a free port, then <b>tells vLLM to connect to it</b> (<a href="https://github.com/NVIDIA-NeMo/RL/blob/5d4d76352ab5adf2a00122420baaa9898fbeab93/nemo_rl/weight_sync/remote_vllm_nccl_weight_synchronizer.py#L151-L178"><code>init_communicator</code></a>).
+The figure uses an 8-GPU trainer (2 nodes × 4) and one vLLM server with 2 GPUs (TP=2), so the NCCL group has 8 + 2 = 10 ranks.</p>
+
+<svg viewBox="0 0 960 640" role="img" aria-label="Startup sequence across launcher, vLLM, driver, trainer GPUs and Gym">
+  <rect class="frame" x="6" y="6" width="948" height="628" rx="10"/>
+  <!-- lifeline heads -->
+  <rect class="head" x="18" y="18" width="150" height="46" rx="7"/><text class="hl" x="30" y="38">sbatch launcher</text><text class="hs" x="30" y="54">runs once, outside NeMo-RL</text>
+  <rect class="head" x="198" y="18" width="170" height="46" rx="7"/><text class="hl" x="210" y="38">vLLM server</text><text class="hs" x="210" y="54">group 1 · 2 GPUs · ranks 8–9</text>
+  <rect class="head" x="398" y="18" width="170" height="46" rx="7"/><text class="hl" x="410" y="38">driver (Ray head)</text><text class="hs" x="410" y="54">group 0 · runs COMMAND</text>
+  <rect class="head" x="598" y="18" width="160" height="46" rx="7"/><text class="hl" x="610" y="38">trainer GPUs</text><text class="hs" x="610" y="54">group 0 · 8 GPUs · ranks 0–7</text>
+  <rect class="head" x="788" y="18" width="150" height="46" rx="7"/><text class="hl" x="800" y="38">Gym servers</text><text class="hs" x="800" y="54">Ray actors, group 0</text>
+  <line class="life" x1="93" y1="64" x2="93" y2="600"/>
+  <line class="life" x1="283" y1="64" x2="283" y2="600"/>
+  <line class="life" x1="483" y1="64" x2="483" y2="600"/>
+  <line class="life" x1="678" y1="64" x2="678" y2="600"/>
+  <line class="life" x1="863" y1="64" x2="863" y2="600"/>
+
+  <!-- 1 -->
+  <text class="num" x="20" y="92">1</text>
+  <path class="msg" d="M93,98 L279,98"/><text class="mt" x="100" y="92">srun --het-group=1 vllm serve</text>
+  <text class="md" x="292" y="102">loads HF weights · minutes</text>
+  <!-- 2 -->
+  <text class="num" x="20" y="132">2</text>
+  <path class="msg" d="M93,138 L479,138"/><text class="mt" x="100" y="132">ray.sub on group 0, COMMAND has base_url=http://&lt;group-1 IP&gt;:8000/v1</text>
+  <!-- 3 -->
+  <text class="num" x="20" y="176">3</text>
+  <path class="bad" d="M483,182 L287,182"/>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/5d4d76352ab5adf2a00122420baaa9898fbeab93/nemo_rl/models/generation/remote_vllm/preflight.py#L44-L92"><text class="mt" x="296" y="176">preflight: /health /v1/models /version /server_info /get_world_size</text></a>
+  <text class="redt" x="296" y="198">once, 5 s timeout, no retry → job dies if vLLM is still loading</text>
+  <!-- 4 -->
+  <text class="num" x="20" y="232">4</text>
+  <path class="msg" d="M483,238 L859,238"/><text class="mt" x="492" y="232">base_url (policy_base_url) [+ API key]</text>
+  <!-- 5 -->
+  <text class="num" x="20" y="272">5</text>
+  <path class="msg" d="M483,278 L287,278"/>
+  <text class="mt" x="296" y="272">/init_weight_transfer_engine {master: trainer IP:port,</text>
+  <text class="mt" x="296" y="290">rank_offset 8, world_size 10}</text>
+  <path class="msg" d="M483,300 L674,300"/><text class="mt" x="492" y="314">init_collective (same IP:port)</text>
+  <!-- 6 -->
+  <text class="num" x="20" y="344">6</text>
+  <path class="msgr" d="M283,350 L674,350"/><text class="ort" x="296" y="344">vLLM GPUs dial the trainer: NCCL runs opposite to HTTP</text>
+  <!-- 7 -->
+  <text class="num" x="20" y="388">7</text>
+  <path class="msg" d="M483,394 L287,394"/><text class="mt" x="296" y="388">#4676 only: /v1/nemo-rl/token-capture/configure {bridge_url, token}</text>
+  <path class="msgr" d="M283,416 L479,416"/><text class="ort" x="296" y="432">plugin calls driver's bridge on a random port</text>
+  <!-- 8 -->
+  <text class="num" x="20" y="466">8</text>
+  <path class="msg" d="M859,472 L287,472"/><text class="mt" x="560" y="466">rollouts: /v1/chat/completions</text>
+  <!-- 9 -->
+  <text class="num" x="20" y="506">9</text>
+  <path class="msg" d="M483,512 L287,512"/>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/5d4d76352ab5adf2a00122420baaa9898fbeab93/nemo_rl/weight_sync/remote_vllm_nccl_weight_synchronizer.py#L214-L235"><text class="mt" x="296" y="506">each step: /pause /start /update /finish("5") /resume</text></a>
+  <path class="msgr" d="M678,532 L287,532"/><text class="ort" x="420" y="548">NCCL weight bytes, ranks 0 → 8–9</text>
+  <!-- 10 -->
+  <text class="num" x="20" y="580">10</text>
+  <path class="msg" d="M93,586 L279,586"/><text class="mt" x="100" y="580">launcher stops vLLM (NeMo-RL never does)</text>
+
+  <!-- legend -->
+  <line class="msg" x1="560" y1="590" x2="595" y2="590"/><text class="dimt" x="600" y="594">HTTP</text>
+  <line class="msgr" x1="640" y1="590" x2="675" y2="590"/><text class="dimt" x="680" y="594">server → trainer</text>
+  <line class="bad" x1="790" y1="590" x2="825" y2="590"/><text class="dimt" x="830" y="594">gap today</text>
+  <text class="dimt" x="20" y="618">Every orange arrow needs a firewall path from group 1 to group 0.</text>
+</svg>
+
+<h2>Your questions, answered</h2>
+<ol>
+<li><b>One vLLM container or two?</b> One server process and one image are enough. Main's <code>vllm</code> extra already pins <a href="https://github.com/NVIDIA-NeMo/RL/blob/5d4d76352ab5adf2a00122420baaa9898fbeab93/pyproject.toml#L160-L180">vLLM 0.29.0</a>, and the image builds that vLLM env under <code>/opt/ray_venvs</code>. Group 1 can run the training image with that env's Python. Not run yet. The L1 test instead <a href="https://github.com/NVIDIA-NeMo/RL/blob/5d4d76352ab5adf2a00122420baaa9898fbeab93/tests/functional/L1_Functional_Tests_ExternalVllm.sh#L13-L27">installs vLLM from PyPI each run</a>. The vLLM server can still use TP/PP/DP across several GPUs inside that one process tree.</li>
+<li><b>Is <code>ray.sub</code> a heterogeneous job now?</b> No. Nothing in the stack touches it. The natural shape is one sbatch with two groups: group 0 runs <code>ray.sub</code> unchanged (Ray, trainer, Gym), and group 1 runs vLLM. Main's <a href="https://github.com/NVIDIA-NeMo/RL/blob/5d4d76352ab5adf2a00122420baaa9898fbeab93/tools/external_gym_vllm/README.md">judge-pool launcher</a> already does exactly this for fixed judge models. It splits node lists, passes URLs through a placeholder in <code>COMMAND</code>, watches both sides, and shares teardown.</li>
+<li><b>Does one side have to start first?</b> Both groups start together, and that's fine: vLLM needs nothing from the trainer to load. What matters is that <b>the trainer's first call must wait</b> until vLLM is up. Today it doesn't (red arrow 3). Only the test script waits, by polling <code>/health</code> <a href="https://github.com/NVIDIA-NeMo/RL/blob/5d4d76352ab5adf2a00122420baaa9898fbeab93/tests/functional/grpo_external_vllm_gym_single_controller.sh#L39-L52">300 × 2 s</a>.</li>
+<li><b>Who passes which address?</b> The launcher passes the vLLM URL to the trainer (step 2). The trainer passes it to Gym (step 4). The trainer passes its own NCCL address to vLLM (step 5). In capture mode, the trainer also passes a bridge URL and a random token to the plugin (step 7). The API key is the odd one out: <a href="https://github.com/NVIDIA-NeMo/RL/blob/5d4d76352ab5adf2a00122420baaa9898fbeab93/nemo_rl/models/generation/remote_vllm/client.py#L40-L59">the trainer reads it from an env var</a>, but nothing tells vLLM to start with the same <code>--api-key</code>. The launcher has to set both sides.</li>
+</ol>
+
+<h2>What would fix the gap — proposed, not in the PR</h2>
+<p>Nothing below is implemented.</p>
+<p class="where"><b>Where it lands: RL only.</b> <a href="https://github.com/NVIDIA-NeMo/RL/blob/5d4d76352ab5adf2a00122420baaa9898fbeab93/nemo_rl/models/generation/remote_vllm/preflight.py#L44-L49"><code>preflight.py</code></a> waits for <code>/health</code>, and main's launcher gets a "policy" pool shape: one server, no load balancer, URL put straight into <code>base_url</code>. No vLLM change.</p>
+<pre class="diff"><span class="hunk">@@ preflight.py L44-L49 · preflight_remote_vllm_service</span>
+ def preflight_remote_vllm_service(
+     config: RemoteVllmServiceConfig,
+ ) -> RemoteVllmServiceInfo:
+     """Check one vLLM 0.29.0 service and its native NCCL transfer settings."""
+     client = RemoteVllmClient(config)
+<span class="del">-    validate_single_backend(client.health(timeout_s=config.connect_timeout_s))
+</span><span class="add">+    # The launcher starts vLLM and the trainer together; vLLM may still be loading.
++    validate_single_backend(_wait_for_health(client, deadline_s=config.startup_timeout_s))</span></pre>
+<p><code>_wait_for_health</code> retries connection errors until the deadline, then raises the same error as today. <code>startup_timeout_s</code> would be a new config field. The checks after <code>/health</code> stay one-shot, because once the server answers, a wrong version or world size will not fix itself.</p>
+
+<div class="warn"><b>So what.</b> The feature works today only when a person starts vLLM first and waits. To run it as one Slurm job, add a wait to preflight, then reuse main's two-group launcher instead of writing a third one. Also open firewall paths from the vLLM nodes to the trainer nodes, because NCCL (and the #4676 bridge) connect in that direction. A failed refit leaves vLLM paused, and only a restart of both sides recovers it, so tying their lifetimes together in one job is the safer default.</div>
+
+</div>
+</body>
+</html>

@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PR #4674 — colocated external vLLM, and Dynamo</title>
+<style>
+:root{--bg:#0d1117;--surface:#161b22;--surface2:#1c2128;--border:#30363d;--text:#e6edf3;--dim:#8b949e;
+  --accent:#58a6ff;--green:#3fb950;--red:#f85149;--orange:#d29922;--purple:#bc8cff}
+:root[data-theme="light"]{--bg:#ffffff;--surface:#f6f8fa;--surface2:#eaeef2;--border:#d0d7de;--text:#1f2328;
+  --dim:#59636e;--accent:#0969da;--green:#1a7f37;--red:#cf222e;--orange:#9a6700;--purple:#8250df}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:28px 20px 70px}
+h1{font-size:22px;margin:0 0 8px;line-height:1.3}
+h2{font-size:18px;margin:30px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+a{color:var(--accent);text-decoration:none} a:hover{text-decoration:underline}
+code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
+.sub{color:var(--dim);font-size:13.5px;margin:0 0 16px}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;font:13px/1 ui-monospace,monospace;cursor:pointer}
+.status{border:1px solid var(--border);border-radius:10px;background:var(--surface);padding:2px 16px 10px;margin:0 0 20px}
+.status dl{display:grid;grid-template-columns:max-content 1fr;gap:4px 14px;margin:12px 0 0}
+.status dt{color:var(--dim);font-size:12px;text-transform:uppercase;letter-spacing:.04em;white-space:nowrap;padding-top:2px}
+.status dd{margin:0;font-size:14px}
+.verdict{font-weight:700;color:var(--orange)}
+nav.chain{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 6px;padding:0}
+nav.chain a,nav.chain span{display:inline-block;padding:5px 11px;border:1px solid var(--border);border-radius:20px;background:var(--surface);text-decoration:none;color:var(--accent);font-size:12.5px;line-height:1.3;white-space:nowrap}
+nav.chain a:hover{background:var(--surface2)}
+nav.chain span.here{background:var(--accent);color:var(--bg);border-color:var(--accent);font-weight:600}
+p.chainnote{color:var(--dim);font-size:12px;margin:0 0 18px}
+.bg{border-left:4px solid var(--accent);background:var(--surface);padding:8px 14px;margin:0 0 16px;font-size:14px}
+.warn{border-left:3px solid var(--orange);background:var(--surface);padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0}
+.tip{border-bottom:1px dotted var(--dim);cursor:help;position:relative;outline:none}
+.tip:hover::after,.tip:focus::after{content:attr(data-tip);position:absolute;left:0;top:1.7em;z-index:60;width:max-content;max-width:min(340px,80vw);white-space:normal;background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:7px 10px;font:13px/1.45 -apple-system,sans-serif;font-weight:400;box-shadow:0 4px 14px rgba(0,0,0,.3)}
+.tbl{overflow-x:auto}
+table{border-collapse:collapse;width:100%;font-size:13.5px;margin:10px 0}
+th,td{border:1px solid var(--border);padding:6px 9px;text-align:left;vertical-align:top}
+th{background:var(--surface)}
+ul li,ol li{margin:3px 0}
+svg{max-width:100%;height:auto;display:block;margin:14px 0}
+svg .frame{fill:var(--surface);stroke:var(--border);stroke-width:1}
+svg .tr{fill:var(--accent);opacity:.85}
+svg .vw{fill:var(--green);opacity:.85}
+svg .kv{fill:var(--purple);opacity:.85}
+svg .off{fill:none;stroke:var(--dim);stroke-width:1.2;stroke-dasharray:4 3}
+svg .col{fill:var(--bg);stroke:var(--border);stroke-width:1}
+svg .hl{fill:var(--text);font:bold 12px -apple-system,sans-serif}
+svg .call{fill:var(--text);font:10.5px ui-monospace,Menlo,monospace}
+svg .dimt{fill:var(--dim);font:11px -apple-system,sans-serif}
+svg .redt{fill:var(--red);font:bold 11.5px -apple-system,sans-serif}
+svg .lab{fill:var(--bg);font:bold 10.5px -apple-system,sans-serif}
+svg a text{text-decoration:underline;fill:var(--accent)}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head>
+<body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+function wire(){var b=document.getElementById('theme-toggle');if(!b)return;b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+<div class="wrap">
+
+<h1>Could an external vLLM share GPUs with the trainer, and could Dynamo be the external server?</h1>
+<p class="sub"><a href="https://github.com/NVIDIA-NeMo/RL/pull/4674">#4674</a> at
+<a href="https://github.com/NVIDIA-NeMo/RL/tree/5d4d76352ab5adf2a00122420baaa9898fbeab93"><code>5d4d7635</code></a> ·
+vLLM <a href="https://github.com/vllm-project/vllm/tree/98dff2a81d747d1dba01a47f939f48c3526d4206">v0.29.0</a></p>
+
+<div class="status"><dl>
+  <dt>Before</dt><dd>Colocated mode exists only for vLLM that NeMo-RL launches itself. Dynamo is also launched by NeMo-RL, on separate GPUs.</dd>
+  <dt>This PR</dt><dd>Adds external vLLM on separate GPUs only. It <a href="https://github.com/NVIDIA-NeMo/RL/blob/5d4d76352ab5adf2a00122420baaa9898fbeab93/nemo_rl/models/generation/remote_vllm/remote_vllm_generation.py#L55-L56">refuses colocated</a> and does not touch Dynamo.</dd>
+  <dt>Status</dt><dd><span class="verdict">Proposed, not implemented.</span> Both ideas look possible with stock vLLM 0.29.0 and no new vLLM endpoints. Neither has been run.</dd>
+</dl></div>
+
+<nav class="chain">
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4674-stack-overview.html">stack overview</a>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4674-external-vllm.html">refit vs managed vLLM</a>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4674-slurm-launch.html">Slurm launch</a>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4674-feature-gaps.html">what it can't do yet</a>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4674-vllm-addons.html">NeMo-RL code in vLLM</a>
+  <span class="here">colocated &amp; Dynamo</span>
+</nav>
+<p class="chainnote">Six pages on this stack, one question each. This one: other server shapes.</p>
+
+<div class="bg"><b>Background.</b> In <span class="tip" tabindex="0" data-tip="The trainer and vLLM use the same GPUs and take turns: vLLM generates, then sleeps to free memory; the trainer trains; then the new weights are copied in and vLLM wakes up.">colocated</span> mode, the trainer and vLLM take turns on the same GPUs.
+NeMo-RL's own colocated path <a href="https://github.com/NVIDIA-NeMo/RL/blob/5d4d76352ab5adf2a00122420baaa9898fbeab93/nemo_rl/models/generation/vllm/vllm_generation.py#L1387-L1436">wakes vLLM before generation and puts it to sleep after</a>.
+It copies weights with <span class="tip" tabindex="0" data-tip="A way for one process to hand another process a pointer to GPU memory on the same GPU. No bytes are copied over a network.">CUDA IPC</span> handles (<a href="https://github.com/NVIDIA-NeMo/RL/blob/5d4d76352ab5adf2a00122420baaa9898fbeab93/nemo_rl/models/generation/vllm/vllm_backend.py#L1753-L1867"><code>update_weights_via_ipc_zmq</code></a>).
+Dotted words have a short explanation: hover or tap them.</div>
+
+<h2>Colocated: yes, but with IPC, not NCCL</h2>
+<p>Your plan works: start Ray on every node as <code>ray.sub</code> does, then add one more <code>srun</code> that runs <code>vllm serve</code> on the same nodes and GPUs.
+In dev mode, stock vLLM 0.29.0 already has an HTTP route for every call the colocated loop needs:
+<a href="https://github.com/vllm-project/vllm/blob/98dff2a81d747d1dba01a47f939f48c3526d4206/vllm/entrypoints/serve/dev/sleep/api_router.py#L21-L44"><code>/sleep</code>, <code>/wake_up?tags=</code>, <code>/is_sleeping</code></a>,
+<a href="https://github.com/vllm-project/vllm/blob/98dff2a81d747d1dba01a47f939f48c3526d4206/vllm/entrypoints/serve/dev/cache/api_router.py#L20-L44"><code>/reset_prefix_cache</code></a>, <code>/pause</code>, <code>/resume</code>, and the weight-update routes.
+The catch is the copy. #4674 uses NCCL, and NCCL refuses two ranks on the same GPU in one group, so a colocated trainer rank and vLLM rank can't share a group.
+vLLM also ships an <a href="https://github.com/vllm-project/vllm/blob/98dff2a81d747d1dba01a47f939f48c3526d4206/vllm/distributed/weight_transfer/factory.py#L219-L267"><code>ipc</code> transfer backend</a>, with an example that does exactly this, <a href="https://github.com/vllm-project/vllm/blob/98dff2a81d747d1dba01a47f939f48c3526d4206/examples/rl/rlhf_http_ipc.py"><code>rlhf_http_ipc.py</code></a>. It matches handles by the GPU's physical ID, so the two processes don't need the same <code>CUDA_VISIBLE_DEVICES</code> view (<a href="https://github.com/vllm-project/vllm/blob/98dff2a81d747d1dba01a47f939f48c3526d4206/vllm/distributed/weight_transfer/ipc_engine.py#L184-L247">receiver</a>).</p>
+
+<svg viewBox="0 0 960 330" role="img" aria-label="One GPU over one training step: what each process holds">
+  <rect class="frame" x="6" y="6" width="948" height="318" rx="10"/>
+  <text class="hl" x="20" y="30">One GPU, one training step. Each column is what sits on the GPU after that HTTP call.</text>
+  <text class="dimt" x="20" y="74">trainer</text><text class="dimt" x="20" y="114">vLLM</text>
+  <!-- columns: x start, width 120 -->
+  <g>
+    <rect class="col" x="80" y="44" width="122" height="100" rx="6"/>
+    <rect class="tr" x="88" y="58" width="106" height="26" rx="4"/><text class="lab" x="96" y="75">weights + optim</text>
+    <rect class="off" x="88" y="98" width="106" height="26" rx="4"/><text class="dimt" x="96" y="115">asleep</text>
+    <text class="call" x="84" y="164">1 train step</text>
+  </g>
+  <g>
+    <rect class="col" x="210" y="44" width="122" height="100" rx="6"/>
+    <rect class="off" x="218" y="58" width="106" height="26" rx="4"/><text class="dimt" x="226" y="75">offloaded</text>
+    <rect class="vw" x="218" y="98" width="106" height="26" rx="4"/><text class="lab" x="226" y="115">weights (old)</text>
+    <text class="call" x="214" y="164">2 /wake_up</text><text class="call" x="214" y="178">?tags=weights</text>
+  </g>
+  <g>
+    <rect class="col" x="340" y="44" width="122" height="100" rx="6"/>
+    <rect class="tr" x="348" y="58" width="106" height="26" rx="4"/><text class="lab" x="356" y="75">HF tensors</text>
+    <rect class="vw" x="348" y="98" width="106" height="26" rx="4"/><text class="lab" x="356" y="115">weights (new)</text>
+    <a href="https://github.com/vllm-project/vllm/blob/98dff2a81d747d1dba01a47f939f48c3526d4206/vllm/distributed/weight_transfer/ipc_engine.py#L184-L247"><text class="call" x="344" y="164">3 /update_weights</text></a><text class="call" x="344" y="178">{IPC handles}</text>
+  </g>
+  <g>
+    <rect class="col" x="470" y="44" width="122" height="100" rx="6"/>
+    <rect class="off" x="478" y="58" width="106" height="26" rx="4"/><text class="dimt" x="486" y="75">freed</text>
+    <rect class="vw" x="478" y="98" width="52" height="26" rx="4"/><rect class="kv" x="532" y="98" width="52" height="26" rx="4"/><text class="lab" x="537" y="115">KV</text>
+    <text class="call" x="474" y="164">4 /wake_up</text><text class="call" x="474" y="178">?tags=kv_cache</text>
+  </g>
+  <g>
+    <rect class="col" x="600" y="44" width="122" height="100" rx="6"/>
+    <rect class="off" x="608" y="58" width="106" height="26" rx="4"/><text class="dimt" x="616" y="75">freed</text>
+    <rect class="vw" x="608" y="98" width="52" height="26" rx="4"/><rect class="kv" x="662" y="98" width="52" height="26" rx="4"/><text class="lab" x="667" y="115">KV</text>
+    <text class="call" x="604" y="164">5 /resume →</text><text class="call" x="604" y="178">Gym rollouts</text>
+  </g>
+  <g>
+    <rect class="col" x="730" y="44" width="122" height="100" rx="6"/>
+    <rect class="tr" x="738" y="58" width="106" height="26" rx="4"/><text class="lab" x="746" y="75">weights + optim</text>
+    <rect class="off" x="738" y="98" width="106" height="26" rx="4"/><text class="dimt" x="746" y="115">asleep</text>
+    <text class="call" x="734" y="164">6 /reset_prefix_cache</text><text class="call" x="734" y="178">/sleep?level=1</text>
+  </g>
+  <!-- legend -->
+  <rect class="tr" x="20" y="206" width="16" height="12" rx="2"/><text class="dimt" x="42" y="216">trainer memory</text>
+  <rect class="vw" x="160" y="206" width="16" height="12" rx="2"/><text class="dimt" x="182" y="216">vLLM weights</text>
+  <rect class="kv" x="290" y="206" width="16" height="12" rx="2"/><text class="dimt" x="312" y="216">vLLM KV cache</text>
+  <rect class="off" x="430" y="206" width="16" height="12" rx="2"/><text class="dimt" x="452" y="216">not on the GPU</text>
+  <text class="redt" x="20" y="250">Step 3 can't use #4674's NCCL here: NCCL refuses two ranks on one GPU in one group.</text>
+  <text class="dimt" x="20" y="272">Step 3 uses vLLM's ipc backend instead: the trainer posts handles to its own GPU memory; vLLM copies from them.</text>
+  <text class="dimt" x="20" y="294">Steps 2–6 are stock vLLM 0.29.0 dev routes. The order mirrors NeMo-RL's managed colocated loop.</text>
+</svg>
+
+<p><b>The hard parts</b> are about processes, not endpoints:</p>
+<ul>
+<li><b>Same container.</b> CUDA IPC only works between processes that share an IPC namespace on the same host. Run <code>vllm serve</code> inside the same container as the Ray worker (for example <code>srun --overlap</code> into the same named container), or use host IPC.</li>
+<li><b>Memory split.</b> vLLM sizes its cache as a share of the whole GPU (<code>--gpu-memory-utilization</code>). Start it before the trainer allocates, or size the share to fit beside the trainer, and use sleep level 1 like the managed path.</li>
+<li><b>Lost features.</b> vLLM's stock IPC receiver just calls the model's weight loader. NeMo-RL's own receiver also handles FP8 and sparse refit. To keep those, load NeMo-RL's worker extension into <code>vllm serve</code> (<code>--worker-extension-cls</code>) and call it through <code>/collective_rpc</code>. That route only takes string arguments.</li>
+<li><b>Safety.</b> Posting handles over HTTP needs <a href="https://github.com/vllm-project/vllm/blob/98dff2a81d747d1dba01a47f939f48c3526d4206/vllm/distributed/weight_transfer/ipc_engine.py#L80-L94"><code>VLLM_ALLOW_INSECURE_SERIALIZATION=1</code></a> (pickled data). With dev mode on, anyone who can reach the port can run code on the server, so bind it to localhost.</li>
+</ul>
+
+<h2>Dynamo: same refit engine, different doors</h2>
+<p>NeMo-RL's <a href="https://github.com/NVIDIA-NeMo/RL/blob/5d4d76352ab5adf2a00122420baaa9898fbeab93/nemo_rl/models/generation/dynamo/managed_runtime.py#L64-L180">Dynamo backend</a> is <b>managed</b>: NeMo-RL starts etcd, NATS and the Dynamo frontend itself, plus one Ray actor per <code>dynamo.vllm</code> worker. Under the hood, refit uses <b>the same vLLM NCCL engine and sender settings as #4674</b>. The difference is where the calls go: Dynamo sends them to each worker's own admin port, <code>{system_url}/engine/…</code> (<a href="https://github.com/NVIDIA-NeMo/RL/blob/5d4d76352ab5adf2a00122420baaa9898fbeab93/nemo_rl/models/generation/dynamo/refit.py#L50-L94"><code>refit.py</code></a>). #4674 sends them to one <code>base_url</code>.</p>
+<div class="tbl"><table>
+<tr><th></th><th>remote_vllm (#4674)</th><th>Dynamo (main)</th></tr>
+<tr><td>Who launches it</td><td>Someone else</td><td>NeMo-RL (<a href="https://github.com/NVIDIA-NeMo/RL/blob/5d4d76352ab5adf2a00122420baaa9898fbeab93/nemo_rl/models/generation/dynamo/dynamo_generation.py#L238-L242">non-colocated Ray cluster</a>)</td></tr>
+<tr><td>Engines</td><td>1</td><td>Many, behind Dynamo's router (round-robin, KV-aware, …)</td></tr>
+<tr><td>Rollout URL</td><td><code>base_url/v1</code></td><td>Frontend <code>/v1</code></td></tr>
+<tr><td>Refit calls go to</td><td><code>base_url</code></td><td>Each worker's <code>system_url/engine/*</code>, with its own rank offset</td></tr>
+<tr><td>Refused settings</td><td>quant_cfg, token capture (until #4676), fleet health</td><td><a href="https://github.com/NVIDIA-NeMo/RL/blob/5d4d76352ab5adf2a00122420baaa9898fbeab93/nemo_rl/models/generation/dynamo/dynamo_generation.py#L150-L206">router replay, VLM, fleet health</a></td></tr>
+</table></div>
+<p><b>Could you point remote_vllm at an external Dynamo?</b> Not as written. Preflight expects plain vLLM (<code>/version</code> = 0.29.0, <code>/get_world_size</code>, one backend). Refit expects one admin URL and one rank offset, while Dynamo has one per worker.
+We did not read Dynamo's own source to check which routes its frontend serves. The conclusion rests on NeMo-RL's Dynamo code going around the frontend for refit.</p>
+
+<div class="warn"><b>So what (proposal).</b> Share the <b>refit protocol</b>, not the launcher. One small interface (init, start, update, finish, pause, resume) with two implementations: plain vLLM dev routes and Dynamo <code>/engine/*</code> routes. Then remote_vllm's config becomes "one rollout URL plus a list of admin URLs". That one change opens up three things: several external vLLM replicas, an externally launched Dynamo, and later a colocated IPC version that swaps in a different transfer backend. #4674 hard-codes one URL and NCCL today. This is the cheapest moment to add that seam, before #4675–#4677 build on top of it.</div>
+
+</div>
+</body>
+</html>

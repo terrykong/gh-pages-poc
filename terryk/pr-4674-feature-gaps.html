@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PR #4674 — what external vLLM can't do yet</title>
+<style>
+:root{--bg:#0d1117;--surface:#161b22;--surface2:#1c2128;--border:#30363d;--text:#e6edf3;--dim:#8b949e;
+  --accent:#58a6ff;--green:#3fb950;--red:#f85149;--orange:#d29922}
+:root[data-theme="light"]{--bg:#ffffff;--surface:#f6f8fa;--surface2:#eaeef2;--border:#d0d7de;--text:#1f2328;
+  --dim:#59636e;--accent:#0969da;--green:#1a7f37;--red:#cf222e;--orange:#9a6700}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:28px 20px 70px}
+h1{font-size:22px;margin:0 0 8px;line-height:1.3}
+h2{font-size:18px;margin:30px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+a{color:var(--accent);text-decoration:none} a:hover{text-decoration:underline}
+code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
+.sub{color:var(--dim);font-size:13.5px;margin:0 0 16px}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;font:13px/1 ui-monospace,monospace;cursor:pointer}
+.status{border:1px solid var(--border);border-radius:10px;background:var(--surface);padding:2px 16px 10px;margin:0 0 20px}
+.status dl{display:grid;grid-template-columns:max-content 1fr;gap:4px 14px;margin:12px 0 0}
+.status dt{color:var(--dim);font-size:12px;text-transform:uppercase;letter-spacing:.04em;white-space:nowrap;padding-top:2px}
+.status dd{margin:0;font-size:14px}
+.verdict{font-weight:700} .verdict.open{color:var(--red)}
+nav.chain{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 6px;padding:0}
+nav.chain a,nav.chain span{display:inline-block;padding:5px 11px;border:1px solid var(--border);border-radius:20px;background:var(--surface);text-decoration:none;color:var(--accent);font-size:12.5px;line-height:1.3;white-space:nowrap}
+nav.chain a:hover{background:var(--surface2)}
+nav.chain span.here{background:var(--accent);color:var(--bg);border-color:var(--accent);font-weight:600}
+p.chainnote{color:var(--dim);font-size:12px;margin:0 0 18px}
+.bg{border-left:4px solid var(--accent);background:var(--surface);padding:8px 14px;margin:0 0 16px;font-size:14px}
+.warn{border-left:3px solid var(--orange);background:var(--surface);padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0}
+.where{border-left:4px solid var(--accent);background:var(--surface);padding:6px 12px;margin:6px 0 10px}
+.cref{margin:6px 0 0;font-size:13px}
+.cref a{display:inline-block;padding:4px 10px;border:1px solid var(--border);border-radius:16px;background:var(--surface);font:12.5px ui-monospace,Menlo,monospace}
+.cref a:hover{background:var(--surface2);text-decoration:none}
+.tip{border-bottom:1px dotted var(--dim);cursor:help;position:relative;outline:none}
+.tip:hover::after,.tip:focus::after{content:attr(data-tip);position:absolute;left:0;top:1.7em;z-index:60;width:max-content;max-width:min(340px,80vw);white-space:normal;background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:7px 10px;font:13px/1.45 -apple-system,sans-serif;font-weight:400;box-shadow:0 4px 14px rgba(0,0,0,.3)}
+ol li,ul li{margin:3px 0}
+svg{max-width:100%;height:auto;display:block;margin:14px 0}
+svg .frame{fill:var(--surface);stroke:var(--border);stroke-width:1}
+svg .rowl{stroke:var(--border);stroke-width:1}
+svg .ok{fill:var(--green);opacity:.18} svg .no{fill:var(--dim);opacity:.15} svg .bad{fill:var(--red);opacity:.2} svg .mid{fill:var(--orange);opacity:.2}
+svg .th{fill:var(--accent);font:bold 12px -apple-system,sans-serif}
+svg .f{fill:var(--text);font:bold 11.5px -apple-system,sans-serif}
+svg .c{fill:var(--text);font:11px -apple-system,sans-serif}
+svg .dimt{fill:var(--dim);font:11px -apple-system,sans-serif}
+svg a text{text-decoration:underline;fill:var(--accent)}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head>
+<body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+function wire(){var b=document.getElementById('theme-toggle');if(!b)return;b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+<div class="wrap">
+
+<h1>Which NeMo-RL refit and serving features work with an external vLLM server, and which don't yet</h1>
+<p class="sub"><a href="https://github.com/NVIDIA-NeMo/RL/pull/4674">#4674</a> at <a href="https://github.com/NVIDIA-NeMo/RL/tree/5d4d76352ab5adf2a00122420baaa9898fbeab93"><code>5d4d7635</code></a> · vLLM <a href="https://github.com/vllm-project/vllm/tree/98dff2a81d747d1dba01a47f939f48c3526d4206">v0.29.0</a></p>
+
+<div class="status"><dl>
+  <dt>Before</dt><dd>Managed vLLM supports several refit methods (full broadcast, reshard, NIXL, delta, CUDA IPC) and fleet health.</dd>
+  <dt>This PR</dt><dd>External vLLM supports one: full-tensor NCCL broadcast to one server. Most of the others are refused at startup, by design.</dd>
+  <dt>Status</dt><dd><span class="verdict open">Open: four gaps fail with no error at startup.</span> Two are already in the pending review (C1, C6). The other two are new findings.</dd>
+</dl></div>
+
+<nav class="chain">
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4674-stack-overview.html">stack overview</a>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4674-external-vllm.html">refit vs managed vLLM</a>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4674-slurm-launch.html">Slurm launch</a>
+  <span class="here">what it can't do yet</span>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4674-vllm-addons.html">NeMo-RL code in vLLM</a>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4674-colocated-dynamo.html">colocated &amp; Dynamo</a>
+</nav>
+<p class="chainnote">Six pages on this stack, one question each. This one: the feature checklist.</p>
+
+<div class="bg"><b>Background.</b> NeMo-RL picks a refit method with <code>policy.generation.refit_transport</code> (<a href="https://github.com/NVIDIA-NeMo/RL/blob/5d4d76352ab5adf2a00122420baaa9898fbeab93/nemo_rl/models/generation/vllm/config.py#L40-L41">options</a>).
+<span class="tip" tabindex="0" data-tip="Each trainer GPU sends its own slice straight to the vLLM GPU that needs it, instead of first building the full tensor.">NCCL reshard</span>,
+<span class="tip" tabindex="0" data-tip="Moves weights through a NIXL-based checkpoint engine instead of a plain NCCL broadcast.">NIXL</span> and
+<span class="tip" tabindex="0" data-tip="Sends only the weight elements that changed since the last refit, as XOR differences over S3 or ZMQ.">delta (sparse) refit</span> are faster ways to do the same copy.
+<span class="tip" tabindex="0" data-tip="NeMo-RL probes each inference shard, pulls dead ones out of rotation, restarts them, and lets them serve again only after a fresh refit.">Fleet health</span> watches the inference servers NeMo-RL launched.
+#4674 accepts only <code>refit_transport: null</code> (<a href="https://github.com/NVIDIA-NeMo/RL/blob/5d4d76352ab5adf2a00122420baaa9898fbeab93/nemo_rl/weight_sync/factory.py#L139-L165">factory</a>), and inside that, only NCCL. Dotted words have a short explanation: hover or tap them.</div>
+
+<svg viewBox="0 0 960 540" role="img" aria-label="Feature checklist: managed vLLM, remote_vllm, and what stock vLLM 0.29 offers">
+  <rect class="frame" x="6" y="6" width="948" height="528" rx="10"/>
+  <text class="th" x="20" y="30">Feature</text><text class="th" x="300" y="30">remote_vllm (#4674)</text><text class="th" x="640" y="30">What stock vLLM 0.29.0 offers</text>
+  <!-- rows start y=42, h=34 -->
+  <g>
+    <rect class="ok" x="290" y="42" width="340" height="32"/>
+    <text class="f" x="20" y="63">Full-tensor NCCL broadcast</text>
+    <a href="https://github.com/NVIDIA-NeMo/RL/blob/5d4d76352ab5adf2a00122420baaa9898fbeab93/nemo_rl/weight_sync/remote_vllm_nccl_weight_synchronizer.py#L214-L235"><text class="c" x="300" y="63">Works: the only method</text></a>
+    <text class="c" x="640" y="63">nccl backend (what #4674 uses)</text>
+  </g>
+  <g>
+    <rect class="no" x="290" y="76" width="340" height="32"/>
+    <text class="f" x="20" y="97">NCCL reshard (slice → slice)</text>
+    <text class="c" x="300" y="97">Refused: refit_transport must be null</text>
+    <text class="c" x="640" y="97">sharded_rdt is closest; not the same</text>
+  </g>
+  <g>
+    <rect class="no" x="290" y="110" width="340" height="32"/>
+    <text class="f" x="20" y="131">Delta / sparse refit</text>
+    <text class="c" x="300" y="131">Refused (also wired only in v1 GRPO)</text>
+    <a href="https://github.com/vllm-project/vllm/blob/98dff2a81d747d1dba01a47f939f48c3526d4206/vllm/distributed/weight_transfer/factory.py#L219-L267"><text class="c" x="640" y="131">sparse_nccl: new values at int32 indices</text></a>
+  </g>
+  <g>
+    <rect class="no" x="290" y="144" width="340" height="32"/>
+    <text class="f" x="20" y="165">NIXL checkpoint engine</text>
+    <text class="c" x="300" y="165">Refused: refit_transport must be null</text>
+    <text class="c" x="640" y="165">none; needs a receiver plugin</text>
+  </g>
+  <g>
+    <rect class="no" x="290" y="178" width="340" height="32"/>
+    <text class="f" x="20" y="199">CUDA IPC (colocated)</text>
+    <a href="https://github.com/NVIDIA-NeMo/RL/blob/5d4d76352ab5adf2a00122420baaa9898fbeab93/nemo_rl/models/generation/remote_vllm/remote_vllm_generation.py#L55-L56"><text class="c" x="300" y="199">Refused: "cannot be colocated"</text></a>
+    <text class="c" x="640" y="199">ipc backend; see colocated page</text>
+  </g>
+  <g>
+    <rect class="no" x="290" y="212" width="340" height="32"/>
+    <text class="f" x="20" y="233">Fleet health (probe, restart)</text>
+    <a href="https://github.com/NVIDIA-NeMo/RL/blob/5d4d76352ab5adf2a00122420baaa9898fbeab93/nemo_rl/models/generation/remote_vllm/remote_vllm_generation.py#L68-L71"><text class="c" x="300" y="233">Refused with a clear error</text></a>
+    <text class="c" x="640" y="233">belongs to whoever launches it</text>
+  </g>
+  <g>
+    <rect class="no" x="290" y="246" width="340" height="32"/>
+    <text class="f" x="20" y="267">ModelOpt quant, draft weights</text>
+    <a href="https://github.com/NVIDIA-NeMo/RL/blob/5d4d76352ab5adf2a00122420baaa9898fbeab93/nemo_rl/weight_sync/factory.py#L147-L156"><text class="c" x="300" y="267">Refused with a clear error</text></a>
+    <text class="c" x="640" y="267">needs NeMo-RL's loaders in vLLM</text>
+  </g>
+  <g>
+    <rect class="mid" x="290" y="280" width="340" height="32"/>
+    <text class="f" x="20" y="301">Generation router</text>
+    <text class="c" x="300" y="301">No check; fronts 1 backend, does nothing</text>
+    <text class="c" x="640" y="301">n/a</text>
+  </g>
+  <g>
+    <rect class="bad" x="290" y="314" width="340" height="32"/>
+    <text class="f" x="20" y="335">FP8 KV-cache scales</text>
+    <a href="https://github.com/NVIDIA-NeMo/RL/blob/5d4d76352ab5adf2a00122420baaa9898fbeab93/nemo_rl/algorithms/single_controller.py#L5503-L5515"><text class="c" x="300" y="335">Skipped, no error</text></a>
+    <text class="c" x="640" y="335">not sent; preflight never checks quant</text>
+  </g>
+  <g>
+    <rect class="bad" x="290" y="348" width="340" height="32"/>
+    <text class="f" x="20" y="369">Router replay (MoE)</text>
+    <text class="c" x="300" y="369">No check; fails later in Gym</text>
+    <text class="c" x="640" y="369">returns routes on choice (.npy)</text>
+  </g>
+  <g>
+    <rect class="bad" x="290" y="382" width="340" height="32"/>
+    <text class="f" x="20" y="403">v1 GRPO entry points</text>
+    <text class="c" x="300" y="403">Not refused; crashes after GPUs (C1)</text>
+    <text class="c" x="640" y="403">n/a</text>
+  </g>
+  <g>
+    <rect class="bad" x="290" y="416" width="340" height="32"/>
+    <text class="f" x="20" y="437">Keep KV cache across refit</text>
+    <a href="https://github.com/NVIDIA-NeMo/RL/blob/5d4d76352ab5adf2a00122420baaa9898fbeab93/nemo_rl/weight_sync/remote_vllm_nccl_weight_synchronizer.py#L218-L220"><text class="c" x="300" y="437">2nd pause forces clear_cache (C6)</text></a>
+    <text class="c" x="640" y="437">/pause has no already-paused check</text>
+  </g>
+  <g>
+    <rect class="ok" x="290" y="450" width="340" height="32"/>
+    <text class="f" x="20" y="471">Token capture into TQ</text>
+    <text class="c" x="300" y="471">Refused in #4674; added by #4676</text>
+    <text class="c" x="640" y="471">via plugin wheel + controller bridge</text>
+  </g>
+  <rect class="ok" x="20" y="500" width="16" height="12"/><text class="dimt" x="42" y="510">works</text>
+  <rect class="no" x="100" y="500" width="16" height="12"/><text class="dimt" x="122" y="510">refused at startup (fine)</text>
+  <rect class="mid" x="280" y="500" width="16" height="12"/><text class="dimt" x="302" y="510">no check, harmless</text>
+  <rect class="bad" x="440" y="500" width="16" height="12"/><text class="dimt" x="462" y="510">no check, wrong result or late crash</text>
+</svg>
+
+<h2>The red rows</h2>
+<ol>
+<li><b>Keeping the KV cache doesn't work.</b> SingleController already pauses before refit with the user's <code>recompute_kv_cache_after_weight_updates</code> setting. The synchronizer then pauses <i>again</i> with <code>clear_cache=True</code>, and vLLM accepts a second pause. So with the setting at <code>false</code>, every kept request still recomputes its whole prompt after each step. The synchronizer also resumes serving before SingleController finishes its own refit bookkeeping.
+<p class="cref">🟡 <a href="https://github.com/NVIDIA-NeMo/RL/pull/4674#discussion_r4353528599">review comment C6 — remote_vllm_nccl_weight_synchronizer.py</a></p></li>
+<li><b>v1 GRPO isn't refused.</b> A v1 run with <code>backend: remote_vllm</code> gets past setup and crashes later, after the cluster is allocated.
+<p class="cref">🔴 <a href="https://github.com/NVIDIA-NeMo/RL/pull/4674#discussion_r4353528510">review comment C1 — nemo_gym.py</a></p></li>
+<li><b>FP8 servers aren't checked.</b> The external backend never asks for KV-cache scale calibration (<code>requires_kv_scale_sync</code> stays at its default <code>False</code>). Preflight never reads the server's quantization from <code>/server_info</code>. An FP8 server would run with stale scales.</li>
+<li><b>Router replay isn't refused.</b> Details are on the <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4674-vllm-addons.html">NeMo-RL code in vLLM</a> page.</li>
+</ol>
+<p>The comment links work for others only after the review is published. It is still pending.</p>
+
+<h2>Leaving room for faster refit — proposed, not in the PR</h2>
+<p>Nothing below is implemented. NCCL is fixed in three places today: the config (<a href="https://github.com/NVIDIA-NeMo/RL/blob/5d4d76352ab5adf2a00122420baaa9898fbeab93/nemo_rl/models/generation/remote_vllm_config.py#L33"><code>transport: Literal["nccl"]</code></a>), the factory (always returns the NCCL synchronizer), and preflight (requires the server's backend to be <code>nccl</code>).</p>
+<p class="where"><b>Where it lands: RL only.</b> Make the factory pick the synchronizer from <code>remote_vllm_cfg.refit.transport</code>, and make preflight compare the server's backend to that value. Then vLLM's own <code>sharded_rdt</code> (closest to reshard) or <code>sparse_nccl</code> (send only changed values) can be added later without touching the rest. NIXL and NeMo-RL's XOR delta format would still need code running inside vLLM. The <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4674-vllm-addons.html">shared-package idea</a> is where that code would live.</p>
+
+<div class="warn"><b>So what.</b> For a first PR, refusing most features is the right call: each refusal is a clear startup error. The problem is the four red rows, which fail late or quietly do the wrong thing. Two are already in the pending review (C1, C6). FP8 and router replay need one startup check each.</div>
+
+</div>
+</body>
+</html>
