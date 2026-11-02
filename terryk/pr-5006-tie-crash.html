@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NVIDIA-NeMo/RL #5006 — a tied token at the top_k cut crashes replay</title>
+<style>
+:root{--bg:#0d1117;--surface:#161b22;--surface2:#1c2128;--border:#30363d;--text:#e6edf3;--dim:#8b949e;
+  --accent:#58a6ff;--green:#3fb950;--red:#f85149;--orange:#d29922}
+:root[data-theme="light"]{--bg:#ffffff;--surface:#f6f8fa;--surface2:#eaeef2;--border:#d0d7de;--text:#1f2328;
+  --dim:#59636e;--accent:#0969da;--green:#1a7f37;--red:#cf222e;--orange:#9a6700}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:28px 20px 70px}
+h1{font-size:22px;margin:0 0 8px;line-height:1.3}
+h2{font-size:18px;margin:30px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
+pre{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:10px 12px;
+  font:12.5px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;overflow-x:auto;margin:8px 0}
+.sub{color:var(--dim);font-size:13.5px;margin:0 0 16px}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);
+  border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;
+  font:13px/1 ui-monospace,Menlo,monospace;cursor:pointer}
+.status{border:1px solid var(--border);border-radius:10px;background:var(--surface);padding:2px 16px 10px;margin:0 0 20px}
+.status dl{display:grid;grid-template-columns:max-content 1fr;gap:4px 14px;margin:12px 0 0}
+.status dt{color:var(--dim);font-size:12px;text-transform:uppercase;letter-spacing:.04em;white-space:nowrap;padding-top:2px}
+.status dd{margin:0;font-size:14px}
+.verdict{font-weight:700}
+.verdict.open{color:var(--orange)}
+nav.chain{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 6px;padding:0}
+nav.chain a,nav.chain span{display:inline-block;padding:5px 11px;border:1px solid var(--border);
+  border-radius:20px;background:var(--surface);text-decoration:none;color:var(--accent);
+  font-size:12.5px;line-height:1.3;white-space:nowrap}
+nav.chain a:hover{background:var(--surface2)}
+nav.chain span.here{background:var(--accent);color:var(--bg);border-color:var(--accent);font-weight:600}
+p.chainnote{color:var(--dim);font-size:12px;margin:0 0 18px}
+.bg{border-left:4px solid var(--accent);background:var(--surface);padding:8px 14px;margin:0 0 16px;font-size:14px}
+.warn{border-left:3px solid var(--orange);background:var(--surface);padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0}
+.tip{border-bottom:1px dotted var(--dim);cursor:help;position:relative;outline:none}
+.tip:hover::after,.tip:focus::after{content:attr(data-tip);position:absolute;left:0;top:1.7em;z-index:60;
+  width:max-content;max-width:min(340px,80vw);white-space:normal;background:var(--surface2);color:var(--text);
+  border:1px solid var(--border);border-radius:6px;padding:7px 10px;font:13px/1.45 -apple-system,sans-serif;
+  font-weight:400;box-shadow:0 4px 14px rgba(0,0,0,.3)}
+table{border-collapse:collapse;width:100%;font-size:13.5px;margin:10px 0}
+th,td{border:1px solid var(--border);padding:6px 9px;text-align:left;vertical-align:top}
+th{background:var(--surface)}
+ol{padding-left:22px;font-size:14px}
+ol li{margin:3px 0}
+.cref{margin:6px 0 0;font-size:13px}
+.cref a{display:inline-block;padding:4px 10px;border:1px solid var(--border);
+  border-radius:16px;background:var(--surface);font:12.5px ui-monospace,Menlo,monospace}
+.cref a:hover{background:var(--surface2);text-decoration:none}
+svg{max-width:100%;height:auto;display:block;margin:14px 0}
+svg .box{fill:var(--surface);stroke:var(--border);stroke-width:1.3}
+svg .bad{fill:var(--surface);stroke:var(--red);stroke-width:2}
+.diff{font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:12px;overflow-x:auto;white-space:pre;margin:10px 0}
+.diff .add{color:var(--green)}
+.diff .del{color:var(--red)}
+.diff .hunk{color:var(--accent)}
+.where{border-left:4px solid var(--accent);background:var(--surface);padding:6px 12px;margin:6px 0 10px}
+svg .ok{fill:var(--surface);stroke:var(--green);stroke-width:2}
+svg .code{fill:var(--text);font:11px ui-monospace,Menlo,monospace}
+svg .data{fill:var(--dim);font:10.5px ui-monospace,Menlo,monospace}
+svg .hdr{fill:var(--accent);font:bold 13.5px -apple-system,sans-serif}
+svg .row{fill:var(--dim);font:bold 11px -apple-system,sans-serif}
+svg .okt{fill:var(--green);font:bold 11.5px -apple-system,sans-serif}
+svg .badt{fill:var(--red);font:bold 11.5px -apple-system,sans-serif}
+svg .ln{stroke:var(--border);stroke-width:1}
+svg a text{text-decoration:underline;fill:var(--accent)}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+  document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head>
+<body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+  function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+  function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
+    b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
+      else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+  document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+<div class="wrap">
+
+<h1>Why a tied token at the top_k cut can stop a replay run with "the capture is corrupt"</h1>
+<p class="sub"><a href="https://github.com/NVIDIA-NeMo/RL/pull/5006">NVIDIA-NeMo/RL #5006</a>, head <code>77d3b094</code>; vLLM 0.29.0.</p>
+
+<div class="status"><dl>
+  <dt>Before</dt>
+  <dd>No replay, so no such check existed.</dd>
+  <dt>This PR</dt>
+  <dd>Adds <a href="https://github.com/NVIDIA-NeMo/RL/blob/77d3b0944b4bcb825c211466d3d8b3f2f7be169a/nemo_rl/distributed/model_utils.py#L714-L748"><code>check_sampler_support</code></a>: a captured list that looks full but misses the sampled token raises and ends training.</dd>
+  <dt>Status</dt>
+  <dd><span class="verdict open">Open — not fixed in this PR.</span> Raised in the review (comment C1), with a 4-line fix. Reproduced on CPU; how often a real run hits it is not measured (no GPU run).</dd>
+</dl></div>
+
+<nav class="chain">
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-5006-sampler-replay.html">1 · replay vs recompute</a>
+  <span class="here">2 · tied-token crash</span>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-5006-zero-tail.html">3 · zero-tail cliff</a>
+</nav>
+<p class="chainnote">Three pages on this PR, one question each. This one: when replay's own safety check kills a healthy run.</p>
+
+<div class="bg"><b>Background.</b> Replay trusts the K captured slots to hold every token vLLM could sample (page 1). When they do not,
+the code must tell two cases apart: a <b>short list</b> (vLLM kept more tokens than K, which happens) and a <b>broken capture</b>
+(a bug). The function's own docstring says a short list is "reported, not raised on", so the token is just dropped and counted.
+It decides "short" by one test: do the captured probabilities add up to less than 1 − 1e-4?</div>
+
+<h2>Three captured lists, one rule</h2>
+<p style="font-size:13.5px;color:var(--dim)"><code>top_k = top_logprobs = 3</code> (allowed: setup only needs <code>top_logprobs ≥ top_k</code>,
+and the guide's example uses 64 / 64). On a decode batch with fewer than 8 requests, vLLM's PyTorch top-k
+<a href="https://github.com/vllm-project/vllm/blob/v0.29.0/vllm/v1/sample/ops/topk_topp_sampler.py#L384-L396">keeps every token tied with the 3rd logit</a>
+(the batch ≥ 8 Triton path keeps exactly 3). Logits for ids 17, 4, 9, 23: 2.0, 1.4, then a tie.</p>
+
+<svg viewBox="0 0 960 300" role="img" aria-label="Row A: tie at logit minus 8, the left-out token has probability 2.9e-5, the list counts as full, sampled token 23 raises: bug. Row B: tie at minus 3, left-out probability 4.3e-3, the list counts as short, token dropped: fine. Row C: list has a minus infinity slot, sampled token 23 not in it: real corruption, raises: correct.">
+  <text class="row" x="12" y="20">CASE</text>
+  <text class="row" x="170" y="20">CAPTURED 3 SLOTS (vLLM kept)</text>
+  <text class="row" x="470" y="20">MASS</text>
+  <text class="row" x="560" y="20">SAMPLED</text>
+  <text class="row" x="650" y="20">TODAY</text>
+  <text class="row" x="810" y="20">AFTER FIX</text>
+  <line class="ln" x1="10" y1="28" x2="950" y2="28"/>
+
+  <rect class="bad" x="10" y="38" width="940" height="70" rx="6"/>
+  <text class="code" x="22" y="60">A · tie at −8</text>
+  <text class="data" x="22" y="78">vLLM kept 4 tokens</text>
+  <text class="code" x="170" y="60">[17, 4, 9]  (23 left out)</text>
+  <text class="data" x="170" y="78">23 has q = 2.9e-5</text>
+  <text class="code" x="470" y="60">0.99997</text>
+  <text class="data" x="470" y="78">≥ 1 − 1e-4</text>
+  <text class="code" x="560" y="60">23</text>
+  <text class="data" x="560" y="78">odds 2.9e-5</text>
+  <text class="badt" x="650" y="60">raises, run dies</text>
+  <text class="data" x="650" y="78">"capture is corrupt"</text>
+  <text class="okt" x="810" y="60">dropped, counted</text>
+  <text class="data" x="22" y="98">counted as "full" because the left-out mass is under 1e-4, so a miss looks like corruption</text>
+
+  <rect class="ok" x="10" y="118" width="940" height="56" rx="6"/>
+  <text class="code" x="22" y="140">B · tie at −3</text>
+  <text class="code" x="170" y="140">[17, 4, 9]  (23 left out)</text>
+  <text class="data" x="170" y="158">23 has q = 4.3e-3</text>
+  <text class="code" x="470" y="140">0.9957</text>
+  <text class="data" x="470" y="158">&lt; 1 − 1e-4</text>
+  <text class="code" x="560" y="140">23</text>
+  <text class="okt" x="650" y="140">dropped, counted</text>
+  <text class="okt" x="810" y="140">dropped, counted</text>
+
+  <rect class="ok" x="10" y="184" width="940" height="56" rx="6"/>
+  <text class="code" x="22" y="206">C · broken</text>
+  <text class="code" x="170" y="206">[17, 4, −inf slot]</text>
+  <text class="data" x="170" y="224">a −inf slot: list holds all kept</text>
+  <text class="code" x="470" y="206">1.0</text>
+  <text class="code" x="560" y="206">23</text>
+  <text class="okt" x="650" y="206">raises (right)</text>
+  <text class="okt" x="810" y="206">raises (right)</text>
+
+  <rect x="10" y="256" width="14" height="10" class="bad"/><text class="data" x="30" y="265">the bug: a healthy run stops</text>
+  <rect x="250" y="256" width="14" height="10" class="ok"/><text class="data" x="270" y="265">correct behaviour</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/77d3b0944b4bcb825c211466d3d8b3f2f7be169a/nemo_rl/distributed/model_utils.py#L739-L746"><text x="10" y="290">model_utils.py L739-L746: the mass test and the raise</text></a>
+</svg>
+
+<ol>
+  <li>Rows A and B are the same event, a tie at the cut. Only the left-out token's size differs. One is dropped quietly; the other ends training.</li>
+  <li>Each hit is rare (the sampler must pick a token with q under 1e-4), but a run samples millions of tokens, and decode batches under 8 rows happen at the end of every rollout.</li>
+  <li>The useful signal is the −inf slot. If the list has one, vLLM's kept set fit inside K, so a miss really is a broken capture (row C).
+  If every slot is finite, the list may be short, so a miss means "drop it", not "crash".</li>
+</ol>
+
+<h2>The fix — proposed in review comment C1, not in the PR</h2>
+<p class="where"><b>Where the fix lands: RL only, one function</b>, <a href="https://github.com/NVIDIA-NeMo/RL/blob/77d3b0944b4bcb825c211466d3d8b3f2f7be169a/nemo_rl/distributed/model_utils.py#L714-L748"><code>check_sampler_support</code></a>.
+No vLLM change: keeping ties is vLLM's documented small-batch behaviour.</p>
+<pre class="diff"><span class="hunk">@@ nemo_rl/distributed/model_utils.py L739-L742 · check_sampler_support</span>
+<span class="del">-    head_mass = sampler_topk_logprobs.to(support.device).float().exp().sum(-1)
+-    complete = head_mass &gt;= 1.0 - 1e-4
+-    sampled = input_ids.to(support.device).unsqueeze(-1)
+-    if not (support == sampled).any(-1)[active &amp; complete].all():
+</span><span class="add">+    head_mass = sampler_topk_logprobs.to(support.device).float().exp().sum(-1)
++    sampled = input_ids.to(support.device).unsqueeze(-1)
++    in_support = (support == sampled).any(-1)
++    # vLLM keeps every token tied at the top_k-th logit on small batches, so a
++    # head with no -inf slot can miss the sampled token: drop it, don't raise.
++    tie_miss = (support &gt;= 0).all(-1) &amp; ~in_support
++    complete = (head_mass &gt;= 1.0 - 1e-4) &amp; ~tie_miss
++    if not in_support[active &amp; complete].all():
+</span>         raise ValueError(
+             "sampler replay: a sampled token is not in its captured sampler "</pre>
+<p style="font-size:14px">Row A now has a full list and a miss, so <code>tie_miss</code> is true, the position is marked short, and the
+loss drops and counts it like row B. Row C has a −inf slot, so <code>tie_miss</code> is false and the raise still fires: the PR's
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/77d3b0944b4bcb825c211466d3d8b3f2f7be169a/tests/unit/algorithms/test_score_centering.py#L211">corrupt-capture test</a> keeps passing. The simpler idea, "any miss
+means short", would break that test, since it would also drop row C. Raising <code>top_logprobs</code> above <code>top_k</code> only
+makes row A rarer: a tie can be wider than the margin.</p>
+
+<div class="warn"><b>So what.</b> As written, replay can end a long run with an error that blames the capture when nothing is wrong.
+The fix is four lines in one function and keeps the real-corruption check. The review also asks for a unit test with a full list
+and a tied sampled token.</div>
+
+</div>
+</body>
+</html>

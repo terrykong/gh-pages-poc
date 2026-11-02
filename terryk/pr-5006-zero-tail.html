@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NVIDIA-NeMo/RL #5006 — zero-tail rule drops the tail gradient for plain score centering</title>
+<style>
+:root{--bg:#0d1117;--surface:#161b22;--surface2:#1c2128;--border:#30363d;--text:#e6edf3;--dim:#8b949e;
+  --accent:#58a6ff;--green:#3fb950;--red:#f85149;--orange:#d29922}
+:root[data-theme="light"]{--bg:#ffffff;--surface:#f6f8fa;--surface2:#eaeef2;--border:#d0d7de;--text:#1f2328;
+  --dim:#59636e;--accent:#0969da;--green:#1a7f37;--red:#cf222e;--orange:#9a6700}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:28px 20px 70px}
+h1{font-size:22px;margin:0 0 8px;line-height:1.3}
+h2{font-size:18px;margin:30px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
+pre{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:10px 12px;
+  font:12.5px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;overflow-x:auto;margin:8px 0}
+.sub{color:var(--dim);font-size:13.5px;margin:0 0 16px}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);
+  border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;
+  font:13px/1 ui-monospace,Menlo,monospace;cursor:pointer}
+.status{border:1px solid var(--border);border-radius:10px;background:var(--surface);padding:2px 16px 10px;margin:0 0 20px}
+.status dl{display:grid;grid-template-columns:max-content 1fr;gap:4px 14px;margin:12px 0 0}
+.status dt{color:var(--dim);font-size:12px;text-transform:uppercase;letter-spacing:.04em;white-space:nowrap;padding-top:2px}
+.status dd{margin:0;font-size:14px}
+.verdict{font-weight:700}
+.verdict.open{color:var(--orange)}
+nav.chain{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 6px;padding:0}
+nav.chain a,nav.chain span{display:inline-block;padding:5px 11px;border:1px solid var(--border);
+  border-radius:20px;background:var(--surface);text-decoration:none;color:var(--accent);
+  font-size:12.5px;line-height:1.3;white-space:nowrap}
+nav.chain a:hover{background:var(--surface2)}
+nav.chain span.here{background:var(--accent);color:var(--bg);border-color:var(--accent);font-weight:600}
+p.chainnote{color:var(--dim);font-size:12px;margin:0 0 18px}
+.bg{border-left:4px solid var(--accent);background:var(--surface);padding:8px 14px;margin:0 0 16px;font-size:14px}
+.warn{border-left:3px solid var(--orange);background:var(--surface);padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0}
+.tip{border-bottom:1px dotted var(--dim);cursor:help;position:relative;outline:none}
+.tip:hover::after,.tip:focus::after{content:attr(data-tip);position:absolute;left:0;top:1.7em;z-index:60;
+  width:max-content;max-width:min(340px,80vw);white-space:normal;background:var(--surface2);color:var(--text);
+  border:1px solid var(--border);border-radius:6px;padding:7px 10px;font:13px/1.45 -apple-system,sans-serif;
+  font-weight:400;box-shadow:0 4px 14px rgba(0,0,0,.3)}
+table{border-collapse:collapse;width:100%;font-size:13.5px;margin:10px 0}
+th,td{border:1px solid var(--border);padding:6px 9px;text-align:left;vertical-align:top}
+th{background:var(--surface)}
+ol{padding-left:22px;font-size:14px}
+ol li{margin:3px 0}
+.cref{margin:6px 0 0;font-size:13px}
+.cref a{display:inline-block;padding:4px 10px;border:1px solid var(--border);
+  border-radius:16px;background:var(--surface);font:12.5px ui-monospace,Menlo,monospace}
+.cref a:hover{background:var(--surface2);text-decoration:none}
+svg{max-width:100%;height:auto;display:block;margin:14px 0}
+svg .box{fill:var(--surface);stroke:var(--border);stroke-width:1.3}
+svg .bad{fill:var(--surface);stroke:var(--red);stroke-width:2}
+.diff{font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:12px;overflow-x:auto;white-space:pre;margin:10px 0}
+.diff .add{color:var(--green)}
+.diff .del{color:var(--red)}
+.diff .hunk{color:var(--accent)}
+.where{border-left:4px solid var(--accent);background:var(--surface);padding:6px 12px;margin:6px 0 10px}
+svg .ok{fill:var(--surface);stroke:var(--green);stroke-width:2}
+svg .code{fill:var(--text);font:11px ui-monospace,Menlo,monospace}
+svg .data{fill:var(--dim);font:10.5px ui-monospace,Menlo,monospace}
+svg .hdr{fill:var(--accent);font:bold 13.5px -apple-system,sans-serif}
+svg .row{fill:var(--dim);font:bold 11px -apple-system,sans-serif}
+svg .okt{fill:var(--green);font:bold 11.5px -apple-system,sans-serif}
+svg .badt{fill:var(--red);font:bold 11.5px -apple-system,sans-serif}
+svg .ln{stroke:var(--border);stroke-width:1}
+svg a text{text-decoration:underline;fill:var(--accent)}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+  document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+<style>
+svg .exact{stroke:var(--dim);stroke-width:1.5;stroke-dasharray:5 4}
+svg .cut{stroke:var(--red);stroke-width:1;stroke-dasharray:3 3}
+svg .basel{fill:none;stroke:var(--green);stroke-width:2.5}
+svg .baseld{fill:var(--green)}
+svg .baseld{fill:var(--green)}
+svg .headl{fill:none;stroke:var(--red);stroke-width:2.5}
+svg .headld{fill:var(--red)}
+svg .exactk{fill:var(--dim)} svg .basek{fill:var(--green)} svg .headk{fill:var(--red)}
+</style>
+</head>
+<body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+  function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+  function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
+    b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
+      else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+  document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+<div class="wrap">
+
+<h1>Why the new "zero tail" rule switches off part of score centering even when replay is off</h1>
+<p class="sub"><a href="https://github.com/NVIDIA-NeMo/RL/pull/5006">NVIDIA-NeMo/RL #5006</a>, head <code>77d3b094</code>.
+Raised first by a reviewer in <a href="https://github.com/NVIDIA-NeMo/RL/pull/5006#discussion_r4448633536">this thread</a>.</p>
+
+<div class="status"><dl>
+  <dt>Before</dt>
+  <dd>#4818's estimator scales the trainer's tail by <code>ρ</code> = sampler tail ÷ trainer tail, with the trainer tail clamped at 1e-6.</dd>
+  <dt>This PR</dt>
+  <dd>Sets <code>ρ = 0</code> whenever the trainer tail is at most 1e-6 (<a href="https://github.com/NVIDIA-NeMo/RL/blob/77d3b0944b4bcb825c211466d3d8b3f2f7be169a/nemo_rl/algorithms/loss/score_centering.py#L74-L81">score_centering.py L74-L81</a>), for every caller, replay or not.</dd>
+  <dt>Status</dt>
+  <dd><span class="verdict open">Open — not fixed in this PR.</span> The review adds a +1 with numbers and the fix (comment C2). The gradient only matters for replay-off runs where the trainer is very sure and the sampler is not.</dd>
+</dl></div>
+
+<nav class="chain">
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-5006-sampler-replay.html">1 · replay vs recompute</a>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-5006-tie-crash.html">2 · tied-token crash</a>
+  <span class="here">3 · zero-tail cliff</span>
+</nav>
+<p class="chainnote">Three pages on this PR, one question each. This one: what the new <code>ρ = 0</code> rule does outside replay.</p>
+
+<div class="bg"><b>Background.</b> Score centering adds a correction built from vLLM's captured top-K list. Tokens outside the list
+(the "tail") are unseen, so their share is estimated as <code>ρ · p</code>: the trainer's own tail probabilities, scaled so the total
+matches vLLM's missing mass. Under replay the list holds every token vLLM could sample, so there is no tail. There, any <code>ρ</code>
+gives the same gradient; only the logged loss value changes (with #4818's formula it can jump from −1.42 to +140), which is why the
+author set it to 0.</div>
+
+<h2>The same token, either side of 1e-6</h2>
+<p style="font-size:13.5px;color:var(--dim)">The reviewer's example, replay off: the trainer gives p = 0.6, 0.4 − t, t to three tokens; vLLM gives
+q = 0.5, 0.3, 0.2 and captured only the first two (K = 2). The tail token holds 0.2 of vLLM's mass. Values computed on CPU with the
+base and head versions of the function.</p>
+<svg viewBox="0 0 960 300" role="img" aria-label="Gradient on the tail logit versus trainer tail mass. Exact is 0.2 everywhere. #4818 rises smoothly from 0.02 to 0.2. This PR is 0 below 1e-6 and jumps to 0.2 above it.">
+  <line class="ln" x1="110" y1="230" x2="900" y2="230"/>
+  <line class="ln" x1="110" y1="230" x2="110" y2="40"/>
+  <text class="data" x="102" y="54" text-anchor="end">0.20</text>
+  <text class="data" x="102" y="144" text-anchor="end">0.10</text>
+  <text class="data" x="102" y="234" text-anchor="end">0</text>
+  <text class="row" x="10" y="30">GRADIENT ON THE TAIL TOKEN'S LOGIT (IS off)</text>
+  <text class="data" x="110" y="252" text-anchor="middle">1e-7</text><text class="data" x="534" y="252" text-anchor="middle">5e-7</text><text class="data" x="689" y="252" text-anchor="middle">9e-7</text><text class="data" x="742" y="252" text-anchor="middle">1.1e-6</text><text class="data" x="900" y="252" text-anchor="middle">2e-6</text>
+  <text class="row" x="505" y="276" text-anchor="middle">TRAINER'S PROBABILITY OUTSIDE THE CAPTURED LIST (log scale)</text>
+  <line class="cut" x1="717" y1="40" x2="717" y2="230"/>
+  <text class="badt" x="711" y="36" text-anchor="end">1e-6 cutoff (this PR)</text>
+  <line class="exact" x1="110" y1="50" x2="900" y2="50"/>
+  <polyline class="basel" points="110,212 534,140 689,68 742,50 900,50"/><circle class="baseld" cx="110" cy="212" r="4"/><circle class="baseld" cx="534" cy="140" r="4"/><circle class="baseld" cx="689" cy="68" r="4"/><circle class="baseld" cx="742" cy="50" r="4"/><circle class="baseld" cx="900" cy="50" r="4"/>
+  <polyline class="headl" points="110,230 534,230 689,230 742,50 900,50"/><circle class="headld" cx="110" cy="230" r="4"/><circle class="headld" cx="534" cy="230" r="4"/><circle class="headld" cx="689" cy="230" r="4"/><circle class="headld" cx="742" cy="50" r="4"/><circle class="headld" cx="900" cy="50" r="4"/>
+  <rect x="560" y="140" width="14" height="4" class="exactk"/><text class="data" x="580" y="146">exact: q_tail − p_tail ≈ 0.2</text>
+  <rect x="560" y="160" width="14" height="4" class="basek"/><text class="data" x="580" y="166">#4818 (main today)</text>
+  <rect x="560" y="180" width="14" height="4" class="headk"/><text class="okt" x="580" y="186" style="fill:var(--red)">this PR: 0 below the cutoff</text>
+</svg>
+<ol>
+  <li>The right gradient on the tail token is about q<sub>tail</sub> − p<sub>tail</sub> = 0.2 at every t.</li>
+  <li>#4818 gets close and fades smoothly as t shrinks (0.18 at t = 9e-7), because of its 1e-6 clamp.</li>
+  <li>This PR gives the full 0.2 at t = 1.1e-6 and <b>nothing</b> at t = 9e-7: the tail correction switches off.
+  Under truncated IS the whole correction goes to about 0.</li>
+</ol>
+
+<h2>The fix — proposed in review comment C2, not in the PR</h2>
+<p class="where"><b>Where the fix lands: RL only.</b> <a href="https://github.com/NVIDIA-NeMo/RL/blob/77d3b0944b4bcb825c211466d3d8b3f2f7be169a/nemo_rl/algorithms/loss/score_centering.py#L19-L25"><code>compute_score_centering_term</code></a>
+gets a <code>sampler_replay</code> argument, passed by <a href="https://github.com/NVIDIA-NeMo/RL/blob/77d3b0944b4bcb825c211466d3d8b3f2f7be169a/nemo_rl/algorithms/loss/loss_functions.py#L1071-L1077"><code>ClippedPGLossFn</code></a>,
+which is built where the single controller already reads <code>policy.generation</code>
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/77d3b0944b4bcb825c211466d3d8b3f2f7be169a/nemo_rl/algorithms/single_controller_utils/setup.py#L2206">setup.py</a>).</p>
+<pre class="diff"><span class="hunk">@@ nemo_rl/algorithms/loss/score_centering.py L74-L81 · compute_score_centering_term</span>
+     trainer_tail = 1.0 - p.sum(-1)
+<span class="del">-    rho = torch.where(
+-        trainer_tail &gt; 1e-6,
+-        (1.0 - head_mass).clamp(min=0.0) / trainer_tail.clamp(min=1e-6),
+-        0.0,
+-    )
+</span><span class="add">+    # Under replay the head holds all of p: rho cannot move the gradient, and a
++    # nonzero rho only inflates the logged loss. Elsewhere keep #4818's estimate.
++    rho = (
++        torch.zeros_like(head_mass)
++        if sampler_replay
++        else (1.0 - head_mass).clamp(min=0.0) / trainer_tail.clamp(min=1e-6)
++    )
+</span></pre>
+<p style="font-size:14px">The <code>else</code> branch is <a href="https://github.com/NVIDIA-NeMo/RL/blob/6e68b17911b83becacc0c0afaf4be15c43c17873/nemo_rl/algorithms/loss/score_centering.py#L66">#4818's line</a>
+(linked at the base, since this PR replaced it). Keep the PR's new <code>slots</code> mask, which stops 0 × −inf from becoming NaN.
+The PR's <a href="https://github.com/NVIDIA-NeMo/RL/blob/77d3b0944b4bcb825c211466d3d8b3f2f7be169a/tests/unit/algorithms/test_score_centering.py#L410-L427">no-tail test</a> feeds a list with no −inf slot, so it
+tests the replay-off case and needs a replay-shaped input; a new test pins the 0.2 gradient at t = 9e-7 and 2e-6.</p>
+
+<div class="warn"><b>So what.</b> The rule is right for replay and wrong elsewhere. Tying it to the replay setting instead of to the
+trainer's tail size keeps replay's logged loss clean and gives plain score centering back the tail gradient it had in #4818.</div>
+
+</div>
+</body>
+</html>
