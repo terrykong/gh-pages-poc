@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NVIDIA-NeMo/RL #5013 — score centering on top of adaptive-ppo-clip</title>
+<style>
+:root{--bg:#0d1117;--surface:#161b22;--surface2:#1c2128;--border:#30363d;--text:#e6edf3;--dim:#8b949e;
+  --accent:#58a6ff;--green:#3fb950;--red:#f85149;--orange:#d29922;--purple:#bc8cff}
+:root[data-theme="light"]{--bg:#ffffff;--surface:#f6f8fa;--surface2:#eaeef2;--border:#d0d7de;--text:#1f2328;
+  --dim:#59636e;--accent:#0969da;--green:#1a7f37;--red:#cf222e;--orange:#9a6700;--purple:#8250df}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:28px 20px 70px}
+h1{font-size:22px;margin:0 0 8px;line-height:1.3}
+h2{font-size:18px;margin:30px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
+.sub{color:var(--dim);font-size:13.5px;margin:0 0 16px}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);
+  border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;
+  font:13px/1 ui-monospace,Menlo,monospace;cursor:pointer}
+.status{border:1px solid var(--border);border-radius:10px;background:var(--surface);padding:2px 16px 10px;margin:0 0 18px}
+.status dl{display:grid;grid-template-columns:max-content 1fr;gap:4px 14px;margin:12px 0 0}
+.status dt{color:var(--dim);font-size:12px;text-transform:uppercase;letter-spacing:.04em;white-space:nowrap;padding-top:2px}
+.status dd{margin:0;font-size:14px}
+.verdict{font-weight:700}.verdict.good{color:var(--green)}
+.bg{border-left:4px solid var(--purple);background:var(--surface);padding:8px 14px;margin:0 0 16px;border-radius:0 8px 8px 0}
+.bg p{margin:6px 0}
+.hl{border-left:4px solid var(--green);background:var(--surface);padding:10px 14px;margin:16px 0;border-radius:0 8px 8px 0}
+.where{border-left:4px solid var(--accent);background:var(--surface);padding:6px 12px;margin:6px 0 10px}
+.tex{overflow-x:auto;overflow-y:hidden;padding:4px 0;margin:6px 0}
+.tex .katex{font-size:1.1em}
+.t1{color:var(--green)}.t2{color:var(--orange)}.t3{color:var(--red)}.t4{color:var(--accent)}
+ul.sym{margin:6px 0;padding-left:20px}ul.sym li{margin:2px 0}
+.diff{font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--surface);
+  border:1px solid var(--border);border-radius:8px;padding:12px;overflow-x:auto;white-space:pre;margin:10px 0}
+.diff .add{color:var(--green)}.diff .del{color:var(--red)}.diff .hunk{color:var(--accent)}
+.tip{border-bottom:1px dotted var(--dim);cursor:help;position:relative;outline:none}
+.tip:hover::after,.tip:focus::after{content:attr(data-tip);position:absolute;left:0;top:1.7em;z-index:60;
+  width:max-content;max-width:min(340px,80vw);white-space:normal;background:var(--surface2);color:var(--text);
+  border:1px solid var(--border);border-radius:6px;padding:7px 10px;font:13px/1.45 -apple-system,sans-serif;
+  font-weight:400;box-shadow:0 4px 14px rgba(0,0,0,.3)}
+svg{max-width:100%;height:auto;display:block;margin:12px 0}
+svg .lbl{fill:var(--text);font:12px ui-monospace,Menlo,monospace}
+svg .lblb{fill:var(--text);font:bold 13px -apple-system,sans-serif}
+svg .note{fill:var(--dim);font:11.5px -apple-system,sans-serif}
+svg .hdr{fill:var(--accent);font:bold 12.5px -apple-system,sans-serif}
+svg .axis{stroke:var(--dim);stroke-width:1}
+svg .bound{stroke:var(--dim);stroke-width:1.2;stroke-dasharray:4 3}
+svg .boundk{stroke:var(--orange);stroke-width:1.6;stroke-dasharray:4 3}
+svg .bando{stroke:var(--red);stroke-width:1.6;stroke-dasharray:4 3}
+svg .band{fill:var(--green);opacity:.16}
+svg .ok{fill:var(--green)}svg .no{fill:var(--red)}
+svg .okt{fill:var(--green);font:bold 12px ui-monospace,Menlo,monospace}
+svg .not{fill:var(--red);font:bold 12px ui-monospace,Menlo,monospace}
+svg .kt{fill:var(--orange);font:11.5px ui-monospace,Menlo,monospace}
+svg .rowsep{stroke:var(--border);stroke-width:1}
+svg a text{text-decoration:underline;fill:var(--accent);font:11.5px ui-monospace,Menlo,monospace}
+</style>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+<script>window.addEventListener('load',function(){if(!window.katex)return;
+  document.querySelectorAll('.tex').forEach(function(e){try{katex.render(e.textContent,e,
+    {displayMode:true,trust:true,strict:false,throwOnError:false});}catch(x){}});});</script>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+  document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head>
+<body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+  function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+  function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
+    b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
+      else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+  document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+<div class="wrap">
+
+<h1>How score centering cancels the pull that adaptive-ppo-clip's filter adds</h1>
+<p class="sub"><a href="https://github.com/NVIDIA-NeMo/RL/pull/5013">NVIDIA-NeMo/RL #5013</a> ·
+builds on <a href="https://github.com/NVIDIA-NeMo/RL/pull/4750">#4750</a> (adaptive-ppo-clip) and
+<a href="https://github.com/NVIDIA-NeMo/RL/pull/4818">#4818</a> (score centering,
+<a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4818-score-centering.html">its page</a>) ·
+permalinks pin head <code>cd05783</code></p>
+
+<div class="status"><dl>
+  <dt>Before</dt>
+  <dd>Turning on <code>score_centering</code> with adaptive-ppo-clip failed at setup: the
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/cd0578349f2bf996cb9f7ecaea0ce165570f9b48/nemo_rl/algorithms/loss/loss_functions.py#L523-L529">allowed-mode check</a> only knew off, IS, TIS and ICEPOP.</dd>
+  <dt>This PR</dt>
+  <dd>Teaches the centering term adaptive-ppo-clip's keep/drop rule, which depends on the sign of each token's advantage and on the offset k.</dd>
+  <dt>Status</dt>
+  <dd><span class="verdict good">Added by this PR. No bug found.</span> Unit tests prove the cancellation for both advantage signs and two values of k; CI is green. The review only adds a docstring nit.</dd>
+</dl></div>
+
+<div class="bg">
+<p><b>Is this the Microsoft AI method?</b> Yes for one half, no for the other.
+<b>adaptive-ppo-clip</b> is the entropy-steered clipping from Microsoft AI's
+<a href="https://microsoft.ai/pdf/mai-thinking-1.pdf">MAI-1 paper</a>. The same author added it in #4750.
+It drops tokens whose ratio is out of range. For positive-advantage tokens the upper limit is <code>hi + k</code>,
+and after every step <span class="tip" tabindex="0" data-tip="Entropy above the target lowers k by k_step; below the target raises it. k stays between 0 and k_max. The step logs it as cur_adaptive_ppo_clip_k.">k moves to steer entropy toward a target</span>
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/cd0578349f2bf996cb9f7ecaea0ce165570f9b48/docs/guides/grpo.md#L659">GRPO guide</a>).</p>
+<p><b>Score centering</b> is a separate fix from #4818: it adds a small extra term so that filtering tokens
+does not push the policy anywhere by itself. <b>This PR does not touch the MAI method or its k controller.</b>
+It only lets the two run together, with the centering reading the same k the filter used in that step.</p>
+</div>
+
+<h2>The math: the filter adds a pull, the centering subtracts it</h2>
+<ul class="sym">
+<li><i>p</i>(v): the trainer's probability of token v. Gradients flow through log <i>p</i>.</li>
+<li><i>q</i>(v): the sampler's (vLLM's) probability. Known only for its top-k tokens, the <b>head</b> H.
+The rest, the <b>tail</b>, is modeled as <i>q</i> ≈ ρ·<i>p</i>.</li>
+<li><i>r</i> = <i>p</i>/<i>q</i>: the ratio. adaptive-ppo-clip requires <code>force_on_policy_ratio</code>, so this
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/cd0578349f2bf996cb9f7ecaea0ce165570f9b48/nemo_rl/algorithms/loss/loss_functions.py#L916-L921">is the token's IS weight</a>, kept raw (no clamp).</li>
+<li><i>A</i>: the token's advantage. lo, hi, k, o: the lower bound, base upper bound, offset and outer bound.</li>
+</ul>
+<p>Tokens are sampled from <i>q</i>. Average the plain loss's gradient over that sampling and every token
+<i>v</i> shows up with weight <i>q</i>·<i>w</i>, the <span class="t1"><b>kept mass</b></span> <i>m</i>(v):</p>
+<div class="tex">\mathbb{E}_{y\sim q}\!\left[\nabla L_{\text{base}}\right] = -A\sum_{v}\htmlClass{t1}{\underbrace{q(v)\,w_A(r_v)}_{m(v)\;=\;p(v)\ \text{if kept, else}\ 0}}\,\nabla\log p(v)</div>
+<p>If nothing is dropped, <i>m</i> = <i>p</i> and the sum is zero, since Σ<i>p</i>∇log <i>p</i> = ∇Σ<i>p</i> = 0.
+Each dropped token leaves a leftover −<i>p</i>(v)∇log <i>p</i>(v): a <b>pull on that token even when <i>A</i> carries no
+information</b>. adaptive-ppo-clip keeps a ratio when
+<span class="t3"><i>r</i> ≤ o</span>, and also <span class="t2"><i>r</i> ≤ hi + k</span> for <i>A</i> &gt; 0, or
+<i>r</i> ≥ lo for <i>A</i> &lt; 0. So <b>which tokens leave a leftover depends on the sign of <i>A</i></b>.
+The centering term subtracts exactly that sum:</p>
+<div class="tex">L = L_{\text{base}} + A\sum_{v\in H}\mathrm{sg}\!\left[\htmlClass{t1}{m(v)}-\htmlClass{t4}{\alpha}\,p(v)\right]\log p(v),
+\qquad \htmlClass{t4}{\alpha}=\mathbb{1}\!\left[\text{tail ratio }1/\rho\text{ kept for this }A\right]</div>
+<p>The <span class="t4">α</span> part stands in for the tail: its tokens share one ratio 1/ρ, so the filter keeps or drops
+the whole tail together. With <i>A</i> constant, the sampled-average gradient of <i>L</i> is zero, up to the tail model.
+The code builds this in <a href="https://github.com/NVIDIA-NeMo/RL/blob/cd0578349f2bf996cb9f7ecaea0ce165570f9b48/nemo_rl/algorithms/loss/score_centering.py#L100-L128">score_centering.py</a>.</p>
+
+<h2>One token, three advantage signs</h2>
+<p>Real numbers from the PR's unit test, run through the PR's code. Four-token vocabulary;
+the head H is tokens 0 and 1 (<i>p</i> = 0.43 and 0.19); the tail is tokens 2 and 3 (<i>p</i> mass 0.38, <i>q</i> mass 0.30).
+Bounds: lo = 0.5, hi = 2, k = 1 (so hi + k = 3), o = 5.</p>
+
+<svg viewBox="0 0 900 360" role="img" aria-label="Ratio axis with three tokens; which are kept for positive, negative and zero advantage, and for ICEPOP">
+  <text class="hdr" x="16" y="20">Ratio r = p/q on a log axis — which tokens the filter keeps</text>
+  <circle class="ok" cx="660" cy="16" r="5"/><text class="note" x="670" y="20">kept</text>
+  <circle class="no" cx="712" cy="16" r="5"/><text class="note" x="722" y="20">dropped</text>
+  <rect class="band" x="780" y="10" width="22" height="12"/><text class="note" x="806" y="20">kept range</text>
+
+  <!-- token labels on top -->
+  <text class="lbl" x="216" y="52" text-anchor="middle">token 1</text><text class="note" x="216" y="66" text-anchor="middle">r = 0.32</text>
+  <text class="lbl" x="409" y="52" text-anchor="middle">tail (2+3)</text><text class="note" x="409" y="66" text-anchor="middle">r = 1/ρ = 1.26</text>
+  <text class="lbl" x="582" y="52" text-anchor="middle">token 0</text><text class="note" x="582" y="66" text-anchor="middle">r = 4.3</text>
+  <text class="lbl" x="770" y="66" text-anchor="middle">c(tok 0, tok 1)</text>
+
+  <!-- bounds -->
+  <line class="bound" x1="279" y1="76" x2="279" y2="312"/>
+  <line class="bound" x1="475" y1="76" x2="475" y2="312"/>
+  <line class="boundk" x1="532" y1="76" x2="532" y2="312"/>
+  <line class="bando" x1="604" y1="76" x2="604" y2="312"/>
+
+  <!-- rows: y centers 100, 155, 210, 280 -->
+  <text class="lblb" x="16" y="104">A &gt; 0</text>
+  <rect class="band" x="150" y="88" width="382" height="24"/>
+  <line class="axis" x1="150" y1="100" x2="670" y2="100"/>
+  <circle class="ok" cx="216" cy="100" r="7"/><circle class="ok" cx="409" cy="100" r="7"/><circle class="no" cx="582" cy="100" r="7"/>
+  <text class="lbl" x="770" y="104" text-anchor="middle">(<tspan class="not">−0.43</tspan>, 0)</text>
+
+  <text class="lblb" x="16" y="159">A &lt; 0</text>
+  <rect class="band" x="279" y="143" width="325" height="24"/>
+  <line class="axis" x1="150" y1="155" x2="670" y2="155"/>
+  <circle class="no" cx="216" cy="155" r="7"/><circle class="ok" cx="409" cy="155" r="7"/><circle class="ok" cx="582" cy="155" r="7"/>
+  <text class="lbl" x="770" y="159" text-anchor="middle">(0, <tspan class="not">−0.19</tspan>)</text>
+
+  <text class="lblb" x="16" y="214">A = 0</text>
+  <rect class="band" x="150" y="198" width="454" height="24"/>
+  <line class="axis" x1="150" y1="210" x2="670" y2="210"/>
+  <circle class="ok" cx="216" cy="210" r="7"/><circle class="ok" cx="409" cy="210" r="7"/><circle class="ok" cx="582" cy="210" r="7"/>
+  <text class="lbl" x="770" y="214" text-anchor="middle">(0, 0)</text>
+
+  <line class="rowsep" x1="16" y1="240" x2="884" y2="240"/>
+  <text class="lblb" x="16" y="276">ICEPOP</text><text class="note" x="16" y="292">existing mode, any A</text>
+  <rect class="band" x="279" y="268" width="196" height="24"/>
+  <line class="axis" x1="150" y1="280" x2="670" y2="280"/>
+  <circle class="no" cx="216" cy="280" r="7"/><circle class="ok" cx="409" cy="280" r="7"/><circle class="no" cx="582" cy="280" r="7"/>
+  <text class="lbl" x="770" y="284" text-anchor="middle">(<tspan class="not">−0.43</tspan>, <tspan class="not">−0.19</tspan>)</text>
+
+  <!-- bound labels -->
+  <text class="note" x="279" y="328" text-anchor="middle">lo 0.5</text>
+  <text class="note" x="475" y="328" text-anchor="middle">hi 2</text>
+  <text class="kt" x="532" y="342" text-anchor="middle">hi+k 3</text>
+  <text class="not" x="604" y="328" text-anchor="middle">o 5</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/cd0578349f2bf996cb9f7ecaea0ce165570f9b48/nemo_rl/algorithms/loss/clipped_pg.py#L38-L50"><text x="660" y="342">adaptive_ppo_clip_kept_mask</text></a>
+</svg>
+
+<p>Read each row left to right. For <b>A &gt; 0</b>, token 0's ratio 4.3 is above hi + k = 3, so it is dropped.
+Its coefficient is −<i>p</i>(0) = −0.43: the centering pushes back on token 0 by exactly the amount the filter's
+gap would have pulled it. For <b>A &lt; 0</b> the lower bound applies instead. Token 1 (0.32 &lt; 0.5) is dropped, and the coefficient moves to it.
+For <b>A = 0</b> only the outer bound applies, so nothing is dropped and the coefficients are zero.
+The tail (1.26) is kept in every row, so α = 1 throughout. ICEPOP (bounds 0.5–2, no sign rule)
+drops both head tokens for any <i>A</i>. That is why the old mode needed no advantage, and the new one does.</p>
+
+<h2>What the PR changes</h2>
+<p class="where"><b>Where it lands: RL only, three source files.</b>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/cd0578349f2bf996cb9f7ecaea0ce165570f9b48/nemo_rl/algorithms/loss/clipped_pg.py#L38-L50"><code>clipped_pg.py</code></a> moves the keep rule into one shared helper,
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/cd0578349f2bf996cb9f7ecaea0ce165570f9b48/nemo_rl/algorithms/loss/score_centering.py#L100-L122"><code>score_centering.py</code></a> adds the branch, and
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/cd0578349f2bf996cb9f7ecaea0ce165570f9b48/nemo_rl/algorithms/loss/loss_functions.py#L1075-L1083"><code>loss_functions.py</code></a> passes the advantages in.
+The k controller from #4750 is unchanged.</p>
+<pre class="diff"><span class="hunk">@@ score_centering.py L100-L122 · compute_score_centering_term</span>
+<span class="add">+    elif importance_sampling_mode == "adaptive-ppo-clip":
++        lo, hi = is_bounds                       # hi already includes k
++        ratio = (p_log.detach() - q_log).exp()
++        head_kept = adaptive_ppo_clip_kept_mask(  # same rule the loss filter uses
++            ratio, advantages=adaptive_ppo_clip_advantages.unsqueeze(-1), ...)
++        mass = torch.where(head_kept, p, 0.0)
++        # the tail shares one ratio 1/rho; at rho=0 it is inf, which o drops
++        alpha = adaptive_ppo_clip_kept_mask(rho.reciprocal(), ...).to(p.dtype)</span>
+<span class="hunk">@@ loss_functions.py L1079-L1082 · ClippedPGLossFn.__call__</span>
+<span class="del">-                is_bounds=self._score_centering_is_bounds,
+</span><span class="add">+                is_bounds=self._get_score_centering_is_bounds(),  # read k now, not at init
+                 token_mask=mask,
++                adaptive_ppo_clip_advantages=advantages,
++                adaptive_ppo_clip_outer_bound=self.truncated_importance_sampling_adaptive_outer_bound,</span></pre>
+<p>Two details make it correct. The loss filter and the centering call one function,
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/cd0578349f2bf996cb9f7ecaea0ce165570f9b48/nemo_rl/algorithms/loss/loss_functions.py#L980-L988">here</a> and
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/cd0578349f2bf996cb9f7ecaea0ce165570f9b48/nemo_rl/algorithms/loss/score_centering.py#L106-L122">here</a>, so they cannot disagree.
+And the bounds are read on every call
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/cd0578349f2bf996cb9f7ecaea0ce165570f9b48/nemo_rl/algorithms/loss/loss_functions.py#L651-L670"><code>_get_score_centering_is_bounds</code></a>), not saved once
+at setup, so the centering uses the k that the controller set for this step.</p>
+
+<div class="hl"><b>So what.</b> With TIS and ICEPOP, the filter's leftover pull is the same for every token. With
+adaptive-ppo-clip it flips with the advantage's sign and moves as k changes. This PR makes the centering follow both, so
+<code>score_centering: true</code> now works with the MAI-1 method. The unit test
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/cd0578349f2bf996cb9f7ecaea0ce165570f9b48/tests/unit/algorithms/test_loss_functions.py#L3637-L3664"><code>test_score_centering_cancels_the_adaptive_ppo_clip_drift</code></a>
+checks the averaged gradient is zero for each sign, k ∈ {0, 0.5}, and tails that are kept or dropped.
+Whether the pair trains better than adaptive-ppo-clip alone has not been measured.</div>
+
+</div>
+</body>
+</html>
