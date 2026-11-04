@@ -138,6 +138,21 @@ Generation and Gym build in parallel in every lane and are not affected.</p>
 </svg>
 <p class="sub">Scale: 1 px ≈ 0.83 s. The slow-load lane uses a made-up 50 s load to show the fallback.</p>
 
+<h2>Why there are two modes</h2>
+<p>The code faces two unknowns when setup starts: how long the dataset will take to load, and whether it will lower
+<code>max_num_steps</code> at all. Waiting is only worth it when the dataset does lower it. When it does not, the trainer
+could have started at once, so every second of waiting is lost. The 20 s limit is a bet: wait a little, because most loads
+are fast, but never lose more than 20 s on a run whose step count does not change. Time until the trainer is ready
+(one build ≈ 280 s):</p>
+<table style="border-collapse:collapse;font-size:14px;margin:8px 0">
+<tr style="color:var(--dim)"><th style="text-align:left;padding:4px 12px 4px 0"></th><th style="padding:4px 12px">load 1.5 s</th><th style="padding:4px 12px">load 50 s</th></tr>
+<tr><td style="padding:4px 12px 4px 0">dataset lowers the step count</td><td style="padding:4px 12px">560 → <b style="color:var(--green)">282 s</b></td><td style="padding:4px 12px">560 → 580 s (+20)</td></tr>
+<tr><td style="padding:4px 12px 4px 0">step count unchanged</td><td style="padding:4px 12px">280 → 282 s</td><td style="padding:4px 12px">280 → 300 s (+20)</td></tr>
+</table>
+<p>Before → after this PR. The limit keeps the bottom row's loss small. The cost shows in the top-right cell: there, waiting
+for the whole load would give 330 s instead of 580 s. Because the example configs almost always lower the step count,
+that top-right case is the one to watch for datasets that load in tens of seconds.</p>
+
 <h2>The fix: hold the trainer back, wait at most 20 s, then submit</h2>
 <p class="where"><b>Where the fix lands: RL only, one function.</b>
 <a href="https://github.com/NVIDIA-NeMo/RL/blob/586831d33686d142a8ba66e8b13646992f8d1585/nemo_rl/algorithms/single_controller_utils/setup.py#L2027-L2102"><code>setup.py</code> · the build step of <code>setup_single_controller</code></a>,
