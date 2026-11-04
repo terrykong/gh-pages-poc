@@ -104,7 +104,7 @@ Raised first by a reviewer in <a href="https://github.com/NVIDIA-NeMo/RL/pull/50
   <dt>This PR</dt>
   <dd>Sets <code>ρ = 0</code> whenever the trainer tail is at most 1e-6 (<a href="https://github.com/NVIDIA-NeMo/RL/blob/77d3b0944b4bcb825c211466d3d8b3f2f7be169a/nemo_rl/algorithms/loss/score_centering.py#L74-L81">score_centering.py L74-L81</a>), for every caller, replay or not.</dd>
   <dt>Status</dt>
-  <dd><span class="verdict open">Open — not fixed in this PR.</span> The review adds a +1 with numbers and the fix (comment C2). The gradient only matters for replay-off runs where the trainer is very sure and the sampler is not.</dd>
+  <dd><span class="verdict" style="color:var(--green)">Fixed by the author in <a href="https://github.com/NVIDIA-NeMo/RL/commit/af11112532d3d5a19c648fc17dd7dafac2d6938f">af11112532</a></span>, after a reviewer flagged it. <code>compute_score_centering_term</code> now takes <code>sampler_replay</code> and zeroes <code>ρ</code> only under replay; the PR's tests now cover the small-tail case. This page shows what the bug was.</dd>
 </dl></div>
 
 <nav class="chain">
@@ -149,34 +149,23 @@ base and head versions of the function.</p>
   Under truncated IS the whole correction goes to about 0.</li>
 </ol>
 
-<h2>The fix — proposed in review comment C2, not in the PR</h2>
-<p class="where"><b>Where the fix lands: RL only.</b> <a href="https://github.com/NVIDIA-NeMo/RL/blob/77d3b0944b4bcb825c211466d3d8b3f2f7be169a/nemo_rl/algorithms/loss/score_centering.py#L19-L25"><code>compute_score_centering_term</code></a>
-gets a <code>sampler_replay</code> argument, passed by <a href="https://github.com/NVIDIA-NeMo/RL/blob/77d3b0944b4bcb825c211466d3d8b3f2f7be169a/nemo_rl/algorithms/loss/loss_functions.py#L1071-L1077"><code>ClippedPGLossFn</code></a>,
-which is built where the single controller already reads <code>policy.generation</code>
-(<a href="https://github.com/NVIDIA-NeMo/RL/blob/77d3b0944b4bcb825c211466d3d8b3f2f7be169a/nemo_rl/algorithms/single_controller_utils/setup.py#L2206">setup.py</a>).</p>
-<pre class="diff"><span class="hunk">@@ nemo_rl/algorithms/loss/score_centering.py L74-L81 · compute_score_centering_term</span>
-     trainer_tail = 1.0 - p.sum(-1)
-<span class="del">-    rho = torch.where(
+<h2>The fix — landed in af11112532</h2>
+<p class="where"><b>Where the fix landed: RL only.</b> <code>compute_score_centering_term</code> takes a new <code>sampler_replay</code> argument. <a href="https://github.com/NVIDIA-NeMo/RL/blob/941d7619bf1548dd7a1089c7a2f32727e9902f90/nemo_rl/algorithms/loss/loss_functions.py#L1071-L1080"><code>ClippedPGLossFn</code></a> sets it when the batch has a top-k/top-p support mask, which only filtered sampling produces; setup already requires replay for score centering under filters, so the two always agree.</p>
+<pre class="diff"><span class="hunk">@@ nemo_rl/algorithms/loss/score_centering.py · compute_score_centering_term (af11112532)</span>
+<span class="del">-    trainer_tail = 1.0 - p.sum(-1)
+-    rho = torch.where(
 -        trainer_tail &gt; 1e-6,
 -        (1.0 - head_mass).clamp(min=0.0) / trainer_tail.clamp(min=1e-6),
 -        0.0,
 -    )
-</span><span class="add">+    # Under replay the head holds all of p: rho cannot move the gradient, and a
-+    # nonzero rho only inflates the logged loss. Elsewhere keep #4818's estimate.
-+    rho = (
-+        torch.zeros_like(head_mass)
-+        if sampler_replay
-+        else (1.0 - head_mass).clamp(min=0.0) / trainer_tail.clamp(min=1e-6)
-+    )
+</span><span class="add">+    if sampler_replay:
++        rho = torch.zeros_like(head_mass)
++    else:
++        rho = (1.0 - head_mass).clamp(min=0.0) / (1.0 - p.sum(-1)).clamp(min=1e-6)
 </span></pre>
-<p style="font-size:14px">The <code>else</code> branch is <a href="https://github.com/NVIDIA-NeMo/RL/blob/6e68b17911b83becacc0c0afaf4be15c43c17873/nemo_rl/algorithms/loss/score_centering.py#L66">#4818's line</a>
-(linked at the base, since this PR replaced it). Keep the PR's new <code>slots</code> mask, which stops 0 × −inf from becoming NaN.
-The PR's <a href="https://github.com/NVIDIA-NeMo/RL/blob/77d3b0944b4bcb825c211466d3d8b3f2f7be169a/tests/unit/algorithms/test_score_centering.py#L410-L427">no-tail test</a> feeds a list with no −inf slot, so it
-tests the replay-off case and needs a replay-shaped input; a new test pins the 0.2 gradient at t = 9e-7 and 2e-6.</p>
-<p class="cref">🔴 <a href="https://github.com/NVIDIA-NeMo/RL/pull/5006#discussion_r4451928874">review comment C2 — score_centering.py:78</a></p>
+<p style="font-size:14px">The <code>else</code> branch is <a href="https://github.com/NVIDIA-NeMo/RL/blob/6e68b17911b83becacc0c0afaf4be15c43c17873/nemo_rl/algorithms/loss/score_centering.py#L66">#4818\'s line</a>, unchanged. The PR\'s replay no-tail test now uses a replay-shaped input, and a new test checks the reviewer\'s example (trainer tail 9e-7) without replay.</p>
 
-<div class="warn"><b>So what.</b> The rule is right for replay and wrong elsewhere. Tying it to the replay setting instead of to the
-trainer's tail size keeps replay's logged loss clean and gives plain score centering back the tail gradient it had in #4818.</div>
+<div class="warn"><b>So what.</b> The rule was right for replay and wrong elsewhere. Tying it to replay instead of to the trainer's tail size keeps replay's logged loss clean and gives plain score centering back the tail gradient it had in #4818.</div>
 
 </div>
 </body>
