@@ -70,6 +70,13 @@ svg .okt{fill:var(--green);font:bold 11.5px -apple-system,sans-serif}
 svg .badt{fill:var(--red);font:bold 11.5px -apple-system,sans-serif}
 svg .ln{stroke:var(--border);stroke-width:1}
 svg a text{text-decoration:underline;fill:var(--accent)}
+.tok{font-size:13.5px}
+.tok td,.tok th{white-space:normal}
+.tok .bar{display:inline-block;height:9px;background:var(--accent);border-radius:2px;vertical-align:middle;margin-right:6px}
+.tok tr.tie td{background:var(--surface)}
+.tok tr.cut td{color:var(--dim)}
+.tok tr.badrow td{background:var(--surface);border-color:var(--red)}
+.g{color:var(--green)} .r{color:var(--red)} .dim{color:var(--dim)}
 </style>
 <script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
   document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
@@ -91,7 +98,7 @@ svg a text{text-decoration:underline;fill:var(--accent)}
   <dt>Before</dt>
   <dd>No replay, so no such check existed.</dd>
   <dt>This PR</dt>
-  <dd>Adds <a href="https://github.com/NVIDIA-NeMo/RL/blob/77d3b0944b4bcb825c211466d3d8b3f2f7be169a/nemo_rl/distributed/model_utils.py#L714-L748"><code>check_sampler_support</code></a>: a captured list that looks full but misses the sampled token raises and ends training.</dd>
+  <dd>Adds <a href="https://github.com/NVIDIA-NeMo/RL/blob/941d7619bf1548dd7a1089c7a2f32727e9902f90/nemo_rl/distributed/model_utils.py#L714-L748"><code>check_sampler_support</code></a>: a captured list that looks full but misses the sampled token raises and ends training.</dd>
   <dt>Status</dt>
   <dd><span class="verdict open">Open — not fixed in this PR.</span> Raised in the review (comment C1), with a 4-line fix. Reproduced on CPU; how often a real run hits it is not measured (no GPU run).</dd>
 </dl></div>
@@ -103,73 +110,56 @@ svg a text{text-decoration:underline;fill:var(--accent)}
 </nav>
 <p class="chainnote">Three pages on this PR, one question each. This one: when replay's own safety check kills a healthy run.</p>
 
-<div class="bg"><b>Background.</b> Replay trusts the <code>top_logprobs</code> recorded slots to hold every token vLLM could sample (page 1). When they do not,
-the code must tell two cases apart: a <b>short list</b> (vLLM kept more tokens than <code>top_logprobs</code>, which happens) and a <b>broken capture</b>
-(a bug). The function's own docstring says a short list is "reported, not raised on", so the token is just dropped and counted.
-It decides "short" by one test: do the captured probabilities add up to less than 1 − 1e-4?</div>
+<div class="bg"><b>Background.</b> For every token it generates, vLLM also returns a short list: the <code>top_logprobs</code>
+most likely tokens with their probabilities. Tokens its top-k filter removed get probability 0 (log-prob −inf).
+Replay treats the tokens in that list as "the tokens vLLM could have sampled" (page 1). So the list must contain the token
+vLLM actually sampled. If it does not, the code must decide between two explanations:
+<b>the list was too short</b> (normal, rare: drop the token from the loss) or <b>the data is broken</b> (a bug: stop the run).
+It decides with one test on the list's probabilities, shown below.</div>
 
-<h2>Three captured lists, one rule</h2>
-<p style="font-size:13.5px;color:var(--dim)"><code>top_k = top_logprobs = 3</code> (allowed: setup only needs <code>top_logprobs ≥ top_k</code>,
-and the guide's example uses 64 / 64). On a decode batch with fewer than 8 requests, vLLM's PyTorch top-k
-<a href="https://github.com/vllm-project/vllm/blob/v0.29.0/vllm/v1/sample/ops/topk_topp_sampler.py#L384-L396">keeps every token tied with the 3rd logit</a>
-(the batch ≥ 8 Triton path keeps exactly 3). Logits for ids 17, 4, 9, 23: 2.0, 1.4, then a tie.</p>
+<h2>One generated token, step by step</h2>
+<p style="font-size:14px">Settings: <code>top_k = 3</code> (vLLM may sample only the 3 most likely tokens) and
+<code>top_logprobs = 3</code> (vLLM records 3 tokens). Setup allows this, since it only asks for <code>top_logprobs ≥ top_k</code>,
+and the guide's own example uses 64 and 64. Pretend the vocabulary has 5 tokens. Here are vLLM's numbers for one position:</p>
 
-<svg viewBox="0 0 960 300" role="img" aria-label="Row A: tie at logit minus 8, the left-out token has probability 2.9e-5, the list counts as full, sampled token 23 raises: bug. Row B: tie at minus 3, left-out probability 4.3e-3, the list counts as short, token dropped: fine. Row C: list has a minus infinity slot, sampled token 23 not in it: real corruption, raises: correct.">
-  <text class="row" x="12" y="20">CASE</text>
-  <text class="row" x="170" y="20">CAPTURED 3 SLOTS (vLLM kept)</text>
-  <text class="row" x="470" y="20">MASS</text>
-  <text class="row" x="560" y="20">SAMPLED</text>
-  <text class="row" x="650" y="20">TODAY</text>
-  <text class="row" x="810" y="20">AFTER FIX</text>
-  <line class="ln" x1="10" y1="28" x2="950" y2="28"/>
-
-  <rect class="bad" x="10" y="38" width="940" height="70" rx="6"/>
-  <text class="code" x="22" y="60">A · tie at −8</text>
-  <text class="data" x="22" y="78">vLLM kept 4 tokens</text>
-  <text class="code" x="170" y="60">[17, 4, 9]  (23 left out)</text>
-  <text class="data" x="170" y="78">23 has q = 2.9e-5</text>
-  <text class="code" x="470" y="60">0.99997</text>
-  <text class="data" x="470" y="78">≥ 1 − 1e-4</text>
-  <text class="code" x="560" y="60">23</text>
-  <text class="data" x="560" y="78">odds 2.9e-5</text>
-  <text class="badt" x="650" y="60">raises, run dies</text>
-  <text class="data" x="650" y="78">"capture is corrupt"</text>
-  <text class="okt" x="810" y="60">dropped, counted</text>
-  <text class="data" x="22" y="98">counted as "full" because the left-out mass is under 1e-4, so a miss looks like corruption</text>
-
-  <rect class="ok" x="10" y="118" width="940" height="56" rx="6"/>
-  <text class="code" x="22" y="140">B · tie at −3</text>
-  <text class="code" x="170" y="140">[17, 4, 9]  (23 left out)</text>
-  <text class="data" x="170" y="158">23 has q = 4.3e-3</text>
-  <text class="code" x="470" y="140">0.9957</text>
-  <text class="data" x="470" y="158">&lt; 1 − 1e-4</text>
-  <text class="code" x="560" y="140">23</text>
-  <text class="okt" x="650" y="140">dropped, counted</text>
-  <text class="okt" x="810" y="140">dropped, counted</text>
-
-  <rect class="ok" x="10" y="184" width="940" height="56" rx="6"/>
-  <text class="code" x="22" y="206">C · broken</text>
-  <text class="code" x="170" y="206">[17, 4, −inf slot]</text>
-  <text class="data" x="170" y="224">a −inf slot: list holds all kept</text>
-  <text class="code" x="470" y="206">1.0</text>
-  <text class="code" x="560" y="206">23</text>
-  <text class="okt" x="650" y="206">raises (right)</text>
-  <text class="okt" x="810" y="206">raises (right)</text>
-
-  <rect x="10" y="256" width="14" height="10" class="bad"/><text class="data" x="30" y="265">the bug: a healthy run stops</text>
-  <rect x="250" y="256" width="14" height="10" class="ok"/><text class="data" x="270" y="265">correct behaviour</text>
-  <a href="https://github.com/NVIDIA-NeMo/RL/blob/77d3b0944b4bcb825c211466d3d8b3f2f7be169a/nemo_rl/distributed/model_utils.py#L739-L746"><text x="10" y="290">model_utils.py L739-L746: the mass test and the raise</text></a>
-</svg>
+<table class="tok">
+<tr><th>rank</th><th>token id</th><th>logit<br><span class="dim">(raw score)</span></th><th>probability after the top-k filter</th><th>vLLM may sample it?</th><th>in the recorded list of 3?</th></tr>
+<tr><td>1</td><td><code>17</code></td><td>2.0</td><td><span class="bar" style="width:129px"></span> 0.6456</td><td class="g">yes</td><td class="g">yes</td></tr>
+<tr><td>2</td><td><code>4</code></td><td>1.4</td><td><span class="bar" style="width:71px"></span> 0.3543</td><td class="g">yes</td><td class="g">yes</td></tr>
+<tr class="tie"><td>3</td><td><code>9</code></td><td>−8.0</td><td><span class="bar" style="width:2px"></span> 0.0000293</td><td class="g">yes</td><td class="g">yes</td></tr>
+<tr class="tie"><td>3 (tie)</td><td><code>23</code></td><td>−8.0</td><td><span class="bar" style="width:2px"></span> 0.0000293</td><td class="g">yes, tied with 9</td><td class="r">no, list is full</td></tr>
+<tr class="cut"><td>5</td><td><code>31</code></td><td>−9.5</td><td>0 (cut)</td><td class="dim">no</td><td class="dim">no</td></tr>
+</table>
 
 <ol>
-  <li>Rows A and B are the same event, a tie at the cut. Only the left-out token's size differs. One is dropped quietly; the other ends training.</li>
-  <li>Each hit is rare (the sampler must pick a token with q under 1e-4), but a run samples millions of tokens, and decode batches under 8 rows happen at the end of every rollout.</li>
-  <li>The useful signal is the −inf slot. If the list has one, vLLM's kept set fit inside the recorded slots, so a miss really is a broken capture (row C).
-  If every slot is finite, the list may be short, so a miss means "drop it", not "crash".</li>
+  <li><b>The tie.</b> Tokens 9 and 23 have the same logit, so they share 3rd place. When fewer than 8 requests are decoding (the end of
+  every rollout), vLLM's top-k <a href="https://github.com/vllm-project/vllm/blob/v0.29.0/vllm/v1/sample/ops/topk_topp_sampler.py#L384-L396">keeps
+  every token that ties with the 3rd</a>. So it keeps 4 tokens, not 3, and can sample any of them.
+  (With 8 or more requests, a different kernel keeps exactly 3.)</li>
+  <li><b>The recorded list has room for 3.</b> It holds 17, 4 and 9. Token 23 is left out.</li>
+  <li><b>The test.</b> The code adds up the probabilities in the list: 0.6456 + 0.3543 + 0.0000293 = <b>0.99997</b>.
+  If the sum is at least 0.9999, the list counts as <b>complete</b>
+  (<a href="https://github.com/NVIDIA-NeMo/RL/blob/941d7619bf1548dd7a1089c7a2f32727e9902f90/nemo_rl/distributed/model_utils.py#L739-L746">model_utils.py L739-L746</a>).
+  Here it does, because the missing token is so unlikely.</li>
+  <li><b>The crash.</b> vLLM samples token 23. That happens 0.0000293 of the time here, about 1 in 34,000. But a run generates
+  millions of tokens. The list is "complete" and 23 is not in it, so the code concludes the data is broken and raises
+  <code>"the capture is corrupt"</code>. Training stops.</li>
 </ol>
 
+<h2>The same rule on three cases</h2>
+<table class="tok">
+<tr><th>case</th><th>what happened</th><th>recorded list</th><th>sum of its probabilities</th><th>sampled</th><th>today</th><th>after the fix</th></tr>
+<tr class="badrow"><td><b>A</b></td><td>the example above: tie at 3rd place, tied tokens unlikely (0.0000293 each)</td><td><code>17, 4, 9</code></td><td>0.99997 → "complete"</td><td><code>23</code></td><td class="r"><b>run stops</b></td><td class="g">token dropped, counted</td></tr>
+<tr><td><b>B</b></td><td>same tie, but the tied tokens are likelier (logit −3.0, 0.0043 each)</td><td><code>17, 4, 9</code></td><td>0.9957 → "short"</td><td><code>23</code></td><td class="g">token dropped, counted</td><td class="g">token dropped, counted</td></tr>
+<tr><td><b>C</b></td><td>no tie; <code>top_logprobs = 4</code>, so the 4th slot holds a cut token at probability 0. A sampled token outside the list means broken data</td><td><code>17, 4, 9, (23 at 0)</code></td><td>1.0 → "complete"</td><td><code>23</code></td><td class="g">run stops (right)</td><td class="g">run stops (right)</td></tr>
+</table>
+<p style="font-size:14px">A and B are the same event. Only the size of the left-out token differs, yet one is dropped quietly and the
+other ends training. "Dropped, counted" means the token is left out of the loss and added to the
+<code>policy_support_excluded_tokens</code> metric. C is how real corruption looks: the list has a slot at probability 0, so it
+already held every token vLLM could sample, and a token outside it cannot be explained by a tie.</p>
+
 <h2>The fix — proposed in review comment C1, not in the PR</h2>
-<p class="where"><b>Where the fix lands: RL only, one function</b>, <a href="https://github.com/NVIDIA-NeMo/RL/blob/77d3b0944b4bcb825c211466d3d8b3f2f7be169a/nemo_rl/distributed/model_utils.py#L714-L748"><code>check_sampler_support</code></a>.
+<p class="where"><b>Where the fix lands: RL only, one function</b>, <a href="https://github.com/NVIDIA-NeMo/RL/blob/941d7619bf1548dd7a1089c7a2f32727e9902f90/nemo_rl/distributed/model_utils.py#L714-L748"><code>check_sampler_support</code></a>.
 No vLLM change: keeping ties is vLLM's documented small-batch behaviour.</p>
 <pre class="diff"><span class="hunk">@@ nemo_rl/distributed/model_utils.py L739-L742 · check_sampler_support</span>
 <span class="del">-    head_mass = sampler_topk_logprobs.to(support.device).float().exp().sum(-1)
@@ -186,11 +176,7 @@ No vLLM change: keeping ties is vLLM's documented small-batch behaviour.</p>
 +    if not in_support[active &amp; complete].all():
 </span>         raise ValueError(
              "sampler replay: a sampled token is not in its captured sampler "</pre>
-<p style="font-size:14px">Row A now has a full list and a miss, so <code>tie_miss</code> is true, the position is marked short, and the
-loss drops and counts it like row B. Row C has a −inf slot, so <code>tie_miss</code> is false and the raise still fires: the PR's
-<a href="https://github.com/NVIDIA-NeMo/RL/blob/77d3b0944b4bcb825c211466d3d8b3f2f7be169a/tests/unit/algorithms/test_score_centering.py#L211">corrupt-capture test</a> keeps passing. The simpler idea, "any miss
-means short", would break that test, since it would also drop row C. Raising <code>top_logprobs</code> above <code>top_k</code> only
-makes row A rarer: a tie can be wider than the margin.</p>
+<p style="font-size:14px">In case A the list has no slot at probability 0 and misses the sampled token, so <code>tie_miss</code> is true: the position counts as short, and the loss drops and counts the token, as in case B. In case C the list has a slot at probability 0, so <code>tie_miss</code> is false and the error still fires. That keeps the PR's <a href="https://github.com/NVIDIA-NeMo/RL/blob/941d7619bf1548dd7a1089c7a2f32727e9902f90/tests/unit/algorithms/test_score_centering.py#L211">broken-data test</a> passing. The simpler idea, "any miss means short", would also drop case C and break that test. Raising <code>top_logprobs</code> above <code>top_k</code> only makes case A rarer, because a tie can be wider than the extra room.</p>
 <p class="cref">🔴 <a href="https://github.com/NVIDIA-NeMo/RL/pull/5006#discussion_r4451926800">review comment C1 — model_utils.py:739</a></p>
 
 <div class="warn"><b>So what.</b> As written, replay can end a long run with an error that blames the capture when nothing is wrong.
