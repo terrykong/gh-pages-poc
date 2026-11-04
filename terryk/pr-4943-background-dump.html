@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NVIDIA-NeMo/RL #4943 — how the training-data dump moves off the advantage stage</title>
+<style>
+:root{--bg:#0d1117;--surface:#161b22;--surface2:#1c2128;--border:#30363d;--text:#e6edf3;--dim:#8b949e;
+  --accent:#58a6ff;--green:#3fb950;--red:#f85149;--orange:#d29922}
+:root[data-theme="light"]{--bg:#ffffff;--surface:#f6f8fa;--surface2:#eaeef2;--border:#d0d7de;--text:#1f2328;
+  --dim:#59636e;--accent:#0969da;--green:#1a7f37;--red:#cf222e;--orange:#9a6700}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:28px 16px 70px}
+h1{font-size:22px;margin:0 0 8px;line-height:1.3}
+h2{font-size:18px;margin:30px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
+.sub{color:var(--dim);font-size:13.5px;margin:0 0 14px}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);
+  border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;
+  font:13px/1 ui-monospace,Menlo,monospace;cursor:pointer}
+.status{border:1px solid var(--border);border-radius:10px;background:var(--surface);padding:2px 16px 10px;margin:0 0 16px}
+.status dl{display:grid;grid-template-columns:max-content 1fr;gap:4px 14px;margin:12px 0 0}
+.status dt{color:var(--dim);font-size:12px;text-transform:uppercase;letter-spacing:.04em;white-space:nowrap;padding-top:2px}
+.status dd{margin:0;font-size:14px}
+.verdict{font-weight:700}.verdict.good{color:var(--green)}.verdict.open{color:var(--red)}
+nav.chain{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 6px;padding:0}
+nav.chain a,nav.chain span{display:inline-block;padding:5px 11px;border:1px solid var(--border);
+  border-radius:20px;background:var(--surface);text-decoration:none;color:var(--accent);font-size:12.5px;line-height:1.3;white-space:nowrap}
+nav.chain a:hover{background:var(--surface2)}
+nav.chain span.here{background:var(--accent);color:var(--bg);border-color:var(--accent);font-weight:600}
+p.chainnote{color:var(--dim);font-size:12px;margin:0 0 18px}
+.bg{border:1px dashed var(--border);border-radius:8px;padding:8px 14px;margin:0 0 14px;font-size:14px}
+.tip{border-bottom:1px dotted var(--dim);cursor:help;position:relative;outline:none}
+.tip:hover::after,.tip:focus::after{content:attr(data-tip);position:absolute;left:0;top:1.7em;z-index:60;
+  width:max-content;max-width:min(340px,80vw);white-space:normal;background:var(--surface2);color:var(--text);
+  border:1px solid var(--border);border-radius:6px;padding:7px 10px;font:13px/1.45 -apple-system,sans-serif;
+  font-weight:400;box-shadow:0 4px 14px rgba(0,0,0,.3)}
+table{border-collapse:collapse;font-size:13.5px;margin:10px 0;width:100%}
+th,td{border:1px solid var(--border);padding:5px 9px;text-align:left}
+th{background:var(--surface)}
+td.num{font-family:ui-monospace,Menlo,monospace}
+.hl{border-left:3px solid var(--accent);background:var(--surface);padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0}
+svg{max-width:100%;height:auto;display:block;margin:14px 0}
+svg .lane{fill:var(--dim);font:bold 12.5px -apple-system,sans-serif}
+svg .t{fill:var(--text);font:11.5px ui-monospace,Menlo,monospace}
+svg .n{fill:var(--dim);font:11.5px -apple-system,sans-serif}
+svg .comp{fill:var(--accent);opacity:.35;stroke:var(--accent)}
+svg .write{fill:var(--orange);opacity:.45;stroke:var(--orange)}
+svg .wait{fill:var(--red);opacity:.4;stroke:var(--red)}
+svg .train{fill:var(--dim);opacity:.25;stroke:var(--dim)}
+svg .axis{stroke:var(--border);stroke-width:1}
+svg .end{stroke:var(--red);stroke-width:2;stroke-dasharray:4 3}
+svg .endg{stroke:var(--green);stroke-width:2;stroke-dasharray:4 3}
+svg .endt{fill:var(--red);font:bold 12px -apple-system,sans-serif}
+svg .endtg{fill:var(--green);font:bold 12px -apple-system,sans-serif}
+svg a text{text-decoration:underline;fill:var(--accent);font:11px ui-monospace,Menlo,monospace}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+  document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head>
+<body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+  function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+  function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
+    b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
+      else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+  document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+<div class="wrap">
+
+<h1>How the training-data dump moves off the advantage stage, and where it waits now</h1>
+<p class="sub"><a href="https://github.com/NVIDIA-NeMo/RL/pull/4943">NVIDIA-NeMo/RL #4943</a>
+· all permalinks pin head <code>85ec597</code>.</p>
+
+<div class="status"><dl>
+<dt>Before</dt><dd>With <code>log_full_train_data</code> on, each advantage-stage call wrote its chunk to JSON before it returned. The write time was added to every chunk.</dd>
+<dt>This PR</dt><dd>The stage hands the JSON write to a separate writer process and returns. The controller waits for all writes once, just before it merges the step's file.</dd>
+<dt>Status</dt><dd><span class="verdict good">Speed-up works as described.</span> <span class="verdict open">One open problem:</span> nobody stops the new writer process — see the next page.</dd>
+</dl></div>
+
+<nav class="chain">
+  <span class="here">1 · where the write goes</span>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4943-writer-never-closed.html">2 · the writer nobody closes</a>
+</nav>
+<p class="chainnote">Two pages on this PR — this one: what changed and where the time goes.</p>
+
+<div class="bg"><b>Background.</b> In the single-controller loop, the <b>advantage stage</b> scores one chunk of samples at a time, in the controller or in a pool of CPU actors. With the debug flag <code>log_full_train_data</code>, it also writes each chunk's rows to a <span class="tip" tabindex="0" data-tip="A per-shard file train_data_stepN.jsonl.part-K. The controller merges all parts into train_data_stepN.jsonl after the optimizer step.">part file</span>. JSON encoding holds Python's <span class="tip" tabindex="0" data-tip="Global interpreter lock: only one thread runs Python code at a time, so a thread cannot hide CPU-heavy JSON work.">GIL</span>, so a thread would not help — the PR uses a process. Dotted words have a short explanation: hover or tap them.</div>
+
+<p>Before, <a href="https://github.com/NVIDIA-NeMo/RL/blob/bf2af41d722d3a4a05feff468b6d1493a6a7eded/nemo_rl/algorithms/single_controller_utils/debug_writer.py#L185-L215"><code>JsonDebugWriter._write_chunk</code></a> wrote every row and then returned.
+Now the same loop lives in <a href="https://github.com/NVIDIA-NeMo/RL/blob/85ec59797a912b96084d5783f027535424e88179/nemo_rl/algorithms/single_controller_utils/debug_writer.py#L281-L303"><code>_write_part</code></a>, and <code>_write_chunk</code> only checks the chunk and <a href="https://github.com/NVIDIA-NeMo/RL/blob/85ec59797a912b96084d5783f027535424e88179/nemo_rl/algorithms/single_controller_utils/debug_writer.py#L213-L221">submits it</a> to a one-worker <code>ProcessPoolExecutor</code> started with <code>spawn</code>. At most two chunks wait; a third <code>add_chunk</code> waits for the oldest.
+At step commit the controller calls <a href="https://github.com/NVIDIA-NeMo/RL/blob/85ec59797a912b96084d5783f027535424e88179/nemo_rl/algorithms/single_controller.py#L3953-L3973"><code>flush_train_data_dump</code></a> on every stage writer, then merges as before. Bad chunks still fail at once, because checking stays in the caller.</p>
+
+<svg viewBox="0 0 900 250" role="img" aria-label="Timeline of one step with three chunks, before and after the PR">
+  <text class="n" x="14" y="18">One step, 3 chunks. Each chunk: 2 s of stage compute, 1 s of JSON write (schematic units, 40 px = 1 s).</text>
+  <!-- legend -->
+  <rect class="comp" x="14" y="28" width="16" height="11"/><text class="n" x="35" y="38">stage compute</text>
+  <rect class="write" x="140" y="28" width="16" height="11"/><text class="n" x="161" y="38">JSON write</text>
+  <rect class="train" x="250" y="28" width="16" height="11"/><text class="n" x="271" y="38">training between chunks</text>
+  <rect class="wait" x="440" y="28" width="16" height="11"/><text class="n" x="461" y="38">time the step waits on the dump</text>
+
+  <text class="lane" x="14" y="76">Before</text>
+  <text class="n" x="14" y="92">stage call</text>
+  <!-- before: per chunk compute 2s (80px) + write 1s (40px, wait) + train 1s (40px) -->
+  <rect class="comp" x="100" y="66" width="80" height="22"/><rect class="wait" x="180" y="66" width="40" height="22"/><rect class="train" x="220" y="66" width="40" height="22"/>
+  <rect class="comp" x="260" y="66" width="80" height="22"/><rect class="wait" x="340" y="66" width="40" height="22"/><rect class="train" x="380" y="66" width="40" height="22"/>
+  <rect class="comp" x="420" y="66" width="80" height="22"/><rect class="wait" x="500" y="66" width="40" height="22"/><rect class="train" x="540" y="66" width="40" height="22"/>
+  <line class="end" x1="580" y1="58" x2="580" y2="100"/><text class="endt" x="588" y="82">commit at 12 s — 3 s spent writing</text>
+
+  <text class="lane" x="14" y="140">This PR</text>
+  <text class="n" x="14" y="156">stage call</text>
+  <rect class="comp" x="100" y="130" width="80" height="22"/><rect class="train" x="180" y="130" width="40" height="22"/>
+  <rect class="comp" x="220" y="130" width="80" height="22"/><rect class="train" x="300" y="130" width="40" height="22"/>
+  <rect class="comp" x="340" y="130" width="80" height="22"/><rect class="train" x="420" y="130" width="40" height="22"/>
+  <text class="n" x="14" y="190">writer process</text>
+  <rect class="write" x="180" y="176" width="40" height="22"/><rect class="write" x="300" y="176" width="40" height="22"/><rect class="write" x="420" y="176" width="40" height="22"/>
+  <line class="endg" x1="460" y1="122" x2="460" y2="206"/><text class="endtg" x="468" y="146">commit at 9 s — flush finds every write done</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/85ec59797a912b96084d5783f027535424e88179/nemo_rl/algorithms/single_controller_utils/debug_writer.py#L220"><text x="180" y="222">submit → writer (debug_writer.py:220)</text></a>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/85ec59797a912b96084d5783f027535424e88179/nemo_rl/algorithms/single_controller.py#L3957-L3967"><text x="468" y="222">flush before merge (single_controller.py:3957)</text></a>
+  <text class="n" x="14" y="244">If chunks arrive faster than the writer finishes them, the third add_chunk and the commit flush wait instead (red again).</text>
+</svg>
+
+<h2>What the PR measured</h2>
+<p>The PR's table: 6 chunks per worker, one chunk's write W ≈ 0.92 s, median of 5 runs on a CPU login node. "Exposed" = how much longer the step takes with the dump on.</p>
+<table>
+<tr><th>compute between chunks</th><th>main exposed</th><th>this PR exposed</th></tr>
+<tr><td>none (back to back)</td><td class="num">6.05 s</td><td class="num">6.12 s</td></tr>
+<tr><td>0.5 × W</td><td class="num">5.94 s</td><td class="num">3.19 s</td></tr>
+<tr><td>1.0 × W</td><td class="num">6.04 s</td><td class="num">0.50 s</td></tr>
+<tr><td>3.0 × W</td><td class="num">5.97 s</td><td class="num">0.28 s</td></tr>
+</table>
+<p>In the real loop each stage call is followed by training on that chunk (<a href="https://github.com/NVIDIA-NeMo/RL/blob/85ec59797a912b96084d5783f027535424e88179/nemo_rl/algorithms/single_controller.py#L3535">single_controller.py:3535</a>), so the "back to back" row is unlikely and most of the write should hide. Two costs the table does not include: starting the writer process (it imports the whole single-controller package, about 650 MiB and 13 s on a Mac, once per stage process), and copying each tensor's storage into shared memory when the chunk is sent.</p>
+
+<div class="hl">The idea is sound and the overlap is real. Before merging, the review asks for: closing the writer process (<a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4943-writer-never-closed.html">next page</a>), sending private copies of the tensors, a lighter module for the writer to import, and tests that fail when the flush or the two-chunk limit is removed.</div>
+
+</div>
+</body>
+</html>
