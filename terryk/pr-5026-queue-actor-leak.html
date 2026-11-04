@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NVIDIA-NeMo/RL #5026 — how measuring argument size leaks the queue actor</title>
+<style>
+:root{--bg:#0d1117;--surface:#161b22;--surface2:#1c2128;--border:#30363d;--text:#e6edf3;--dim:#8b949e;
+  --accent:#58a6ff;--green:#3fb950;--red:#f85149;--orange:#d29922}
+:root[data-theme="light"]{--bg:#ffffff;--surface:#f6f8fa;--surface2:#eaeef2;--border:#d0d7de;--text:#1f2328;
+  --dim:#59636e;--accent:#0969da;--green:#1a7f37;--red:#cf222e;--orange:#9a6700}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:28px 16px 70px}
+h1{font-size:22px;margin:0 0 8px;line-height:1.3}
+h2{font-size:18px;margin:30px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
+.sub{color:var(--dim);font-size:13.5px;margin:0 0 14px}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);
+  border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;
+  font:13px/1 ui-monospace,monospace;cursor:pointer}
+.status{border:1px solid var(--border);border-radius:10px;background:var(--surface);padding:2px 16px 10px;margin:0 0 14px}
+.status dl{display:grid;grid-template-columns:max-content 1fr;gap:4px 14px;margin:12px 0 0}
+.status dt{color:var(--dim);font-size:12px;text-transform:uppercase;letter-spacing:.04em;white-space:nowrap;padding-top:2px}
+.status dd{margin:0;font-size:14px}
+.verdict{font-weight:700}.verdict.good{color:var(--green)}.verdict.open{color:var(--red)}
+nav.chain{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 6px;padding:0}
+nav.chain a,nav.chain span{display:inline-block;padding:5px 11px;border:1px solid var(--border);
+  border-radius:20px;background:var(--surface);text-decoration:none;color:var(--accent);font-size:12.5px;line-height:1.3;white-space:nowrap}
+nav.chain a:hover{background:var(--surface2)}
+nav.chain span.here{background:var(--accent);color:var(--bg);border-color:var(--accent);font-weight:600}
+p.chainnote{color:var(--dim);font-size:12px;margin:0 0 18px}
+.bg{border:1px dashed var(--border);border-radius:8px;padding:8px 14px;margin:0 0 14px;font-size:14px}
+.tip{border-bottom:1px dotted var(--dim);cursor:help;position:relative;outline:none}
+.tip:hover::after,.tip:focus::after{content:attr(data-tip);position:absolute;left:0;top:1.7em;z-index:60;
+  width:max-content;max-width:min(340px,80vw);white-space:normal;background:var(--surface2);color:var(--text);
+  border:1px solid var(--border);border-radius:6px;padding:7px 10px;font:13px/1.45 -apple-system,sans-serif;
+  font-weight:400;box-shadow:0 4px 14px rgba(0,0,0,.3)}
+.diff{font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--surface);
+  border:1px solid var(--border);border-radius:8px;padding:12px;overflow-x:auto;white-space:pre;margin:10px 0}
+.diff .add{color:var(--green)}.diff .del{color:var(--red)}.diff .hunk{color:var(--accent)}
+table{border-collapse:collapse;font-size:14px;margin:8px 0}
+td,th{border:1px solid var(--border);padding:4px 10px;text-align:left}
+th{background:var(--surface)}
+.hl{border-left:3px solid var(--accent);background:var(--surface);padding:12px 16px;margin:18px 0;border-radius:0 8px 8px 0}
+.warn{border-left:3px solid var(--red);background:var(--surface);padding:12px 16px;margin:18px 0;border-radius:0 8px 8px 0}
+.where{border-left:4px solid var(--accent);background:var(--surface);padding:6px 12px;margin:6px 0 10px}
+svg{max-width:100%;height:auto;display:block;margin:14px 0}
+svg .box{fill:var(--surface);stroke:var(--border);stroke-width:1.4}
+svg .box-r{fill:var(--surface);stroke:var(--red);stroke-width:1.6}
+svg .box-g{fill:var(--surface);stroke:var(--green);stroke-width:1.6}
+svg .lbl{fill:var(--text);font:12px ui-monospace,Menlo,monospace}
+svg .lbl-b{fill:var(--text);font:bold 13px -apple-system,sans-serif}
+svg .note{fill:var(--dim);font:11.5px -apple-system,sans-serif}
+svg .hdr{fill:var(--accent);font:bold 13px -apple-system,sans-serif}
+svg .red{fill:var(--red);font:bold 11.5px ui-monospace,Menlo,monospace}
+svg .grn{fill:var(--green);font:bold 11.5px ui-monospace,Menlo,monospace}
+svg .ar-r{stroke:var(--red);stroke-width:2.2;fill:none}
+svg .ar-g{stroke:var(--green);stroke-width:1.6;fill:none}
+svg .ar-d{stroke:var(--dim);stroke-width:1.4;fill:none;stroke-dasharray:4 3}
+svg .sep{stroke:var(--border);stroke-width:1}
+svg a text{text-decoration:underline;fill:var(--accent);font:11.5px ui-monospace,Menlo,monospace}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+  document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head>
+<body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+  function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+  function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
+    b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
+      else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+  document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+<div class="wrap">
+
+<h1>How measuring argument size leaks the policy's queue actor</h1>
+<p class="sub"><a href="https://github.com/NVIDIA-NeMo/RL/pull/5026">NVIDIA-NeMo/RL #5026</a>
+· permalinks pin the PR head <code>925d381</code> and Ray <code>2.58.0</code></p>
+
+<div class="status"><dl>
+  <dt>Before</dt><dd>The policy's small queue was pickled only by Ray, as part of each initializer's start-up call. When the group shut down, the queue's actor was freed.</dd>
+  <dt>This PR</dt><dd>Pickles every constructor argument once with plain <code>cloudpickle</code>, just to measure its size. The queue (about 430 bytes) is then passed on unchanged.</dd>
+  <dt>Status</dt><dd><span class="verdict open">Open, not fixed in this PR.</span> The queue's actor now lives until the driver exits. The review proposes a smaller fix, tested on CPU Ray 2.58.0.</dd>
+</dl></div>
+
+<nav class="chain">
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-5026-pickle-once.html">pickle once</a>
+  <span class="here">the leaked queue actor</span>
+</nav>
+<p class="chainnote">Two pages on this PR, one question each. This one: the bug in the size check.</p>
+
+<div class="bg"><b>Background.</b> Ray counts who still holds each object or actor, and frees it when the count reaches zero.
+That works only when Ray does the pickling itself (in a task call or <code>ray.put</code>).
+If you pickle an actor handle with plain <code>cloudpickle</code>, Ray cannot see where the bytes go.
+So it adds a reference that is <i>never</i> removed: it will
+"pin the object for the lifetime of this worker" (<a href="https://github.com/ray-project/ray/blob/ray-2.58.0/python/ray/_private/serialization.py#L333-L340">serialization.py L333-L340</a>,
+reached for actor handles from <a href="https://github.com/ray-project/ray/blob/ray-2.58.0/python/ray/_private/serialization.py#L185-L196">L185-L196</a>).</div>
+
+<p>Both <a href="https://github.com/NVIDIA-NeMo/RL/blob/925d38107d37e92165396d6bf47e8101f2118cee/nemo_rl/models/policy/lm_policy.py#L431-L439"><code>lm_policy</code></a>
+and <a href="https://github.com/NVIDIA-NeMo/RL/blob/925d38107d37e92165396d6bf47e8101f2118cee/nemo_rl/models/value/lm_value.py#L162-L170"><code>lm_value</code></a>
+pass <code>pre_init_communication_queue=RayQueue()</code> to their workers. A
+<span class="tip" tabindex="0" data-tip="ray.util.queue.Queue: a queue backed by its own small Ray actor. The Python object only holds a handle to that actor.">RayQueue</span> is a handle to its own actor.
+The PR's helper sizes every argument with
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/925d38107d37e92165396d6bf47e8101f2118cee/nemo_rl/distributed/worker_groups.py#L94"><code>len(cloudpickle.dumps(value))</code></a>,
+the queue included. That one pickle is enough.</p>
+
+<h2>Three ways to send the same queue</h2>
+
+<svg viewBox="0 0 900 300" role="img" aria-label="The queue actor after shutdown: freed on main, still alive with the PR's size check, freed with ray.put.">
+  <text class="hdr" x="16" y="22">One policy built, then shut down. What happens to its queue actor?</text>
+  <text class="note" x="16" y="48">how the queue is pickled</text>
+  <text class="note" x="430" y="48">after shutdown()</text>
+  <text class="note" x="640" y="48">measured, Ray 2.58.0 on CPU</text>
+  <!-- main -->
+  <text class="lbl-b" x="16" y="86">main</text>
+  <rect class="box-g" x="110" y="66" width="290" height="30" rx="6"/>
+  <text class="lbl" x="122" y="86">only inside .remote() (Ray's own)</text>
+  <path class="ar-g" d="M400 81 L430 81"/>
+  <text class="lbl" x="438" y="86">refs reach 0</text>
+  <text class="grn" x="640" y="86">queue actor: DEAD</text>
+  <!-- PR -->
+  <text class="lbl-b" x="16" y="146">this PR</text>
+  <rect class="box-r" x="110" y="126" width="290" height="30" rx="6"/>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/925d38107d37e92165396d6bf47e8101f2118cee/nemo_rl/distributed/worker_groups.py#L94"><text x="122" y="146">cloudpickle.dumps(queue) ← L94</text></a>
+  <path class="ar-r" d="M400 141 L430 141"/>
+  <text class="lbl" x="438" y="146">+1 ref, never removed</text>
+  <text class="red" x="640" y="146">queue actor: ALIVE</text>
+  <text class="note" x="122" y="174">size 430 B, under 1 MB, so it is passed on as before — but the pin already happened</text>
+  <!-- fix -->
+  <text class="lbl-b" x="16" y="216">proposed</text>
+  <rect class="box-g" x="110" y="196" width="290" height="30" rx="6"/>
+  <text class="lbl" x="122" y="216">ray.put(queue) (Ray's own)</text>
+  <path class="ar-g" d="M400 211 L430 211"/>
+  <text class="lbl" x="438" y="216">freed with the object</text>
+  <text class="grn" x="640" y="216">queue actor: DEAD</text>
+  <text class="red" x="16" y="270">red = pickled outside Ray → pinned until the driver exits</text>
+  <text class="grn" x="16" y="290">green = Ray pickles it → counted and freed normally</text>
+</svg>
+
+<p>The cost is one idle actor process per Policy or Value build, until the driver exits.
+A single training run builds only a few. Test sessions, and runs that rebuild groups (a teacher torn down mid-run, say), build many.</p>
+
+<h2>What would fix it — proposed, not in the PR</h2>
+<p class="where"><b>Where the fix lands: RL only, one file plus its tests.</b>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/925d38107d37e92165396d6bf47e8101f2118cee/nemo_rl/distributed/worker_groups.py#L67-L113"><code>worker_groups.py</code></a>: drop the size check and <code>ray.put</code> every argument.
+No caller changes: Ray still hands each initializer the real values.</p>
+<pre class="diff"><span class="hunk">@@ worker_groups.py L67-L113 · the helper (shown in short)</span>
+<span class="del">-SHARE_ARG_THRESHOLD_BYTES = 1 &lt;&lt; 20
+-def _share_large_arguments(args, kwargs, *, threshold_bytes=..., put=None, serialized_size=None):
+-    ...
+-        try:
+-            size = serialized_size(value)      # cloudpickle.dumps: pins actor handles
+-        except Exception:
+-            return value
+-        if size &lt;= threshold_bytes:
+-            return value
+-        ref = put(value)
+-        refs.append(ref)
+-        return ref</span>
+<span class="add">+def _share_arguments(args, kwargs):
++    def share(value):
++        # ray.put rejects an ObjectRef; pass it as before and Ray resolves it.
++        return value if isinstance(value, ray.ObjectRef) else ray.put(value)
++    return tuple(share(v) for v in args), {k: share(v) for k, v in kwargs.items()}</span>
+<span class="hunk">@@ worker_groups.py L653-L659 · RayWorkerGroup, before the initializer loop</span>
+<span class="del">-        initializer_args, initializer_kwargs, self._shared_init_arg_refs = (
+-            _share_large_arguments(remote_worker_builder.args, remote_worker_builder.kwargs))</span>
+<span class="add">+        initializer_args, initializer_kwargs = _share_arguments(
++            remote_worker_builder.args, remote_worker_builder.kwargs
++        )</span>
+<span class="hunk">@@ worker_groups.py L244-L253 · IsolatedWorkerInitializer.__init__ (back to main)</span>
+<span class="del">-            self.init_args = tuple(ray.get(arg) if isinstance(arg, ray.ObjectRef) else arg ...)
+-            self.init_kwargs = {key: ray.get(value) if isinstance(value, ray.ObjectRef) else value ...}</span>
+<span class="add">+            self.init_args = init_args
++            self.init_kwargs = init_kwargs</span></pre>
+<p>In order:
+(1) <code>ray.put</code> pickles inside Ray, so the queue is counted and freed when its object is.
+It also pickles the tokenizer once instead of twice: today's 0.31 s one-time cost is the size check plus the put.
+(2) The group no longer keeps the refs. Ray already keeps "arguments to pending tasks" alive
+(<a href="https://github.com/ray-project/ray/blob/ray-2.58.0/doc/source/ray-core/scheduling/memory-management.rst#L32">Ray docs</a>),
+and holding them would pin the queue again until the group object is gone.
+(3) The initializer's <code>ray.get</code> branch can never run, because Ray resolves keyword refs too
+(<a href="https://github.com/ray-project/ray/blob/ray-2.58.0/python/ray/_common/signature.py#L131-L137">flatten_args</a>).
+<code>ray.put</code> refuses an existing ObjectRef
+(<a href="https://github.com/ray-project/ray/blob/ray-2.58.0/python/ray/_private/worker.py#L836-L838">worker.py L836</a>), so those pass through as before.</p>
+
+<div class="warn"><b>So what.</b> Tested together with the new tests on CPU Ray 2.58.0: a test that runs a real queue through the helper
+fails on this PR (<code>assert 'ALIVE' == 'DEAD'</code> after 30 s) and passes with the fix in about 0.1 s.
+All worker-group tests pass (35 passed, 1 skipped). The fix keeps the full speed-up and makes the helper shorter.</div>
+
+</div>
+</body>
+</html>

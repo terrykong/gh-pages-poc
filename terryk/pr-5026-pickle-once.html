@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NVIDIA-NeMo/RL #5026 — pickle the tokenizer once, not once per node</title>
+<style>
+:root{--bg:#0d1117;--surface:#161b22;--surface2:#1c2128;--border:#30363d;--text:#e6edf3;--dim:#8b949e;
+  --accent:#58a6ff;--green:#3fb950;--red:#f85149;--orange:#d29922}
+:root[data-theme="light"]{--bg:#ffffff;--surface:#f6f8fa;--surface2:#eaeef2;--border:#d0d7de;--text:#1f2328;
+  --dim:#59636e;--accent:#0969da;--green:#1a7f37;--red:#cf222e;--orange:#9a6700}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:28px 16px 70px}
+h1{font-size:22px;margin:0 0 8px;line-height:1.3}
+h2{font-size:18px;margin:30px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
+.sub{color:var(--dim);font-size:13.5px;margin:0 0 14px}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);
+  border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;
+  font:13px/1 ui-monospace,monospace;cursor:pointer}
+.status{border:1px solid var(--border);border-radius:10px;background:var(--surface);padding:2px 16px 10px;margin:0 0 14px}
+.status dl{display:grid;grid-template-columns:max-content 1fr;gap:4px 14px;margin:12px 0 0}
+.status dt{color:var(--dim);font-size:12px;text-transform:uppercase;letter-spacing:.04em;white-space:nowrap;padding-top:2px}
+.status dd{margin:0;font-size:14px}
+.verdict{font-weight:700}.verdict.good{color:var(--green)}.verdict.open{color:var(--red)}
+nav.chain{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 6px;padding:0}
+nav.chain a,nav.chain span{display:inline-block;padding:5px 11px;border:1px solid var(--border);
+  border-radius:20px;background:var(--surface);text-decoration:none;color:var(--accent);font-size:12.5px;line-height:1.3;white-space:nowrap}
+nav.chain a:hover{background:var(--surface2)}
+nav.chain span.here{background:var(--accent);color:var(--bg);border-color:var(--accent);font-weight:600}
+p.chainnote{color:var(--dim);font-size:12px;margin:0 0 18px}
+.bg{border:1px dashed var(--border);border-radius:8px;padding:8px 14px;margin:0 0 14px;font-size:14px}
+.tip{border-bottom:1px dotted var(--dim);cursor:help;position:relative;outline:none}
+.tip:hover::after,.tip:focus::after{content:attr(data-tip);position:absolute;left:0;top:1.7em;z-index:60;
+  width:max-content;max-width:min(340px,80vw);white-space:normal;background:var(--surface2);color:var(--text);
+  border:1px solid var(--border);border-radius:6px;padding:7px 10px;font:13px/1.45 -apple-system,sans-serif;
+  font-weight:400;box-shadow:0 4px 14px rgba(0,0,0,.3)}
+.diff{font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--surface);
+  border:1px solid var(--border);border-radius:8px;padding:12px;overflow-x:auto;white-space:pre;margin:10px 0}
+.diff .add{color:var(--green)}.diff .del{color:var(--red)}.diff .hunk{color:var(--accent)}
+table{border-collapse:collapse;font-size:14px;margin:8px 0}
+td,th{border:1px solid var(--border);padding:4px 10px;text-align:left}
+th{background:var(--surface)}
+.hl{border-left:3px solid var(--accent);background:var(--surface);padding:12px 16px;margin:18px 0;border-radius:0 8px 8px 0}
+svg{max-width:100%;height:auto;display:block;margin:14px 0}
+svg .box{fill:var(--surface);stroke:var(--border);stroke-width:1.4}
+svg .box-r{fill:var(--surface);stroke:var(--red);stroke-width:1.6}
+svg .box-g{fill:var(--surface);stroke:var(--green);stroke-width:1.6}
+svg .lbl{fill:var(--text);font:12px ui-monospace,Menlo,monospace}
+svg .lbl-b{fill:var(--text);font:bold 13px -apple-system,sans-serif}
+svg .note{fill:var(--dim);font:11.5px -apple-system,sans-serif}
+svg .hdr{fill:var(--accent);font:bold 13px -apple-system,sans-serif}
+svg .red{fill:var(--red);font:bold 11.5px ui-monospace,Menlo,monospace}
+svg .grn{fill:var(--green);font:bold 11.5px ui-monospace,Menlo,monospace}
+svg .ar-r{stroke:var(--red);stroke-width:2.2;fill:none}
+svg .ar-g{stroke:var(--green);stroke-width:1.6;fill:none}
+svg .ar-d{stroke:var(--dim);stroke-width:1.4;fill:none;stroke-dasharray:4 3}
+svg .sep{stroke:var(--border);stroke-width:1}
+svg a text{text-decoration:underline;fill:var(--accent);font:11.5px ui-monospace,Menlo,monospace}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+  document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head>
+<body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+  function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+  function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
+    b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
+      else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+  document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+<div class="wrap">
+
+<h1>Why the driver now pickles the tokenizer once, not once per node</h1>
+<p class="sub"><a href="https://github.com/NVIDIA-NeMo/RL/pull/5026">NVIDIA-NeMo/RL #5026</a>
+· permalinks pin the PR head <code>925d381</code> (code that was removed links the base, <code>681ca04</code>)</p>
+
+<div class="status"><dl>
+  <dt>Before</dt><dd>When a worker group starts, the driver sends the worker's constructor arguments to one helper actor per node. Ray pickled them again for every node: 8.3 MB and about 0.16 s each time, almost all of it the tokenizer.</dd>
+  <dt>This PR</dt><dd>Puts each argument over 1 MB into Ray's object store once, and sends every node a 233-byte reference instead.</dd>
+  <dt>Status</dt><dd><span class="verdict good">The speed-up works as measured</span> (21 s → 0.07 s at 128 nodes).
+  <span class="verdict open">One bug is open</span> in how it decides what is "over 1 MB". See <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-5026-queue-actor-leak.html">the second page</a>.</dd>
+</dl></div>
+
+<nav class="chain">
+  <span class="here">pickle once</span>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-5026-queue-actor-leak.html">the leaked queue actor</a>
+</nav>
+<p class="chainnote">Two pages on this PR, one question each. This one: what the change does.</p>
+
+<div class="bg"><b>Background.</b> A <span class="tip" tabindex="0" data-tip="RayWorkerGroup: the object on the driver that starts and talks to all the training (or generation) worker processes.">worker group</span>
+starts its workers in two steps. First it starts one small
+<span class="tip" tabindex="0" data-tip="IsolatedWorkerInitializer: a Ray actor that sits on one node and starts that node's GPU workers, so the workers get the right Python environment.">initializer actor</span>
+per node. Each initializer then starts that node's GPU workers.
+Everything the workers need to be built with (config, tokenizer, a small queue) travels with step one.
+Dotted words have a short explanation: hover or tap them.</div>
+
+<p>On main, the loop that starts the initializers passed
+<code>*remote_worker_builder.args, **remote_worker_builder.kwargs</code> straight into every
+<code>.remote()</code> call (<a href="https://github.com/NVIDIA-NeMo/RL/blob/681ca0463c771b413896ff6cca075b8de5da5d18/nemo_rl/distributed/worker_groups.py#L596-L608">base worker_groups.py L596-L608</a>).
+Ray pickles a call's arguments each time it is made, so a 128-node job pickled the tokenizer 128 times, one after another, on the driver.
+The policy passes the tokenizer as a keyword argument (<a href="https://github.com/NVIDIA-NeMo/RL/blob/925d38107d37e92165396d6bf47e8101f2118cee/nemo_rl/models/policy/lm_policy.py#L455-L462">lm_policy.py L455-L462</a>),
+and its fast tokenizer rebuilds its whole vocabulary on every pickle.</p>
+
+<h2>One pickle per node, versus one pickle total</h2>
+
+<svg viewBox="0 0 900 412" role="img" aria-label="Before: the driver pickles the 8.3 MB tokenizer once for each of 3 nodes. After: it puts it in the object store once and sends 3 tiny references.">
+  <text class="hdr" x="16" y="22">Example: 3 nodes (the PR measured 128)</text>
+  <!-- before -->
+  <text class="lbl-b" x="16" y="52">Before (main)</text>
+  <rect class="box" x="16" y="64" width="170" height="104" rx="8"/>
+  <text class="lbl-b" x="30" y="88">driver</text>
+  <text class="lbl" x="30" y="110">kwargs =</text>
+  <text class="lbl" x="30" y="128">{tokenizer: 8.3 MB,</text>
+  <text class="lbl" x="30" y="146"> config: ~10 KB, …}</text>
+  <path class="ar-r" d="M186 80 L560 80"/><path class="ar-r" d="M186 116 L560 116"/><path class="ar-r" d="M186 152 L560 152"/>
+  <text class="red" x="210" y="74">pickle 8.3 MB · 0.16 s</text>
+  <text class="red" x="210" y="110">pickle 8.3 MB · 0.16 s</text>
+  <text class="red" x="210" y="146">pickle 8.3 MB · 0.16 s</text>
+  <rect class="box-r" x="560" y="66" width="200" height="26" rx="6"/><text class="lbl" x="572" y="84">node 0 initializer</text>
+  <rect class="box-r" x="560" y="102" width="200" height="26" rx="6"/><text class="lbl" x="572" y="120">node 1 initializer</text>
+  <rect class="box-r" x="560" y="138" width="200" height="26" rx="6"/><text class="lbl" x="572" y="156">node 2 initializer</text>
+  <text class="red" x="776" y="120">0.48 s</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/681ca0463c771b413896ff6cca075b8de5da5d18/nemo_rl/distributed/worker_groups.py#L603-L607"><text x="380" y="190">.remote(*args, **kwargs) per node — L603</text></a>
+  <line class="sep" x1="16" y1="206" x2="884" y2="206"/>
+  <!-- after -->
+  <text class="lbl-b" x="16" y="234">This PR</text>
+  <rect class="box" x="16" y="246" width="170" height="104" rx="8"/>
+  <text class="lbl-b" x="30" y="270">driver</text>
+  <text class="lbl" x="30" y="292">ray.put(tokenizer)</text>
+  <text class="lbl" x="30" y="310">→ ref (233 B)</text>
+  <text class="grn" x="30" y="332">once · 0.31 s</text>
+  <rect class="box-g" x="236" y="360" width="200" height="28" rx="6"/>
+  <text class="lbl" x="248" y="379">object store: 1 copy</text>
+  <path class="ar-g" d="M100 350 L100 374 L236 374"/>
+  <path class="ar-g" d="M186 262 L560 262"/><path class="ar-g" d="M186 298 L560 298"/><path class="ar-g" d="M186 334 L560 334"/>
+  <text class="grn" x="210" y="256">ref 233 B · 0.0004 s</text>
+  <text class="grn" x="210" y="292">ref 233 B · 0.0004 s</text>
+  <text class="grn" x="210" y="328">ref 233 B · 0.0004 s</text>
+  <rect class="box-g" x="560" y="248" width="200" height="26" rx="6"/><text class="lbl" x="572" y="266">node 0 initializer</text>
+  <rect class="box-g" x="560" y="284" width="200" height="26" rx="6"/><text class="lbl" x="572" y="302">node 1 initializer</text>
+  <rect class="box-g" x="560" y="320" width="200" height="26" rx="6"/><text class="lbl" x="572" y="338">node 2 initializer</text>
+  <text class="note" x="448" y="379">each node pulls this copy before __init__ runs</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/925d38107d37e92165396d6bf47e8101f2118cee/nemo_rl/distributed/worker_groups.py#L653-L671"><text x="776" y="302">L653-L671</text></a>
+  <text class="red" x="16" y="398">red = pickled again per node</text>
+  <text class="grn" x="250" y="398">green = sent once / tiny</text>
+</svg>
+
+<p>The initializer code does not change. Ray turns a top-level reference argument back into its value before
+the actor's <code>__init__</code> runs, for keyword arguments too
+(<a href="https://github.com/ray-project/ray/blob/ray-2.58.0/python/ray/_common/signature.py#L131-L137">Ray <code>flatten_args</code></a>
+puts each keyword argument at the top level). So each initializer still gets a real tokenizer.</p>
+
+<h2>The change, and what it bought</h2>
+<pre class="diff"><span class="hunk">@@ worker_groups.py L653-L671 · RayWorkerGroup._create_workers_from_bundle_indices</span>
+         self._initializer_pool: dict[int, ray.actor.ActorHandle] = {}
+<span class="add">+        initializer_args, initializer_kwargs, self._shared_init_arg_refs = (
++            _share_large_arguments(   # ray.put each arg over 1 MB, once
++                remote_worker_builder.args, remote_worker_builder.kwargs
++            )
++        )</span>
+         for pg_idx in unique_pg_indices:
+             ...
+                 ).remote(
+                     remote_worker_builder.ray_actor_class_fqn,
+<span class="del">-                    *remote_worker_builder.args,
+-                    **remote_worker_builder.kwargs,</span>
+<span class="add">+                    *initializer_args,
++                    **initializer_kwargs,</span>
+                 )</pre>
+<p>The helper <a href="https://github.com/NVIDIA-NeMo/RL/blob/925d38107d37e92165396d6bf47e8101f2118cee/nemo_rl/distributed/worker_groups.py#L73-L113"><code>_share_large_arguments</code></a>
+pickles each argument to measure it, and calls <code>ray.put</code> on anything over 1 MB.
+The author's numbers from a 128-node job (from the PR description):</p>
+<table>
+<tr><th></th><th>Before</th><th>After</th></tr>
+<tr><td>Start 128 initializers</td><td>21.14 s</td><td>0.07 s</td></tr>
+<tr><td>Bytes sent per initializer</td><td>8,279,016</td><td>10,377</td></tr>
+<tr><td>Group start to all workers ready</td><td>66.3 s</td><td>51.2 s</td></tr>
+</table>
+
+<div class="hl"><b>So what.</b> Worker groups start about 15 s faster at 128 nodes, and the saving grows with node count.
+The idea is sound. But the way it measures size pickles a Ray actor handle outside Ray, which leaks one actor per policy.
+<a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-5026-queue-actor-leak.html">Next page: the leak and a simpler fix →</a></div>
+
+</div>
+</body>
+</html>
