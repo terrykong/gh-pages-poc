@@ -192,6 +192,13 @@ and holding them would pin the queue again until the group object is gone.
 <code>ray.put</code> refuses an existing ObjectRef
 (<a href="https://github.com/ray-project/ray/blob/ray-2.58.0/python/ray/_private/worker.py#L836-L838">worker.py L836</a>), so those pass through as before.</p>
 
+<p><b>Why not keep the 1 MB threshold?</b> You cannot know an object's size without pickling it,
+and pickling outside Ray is the bug. So the proposal puts <i>every</i> argument, small ones too.
+<code>ray.put</code> always writes to the shared object store, whatever the size
+(<a href="https://github.com/ray-project/ray/blob/ray-2.58.0/src/ray/core_worker/core_worker.cc#L1208-L1213">core_worker.cc L1208-L1213</a>).
+So the price is that each initializer fetches about 10 small arguments (config, flags, the queue) at start-up instead of getting them inside the call.
+Nodes do this in parallel. It is not measured, but it is small next to the 0.16 s per node that the PR removes.</p>
+
 <div class="warn"><b>So what.</b> Tested together with the new tests on CPU Ray 2.58.0: a test that runs a real queue through the helper
 fails on this PR (<code>assert 'ALIVE' == 'DEAD'</code> after 30 s) and passes with the fix in about 0.1 s.
 All worker-group tests pass (35 passed, 1 skipped). The fix keeps the full speed-up and makes the helper shorter.</div>
