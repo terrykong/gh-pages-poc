@@ -180,7 +180,7 @@ Part of the new config is the same code as #4905's: the frontend arguments
 <a href="https://github.com/NVIDIA-NeMo/RL/blob/44671d3bf5f017fbef5e7455f5686cf994ef9106/nemo_rl/models/generation/dynamo/config.py#L27-L41"><code>DynamoFrontendArgs</code></a>),
 the startup and request timeouts, and <code>dynamo_enabled</code>. Main has no small shared module to import them from yet: main's
 <code>dynamo/config.py</code> still holds the old <code>backend: dynamo</code> schema. #4905 turns that file into one.</p>
-<p class="cref">💬 <a href="https://github.com/NVIDIA-NeMo/RL/pull/4801">review comment C1 — generation/__init__.py:89</a></p>
+<p class="cref">💬 <a href="https://github.com/NVIDIA-NeMo/RL/pull/4801#discussion_r4472808519">review comment C1 — generation/__init__.py:89</a> <a href="https://github.com/NVIDIA-NeMo/RL/pull/4801#discussion_r4472808569">C3 — grpo.py:733</a></p>
 
 <h2>What this PR changes now: refit with shards of different widths</h2>
 <p>The refit NCCL group lists the trainer ranks first, then each engine's ranks, shard by shard. Until now every shard had the same width, so shard <i>i</i> started at <code>i × width</code>. A prefill engine at TP 4 next to decode engines at TP 2 breaks that. <a href="https://github.com/NVIDIA-NeMo/RL/blob/8b38bd7fae2e3b66907dae770d297b40b256a376/nemo_rl/weight_sync/membership.py#L47-L59"><code>RefitMembership.worker_offset()</code></a> adds up the earlier widths instead, dead shards included, because the worker list never shrinks.</p>
@@ -196,7 +196,7 @@ shard 0 dies → refit ranks after the trainers: shard 1 → 0..1, shard 2 → 2
 </span><span class="add">+            leader_idx = membership.worker_offset(shard_idx)
 </span>             if leader_idx &gt;= len(workers):</pre>
 <p>Only the plan and <code>worker_offset</code> are tested with uneven widths. The callers are still tested only with equal widths (C5). No caller passes uneven widths until <a href="https://github.com/NVIDIA-NeMo/RL/pull/5025">#5025</a>'s engine fleet does.</p>
-<p class="cref">💬 <a href="https://github.com/NVIDIA-NeMo/RL/pull/4801">review comment C5 — vllm_generation.py:1039</a></p>
+<p class="cref">💬 <a href="https://github.com/NVIDIA-NeMo/RL/pull/4801#discussion_r4472808602">review comment C5 — vllm_generation.py:1039</a></p>
 
 <h2>Merge order — proposed, not in the PR</h2>
 <p>Nothing below is implemented. Each PR is fine alone on main, so the two authors only need to agree which lands second. The second one has to:</p>
@@ -208,7 +208,7 @@ shard 0 dies → refit ranks after the trainers: shard 1 → 0..1, shard 2 → 2
 </ul>
 <p>The larger overlap is at the end of this stack, not in this PR. <a href="https://github.com/NVIDIA-NeMo/RL/pull/5025">#5025</a> rewrites <code>dynamo/managed_runtime.py</code> and keeps <code>DynamoGeneration</code> running from a copied runtime file. #4905 deletes <code>DynamoGeneration</code> and also rewrites that runtime. Merging those two touches 11 of the same files.</p>
 
-<div class="hl"><b>So what.</b> This PR is groundwork. It does nothing at run time on main, and it is safe to merge alone. The risk is a quiet one: it and #4905 give <code>dynamo: true</code> opposite meanings, and git will not flag it. Write the order into the PR description before either one lands. Note that these review links work for others only after the review is published.</div>
+<div class="hl"><b>So what.</b> This PR is groundwork. It does nothing at run time on main, and it is safe to merge alone. The risk is a quiet one: it and #4905 give <code>dynamo: true</code> opposite meanings, and git will not flag it. Write the order into the PR description before either one lands. The review links work for others only after the review is published.</div>
 
 </div>
 </body>
