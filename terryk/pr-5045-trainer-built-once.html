@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NVIDIA-NeMo/RL #5045 — building the Megatron trainer once, not twice, when the dataset caps the step count</title>
+<style>
+:root{--bg:#0d1117;--surface:#161b22;--surface2:#1c2128;--border:#30363d;--text:#e6edf3;--dim:#8b949e;
+  --accent:#58a6ff;--green:#3fb950;--red:#f85149;--orange:#d29922}
+:root[data-theme="light"]{--bg:#ffffff;--surface:#f6f8fa;--surface2:#eaeef2;--border:#d0d7de;--text:#1f2328;
+  --dim:#59636e;--accent:#0969da;--green:#1a7f37;--red:#cf222e;--orange:#9a6700}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:28px 16px 70px}
+h1{font-size:22px;margin:0 0 8px;line-height:1.3}
+h2{font-size:18px;margin:30px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
+.sub{color:var(--dim);font-size:13.5px;margin:0 0 16px}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);
+  border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;
+  font:13px/1 ui-monospace,Menlo,monospace;cursor:pointer}
+.status{border:1px solid var(--border);border-radius:10px;background:var(--surface);padding:2px 16px 10px;margin:0 0 20px}
+.status dl{display:grid;grid-template-columns:max-content 1fr;gap:4px 14px;margin:12px 0 0}
+.status dt{color:var(--dim);font-size:12px;text-transform:uppercase;letter-spacing:.04em;white-space:nowrap;padding-top:2px}
+.status dd{margin:0;font-size:14px}
+.verdict{font-weight:700}.verdict.good{color:var(--green)}.verdict.open{color:var(--red)}
+.bg{border-left:3px solid var(--accent);background:var(--surface);padding:10px 16px;margin:0 0 16px;border-radius:0 8px 8px 0;font-size:14px}
+.warn{border-left:3px solid var(--orange);background:var(--surface);padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0}
+.where{border-left:4px solid var(--accent);background:var(--surface);padding:6px 12px;margin:6px 0 10px}
+.diff{font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--surface);
+  border:1px solid var(--border);border-radius:8px;padding:12px;overflow-x:auto;white-space:pre;margin:10px 0}
+.diff .add{color:var(--green)}.diff .del{color:var(--red)}.diff .hunk{color:var(--accent)}
+.cref{margin:6px 0 0;font-size:13px}
+.cref a{display:inline-block;padding:4px 10px;border:1px solid var(--border);border-radius:16px;
+  background:var(--surface);font:12.5px ui-monospace,Menlo,monospace}
+.cref a:hover{background:var(--surface2);text-decoration:none}
+.tip{border-bottom:1px dotted var(--dim);cursor:help;position:relative;outline:none}
+.tip:hover::after,.tip:focus::after{content:attr(data-tip);position:absolute;left:0;top:1.7em;z-index:60;
+  width:max-content;max-width:min(340px,80vw);white-space:normal;background:var(--surface2);color:var(--text);
+  border:1px solid var(--border);border-radius:6px;padding:7px 10px;font:13px/1.45 -apple-system,sans-serif;
+  font-weight:400;box-shadow:0 4px 14px rgba(0,0,0,.3)}
+svg{max-width:100%;height:auto;display:block;margin:14px 0}
+svg .lane{fill:var(--text);font:bold 12px -apple-system,sans-serif}
+svg .lane2{fill:var(--dim);font:11px -apple-system,sans-serif}
+svg .tw{fill:var(--bg);font:bold 11.5px -apple-system,sans-serif}
+svg .t{fill:var(--text);font:11.5px -apple-system,sans-serif}
+svg .note{fill:var(--dim);font:11px -apple-system,sans-serif}
+svg .red{fill:var(--red);font:bold 11.5px -apple-system,sans-serif}
+svg .grn{fill:var(--green);font:bold 11.5px -apple-system,sans-serif}
+svg .b-data{fill:var(--orange);opacity:.8}
+svg .b-ok{fill:var(--accent);opacity:.85}
+svg .b-waste{fill:var(--red);opacity:.45;stroke:var(--red)}
+svg .b-wait{fill:var(--dim);opacity:.3}
+svg .b-gen{fill:var(--green);opacity:.7}
+svg .mk{stroke:var(--text);stroke-width:1.4;stroke-dasharray:3 3}
+svg .axis{stroke:var(--border);stroke-width:1}
+svg a text{text-decoration:underline;fill:var(--accent);font:11px ui-monospace,Menlo,monospace}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+  document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head>
+<body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+  function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+  function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
+    b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
+      else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+  document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+<div class="wrap">
+
+<h1>Why the Megatron trainer was built twice at startup, and how a 20-second wait builds it once</h1>
+<p class="sub"><a href="https://github.com/NVIDIA-NeMo/RL/pull/5045">NVIDIA-NeMo/RL #5045</a>.
+All permalinks pin the PR head <code>586831d</code>. Times are from the run in the PR description.</p>
+
+<div class="status">
+<dl>
+  <dt>Before</dt>
+  <dd>On the NeMo-Gym + vLLM + separate-GPU path, the trainer started building before the dataset loaded. When the dataset then
+  lowered <code>max_num_steps</code>, the finished trainer was shut down and built again: about 280 s lost.</dd>
+  <dt>This PR</dt>
+  <dd>The trainer build waits up to 20 s for the dataset. If it arrives, the trainer is built once with the right step count.
+  If not, it falls back to the old behavior.</dd>
+  <dt>Status</dt>
+  <dd><span class="verdict good">Fixed by this PR</span> for any dataset that loads in under 20 s.
+  The review asks for small follow-ups (below); none blocks the fix.</dd>
+</dl>
+</div>
+
+<div class="bg"><b>Background.</b> Megatron's learning-rate schedule needs the total number of training steps
+(<span class="tip" tabindex="0" data-tip="Megatron's name for the total optimizer steps. NeMo-RL sets it from max_num_steps before building the trainer.">train_iters</span>)
+when the trainer is built, and a resume checks it against the saved schedule. That number is
+<code>max_num_steps</code>, capped at <code>max_num_epochs × batches per epoch</code>
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/586831d33686d142a8ba66e8b13646992f8d1585/nemo_rl/algorithms/single_controller_utils/setup.py#L883-L894"><code>_clamp_max_num_steps</code></a>).
+The batch count is only known once the dataset is loaded. The example configs set <code>max_num_steps: 1000000</code> and
+<code>max_num_epochs: 1</code>, so the cap almost always lowers the number. Dotted words have a short explanation: hover or tap them.</div>
+
+<h2>Three ways startup can go</h2>
+<p>Example from the PR: <code>max_num_steps = 100</code>, the dataset holds 12 steps per epoch, <code>max_num_epochs = 1</code>,
+so the trainer must be built with <code>train_iters = 12</code>. The load took 1.5 s and one trainer build takes about 280 s.
+Generation and Gym build in parallel in every lane and are not affected.</p>
+
+<svg viewBox="0 0 960 300" role="img" aria-label="Timeline of dataset load and trainer builds before and after the PR">
+  <rect x="210" y="8" width="12" height="10" class="b-data"/><text x="226" y="17" class="note">dataset load</text>
+  <rect x="310" y="8" width="12" height="10" class="b-waste"/><text x="326" y="17" class="note">trainer built, then thrown away</text>
+  <rect x="506" y="8" width="12" height="10" class="b-ok"/><text x="522" y="17" class="note">trainer build that is kept</text>
+  <rect x="680" y="8" width="12" height="10" class="b-wait"/><text x="696" y="17" class="note">trainer waits for the dataset</text>
+
+  <!-- x = 200 + seconds * 1.2 ; 280 s build = 336 px -->
+  <text x="10" y="58" class="lane">Before</text>
+  <text x="10" y="72" class="lane2">trainer starts at once</text>
+  <rect x="200" y="46" width="12" height="20" rx="2" class="b-data"/>
+  <rect x="200" y="70" width="336" height="20" rx="3" class="b-waste"/><text x="226" y="84" class="t">build #1 with train_iters = 100</text>
+  <rect x="536" y="70" width="336" height="20" rx="3" class="b-ok"/><text x="562" y="84" class="tw">build #2 with train_iters = 12</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/586831d33686d142a8ba66e8b13646992f8d1585/nemo_rl/algorithms/single_controller_utils/setup.py#L2085-L2102"><text x="540" y="106">rebuild check, setup.py#L2085</text></a>
+  <text x="760" y="106" class="red">ready at ≈ 560 s</text>
+
+  <text x="10" y="148" class="lane">This PR, fast load</text>
+  <text x="10" y="162" class="lane2">load ends inside the wait</text>
+  <rect x="200" y="136" width="12" height="20" rx="2" class="b-data"/>
+  <rect x="200" y="160" width="2" height="20" class="b-wait"/>
+  <rect x="202" y="160" width="336" height="20" rx="3" class="b-ok"/><text x="228" y="174" class="tw">one build with train_iters = 12</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/586831d33686d142a8ba66e8b13646992f8d1585/nemo_rl/algorithms/single_controller_utils/setup.py#L2057-L2076"><text x="204" y="196">wait, then submit, setup.py#L2057</text></a>
+  <text x="548" y="174" class="grn">ready at ≈ 282 s</text>
+
+  <text x="10" y="232" class="lane">This PR, slow load</text>
+  <text x="10" y="246" class="lane2">load takes longer than 20 s</text>
+  <rect x="200" y="220" width="60" height="20" rx="2" class="b-data"/><text x="204" y="234" class="tw">50 s</text>
+  <rect x="200" y="244" width="24" height="20" rx="2" class="b-wait"/>
+  <rect x="224" y="244" width="336" height="20" rx="3" class="b-waste"/><text x="250" y="258" class="t">build #1, train_iters = 100</text>
+  <rect x="560" y="244" width="336" height="20" rx="3" class="b-ok"/><text x="586" y="258" class="tw">build #2, train_iters = 12</text>
+  <text x="560" y="282" class="note">same as Before, plus at most 20 s</text>
+
+  <line x1="200" y1="292" x2="920" y2="292" class="axis"/>
+</svg>
+<p class="sub">Scale: 1 px ≈ 0.83 s. The slow-load lane uses a made-up 50 s load to show the fallback.</p>
+
+<h2>The fix: hold the trainer back, wait at most 20 s, then submit</h2>
+<p class="where"><b>Where the fix lands: RL only, one function.</b>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/586831d33686d142a8ba66e8b13646992f8d1585/nemo_rl/algorithms/single_controller_utils/setup.py#L2027-L2102"><code>setup.py</code> · the build step of <code>setup_single_controller</code></a>,
+plus the constant
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/586831d33686d142a8ba66e8b13646992f8d1585/nemo_rl/algorithms/single_controller_utils/setup.py#L880"><code>_TRAINER_BUILD_DATASET_WAIT_S = 20.0</code></a>.
+No config change.</p>
+<pre class="diff"><span class="hunk">@@ setup.py L2035-L2045 · don't submit a Megatron trainer with the other builds</span>
+<span class="del">-            submitted = {k: executor.submit(fn) for k, fn in build_tasks.items()}
+</span><span class="add">+            defer_trainer = (
++                overlap_dataset_load
++                and "trainer" in build_tasks
++                and speculative_train_iters is not None
++                and any(iters is not None for iters in speculative_train_iters)
++            )
++            submitted = {
++                k: executor.submit(fn)
++                for k, fn in build_tasks.items()
++                if not (defer_trainer and k == "trainer")
++            }
+</span><span class="hunk">@@ setup.py L2053-L2079 · load on a side thread, wait up to 20 s, then build</span>
+<span class="del">-                dataset, _val_dataset, env_handles, dataloader = _load_training_data()
+</span><span class="add">+                with ThreadPoolExecutor(
++                    max_workers=1, thread_name_prefix="training-data-load"
++                ) as load_executor:
++                    load_future = load_executor.submit(_load_training_data)
++                    if defer_trainer:
++                        try:
++                            load_future.result(timeout=_TRAINER_BUILD_DATASET_WAIT_S)
++                        except FuturesTimeoutError:
++                            pass
++                        else:
++                            _maybe_inject_megatron_train_iters(master_config)
++                            speculative_train_iters = _megatron_train_iters(
++                                master_config
++                            )
++                        submitted["trainer"] = executor.submit(_build_trainer_and_value)
++                    dataset, _val_dataset, env_handles, dataloader = (
++                        load_future.result()
++                    )</span></pre>
+<p>In order: (1) a trainer that has a Megatron <code>train_iters</code> is left out of the first round of builds;
+(2) the dataset loads on its own thread while generation and Gym build;
+(3) if it finishes within 20 s, <code>train_iters</code> is set to the capped value (12) and the trainer is built once;
+(4) if not, the trainer starts with 100 and the existing
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/586831d33686d142a8ba66e8b13646992f8d1585/nemo_rl/algorithms/single_controller_utils/setup.py#L2085-L2102">rebuild check</a>
+replaces it, as before. A trainer without Megatron never waits. (Print lines and comments are left out of the diff above.)</p>
+
+<div class="warn"><b>So what.</b> Runs on this path that cap their step count by epochs, which includes every config built from the
+examples, now start training about 280 s sooner, and slow-loading datasets lose at most 20 s.
+The review's main ask: the new submit calls <code>_build_trainer_and_value</code> by name instead of <code>build_tasks["trainer"]</code>.
+Open PR <a href="https://github.com/NVIDIA-NeMo/RL/pull/4914">#4914</a> swaps a CPU stand-in trainer into <code>build_tasks["trainer"]</code>, so once both
+merge, its runs would quietly build the real Megatron trainer.
+The review also asks for two tests the new branch lacks, and for one startup time measured with the fix.
+<!--CREF--></div>
+
+</div>
+</body>
+</html>
