@@ -79,8 +79,9 @@ vLLM <a href="https://github.com/vllm-project/vllm/tree/98dff2a81d747d1dba01a47f
   <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4674-feature-gaps.html">what it can't do yet</a>
   <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4674-vllm-addons.html">NeMo-RL code in vLLM</a>
   <span class="here">colocated &amp; Dynamo</span>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4674-one-worker.html">one worker, three launches</a>
 </nav>
-<p class="chainnote">Six pages on this stack, one question each. This one: other server shapes.</p>
+<p class="chainnote">Seven pages on this stack, one question each. This one: other server shapes.</p>
 
 <div class="bg"><b>Background.</b> In <span class="tip" tabindex="0" data-tip="The trainer and vLLM use the same GPUs and take turns: vLLM generates, then sleeps to free memory; the trainer trains; then the new weights are copied in and vLLM wakes up.">colocated</span> mode, the trainer and vLLM take turns on the same GPUs.
 NeMo-RL's own colocated path <a href="https://github.com/NVIDIA-NeMo/RL/blob/5d4d76352ab5adf2a00122420baaa9898fbeab93/nemo_rl/models/generation/vllm/vllm_generation.py#L1387-L1436">wakes vLLM before generation and puts it to sleep after</a>.
@@ -155,6 +156,7 @@ vLLM also ships an <a href="https://github.com/vllm-project/vllm/blob/98dff2a81d
 </ul>
 
 <h2>Dynamo: same refit engine, different doors</h2>
+<p class="bg"><b>Update:</b> open PR <a href="https://github.com/NVIDIA-NeMo/RL/pull/4905">#4905</a> replaces the managed <code>dynamo.vllm</code> design below. Dynamo becomes a switch on NeMo-RL's own vLLM worker, and the <code>/engine/…</code> refit routes go away. See <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4674-one-worker.html">one worker, three launches</a>.</p>
 <p>NeMo-RL's <a href="https://github.com/NVIDIA-NeMo/RL/blob/5d4d76352ab5adf2a00122420baaa9898fbeab93/nemo_rl/models/generation/dynamo/managed_runtime.py#L64-L180">Dynamo backend</a> is <b>managed</b>: NeMo-RL starts etcd, NATS and the Dynamo frontend itself, plus one Ray actor per <code>dynamo.vllm</code> worker. Under the hood, refit uses <b>the same vLLM NCCL engine and sender settings as #4674</b>. The difference is where the calls go: Dynamo sends them to each worker's own admin port, <code>{system_url}/engine/…</code> (<a href="https://github.com/NVIDIA-NeMo/RL/blob/5d4d76352ab5adf2a00122420baaa9898fbeab93/nemo_rl/models/generation/dynamo/refit.py#L50-L94"><code>refit.py</code></a>). #4674 sends them to one <code>base_url</code>.</p>
 <div class="tbl"><table>
 <tr><th></th><th>remote_vllm (#4674)</th><th>Dynamo (main)</th></tr>

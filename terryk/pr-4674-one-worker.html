@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PR #4674 — one vLLM worker, three launches</title>
+<style>
+:root{--bg:#0d1117;--surface:#161b22;--surface2:#1c2128;--border:#30363d;--text:#e6edf3;--dim:#8b949e;
+  --accent:#58a6ff;--green:#3fb950;--red:#f85149;--orange:#d29922;--purple:#bc8cff}
+:root[data-theme="light"]{--bg:#ffffff;--surface:#f6f8fa;--surface2:#eaeef2;--border:#d0d7de;--text:#1f2328;
+  --dim:#59636e;--accent:#0969da;--green:#1a7f37;--red:#cf222e;--orange:#9a6700;--purple:#8250df}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:28px 20px 70px}
+h1{font-size:22px;margin:0 0 8px;line-height:1.3}
+h2{font-size:18px;margin:30px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+a{color:var(--accent);text-decoration:none} a:hover{text-decoration:underline}
+code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
+.sub{color:var(--dim);font-size:13.5px;margin:0 0 16px}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;font:13px/1 ui-monospace,monospace;cursor:pointer}
+.status{border:1px solid var(--border);border-radius:10px;background:var(--surface);padding:2px 16px 10px;margin:0 0 20px}
+.status dl{display:grid;grid-template-columns:max-content 1fr;gap:4px 14px;margin:12px 0 0}
+.status dt{color:var(--dim);font-size:12px;text-transform:uppercase;letter-spacing:.04em;white-space:nowrap;padding-top:2px}
+.status dd{margin:0;font-size:14px}
+.verdict{font-weight:700;color:var(--orange)}
+nav.chain{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 6px;padding:0}
+nav.chain a,nav.chain span{display:inline-block;padding:5px 11px;border:1px solid var(--border);border-radius:20px;background:var(--surface);text-decoration:none;color:var(--accent);font-size:12.5px;line-height:1.3;white-space:nowrap}
+nav.chain a:hover{background:var(--surface2)}
+nav.chain span.here{background:var(--accent);color:var(--bg);border-color:var(--accent);font-weight:600}
+p.chainnote{color:var(--dim);font-size:12px;margin:0 0 18px}
+.bg{border-left:4px solid var(--accent);background:var(--surface);padding:8px 14px;margin:0 0 16px;font-size:14px}
+.where{border-left:4px solid var(--accent);background:var(--surface);padding:6px 12px;margin:6px 0 10px;font-size:14px}
+.warn{border-left:3px solid var(--orange);background:var(--surface);padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0}
+.tip{border-bottom:1px dotted var(--dim);cursor:help;position:relative;outline:none}
+.tip:hover::after,.tip:focus::after{content:attr(data-tip);position:absolute;left:0;top:1.7em;z-index:60;width:max-content;max-width:min(340px,80vw);white-space:normal;background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:7px 10px;font:13px/1.45 -apple-system,sans-serif;font-weight:400;box-shadow:0 4px 14px rgba(0,0,0,.3)}
+.tbl{overflow-x:auto}
+table{border-collapse:collapse;width:100%;font-size:13.5px;margin:10px 0}
+th,td{border:1px solid var(--border);padding:6px 9px;text-align:left;vertical-align:top}
+th{background:var(--surface)}
+td.no{color:var(--red)} td.yes{color:var(--green)}
+ul li,ol li{margin:3px 0}
+.diff{font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:12px;overflow-x:auto;white-space:pre;margin:10px 0}
+.diff .add{color:var(--green)} .diff .del{color:var(--red)} .diff .hunk{color:var(--accent)}
+svg{max-width:100%;height:auto;display:block;margin:14px 0}
+svg .frame{fill:var(--surface);stroke:var(--border);stroke-width:1}
+svg .pkg{fill:var(--surface2);stroke:var(--accent);stroke-width:1.5}
+svg .old{fill:none;stroke:var(--green);stroke-width:1.5}
+svg .new{fill:none;stroke:var(--orange);stroke-width:1.5}
+svg .ln{stroke:var(--dim);stroke-width:1.2;fill:none}
+svg .hl{fill:var(--text);font:bold 12.5px -apple-system,sans-serif}
+svg .lbl{fill:var(--dim);font:10px -apple-system,sans-serif;letter-spacing:.04em}
+svg .v{fill:var(--text);font:11.5px -apple-system,sans-serif}
+svg .vn{fill:var(--orange);font:bold 11.5px -apple-system,sans-serif}
+svg .vd{fill:var(--purple);font:11.5px -apple-system,sans-serif}
+svg .mono{fill:var(--text);font:11px ui-monospace,Menlo,monospace}
+svg .dimt{fill:var(--dim);font:11px -apple-system,sans-serif}
+svg .gt{fill:var(--green);font:bold 11px -apple-system,sans-serif}
+svg .ot{fill:var(--orange);font:bold 11px -apple-system,sans-serif}
+svg a text{text-decoration:underline;fill:var(--accent)}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head>
+<body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+function wire(){var b=document.getElementById('theme-toggle');if(!b)return;b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+<div class="wrap">
+
+<h1>Could NeMo-RL's own vLLM worker be the external server, so every launch shape runs the same code?</h1>
+<p class="sub">Design proposal for the <a href="https://github.com/NVIDIA-NeMo/RL/pull/4674">#4674</a>–<a href="https://github.com/NVIDIA-NeMo/RL/pull/4677">#4677</a> stack ·
+main at <a href="https://github.com/NVIDIA-NeMo/RL/tree/efc309512601fef2a219c47240651ec130f2709b"><code>efc30951</code></a> ·
+Dynamo PR <a href="https://github.com/NVIDIA-NeMo/RL/pull/4905">#4905</a> at <a href="https://github.com/NVIDIA-NeMo/RL/tree/b0b6b32cea02fac751333d165b50209572040f0b"><code>b0b6b32c</code></a> ·
+vLLM <a href="https://github.com/vllm-project/vllm/tree/98dff2a81d747d1dba01a47f939f48c3526d4206">v0.29.0</a></p>
+
+<div class="status"><dl>
+  <dt>Before</dt><dd>NeMo-RL's own vLLM worker runs only as a Ray actor inside the training cluster. All of NeMo-RL's vLLM extras (reshard, delta refit, MXFP8, exact prefix tokens) live in that worker.</dd>
+  <dt>The stack</dt><dd>Adds external rollout with <b>stock</b> <code>vllm serve</code> plus a plugin wheel. So reshard, delta refit, MXFP8/NVFP4 and fleet health are <a href="https://github.com/NVIDIA-NeMo/RL/blob/5d4d76352ab5adf2a00122420baaa9898fbeab93/nemo_rl/models/generation/remote_vllm/remote_vllm_generation.py#L58-L71">refused</a> in every PR of the stack.</dd>
+  <dt>Status</dt><dd><span class="verdict">Proposed, not implemented.</span> Read from the code; nothing on this page has been built or run.</dd>
+</dl></div>
+
+<nav class="chain">
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4674-stack-overview.html">stack overview</a>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4674-external-vllm.html">refit vs managed vLLM</a>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4674-slurm-launch.html">Slurm launch</a>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4674-feature-gaps.html">what it can't do yet</a>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4674-vllm-addons.html">NeMo-RL code in vLLM</a>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4674-colocated-dynamo.html">colocated &amp; Dynamo</a>
+  <span class="here">one worker, three launches</span>
+</nav>
+<p class="chainnote">Seven pages on this stack, one question each. This one: an alternative design.</p>
+
+<div class="bg"><b>Background.</b> A <span class="tip" tabindex="0" data-tip="A NeMo-RL class that owns one vLLM engine. It adds NeMo-RL's own HTTP routes, refit receivers and quantization on top of stock vLLM.">vLLM worker</span> is the process that holds the model and generates rollouts. <span class="tip" tabindex="0" data-tip="Copying new weights from the trainer into vLLM after each training step.">Refit</span> copies new weights into it after each step. Today the trainer drives the worker with Ray calls, and Ray also places it on GPUs and spreads it across nodes. Dotted words have a short explanation: hover or tap them.</div>
+
+<p><b>The idea:</b> keep one copy of the worker code, and launch it three ways. The two ways that exist today stay as they are. The new, external way starts the same worker as a plain process on its own nodes, with no Ray. The trainer then drives it over HTTP instead of Ray calls, and weights still move over NCCL. Because it is the same code, external rollout gets every feature the worker already has, and <a href="https://github.com/NVIDIA-NeMo/RL/pull/4905">#4905</a>'s Dynamo switch comes along too.</p>
+
+<svg viewBox="0 0 960 470" role="img" aria-label="One worker package launched three ways">
+  <rect class="pkg" x="20" y="8" width="920" height="62" rx="8"/>
+  <text class="hl" x="36" y="30">One package: NeMo-RL's own vLLM worker, split out of nemo_rl</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/efc309512601fef2a219c47240651ec130f2709b/nemo_rl/models/generation/vllm/vllm_worker_async.py#L1894"><text x="36" y="52" style="font:11px ui-monospace,Menlo,monospace">vllm_worker_async.py</text></a>
+  <text class="mono" x="178" y="52">+</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/efc309512601fef2a219c47240651ec130f2709b/nemo_rl/models/generation/vllm/vllm_backend.py#L881"><text x="194" y="52" style="font:11px ui-monospace,Menlo,monospace">vllm_backend.py</text></a>
+  <text class="mono" x="300" y="52">+ quantization/ + patches.py   (refit receivers, MXFP8, exact-prefix chat route)</text>
+
+  <path class="ln" d="M165 70 V96 M480 70 V96 M795 70 V96"/>
+  <text class="dimt" x="490" y="88">same code in all three</text>
+
+  <rect class="frame" x="20" y="98" width="290" height="300" rx="8"/><rect class="old" x="20" y="98" width="290" height="300" rx="8"/>
+  <rect class="frame" x="335" y="98" width="290" height="300" rx="8"/><rect class="old" x="335" y="98" width="290" height="300" rx="8"/>
+  <rect class="frame" x="650" y="98" width="290" height="300" rx="8"/><rect class="new" x="650" y="98" width="290" height="300" rx="8"/>
+
+  <text class="hl" x="34" y="120">1 · Colocated</text><text class="gt" x="34" y="137">exists on main, unchanged</text>
+  <text class="hl" x="349" y="120">2 · Own GPUs, same Ray cluster</text><text class="gt" x="349" y="137">exists on main, unchanged</text>
+  <text class="hl" x="664" y="120">3 · External (new)</text><text class="ot" x="664" y="137">proposed</text>
+
+  <text class="lbl" x="34" y="162">STARTED BY</text><text class="v" x="34" y="177">Ray actor on the trainer's GPUs</text>
+  <text class="lbl" x="349" y="162">STARTED BY</text><text class="v" x="349" y="177">Ray actor on its own GPUs</text>
+  <text class="lbl" x="664" y="162">STARTED BY</text><text class="vn" x="664" y="177">Slurm step, plain process, no Ray</text>
+
+  <text class="lbl" x="34" y="202">TP ACROSS NODES</text><text class="v" x="34" y="217">vLLM's Ray executor</text>
+  <text class="lbl" x="349" y="202">TP ACROSS NODES</text><text class="v" x="349" y="217">vLLM's Ray executor</text>
+  <text class="lbl" x="664" y="202">TP ACROSS NODES</text><text class="vn" x="664" y="217">vLLM mp: --nnodes N --node-rank k</text>
+
+  <text class="lbl" x="34" y="242">TRAINER CONTROLS IT WITH</text><text class="v" x="34" y="257">Ray calls</text>
+  <text class="lbl" x="349" y="242">TRAINER CONTROLS IT WITH</text><text class="v" x="349" y="257">Ray calls</text>
+  <text class="lbl" x="664" y="242">TRAINER CONTROLS IT WITH</text><text class="vn" x="664" y="257">HTTP admin routes (new)</text>
+
+  <text class="lbl" x="34" y="282">WEIGHTS ARRIVE BY</text><text class="v" x="34" y="297">CUDA IPC (same GPU)</text>
+  <text class="lbl" x="349" y="282">WEIGHTS ARRIVE BY</text><text class="v" x="349" y="297">NCCL, reshard or delta</text>
+  <text class="lbl" x="664" y="282">WEIGHTS ARRIVE BY</text><text class="v" x="664" y="297">NCCL, reshard or delta (same code)</text>
+
+  <text class="lbl" x="34" y="322">ROLLOUTS ENTER THROUGH</text><text class="v" x="34" y="337">worker's own HTTP server</text>
+  <text class="lbl" x="349" y="322">ROLLOUTS ENTER THROUGH</text><text class="v" x="349" y="337">own HTTP server, or</text><text class="vd" x="478" y="337">Dynamo</text>
+  <text class="lbl" x="664" y="322">ROLLOUTS ENTER THROUGH</text><text class="v" x="664" y="337">own HTTP server, or</text><text class="vd" x="793" y="337">Dynamo (attach)</text>
+
+  <text class="lbl" x="34" y="362">DEAD SHARD FOUND AND RESTARTED BY</text><text class="v" x="34" y="377">Ray actor death; trainer restarts it</text>
+  <text class="lbl" x="349" y="362">DEAD SHARD FOUND AND RESTARTED BY</text><text class="v" x="349" y="377">Ray actor death; trainer restarts it</text>
+  <text class="lbl" x="664" y="362">DEAD SHARD FOUND AND RESTARTED BY</text><text class="vn" x="664" y="377">HTTP probe; Slurm restarts it</text>
+
+  <rect x="20" y="414" width="12" height="12" class="old"/><text class="dimt" x="38" y="424">green: already on main</text>
+  <rect x="200" y="414" width="12" height="12" class="new"/><text class="dimt" x="218" y="424">orange: new work for the external launch</text>
+  <text class="vd" x="470" y="424">purple:</text><text class="dimt" x="516" y="424">Dynamo frontend, a switch on the same worker (</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/pull/4905"><text x="800" y="424" style="font:11px -apple-system,sans-serif">#4905</text></a><text class="dimt" x="834" y="424">)</text>
+  <text class="dimt" x="20" y="452">Colocated stays Ray-only: CUDA IPC needs the worker on the trainer's own GPUs. Only column 3 changes.</text>
+</svg>
+
+<h2>What external rollout gets: stock vLLM vs NeMo-RL's own worker</h2>
+<div class="tbl"><table>
+<tr><th>Feature</th><th>Stock vLLM (the stack today)</th><th>NeMo-RL worker, launched external</th></tr>
+<tr><td>Full-weight NCCL refit</td><td class="yes">yes</td><td class="yes">yes, same code</td></tr>
+<tr><td>NCCL reshard refit</td><td class="no">refused</td><td class="yes">yes. The receiver <a href="https://github.com/NVIDIA-NeMo/RL/blob/efc309512601fef2a219c47240651ec130f2709b/nemo_rl/models/generation/vllm/vllm_backend.py#L881">already exists</a> in the worker; it needs 3 admin routes</td></tr>
+<tr><td>Delta (sparse) refit</td><td class="no">refused</td><td class="yes">yes. Its steps already go to the worker as <a href="https://github.com/NVIDIA-NeMo/RL/blob/efc309512601fef2a219c47240651ec130f2709b/nemo_rl/utils/weight_transfer_http.py#L27-L31">HTTP routes</a></td></tr>
+<tr><td>MXFP8 / NVFP4 rollouts, FP8 KV scales</td><td class="no">refused or not checked</td><td class="yes">yes, same quantization code</td></tr>
+<tr><td>Exact multi-turn prefix tokens, router replay</td><td>hand copies in a plugin wheel (two bugs found)</td><td class="yes">the worker's own <a href="https://github.com/NVIDIA-NeMo/RL/blob/efc309512601fef2a219c47240651ec130f2709b/nemo_rl/models/generation/vllm/vllm_worker_async.py#L1626">chat route</a></td></tr>
+<tr><td>Token capture to TransferQueue</td><td>through the trainer's controller (#4676)</td><td>also through the controller: the worker finds TransferQueue <a href="https://github.com/NVIDIA-NeMo/RL/blob/efc309512601fef2a219c47240651ec130f2709b/nemo_rl/data_plane/adapters/transfer_queue.py#L824">through Ray</a> today</td></tr>
+<tr><td>Fleet health</td><td class="no">refused</td><td>remove and re-admit over HTTP; Slurm restarts the process at the same URL</td></tr>
+<tr><td>TP across nodes</td><td>left to <code>vllm serve</code>; not tested</td><td>vLLM's <a href="https://github.com/vllm-project/vllm/blob/98dff2a81d747d1dba01a47f939f48c3526d4206/vllm/config/parallel.py#L277-L290">mp executor with <code>--nnodes</code></a>, no Ray</td></tr>
+<tr><td>Dynamo frontend</td><td class="no">no</td><td class="yes">#4905's switch, plus an "attach" mode</td></tr>
+<tr><td>What the server must run</td><td>any vLLM 0.29.0</td><td>the same NeMo-RL commit as the trainer</td></tr>
+</table></div>
+<p>The last row is the real trade. Stock vLLM lets any vLLM deployment plug in, but every NeMo-RL extra must be rebuilt as a plugin. The NeMo-RL worker gets every extra for free, but the server has to match the trainer's NeMo-RL commit. The worker's own environment <a href="https://github.com/NVIDIA-NeMo/RL/blob/efc309512601fef2a219c47240651ec130f2709b/nemo_rl/distributed/actor_environments.py#L44-L53">already installs all of nemo_rl</a>, so splitting it into a package would mostly mean a much smaller list of dependencies.</p>
+
+<h2>What would have to change: proposed, not in any PR</h2>
+<p>Nothing below is implemented. Sizes come from reading the code on main and #4905.</p>
+<p class="where"><b>Where it lands: RL only.</b> <b>No vLLM change:</b> vLLM 0.29.0 already runs TP across nodes without Ray (<a href="https://github.com/vllm-project/vllm/blob/98dff2a81d747d1dba01a47f939f48c3526d4206/vllm/entrypoints/cli/serve.py#L211-L227">headless followers</a>), and its <code>collective_rpc</code> reaches workers on other nodes. <b>No Gym change:</b> Gym only sees base URLs.</p>
+<ol>
+<li><b>Let the worker run without Ray.</b> Small. Choose vLLM's mp executor and pass <code>nnodes</code>/<code>node_rank</code>. Take the GPU for NUMA pinning from <code>CUDA_VISIBLE_DEVICES</code>, using the existing <a href="https://github.com/NVIDIA-NeMo/RL/blob/efc309512601fef2a219c47240651ec130f2709b/nemo_rl/distributed/numa_utils.py#L84"><code>resolve_visible_gpu_id</code></a>. Apply <code>@ray.remote</code> only in Ray mode (<a href="https://github.com/NVIDIA-NeMo/RL/blob/efc309512601fef2a219c47240651ec130f2709b/nemo_rl/models/generation/vllm/vllm_worker_async.py#L2734">it already sits on a thin subclass</a>).</li>
+<li><b>A follower launcher for nodes 2..N.</b> Plain <code>vllm serve --headless</code> is not enough. Each node loads the worker extension from its <a href="https://github.com/vllm-project/vllm/blob/98dff2a81d747d1dba01a47f939f48c3526d4206/vllm/v1/worker/worker_base.py#L285-L308">own config</a>, so every node must build exactly the settings node 0 builds.</li>
+<li><b>HTTP admin routes, and an <code>external</code> backend on the trainer that calls them.</b> About 18 methods go over Ray today: refit, reshard, pause and resume, sleep, cache reset, weight version and metrics. NeMo-RL's SGLang backend already works this way: its worker is a thin wrapper that <a href="https://github.com/NVIDIA-NeMo/RL/blob/efc309512601fef2a219c47240651ec130f2709b/nemo_rl/models/generation/sglang/sglang_worker.py#L169">sends every control call over HTTP</a>. A <code>capabilities</code> route reports the server's TP/PP layout, which reshard needs.</li>
+<li><b>Fleet health over HTTP.</b> The existing hooks fit: <a href="https://github.com/NVIDIA-NeMo/RL/blob/efc309512601fef2a219c47240651ec130f2709b/nemo_rl/models/generation/vllm/vllm_generation.py#L877">liveness probe</a>, <a href="https://github.com/NVIDIA-NeMo/RL/blob/efc309512601fef2a219c47240651ec130f2709b/nemo_rl/models/generation/vllm/vllm_generation.py#L900">restart</a> and <a href="https://github.com/NVIDIA-NeMo/RL/blob/efc309512601fef2a219c47240651ec130f2709b/nemo_rl/models/generation/vllm/vllm_generation.py#L1004">NCCL group rebuild</a>. The trainer can't start processes on other nodes, so "restart" becomes "wait for Slurm to bring the URL back, then refit it before it serves". The health check must also test the engine, since <code>/health</code> always says ok today.</li>
+<li><b>Split into a package.</b> About 25k lines move as they are. About 6 imports have to be cut. The worst is that the worker's config imports <code>interfaces.py</code>, which pulls in Ray.</li>
+<li><b>Dynamo "attach" mode.</b> In #4905 Dynamo is already a <a href="https://github.com/NVIDIA-NeMo/RL/blob/b0b6b32cea02fac751333d165b50209572040f0b/nemo_rl/models/generation/vllm/vllm_worker_async.py#L651-L670">switch on this same worker</a>, and <a href="https://github.com/NVIDIA-NeMo/RL/blob/b0b6b32cea02fac751333d165b50209572040f0b/docs/design-docs/dynamo-integration.md#L49-L59">control never goes through Dynamo</a>. For external, the etcd, NATS and frontend addresses come from config, not from a trainer-started runtime. Registration starts from a launch flag, not a Ray call. The shard ID must not be a Ray group index. A restarted server stays unregistered until its first refit.</li>
+</ol>
+<p>The first change, as an example of the size:</p>
+<pre class="diff"><span class="hunk">@@ worker_utils.py L41-L47 · resolve_distributed_executor_backend</span>
+ def resolve_distributed_executor_backend(
+     tensor_parallel_size: int,
+     pipeline_parallel_size: int,
+     expert_parallel_size: int,
+<span class="add">+    nnodes: int | None = None,
+</span> ) -&gt; str | None:
+<span class="add">+    if nnodes is not None:
++        # External launch: no Ray here. vLLM's own processes span nnodes nodes.
++        return "mp"
+</span>     if tensor_parallel_size * pipeline_parallel_size &gt; 1:
+         return "ray"
+<span class="hunk">@@ vllm_worker.py L448-L449 · single-GPU NUMA pinning</span>
+         if bundle_indices is not None and len(bundle_indices) == 1:
+             bind_to_gpu_numa(int(ray.get_gpu_ids()[0]))
+<span class="add">+        elif self.launch_mode == "external" and self.tensor_parallel_size == 1:
++            # The launcher sets CUDA_VISIBLE_DEVICES, so there is no Ray to ask.
++            gpu = resolve_visible_gpu_id(0)
++            if gpu is not None:
++                bind_to_gpu_numa(gpu)</span></pre>
+<p><a href="https://github.com/NVIDIA-NeMo/RL/blob/efc309512601fef2a219c47240651ec130f2709b/nemo_rl/models/generation/vllm/worker_utils.py#L41-L51">The first hunk</a> keeps today's behavior unless a launcher passes <code>nnodes</code>. <a href="https://github.com/NVIDIA-NeMo/RL/blob/efc309512601fef2a219c47240651ec130f2709b/nemo_rl/models/generation/vllm/vllm_worker.py#L448-L449">The second</a> leaves the Ray path alone. <code>launch_mode</code> is a new setting the launcher would set. Neither hunk has been run.</p>
+
+<p><b>Not checked yet:</b></p>
+<ul>
+<li>Expert parallel and vLLM-internal data parallel across nodes under the mp executor.</li>
+<li>Whether reshard's metadata survives JSON as it is.</li>
+<li>Whether the refit rank offsets line up across Slurm het groups.</li>
+<li>How long the trainer takes to notice a dead follower node (today: only a timeout on node 0).</li>
+</ul>
+
+<div class="warn"><b>So what:</b> the stack's design question is whether the external server <i>must</i> be stock vLLM. If it doesn't have to be, launching NeMo-RL's own worker as the external server makes reshard, delta refit, MXFP8, exact prefix tokens, fleet health and Dynamo all work, with one copy of the code. If it does, the plugin wheel has to keep copying each of those features. Settle this before the plugin wheel grows.</div>
+
+</div>
+</body>
+</html>
