@@ -95,8 +95,8 @@ All permalinks pin the PR head <code>8c75341b</code>.</p>
   per rollout event to <code>rollout_trace.jsonl</code> in the log folder.</dd>
   <dt>Status</dt>
   <dd><span class="verdict open">New feature, in review.</span> The design is sound. The review asks for a smaller
-  file writer and test file (about 13% of the PR), plus one fix so a restart does not report the same lost
-  rollout twice. The smaller writer below is <b>proposed, not in the PR</b>.</dd>
+  test file and design doc section (about 9% of the PR), plus one fix so a restart does not report the same lost
+  rollout twice. The cuts below are <b>proposed, not in the PR</b>.</dd>
 </dl>
 </div>
 
@@ -184,7 +184,7 @@ would say only "1 rollout restarted".</p>
 <p>Nothing below is implemented. The PR is 694 added lines; 348 of them are one test file and 126 are the writer.
 No existing writer in the repo fits better. The review checked these:</p>
 <ul>
-  <li>the standard library's <code>QueueListener</code>, which still needs a thread and prints a traceback on every failed write;</li>
+  <li>the standard library's <code>QueueListener</code>, which prints a traceback on every failed write;</li>
   <li>the logger's JSONL helpers, which open the file on every call;</li>
   <li>the metrics logger, which takes numbers only;</li>
   <li>the train-data debug writer;</li>
@@ -192,75 +192,27 @@ No existing writer in the repo fits better. The review checked these:</p>
 </ul>
 <p>So the savings come from writing less, not from reusing more.</p>
 
-<p class="where"><b>Where the change lands: RL only.</b>
-<a href="https://github.com/NVIDIA-NeMo/RL/blob/8c75341bf8ca8df1d917c3fe5366a05a6e9637c4/nemo_rl/algorithms/rollout_checkpointing/trace.py#L48-L126"><code>trace.py</code></a> and the test calls to
-<a href="https://github.com/NVIDIA-NeMo/RL/blob/8c75341bf8ca8df1d917c3fe5366a05a6e9637c4/nemo_rl/algorithms/rollout_checkpointing/trace.py#L84-L87"><code>flush()</code></a>.
-No change for #5049: it uses only the constructor, <code>enabled</code>, <code>emit</code> and <code>close</code>.</p>
+<p><b>The writer's thread stays.</b> The PR writes each line from a background thread, so the event loop never waits
+on the disk. Timed with 2 million events on a laptop SSD, the event loop spends 2.5 µs per event with the thread and
+3.6 µs writing each line directly. At the 1B example's 1,150 events per step that is nothing. At a million events per
+step (hundreds of thousands of rollouts) it is about a second per step, and every direct write is a system call on
+the event loop, which on a shared filesystem can stall far longer. Removing the thread would save about 40 lines,
+but it is not worth that risk.</p>
 
-<p>The writer queues each line for a background thread so the event loop never waits on the disk. Measured on a laptop,
-that saves about 4 µs per event: 5.5 µs queued vs 9.6 µs written directly. The 1B example config makes about 1,150 events
-per step, so the thread saves about 5 ms in a step that takes seconds to minutes. The controller already writes its
-logs and metrics to the same folder without a thread. Writing directly drops about 40 lines:</p>
-
-<pre class="diff"><span class="hunk">@@ trace.py L57-L71 · RolloutTrace.__init__</span>
-         self._run_id = uuid.uuid4().hex
-         self._file: Optional[IO[str]] = None
-<span class="del">-        # Created only when enabled: a disabled trace holds no lock, so the
--        # controller class that defaults to one still pickles for Ray.
--        self._lines: Optional[queue.Queue[Optional[str]]] = None
--        self._writer: Optional[threading.Thread] = None
-</span>         if path is not None:
-             path.parent.mkdir(parents=True, exist_ok=True)
-<span class="del">-            self._file = open(path, "a", encoding="utf-8")
--            self._lines = queue.Queue()
--            self._writer = threading.Thread(
--                target=self._write_lines, name="rollout-trace-writer", daemon=True
--            )
--            self._writer.start()
-</span><span class="add">+            # Line-buffered: each event reaches the OS when it is written, so a
-+            # killed run loses at most the line being written.
-+            self._file = open(path, "a", buffering=1, encoding="utf-8")
-</span>             self.emit("trace_opened", pid=os.getpid())
-<span class="hunk">@@ trace.py L77-L82 · emit</span>
-<span class="del">-        if self._lines is None:
-</span><span class="add">+        if self._file is None:
-</span>             return
-         record = {"t": time.time(), "run": self._run_id, "event": event, **fields}
-<span class="del">-        self._lines.put(json.dumps(record, default=str) + "\n")
-</span><span class="add">+        try:
-+            self._file.write(json.dumps(record, default=str) + "\n")
-+        except OSError as error:
-+            # Tracing must never stop the run it observes.
-+            warnings.warn(f"rollout trace stopped writing: {error}", stacklevel=2)
-+            self.close()
-</span><span class="hunk">@@ trace.py L84-L126 · flush, close, _write_lines (43 lines) → one short close</span>
-<span class="del">-    def flush(self) -> None:          # only the tests call it
--    def close(self) -> None:          # sentinel, join the thread, close
--    def _write_lines(self) -> None:   # batch loop, task_done, warn once
-</span><span class="add">+    def close(self) -> None:
-+        """Close the file; later events are dropped."""
-+        trace_file, self._file = self._file, None
-+        if trace_file is not None:
-+            with contextlib.suppress(OSError):
-+                trace_file.close()</span></pre>
-<p class="cref">💬 <a href="https://github.com/NVIDIA-NeMo/RL/pull/5048#discussion_r4477535053">review comment C1 — trace.py:61-70</a></p>
-
-<p>The third hunk lists the three removed methods by name instead of all 43 lines. The full replacement class was checked
-outside the repo: it appends across runs, the file can be read before close, a failed write warns once and stops,
-a disabled trace still pickles, and ruff passes. With the rest of the review's asks, the PR shrinks by about 85–95 lines:</p>
+<p>The cuts the review does ask for, about 55–65 lines:</p>
 
 <table class="sz">
 <tr><th>Ask</th><th>Lines</th><th>Comment</th></tr>
-<tr><td>Write directly, drop the thread and <code>flush()</code> (above)</td><td class="n">≈ −40</td><td><a href="https://github.com/NVIDIA-NeMo/RL/pull/5048#discussion_r4477535053">C1</a></td></tr>
 <tr><td>Test file: one table test for the ledger event orders, drop a check that overlaps the off-by-default test, move the cancelled-vs-failed check next to the rollout-manager test that owns it</td><td class="n">≈ −40 to −50</td><td><a href="https://github.com/NVIDIA-NeMo/RL/pull/5048#discussion_r4477535163">C9</a>, <a href="https://github.com/NVIDIA-NeMo/RL/pull/5048#discussion_r4477535152">C8</a></td></tr>
-<tr><td>Event list written out in five places (design doc, two docstrings, two YAML comments): keep the table in the design doc, point to it from the rest</td><td class="n">≈ −8</td><td><a href="https://github.com/NVIDIA-NeMo/RL/pull/5048#discussion_r4477535127">C7</a></td></tr>
+<tr><td>Design doc: replace the event table (already wrong in three places) with a short section on how to turn tracing on and read the file</td><td class="n">≈ −14</td><td><a href="https://github.com/NVIDIA-NeMo/RL/pull/5048#discussion_r4478342058">C6</a></td></tr>
+<tr><td>Event list written out in five places: keep one list, in the <code>trace.py</code> docstring, and point to it from the rest</td><td class="n">≈ −8</td><td><a href="https://github.com/NVIDIA-NeMo/RL/pull/5048#discussion_r4477535127">C7</a></td></tr>
 <tr><td>Small cleanups: a redundant <code>enabled</code> check, a <code>getattr</code> fallback that never runs</td><td class="n">≈ −3</td><td><a href="https://github.com/NVIDIA-NeMo/RL/pull/5048#discussion_r4477535113">C5</a>, <a href="https://github.com/NVIDIA-NeMo/RL/pull/5048#discussion_r4477535181">C11</a></td></tr>
 <tr><td>Additions: skip the ledger copy when tracing is off; skip re-reporting a try abandoned before the stop; a test for the "failed" label</td><td class="n">≈ +10</td><td><a href="https://github.com/NVIDIA-NeMo/RL/pull/5048#discussion_r4477535073">C2</a>, <a href="https://github.com/NVIDIA-NeMo/RL/pull/5048#discussion_r4477535093">C3</a>, <a href="https://github.com/NVIDIA-NeMo/RL/pull/5048#discussion_r4477535152">C8</a></td></tr>
 </table>
 
 <div class="hl"><b>So what.</b> This PR is not much larger than it needs to be. Half of it is tests, and the feature is a thin hook
-plus a file writer. The clearest saving is the writer's thread, about 40 lines that buy 5 ms per step. Together with the
-test trims, that is about 13% of the PR. The one change that affects the numbers the trace gives you: after a restart,
+plus a file writer whose thread earns its keep at large scale. Trimming the tests and the design doc saves about 9% of the PR.
+The one change that affects the numbers the trace gives you: after a restart,
 a try that had already been abandoned before the stop is reported as abandoned again, so the thrown-away time above counts it twice.
 The review asks for a short skip in two places.</div>
 <p class="cref">💬 <a href="https://github.com/NVIDIA-NeMo/RL/pull/5048#discussion_r4477535093">C3 — rollout_recovery.py:841-847</a><a href="https://github.com/NVIDIA-NeMo/RL/pull/5048#discussion_r4477535100">C4 — rollout_recovery.py:863-872</a></p>
