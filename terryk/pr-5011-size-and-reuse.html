@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NVIDIA-NeMo/RL #5011 — the move shrank the code; the new files add 882 lines</title>
+<style>
+:root{
+  --bg:#0d1117; --surface:#161b22; --surface2:#1c2128; --border:#30363d;
+  --text:#e6edf3; --dim:#8b949e; --accent:#58a6ff; --green:#3fb950;
+  --orange:#d29922; --red:#f85149;
+}
+:root[data-theme="light"]{
+  --bg:#ffffff; --surface:#f6f8fa; --surface2:#eaeef2; --border:#d0d7de;
+  --text:#1f2328; --dim:#59636e; --accent:#0969da; --green:#1a7f37;
+  --orange:#9a6700; --red:#cf222e;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:28px 16px 70px}
+h1{font-size:22px;margin:0 0 8px;line-height:1.3}
+h2{font-size:18px;margin:32px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;
+  font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
+.sub{color:var(--dim);font-size:13.5px;margin:0 0 16px}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);
+  border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;
+  font:13px/1 ui-monospace,Menlo,monospace;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.18)}
+.status{border:1px solid var(--border);border-radius:10px;background:var(--surface);
+  padding:2px 16px 10px;margin:0 0 20px}
+.status dl{display:grid;grid-template-columns:max-content 1fr;gap:4px 14px;margin:12px 0 0}
+.status dt{color:var(--dim);font-size:12px;text-transform:uppercase;letter-spacing:.04em;
+  white-space:nowrap;padding-top:2px}
+.status dd{margin:0;font-size:14px}
+.verdict{font-weight:700}
+.verdict.open{color:var(--orange)}
+.hl{border-left:3px solid var(--accent);background:var(--surface);
+  padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0}
+.where{border-left:4px solid var(--accent);background:var(--surface);padding:6px 12px;margin:6px 0 10px;font-size:14px}
+table.same{border-collapse:collapse;font-size:13.5px;margin:8px 0}
+table.same td{border-top:1px solid var(--border);padding:4px 10px 4px 0;vertical-align:top}
+table.same td:first-child{color:var(--green);white-space:nowrap}
+svg{max-width:100%;height:auto;display:block;margin:16px 0}
+svg .lbl{fill:var(--text);font:12px ui-monospace,Menlo,monospace}
+svg .num{fill:var(--dim);font:11px ui-monospace,Menlo,monospace}
+svg .body{fill:var(--surface2);stroke:var(--border)}
+svg .hdrb{fill:var(--dim);opacity:.55}
+svg .rm{fill:var(--red);opacity:.75}
+svg .cut{fill:var(--orange);opacity:.9}
+svg .ct{fill:var(--orange);font:bold 11px -apple-system,sans-serif}
+svg .rt{fill:var(--red);font:bold 11px -apple-system,sans-serif}
+svg .note{fill:var(--dim);font:11px -apple-system,sans-serif}
+svg .sep{stroke:var(--border);stroke-dasharray:4 4}
+svg .hdr{fill:var(--accent);font:bold 12px -apple-system,sans-serif}
+svg a text{text-decoration:underline;fill:var(--accent)}
+.diff{font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--surface);
+  border:1px solid var(--border);border-radius:8px;padding:12px;overflow-x:auto;white-space:pre;margin:10px 0}
+.diff .add{color:var(--green)}
+.diff .del{color:var(--red)}
+.diff .hunk{color:var(--accent)}
+.cref{margin:6px 0 0;font-size:13px}
+.cref a{display:inline-block;padding:4px 10px;border:1px solid var(--border);
+  border-radius:16px;background:var(--surface);font:12.5px ui-monospace,Menlo,monospace;margin:2px 4px 2px 0}
+.cref a:hover{background:var(--surface2);text-decoration:none}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+  document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head>
+<body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+  function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+  function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
+    b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
+      else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+  document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+<div class="wrap">
+
+<h1>Moving rollout checkpointing out of the controller: 1,974 lines left, 2,856 arrived — where the extra 882 come from</h1>
+<p class="sub"><a href="https://github.com/NVIDIA-NeMo/RL/pull/5011">NVIDIA-NeMo/RL #5011</a>, part 1 of 11 in the partial-checkpointing stack.
+All permalinks pin the PR head <code>7171e5d</code>; removed code is linked at the base <code>d3d22f1</code>.</p>
+
+<div class="status">
+<dl>
+  <dt>Before</dt>
+  <dd>Saving and restoring rollouts lived inside the single controller, a 6,688-line class, next to its Gym-only branches.</dd>
+  <dt>This PR</dt>
+  <dd>Moves that code into two new packages, with the same behavior. The controller drops to 4,714 lines. Source grows by about 850 lines and tests by about 510.</dd>
+  <dt>Status</dt>
+  <dd><span class="verdict open">Cuts proposed, not in the PR.</span> The review found no bugs. The cuts below are review asks (C2–C8). Nothing here has been run.</dd>
+</dl>
+</div>
+
+<p>The move itself is careful. Each of the 27 methods that left
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/d3d22f154a6b978a071b646ff3a35307800fa6d6/nemo_rl/algorithms/single_controller.py">single_controller.py</a>
+was compared with its new home, and the differences are renames.
+The extra lines are not in the moved code. They are in what the move added around it: eight new files, each with its own license, docstring and imports;
+two <span title="A Python typing class that lists methods but holds no code">Protocol classes</span> with only one real implementation;
+a 99-line test helper that rebuilds the controller's setup; and a design doc that lists private methods.</p>
+
+<h2>What stayed the same</h2>
+<table class="same">
+<tr><td>same</td><td>Lock order around a save, the optimizer-commit window, and restore order (replay → ledger → spare prompts → loader place).</td></tr>
+<tr><td>same</td><td>On-disk checkpoint keys (<code>gym_instance_id</code>, <code>gym_attempt</code>) and schema version, so old checkpoints restore.</td></tr>
+<tr><td>same</td><td>Telemetry keys, including <code>gym_restarted_episodes</code> and the <code>gym_unavailable</code> reason. One log line did change its key (C1).</td></tr>
+<tr><td>same</td><td>Checks that two commits drop: setup or the Gym adapter already makes each one on the same checkpoint.</td></tr>
+<tr><td>same</td><td>Tests: every removed test moved or went with a duplicate check. 1,233 changed CPU tests pass; the Ray-cluster and triton ones were not run.</td></tr>
+</table>
+
+<h2>Lines per new file, and what each review comment removes</h2>
+
+<svg viewBox="0 0 900 470" role="img" aria-label="Bars per file. Red is code removed from the controller. Gray is code in a new file; the dim part at the left is the file's license, docstring and imports. Orange is what a review comment removes.">
+  <rect x="300" y="8" width="12" height="12" class="rm"/><text class="note" x="317" y="18">left the controller</text>
+  <rect x="430" y="8" width="12" height="12" class="hdrb"/><text class="note" x="447" y="18">file header: license, docstring, imports</text>
+  <rect x="300" y="26" width="12" height="12" class="body"/><text class="note" x="317" y="36">code</text>
+  <rect x="430" y="26" width="12" height="12" class="cut"/><text class="note" x="447" y="36">removed by a review comment (about)</text>
+  <text class="note" x="690" y="36">100 px = 400 lines</text>
+
+  <text class="hdr" x="12" y="62">source</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/d3d22f154a6b978a071b646ff3a35307800fa6d6/nemo_rl/algorithms/single_controller.py"><text class="lbl" x="12" y="84">single_controller.py</text></a>
+  <rect class="rm" x="300" y="72" width="494" height="16"/><text class="rt" x="800" y="84">−1,974</text>
+
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/7171e5d2d945d56e99a8b5b8e10681783df9bf42/nemo_rl/algorithms/rollout_checkpointing/snapshots.py"><text class="lbl" x="12" y="110">…/snapshots.py</text></a>
+  <rect class="hdrb" x="300" y="98" width="27" height="16"/><rect class="body" x="327" y="98" width="197" height="16"/><text class="num" x="530" y="110">897</text>
+
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/7171e5d2d945d56e99a8b5b8e10681783df9bf42/nemo_rl/algorithms/rollout_checkpointing/restore.py"><text class="lbl" x="12" y="134">…/restore.py</text></a>
+  <rect class="hdrb" x="300" y="122" width="20" height="16"/><rect class="body" x="320" y="122" width="176" height="16"/><text class="num" x="502" y="134">784</text>
+
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/7171e5d2d945d56e99a8b5b8e10681783df9bf42/nemo_rl/environments/checkpointing/nemo_gym.py#L120-L141"><text class="lbl" x="12" y="158">…/checkpointing/nemo_gym.py</text></a>
+  <rect class="hdrb" x="300" y="146" width="16" height="16"/><rect class="body" x="316" y="146" width="121" height="16"/><rect class="cut" x="437" y="146" width="3" height="16"/>
+  <text class="num" x="446" y="158">556</text><text class="ct" x="482" y="158">−6 C5</text>
+
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/7171e5d2d945d56e99a8b5b8e10681783df9bf42/nemo_rl/environments/checkpointing/interfaces.py#L106-L170"><text class="lbl" x="12" y="182">…/checkpointing/interfaces.py</text></a>
+  <rect class="hdrb" x="300" y="170" width="11" height="16"/><rect class="body" x="311" y="170" width="23" height="16"/><rect class="cut" x="334" y="170" width="16" height="16"/>
+  <text class="num" x="356" y="182">201</text><text class="ct" x="390" y="182">−65 Protocols, ~35 move to Gym docstrings · C2</text>
+
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/7171e5d2d945d56e99a8b5b8e10681783df9bf42/nemo_rl/algorithms/rollout_checkpointing/state.py"><text class="lbl" x="12" y="206">…/state.py</text></a>
+  <rect class="hdrb" x="300" y="194" width="13" height="16"/><rect class="body" x="313" y="194" width="32" height="16"/><text class="num" x="351" y="206">181</text>
+
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/7171e5d2d945d56e99a8b5b8e10681783df9bf42/nemo_rl/algorithms/rollout_checkpointing/inventory.py"><text class="lbl" x="12" y="230">…/inventory.py</text></a>
+  <rect class="hdrb" x="300" y="218" width="12" height="16"/><rect class="body" x="312" y="218" width="28" height="16"/><text class="num" x="346" y="230">161</text>
+
+  <text class="lbl" x="12" y="254">two __init__.py files</text>
+  <rect class="hdrb" x="300" y="242" width="13" height="16"/><rect class="body" x="313" y="242" width="6" height="16"/><text class="num" x="325" y="254">76</text>
+
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/7171e5d2d945d56e99a8b5b8e10681783df9bf42/nemo_rl/experience/rollout_recovery.py#L88-L106"><text class="lbl" x="12" y="278">rollout_recovery.py (net)</text></a>
+  <rect class="body" x="300" y="266" width="8" height="16"/><rect class="cut" x="308" y="266" width="2" height="16"/>
+  <text class="num" x="316" y="278">+34</text><text class="ct" x="350" y="278">−5 C4</text>
+
+  <line class="sep" x1="12" y1="296" x2="888" y2="296"/>
+  <text class="hdr" x="12" y="316">tests and docs</text>
+
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/7171e5d2d945d56e99a8b5b8e10681783df9bf42/tests/unit/environments/test_gym_environment_checkpoint.py#L984-L988"><text class="lbl" x="12" y="338">test_gym_environment_checkpoint</text></a>
+  <rect class="body" x="300" y="326" width="261" height="16"/><rect class="cut" x="561" y="326" width="3" height="16"/>
+  <text class="num" x="570" y="338">1,054</text><text class="ct" x="612" y="338">−10 C7</text>
+
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/7171e5d2d945d56e99a8b5b8e10681783df9bf42/tests/unit/single_controller/test_checkpoint_dispatch_races.py#L294-L328"><text class="lbl" x="12" y="362">test_checkpoint_dispatch_races</text></a>
+  <rect class="rm" x="300" y="350" width="209" height="16"/><text class="rt" x="515" y="362">−836 net</text><text class="ct" x="580" y="362">−22 more · C8</text>
+
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/7171e5d2d945d56e99a8b5b8e10681783df9bf42/tests/unit/single_controller/_rollout_checkpoints.py#L32-L99"><text class="lbl" x="12" y="386">_rollout_checkpoints.py (new)</text></a>
+  <rect class="body" x="300" y="374" width="18" height="16"/><rect class="cut" x="318" y="374" width="7" height="16"/>
+  <text class="num" x="331" y="386">99</text><text class="ct" x="358" y="386">−27 C3</text>
+
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/7171e5d2d945d56e99a8b5b8e10681783df9bf42/docs/design-docs/single-controller-rollout-checkpointing.md#L72-L84"><text class="lbl" x="12" y="410">design doc (new)</text></a>
+  <rect class="body" x="300" y="398" width="54" height="16"/><rect class="cut" x="354" y="398" width="6" height="16"/>
+  <text class="num" x="366" y="410">241</text><text class="ct" x="398" y="410">−25 C6</text>
+
+  <line class="sep" x1="12" y1="428" x2="888" y2="428"/>
+  <text class="note" x="12" y="448">New source files: 2,856 lines, of which 450 are file headers. 2,856 − 1,974 = 882 more source lines than before.</text>
+  <text class="note" x="12" y="464">The 1,054-line test file is mostly moved: 27 of its 29 tests came from test_checkpoint_dispatch_races.py.</text>
+</svg>
+
+<h2>The largest source cut: delete the two Protocol classes (C2)</h2>
+<p class="where"><b>Where the fix lands: RL only, four files.</b>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/7171e5d2d945d56e99a8b5b8e10681783df9bf42/nemo_rl/environments/checkpointing/interfaces.py#L106-L170"><code>interfaces.py</code></a> loses both classes;
+three type hints change. Gym itself needs no change.</p>
+<p>Only one real backend exists, <a href="https://github.com/NVIDIA-NeMo/RL/blob/7171e5d2d945d56e99a8b5b8e10681783df9bf42/nemo_rl/environments/checkpointing/nemo_gym.py#L144"><code>GymEnvironmentCheckpoint</code></a>.
+The do-nothing backend, <a href="https://github.com/NVIDIA-NeMo/RL/blob/7171e5d2d945d56e99a8b5b8e10681783df9bf42/nemo_rl/environments/checkpointing/interfaces.py#L172"><code>NoEnvironmentCheckpoint</code></a>, does not use the Protocol, and the test stand-ins inherit from it.
+Nothing checks the Protocol while the program runs, so naming the two real classes keeps behavior the same and adds no <code>is None</code> checks.</p>
+<pre class="diff"><span class="hunk">@@ environments/checkpointing/interfaces.py L106-L170 · both Protocols</span>
+<span class="del">-class EnvironmentSnapshot(Protocol):
+-    """The backend's part of one rollout snapshot, while the backend is paused."""
+-    ...                                   # 3 members, docstrings only
+-class EnvironmentCheckpoint(Protocol):
+-    """Rollout state an environment backend keeps between turns."""
+-    ...                                   # 5 members, docstrings only
+</span> class NoEnvironmentCheckpoint:
+<span class="hunk">@@ algorithms/rollout_checkpointing/state.py L156 · RolloutParts</span>
+<span class="del">-    environment_checkpoint: EnvironmentCheckpoint
+</span><span class="add">+    environment_checkpoint: GymEnvironmentCheckpoint | NoEnvironmentCheckpoint
+</span><span class="hunk">@@ algorithms/rollout_checkpointing/snapshots.py L462-L464 · _enter_environment_phase_unless_a_step_commits</span>
+<span class="del">-    ) -> tuple[bool, Optional[EnvironmentSnapshot]]:
+</span><span class="add">+    ) -> tuple[bool, Optional[GymEnvironmentSnapshot]]:
+</span><span class="hunk">@@ single_controller.py L509 and environments/checkpointing/__init__.py L37</span>
+<span class="del">-EnvironmentCheckpoint
+</span><span class="add">+GymEnvironmentCheckpoint | NoEnvironmentCheckpoint   # Gym type imported under TYPE_CHECKING
+</span></pre>
+<p style="font-size:13.5px">The rules the Protocol docstrings state, such as "yields None when there is nothing to save" and "drops the restore on an exception", move onto <code>GymEnvironmentCheckpoint</code>'s methods, which have none today.
+That is why the net saving is about 30 lines, not 65. It also makes the PR description's "concrete classes and no abstract layers" true.</p>
+<p class="cref" id="cref-c2"></p>
+
+<div class="hl"><b>So what.</b> The move is right and the review found no bugs. The size is the issue: a move that keeps behavior the same still adds about 850 source and 510 test lines, and the next 10 PRs build on this shape.
+The comments trim roughly 100–150 lines: the Protocols (C2), the copied setup code in the test helper (C3), an unused key map (C4), a pass-through method (C5), the private-method table in the doc (C6), a dead test (C7), and duplicate test builders (C8).
+C1 is separate: one log line changed its key although the description says log lines are unchanged.
+<p class="cref" id="cref-all"></p></div>
+
+</div>
+</body>
+</html>
