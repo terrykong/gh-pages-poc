@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>NVIDIA-NeMo/RL #4506 — where the 3,752 lines go, and which ~300 source lines can be replaced</title>
+<title>NVIDIA-NeMo/RL #4506 — where this PR can shrink without losing correctness</title>
 <style>
 :root{
   --bg:#0d1117; --surface:#161b22; --surface2:#1c2128; --border:#30363d;
@@ -37,15 +37,15 @@ code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;
 .status dd{margin:0;font-size:14px}
 .verdict{font-weight:700}
 .verdict.open{color:var(--orange)}
-.warn{border-left:3px solid var(--orange);background:var(--surface);
+.bg{border-left:3px solid var(--dim);background:var(--surface);padding:10px 14px;margin:0 0 16px;
+  font-size:14px;border-radius:0 8px 8px 0}
+.hl{border-left:3px solid var(--accent);background:var(--surface);
   padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0}
 .where{border-left:4px solid var(--accent);background:var(--surface);padding:6px 12px;margin:6px 0 10px}
-.diff{font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--surface);
+.code{font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--surface);
   border:1px solid var(--border);border-radius:8px;padding:12px;overflow-x:auto;white-space:pre;margin:10px 0}
-.diff .add{color:var(--green)}
-.diff .del{color:var(--red)}
-.diff .hunk{color:var(--accent)}
-.diff .skip{color:var(--dim);font-style:italic}
+.code .add{color:var(--green)}
+.code .c{color:var(--dim)}
 table{border-collapse:collapse;width:100%;font-size:13.5px;margin:10px 0}
 th,td{border-bottom:1px solid var(--border);padding:5px 8px;text-align:left;vertical-align:top}
 th{color:var(--dim);font-weight:600;font-size:12px}
@@ -58,22 +58,23 @@ td.n{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
   font-weight:400;box-shadow:0 4px 14px rgba(0,0,0,.3)}
 svg{max-width:100%;height:auto;display:block;margin:16px 0}
 svg .t{fill:var(--text);font:bold 12.5px -apple-system,sans-serif}
+svg .lane{fill:var(--accent);font:bold 13px -apple-system,sans-serif}
 svg .note{fill:var(--dim);font:11.5px -apple-system,sans-serif}
+svg .d{fill:var(--text);font:11.5px -apple-system,sans-serif}
 svg .in{fill:var(--bg);font:bold 11.5px -apple-system,sans-serif}
-svg .in-d{fill:var(--text);font:11px -apple-system,sans-serif}
-svg .cut{fill:var(--orange);font:bold 11.5px -apple-system,sans-serif}
-svg .other{fill:var(--surface2);stroke:var(--border);stroke-width:1}
-svg .this{fill:var(--accent)}
-svg .src{fill:var(--accent)}
-svg .src2{fill:var(--accent);fill-opacity:.72}
-svg .src3{fill:var(--accent);fill-opacity:.5}
-svg .ut{fill:var(--green)}
-svg .fn{fill:var(--dim)}
-svg .doc{fill:var(--border)}
-svg .sep{stroke:var(--bg);stroke-width:1.5}
-svg .hatch-bar{fill:var(--orange)}
-svg .hatched{fill:url(#hatch);stroke:var(--orange);stroke-width:1.2}
-svg .zoom{stroke:var(--dim);stroke-width:1;stroke-dasharray:4 4;fill:none}
+svg .bad{fill:var(--red);font:bold 11.5px -apple-system,sans-serif}
+svg .good{fill:var(--green);font:bold 11.5px -apple-system,sans-serif}
+svg .q{fill:var(--orange);font:bold 11.5px -apple-system,sans-serif}
+svg .tick{stroke:var(--border);stroke-width:1;stroke-dasharray:3 4}
+svg .redbar{fill:var(--red)}
+svg .sw-red{fill:var(--red)} svg .sw-green{fill:var(--green)} svg .sw-q{fill:var(--orange)}
+svg .wait{stroke:var(--red);stroke-width:2;stroke-dasharray:6 4;fill:none}
+svg .qline{stroke:var(--orange);stroke-width:2;stroke-dasharray:2 4;fill:none}
+svg .gbox{fill:var(--surface);stroke:var(--green);stroke-width:2}
+svg .dot-red{fill:var(--red)} svg .dot-green{fill:var(--green)}
+svg .ar-g{stroke:var(--green);stroke-width:2;fill:none} svg .ah-g{fill:var(--green)}
+svg .ah-r{fill:var(--red)}
+svg a text{text-decoration:underline;fill:var(--accent);font:11px ui-monospace,Menlo,monospace}
 .cref{margin:6px 0 0;font-size:13px}
 .cref a{display:inline-block;padding:4px 10px;border:1px solid var(--border);
   border-radius:16px;background:var(--surface);font:12.5px ui-monospace,Menlo,monospace;margin:2px 4px 2px 0}
@@ -101,195 +102,114 @@ p.chainnote{color:var(--dim);font-size:12px;margin:0 0 18px}
   document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
 <div class="wrap">
 
-<h1>Where the 3,752 lines go, and which ~300 source lines can be replaced by code that already exists</h1>
-<p class="sub">Size review of <a href="https://github.com/NVIDIA-NeMo/RL/pull/4506">NVIDIA-NeMo/RL #4506</a>. Line counts are from
-<code>git diff cf124ff 0c54ff7</code> (the PR against its real base, <a href="https://github.com/NVIDIA-NeMo/RL/pull/4501">#4501</a>). All permalinks pin the PR head <code>0c54ff7</code>. Review comments are in a pending review; the links work once it is published.</p>
+<h1>Where this PR can shrink without losing correctness</h1>
+<p class="sub">Size review, round 2, of <a href="https://github.com/NVIDIA-NeMo/RL/pull/4506">NVIDIA-NeMo/RL #4506</a> (part 5 of 11 in the partial-checkpointing stack, base <a href="https://github.com/NVIDIA-NeMo/RL/pull/5056">#5056</a>). All permalinks pin the PR head <code>b6aff18</code>. Review comments are in a pending review; their links work once it is published.</p>
 
 <div class="status">
 <dl>
   <dt>Before</dt>
-  <dd>The prefix-recovery feature is a stack of 8 open PRs, about 21,100 added lines in total. This PR adds 3,752 of them, 2,007 in source files.</dd>
-  <dt>This PR</dt>
-  <dd>Brings its own output accumulators, buffers, checks and test helpers. Several repeat what vLLM, Gym, or NeMo-RL already do.</dd>
+  <dd>Last round asked for about 300 source lines to go. About 290 did: the two output accumulators, the freeze/seal buffers, the fence context manager, the fallback reply, the second log-prob loop.</dd>
+  <dt>This PR now</dt>
+  <dd>+6,412 / −269 lines; +2,733 in source. Source grew by about 400 lines since then, mostly from reading vLLM's progress directly (~200) and per-reason cut counters (~120).</dd>
   <dt>Status</dt>
-  <dd><span class="verdict open">Proposed — not implemented.</span> Each cut below is a review comment on the PR; none is applied yet. The diff on this page has not been run.</dd>
+  <dd><span class="verdict open">Proposed — not implemented.</span> Each cut below is a review comment (C28, C30, C31, C33, C34, C38). Nothing on this page has been run.</dd>
 </dl>
 </div>
 
 <nav class="chain">
   <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4506-prefix-vs-turn.html">prefix vs turn</a>
   <span class="here">size and reuse</span>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4506-forest-drops-prefix.html">forest training drops the prefix</a>
 </nav>
-<p class="chainnote">Two pages on this PR — this one: how big it is, and what can go.</p>
+<p class="chainnote">Three pages on this PR, one question each — this one: what can go.</p>
 
-<p>The rework from the earlier version of this change (<a href="https://github.com/NVIDIA-NeMo/RL/pull/4319">#4319</a>, +6,304) cut tests, not source:
-the new cut module went from 904 to 821 lines and the vLLM worker changes from 786 to 761. Most of the ~300 source lines below (plus ~55 test lines) can be swapped for one call into code that already exists.
-Asking now matters because the next PRs in the stack build on these files: by <a href="https://github.com/NVIDIA-NeMo/RL/pull/4508">#4508</a> the cut module is about 1,500 lines.</p>
+<div class="bg"><b>Background.</b> With <code>target_level: prefix</code>, each rollout snapshot asks every vLLM worker to save the tokens its running calls have decoded so far, as <span class="tip" tabindex="0" data-tip="Partial token rows in TQ, the shared token store. A long call can have several, one per snapshot it was running through.">chunk rows</span>. When a call finishes, the worker writes its full <span class="tip" tabindex="0" data-tip="The finished call's complete token row. Gym points at this row once the call is done.">terminal row</span> and deletes its chunk rows. That delete is the only write that can break a snapshot in progress: Gym's snapshot may still point at those chunk rows. Dotted words have a short explanation: hover or tap them.</div>
 
-<h2>Where the lines go</h2>
+<h2>The biggest cut: the snapshot fence</h2>
 
-<svg viewBox="0 0 940 312" role="img" aria-label="Three stacked bars. Top: the feature stack of about 21,100 lines, with #4506 at 3,752. Middle: #4506 split into source 2,007, unit tests 1,150, functional 581, docs 14. Bottom: the 2,007 source lines by file, with about 300 replaceable lines hatched.">
-  <defs><pattern id="hatch" patternUnits="userSpaceOnUse" width="6" height="6" patternTransform="rotate(45)">
-    <rect class="hatch-bar" width="3" height="6"/></pattern></defs>
+<p>To keep that delete out of the snapshot window, the PR closes a <a href="https://github.com/NVIDIA-NeMo/RL/blob/b6aff18f982137a538bbf5d3540983e0d094a95c/nemo_rl/models/generation/generation_cut_capture.py#L241-L285">gate</a> on every worker from the snapshot's start until the TQ save is done. Every terminal write waits, so a call that finishes inside the window cannot return its reply. The gate needs begin/end calls on the <a href="https://github.com/NVIDIA-NeMo/RL/blob/b6aff18f982137a538bbf5d3540983e0d094a95c/nemo_rl/models/generation/vllm/vllm_worker_async.py#L3772-L3808">worker</a>, <a href="https://github.com/NVIDIA-NeMo/RL/blob/b6aff18f982137a538bbf5d3540983e0d094a95c/nemo_rl/models/generation/vllm/vllm_generation.py#L1856-L1882"><code>VllmGeneration</code></a> and the <a href="https://github.com/NVIDIA-NeMo/RL/blob/b6aff18f982137a538bbf5d3540983e0d094a95c/nemo_rl/models/generation/interfaces.py#L803-L819">interface</a>, plus <a href="https://github.com/NVIDIA-NeMo/RL/blob/b6aff18f982137a538bbf5d3540983e0d094a95c/nemo_rl/environments/checkpointing/nemo_gym.py#L64-L106"><code>GenerationCutFence</code></a>. The PR's own notes say the terminal write itself is safe; only the delete is not. So queue the delete instead.</p>
 
-  <!-- Row A: stack -->
-  <text class="t" x="16" y="20">The feature stack, in stack order: ~21,100 added lines</text>
-  <rect class="other" x="16" y="30" width="348.4" height="26"/>
-  <rect class="other" x="364.4" y="30" width="58.1" height="26"/>
-  <rect class="this" x="422.5" y="30" width="160" height="26"/>
-  <rect class="other" x="582.5" y="30" width="89.5" height="26"/>
-  <rect class="other" x="672" y="30" width="118.8" height="26"/>
-  <rect class="other" x="790.8" y="30" width="48.2" height="26"/>
-  <rect class="other" x="839" y="30" width="38.9" height="26"/>
-  <rect class="other" x="877.9" y="30" width="38.1" height="26"/>
-  <text class="in-d" x="190" y="47" text-anchor="middle">#4500 · 8,171 (turn recovery)</text>
-  <text class="in-d" x="393.5" y="47" text-anchor="middle">#4501</text>
-  <text class="in" x="502.5" y="47" text-anchor="middle">#4506 · 3,752</text>
-  <text class="in-d" x="627.3" y="47" text-anchor="middle">#4507</text>
-  <text class="in-d" x="731.4" y="47" text-anchor="middle">#4508</text>
-  <text class="in-d" x="814.9" y="47" text-anchor="middle">#4583</text>
-  <text class="in-d" x="858.5" y="47" text-anchor="middle">#4612</text>
-  <text class="in-d" x="897" y="47" text-anchor="middle">#4655</text>
-  <text class="note" x="16" y="72">#4501 1,362 · #4507 2,098 (parity test) · #4508 2,786 · #4583 1,131 · #4612 913 · #4655 ~893 of its own (GitHub shows more: stale base)</text>
+<svg viewBox="0 0 940 336" role="img" aria-label="Timeline of one snapshot window. Today the gate blocks every terminal write from snapshot N begin to end, so call A's reply waits. Proposed: call A's terminal row is written right away and only its chunk-row delete is queued until snapshot N+1 begins, after N's TQ save.">
+  <text class="t" x="16" y="20">One snapshot window; call A finishes decoding inside it</text>
+  <rect class="sw-red" x="560" y="9" width="13" height="12" rx="2"/><text class="note" x="579" y="19">waits</text>
+  <rect class="sw-green" x="630" y="9" width="13" height="12" rx="2"/><text class="note" x="649" y="19">goes through</text>
+  <rect class="sw-q" x="740" y="9" width="13" height="12" rx="2"/><text class="note" x="759" y="19">delete queued</text>
 
-  <path class="zoom" d="M422.5 56 L16 104 M582.5 56 L916 104"/>
+  <!-- time axis -->
+  <text class="note" x="110" y="44" text-anchor="middle">snapshot N begins</text>
+  <text class="note" x="290" y="44" text-anchor="middle">Gym cuts calls</text>
+  <text class="note" x="470" y="44" text-anchor="middle">TQ save</text>
+  <text class="note" x="600" y="44" text-anchor="middle">snapshot N ends</text>
+  <text class="note" x="840" y="44" text-anchor="middle">snapshot N+1 begins</text>
+  <line class="tick" x1="110" y1="50" x2="110" y2="282"/>
+  <line class="tick" x1="290" y1="50" x2="290" y2="282"/>
+  <line class="tick" x1="470" y1="50" x2="470" y2="282"/>
+  <line class="tick" x1="600" y1="50" x2="600" y2="282"/>
+  <line class="tick" x1="840" y1="50" x2="840" y2="282"/>
 
-  <!-- Row B: this PR by purpose -->
-  <text class="t" x="16" y="98">#4506 by purpose</text>
-  <rect class="src" x="16" y="106" width="481.4" height="30"/>
-  <rect class="ut" x="497.4" y="106" width="275.9" height="30"/>
-  <rect class="fn" x="773.3" y="106" width="139.3" height="30"/>
-  <rect class="doc" x="912.6" y="106" width="3.4" height="30"/>
-  <rect class="hatched" x="773.3" y="106" width="13.2" height="30"/>
-  <text class="in" x="256.7" y="125" text-anchor="middle">source 2,007</text>
-  <text class="in" x="635.4" y="125" text-anchor="middle">unit tests 1,150</text>
-  <text class="in" x="850" y="125" text-anchor="middle">functional 581</text>
-  <text class="cut" x="773.3" y="152">↑ S8 −55</text>
-  <text class="note" x="916" y="152" text-anchor="end">docs 14</text>
+  <!-- lane A: today -->
+  <text class="lane" x="16" y="74">Today</text>
+  <rect class="redbar" x="110" y="82" width="490" height="22" rx="4"/>
+  <text class="in" x="122" y="97">gate closed on every worker: every terminal write waits</text>
+  <circle class="dot-red" cx="370" cy="128" r="6"/>
+  <text class="d" x="16" y="132">call A finishes →</text>
+  <path class="wait" d="M378 128 L592 128"/><path class="ah-r" d="M600 128 L590 123 L590 133 Z"/>
+  <text class="bad" x="390" y="148">reply held until the gate opens</text>
+  <text class="d" x="612" y="132">terminal row + reply, then delete</text>
 
-  <path class="zoom" d="M16 136 L16 184 M497.4 136 L916 184"/>
+  <!-- lane B: proposed -->
+  <text class="lane" x="16" y="186">Proposed</text>
+  <circle class="dot-green" cx="370" cy="214" r="6"/>
+  <text class="d" x="16" y="218">call A finishes →</text>
+  <text class="good" x="382" y="211">terminal row written, reply sent now</text>
+  <path class="qline" d="M370 244 L828 244"/>
+  <text class="q" x="382" y="262">only its chunk-row delete waits in a list</text>
+  <rect class="gbox" x="846" y="198" width="86" height="62" rx="7"/>
+  <text class="d" x="854" y="218">swap list,</text>
+  <text class="d" x="854" y="234">delete rows</text>
+  <text class="good" x="854" y="252">1 batch</text>
 
-  <!-- Row C: source by file -->
-  <text class="t" x="16" y="178">Source 2,007 lines by file</text>
-  <rect class="src" x="16" y="186" width="368.2" height="34"/>
-  <rect class="src2" x="384.2" y="186" width="341.3" height="34"/>
-  <rect class="src3" x="725.5" y="186" width="50.7" height="34"/>
-  <rect class="src" x="776.2" y="186" width="36.8" height="34"/>
-  <rect class="src2" x="813" y="186" width="22.4" height="34"/>
-  <rect class="src3" x="835.4" y="186" width="20.6" height="34"/>
-  <rect class="src" x="856" y="186" width="17" height="34"/>
-  <rect class="src2" x="873" y="186" width="43" height="34"/>
-  <rect class="hatched" x="324.6" y="186" width="59.6" height="34"/>
-  <rect class="hatched" x="682.9" y="186" width="42.6" height="34"/>
-  <rect class="hatched" x="756" y="186" width="20.2" height="34"/>
-  <rect class="hatched" x="808.5" y="186" width="4.5" height="34"/>
-  <rect class="hatched" x="826.4" y="186" width="9" height="34"/>
-  <text class="in" x="170" y="207" text-anchor="middle">generation_cut_capture.py 821 (new)</text>
-  <text class="in" x="534" y="207" text-anchor="middle">vllm_worker_async.py 761</text>
-  <text class="in" x="741" y="207" text-anchor="middle">SC</text>
-  <text class="in" x="787" y="207" text-anchor="middle">tq</text>
-  <text class="cut" x="354.4" y="238" text-anchor="middle">S2 S5 S6 −133</text>
-  <text class="cut" x="704.2" y="238" text-anchor="middle">S1 −95</text>
-  <text class="cut" x="766" y="254" text-anchor="middle">S4 −45</text>
-  <text class="cut" x="822" y="238" text-anchor="middle">S7 S9 −30</text>
-  <text class="note" x="16" y="276">SC = single_controller.py 113 · tq = tq_token_sink.py 82 · then vllm/utils.py 50 · vllm_generation.py 46 · setup.py 38 · other files 96</text>
-  <rect class="hatched" x="16" y="290" width="18" height="12"/>
-  <text class="note" x="40" y="300">can be replaced by code that already exists: ~300 source lines + ~55 test lines (table below)</text>
+  <text class="note" x="16" y="300">Snapshot N stops needing call A's chunk rows once its TQ save is done; snapshot N+1 begins after that, and never names them.</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/b6aff18f982137a538bbf5d3540983e0d094a95c/nemo_rl/models/generation/generation_cut_capture.py#L241" target="_blank" rel="noopener"><text x="16" y="324">gate :241</text></a>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/b6aff18f982137a538bbf5d3540983e0d094a95c/nemo_rl/environments/checkpointing/nemo_gym.py#L454-L459" target="_blank" rel="noopener"><text x="120" y="324">fence order :454</text></a>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/b6aff18f982137a538bbf5d3540983e0d094a95c/nemo_rl/models/generation/vllm/vllm_worker_async.py#L1859" target="_blank" rel="noopener"><text x="270" y="324">terminal delete :1859</text></a>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/b6aff18f982137a538bbf5d3540983e0d094a95c/nemo_rl/models/generation/generation_cut_capture.py#L571-L579" target="_blank" rel="noopener"><text x="450" y="324">abort delete :571</text></a>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/b6aff18f982137a538bbf5d3540983e0d094a95c/nemo_rl/models/generation/generation_cut_capture.py#L496-L503" target="_blank" rel="noopener"><text x="610" y="324">bad-prefix delete :496</text></a>
 </svg>
 
-<div class="tbl"><table>
-<tr><th></th><th>What the PR writes</th><th>Replace with</th><th class="n">lines</th></tr>
-<tr><td>S1</td><td>Two hand-written output accumulators (<a href="https://github.com/NVIDIA-NeMo/RL/blob/0c54ff74c776dadced4b2cc4e2d9da5f77ebdd8b/nemo_rl/models/generation/vllm/vllm_worker_async.py#L226">vllm_worker_async.py:226</a>)<p class="cref"><a href="https://github.com/NVIDIA-NeMo/RL/pull/4506#discussion_r4262413930">review comment — vllm_worker_async.py:226</a></p></td><td>vLLM's own <code>CUMULATIVE</code> output mode — diff below</td><td class="n">~95</td></tr>
-<tr><td>S2</td><td>Freeze / seal / rollback buffers per call (<a href="https://github.com/NVIDIA-NeMo/RL/blob/0c54ff74c776dadced4b2cc4e2d9da5f77ebdd8b/nemo_rl/models/generation/generation_cut_capture.py#L109">generation_cut_capture.py:109</a>)<p class="cref"><a href="https://github.com/NVIDIA-NeMo/RL/pull/4506#discussion_r4262413947">review comment — generation_cut_capture.py:109</a></p></td><td>One token list plus a count of tokens already saved</td><td class="n">~65</td></tr>
-<tr><td>S4</td><td>Fence start/release with two flags and two exception groups, plus a re-indent (<a href="https://github.com/NVIDIA-NeMo/RL/blob/0c54ff74c776dadced4b2cc4e2d9da5f77ebdd8b/nemo_rl/algorithms/single_controller.py#L4765">single_controller.py:4765</a>)<p class="cref"><a href="https://github.com/NVIDIA-NeMo/RL/pull/4506#discussion_r4262413958">review comment — single_controller.py:4789</a></p></td><td>One <code>async with</code> context manager</td><td class="n">~45</td></tr>
-<tr><td>S6</td><td>Re-checks of token count, digest and version (<a href="https://github.com/NVIDIA-NeMo/RL/blob/0c54ff74c776dadced4b2cc4e2d9da5f77ebdd8b/nemo_rl/models/generation/generation_cut_capture.py#L396">generation_cut_capture.py:396</a>)<p class="cref"><a href="https://github.com/NVIDIA-NeMo/RL/pull/4506#discussion_r4262413986">review comment — generation_cut_capture.py:428</a></p></td><td>Gym's own checks, which run right after (<a href="https://github.com/NVIDIA-NeMo/Gym/blob/120d516f09cfd0377dbed6828247ab1606e9e686/nemo_gym/token_id_capture/staging/capture.py#L156">capture.py:156</a>)</td><td class="n">~40</td></tr>
-<tr><td>S5</td><td>A fallback that returns the same failure on every branch (<a href="https://github.com/NVIDIA-NeMo/RL/blob/0c54ff74c776dadced4b2cc4e2d9da5f77ebdd8b/nemo_rl/models/generation/generation_cut_capture.py#L554">generation_cut_capture.py:554</a>)<p class="cref"><a href="https://github.com/NVIDIA-NeMo/RL/pull/4506#discussion_r4262413976">review comment — generation_cut_capture.py:587</a></p></td><td>Delete; build failure replies with Gym's <code>GenerationCutPrefixAck.failure</code></td><td class="n">~28</td></tr>
-<tr><td>S9</td><td>A second "log-prob of the chosen token" loop (<a href="https://github.com/NVIDIA-NeMo/RL/blob/0c54ff74c776dadced4b2cc4e2d9da5f77ebdd8b/nemo_rl/models/generation/vllm/utils.py#L56">vllm/utils.py:56</a>)<p class="cref"><a href="https://github.com/NVIDIA-NeMo/RL/pull/4506#discussion_r4262414062">review comment — utils.py:56</a></p></td><td>Have the existing loop at <a href="https://github.com/NVIDIA-NeMo/RL/blob/0c54ff74c776dadced4b2cc4e2d9da5f77ebdd8b/nemo_rl/models/generation/vllm/utils.py#L526">:526</a> call the new function</td><td class="n">~20</td></tr>
-<tr><td>S7</td><td>Support for a key format and two config keys that never shipped (<a href="https://github.com/NVIDIA-NeMo/RL/blob/0c54ff74c776dadced4b2cc4e2d9da5f77ebdd8b/nemo_rl/data_plane/tq_token_sink.py#L173">tq_token_sink.py:173</a>, <a href="https://github.com/NVIDIA-NeMo/RL/blob/0c54ff74c776dadced4b2cc4e2d9da5f77ebdd8b/nemo_rl/algorithms/single_controller_utils/config.py#L731">config.py:731</a>)<p class="cref"><a href="https://github.com/NVIDIA-NeMo/RL/pull/4506#discussion_r4262414001">review comment — tq_token_sink.py:174</a> <a href="https://github.com/NVIDIA-NeMo/RL/pull/4506#discussion_r4262414026">review comment — config.py:732</a></p></td><td>Delete</td><td class="n">~10</td></tr>
-<tr><td>S8</td><td>Functional-test helpers copied from the turn-recovery script (<a href="https://github.com/NVIDIA-NeMo/RL/blob/0c54ff74c776dadced4b2cc4e2d9da5f77ebdd8b/tests/functional/_gym_prefix_recovery_snapshot.py#L37">_gym_prefix_recovery_snapshot.py:37</a>)<p class="cref"><a href="https://github.com/NVIDIA-NeMo/RL/pull/4506#discussion_r4262414048">review comment — _gym_prefix_recovery_snapshot.py:37</a></p></td><td>One shared helper module both tests import</td><td class="n">~55 test</td></tr>
-</table></div>
+<p><b>Why the proposed order is safe.</b> The driver already waits for the fence to begin before Gym prepares its snapshot (<a href="https://github.com/NVIDIA-NeMo/RL/blob/b6aff18f982137a538bbf5d3540983e0d094a95c/nemo_rl/environments/checkpointing/nemo_gym.py#L454-L459"><code>async with</code> order</a>), so the list swap at the start of snapshot N+1 always runs after snapshot N's TQ save. Rows swapped out belong to calls that had already finished. Gym acknowledges a finished call through its terminal row only (<a href="https://github.com/NVIDIA-NeMo/RL/blob/b6aff18f982137a538bbf5d3540983e0d094a95c/nemo_rl/models/generation/generation_cut_capture.py#L656-L667">terminal ack</a>), and exports only this round's cuts (<a href="https://github.com/NVIDIA-NeMo/Gym/blob/5911d628c744d0bf43fe1d9ddf3bda72d59b0f9a/nemo_gym/_checkpoint/model.py#L629-L660">Gym export</a>), so snapshot N+1 never names those chunk rows. A terminal row written mid-window is already accepted: validation runs with <code>clear_unreferenced=False</code> (<a href="https://github.com/NVIDIA-NeMo/RL/blob/b6aff18f982137a538bbf5d3540983e0d094a95c/nemo_rl/algorithms/rollout_checkpointing/snapshots.py#L421">snapshots.py:421</a>) and restore clears extra rows (<a href="https://github.com/NVIDIA-NeMo/RL/blob/b6aff18f982137a538bbf5d3540983e0d094a95c/nemo_rl/algorithms/rollout_checkpointing/restore.py#L466">restore.py:466</a>). One cost: if a worker restarts, its list is lost and those rows wait for the next restore to clear them.</p>
+<p class="cref"><!--CREF-C30--></p>
 
-<h2>One of them as a diff — proposed, not in the PR</h2>
+<h2>What would replace it — proposed, not in the PR</h2>
 
 <p>Nothing below is implemented, and it has not been run.</p>
-<p class="where"><b>Where the fix lands: RL only, one file.</b>
-<a href="https://github.com/NVIDIA-NeMo/RL/blob/0c54ff74c776dadced4b2cc4e2d9da5f77ebdd8b/nemo_rl/models/generation/vllm/vllm_worker_async.py"><code>vllm_worker_async.py</code></a>.
-<b>No Gym or vLLM change:</b> vLLM already offers an output mode that carries every token so far.</p>
+<p class="where"><b>Where the change lands: RL only.</b> The worker keeps a list of chunk-row keys to delete; the three delete sites append to it; the begin/end pair becomes one call that <code>GenerationCutFence.held</code> awaits before Gym prepares. <b>No Gym change:</b> Gym already acknowledges finished calls through their terminal row. It also removes the gate that <a href="https://github.com/NVIDIA-NeMo/RL/pull/4655">#4655</a> would otherwise build on before a later PR deletes it.</p>
+<div class="code"><span class="add">async def flush_obsolete_generation_cut_rows_async(self) -> bool:</span>
+<span class="c">    # Keys queued before this snapshot belong to calls that already ended;
+    # Gym acks those through their terminal row, never their chunk rows.</span>
+<span class="add">    with self._capture_registry_lock:
+        keys, self._obsolete_cut_keys = self._obsolete_cut_keys, []
+    if keys:
+        self._generation_cut_cleanup_executor.submit(
+            self._clear_generation_cut_rows, "batch", tuple(keys)
+        )
+    return True</span></div>
 
-<p>Why the accumulators exist: for prefix runs the PR switches vLLM to <span class="tip" tabindex="0" data-tip="vLLM output mode where each step returns only the tokens added since the last step. NeMo-RL then has to glue the pieces back together for the final reply.">DELTA output</span>, then writes ~95 lines to glue the pieces back into one reply.
-<span class="tip" tabindex="0" data-tip="vLLM output mode where each step returns all tokens so far. vLLM appends to the same token list in place, so it does not copy the list each step (detokenizer.py L36-L37 at v0.29.0).">CUMULATIVE output</span> gives the whole reply at every step, so the worker only needs to skip the tokens it has already seen. It already keeps that count in <code>observed_generation_token_count</code>.</p>
+<h2>Every size ask, with lines saved</h2>
 
-<pre class="diff"><span class="hunk">@@ vllm_worker_async.py L1769 · NeMoRLChatCompletionRequest.to_sampling_params</span>
-                     and self.ng_capture is not None
-                 ):
-<span class="del">-                    sampling_params.output_kind = RequestOutputKind.DELTA
-</span><span class="add">+                    # Each step carries every token so far; the capture skips the seen ones.
-+                    sampling_params.output_kind = RequestOutputKind.CUMULATIVE
-</span>                     worker_self._record_request_effective_output_limit(
+<div class="tbl"><table>
+<tr><th>Ask</th><th>What goes</th><th>Why it stays correct</th><th class="n">lines</th></tr>
+<tr><td>C28</td><td>Land the prefix functional test once, in <a href="https://github.com/NVIDIA-NeMo/RL/pull/4507">#4507</a>, which rewrites about a third of it (<a href="https://github.com/NVIDIA-NeMo/RL/blob/b6aff18f982137a538bbf5d3540983e0d094a95c/tests/functional/L1_Functional_Tests_SingleController_3.sh#L72">L1 line</a>)<p class="cref"><!--CREF-C28--></p></td><td>At this head it would fail at Gym start-up (wrong env var name) and FAST lanes skip it, so nothing is tested here today</td><td class="n">−615 test</td></tr>
+<tr><td>C30</td><td>Snapshot gate, fence executor, begin/end calls on three layers</td><td>Only the delete is unsafe; it moves after the TQ save (above)</td><td class="n">≈−100 src<br>≈−110 test</td></tr>
+<tr><td>C31</td><td>11 per-reason failure counters and their plumbing to step metrics (<a href="https://github.com/NVIDIA-NeMo/RL/blob/b6aff18f982137a538bbf5d3540983e0d094a95c/nemo_rl/models/generation/generation_cut_capture.py#L34-L51">reasons</a>)<p class="cref"><!--CREF-C31--></p></td><td>Gym already reports failed cuts per snapshot; one INFO log line per cut keeps the breakdown. The restore and progress-read counters stay.</td><td class="n">≈−60 src<br>≈−45 test</td></tr>
+<tr><td>C33</td><td>Five <code>GenerationCutCaptureMixin._x(self, …)</code> calls (<a href="https://github.com/NVIDIA-NeMo/RL/blob/b6aff18f982137a538bbf5d3540983e0d094a95c/nemo_rl/models/generation/generation_cut_capture.py#L475">first one</a>) and a test fake that copies 25 worker fields by hand<p class="cref"><!--CREF-C33--></p></td><td>No subclass overrides those methods; a real worker object in the tests makes plain <code>self._x</code> work</td><td class="n">≈−35 test</td></tr>
+<tr><td>C34</td><td>A copy of vLLM's greedy-temperature constant (<a href="https://github.com/NVIDIA-NeMo/RL/blob/b6aff18f982137a538bbf5d3540983e0d094a95c/nemo_rl/models/generation/vllm/vllm_worker_async.py#L226-L230">seed check</a>)<p class="cref"><!--CREF-C34--></p></td><td>vLLM's own <code>SamplingType.RANDOM_SEED</code> is the same test</td><td class="n">−3 src</td></tr>
+<tr><td>C38</td><td>A "prefix needs turn" check that cannot fire (<a href="https://github.com/NVIDIA-NeMo/RL/blob/b6aff18f982137a538bbf5d3540983e0d094a95c/nemo_rl/environments/nemo_gym.py#L2824-L2827">nemo_gym.py:2824</a>)<p class="cref"><!--CREF-C38--></p></td><td>The prefix level always implies the turn checkpoint in the level enum</td><td class="n">−4 src</td></tr>
+<tr><td>Question</td><td>The private vLLM output wraps and kept finished-request state (<a href="https://github.com/NVIDIA-NeMo/RL/blob/b6aff18f982137a538bbf5d3540983e0d094a95c/nemo_rl/models/generation/vllm/vllm_worker_async.py#L616-L680">wraps</a>)</td><td>vLLM's supported streaming output could replace them, at a per-step cost on the engine loop. Not measured, so only asked.</td><td class="n">~150 src?</td></tr>
+<tr><td>Follow-up</td><td>Turn the capture mixin into its own object (already in the PR's follow-up list)</td><td>Mostly a testing gain, about −60 source</td><td class="n">later</td></tr>
+</table></div>
 
-<span class="hunk">@@ vllm_worker_async.py L980-L982 · _observe_request_capture</span>
-             output = outputs[0]
-<span class="del">-            generation_token_ids = list(getattr(output, "token_ids", ()) or ())
--            generation_logprobs = extract_selected_token_logprobs(output)
-</span><span class="add">+            # CUMULATIVE output: keep only the tokens added since the last step.
-+            seen = state.observed_generation_token_count
-+            generation_token_ids = list(getattr(output, "token_ids", ()) or ())[seen:]
-+            generation_logprobs = extract_selected_token_logprobs(output)[seen:]
-</span>             finish_reason = getattr(output, "finish_reason", None)
-
-<span class="hunk">@@ vllm_worker_async.py L1839-L1869 · chat_completion_full_generator</span>
-<span class="del">-                aggregate_deltas = bool(
--                    worker_self._generation_prefix_cuts_enabled
--                    and request.ng_capture is not None
--                )
-</span>                 final_res = None
-<span class="del">-                delta_accumulator = _RequestOutputDeltaAccumulator()
-</span>
-                 async def capture_result_generator():
-                     nonlocal final_res
-                     async for res in result_generator:
-                         worker_self._observe_request_capture(request, res)
-<span class="del">-                        if not aggregate_deltas:
--                            final_res = res
--                            worker_self._restore_response_prefix(
--                                request,
--                                res,
--                                tokenizer=self.renderer.tokenizer,
--                            )
--                            yield res
--                            continue
--                        delta_accumulator.append(res)
--
--                    if not aggregate_deltas or delta_accumulator.template is None:
--                        return
--                    final_res = delta_accumulator.build()
-</span><span class="add">+                        final_res = res
-+                    if final_res is None:
-+                        return
-+                    # vLLM's full generator keeps only the last output, which now
-+                    # holds the whole reply: put the restored prefix in front once.
-</span>                     worker_self._restore_response_prefix(
-                         request,
-                         final_res,
-
-<span class="hunk">@@ vllm_worker_async.py L225-L313 · delete both accumulator classes</span>
-<span class="del">-@dataclass
--class _CompletionOutputDeltaAccumulator:
--    """Linear-time accumulator for one vLLM completion index."""
-</span><span class="skip">   … 85 more deleted lines: append/build for each class …</span>
-<span class="del">-        return self.template
-</span></pre>
-
-<p>What each piece does, in order: (1) ask vLLM for the whole reply at every step (<a href="https://github.com/NVIDIA-NeMo/RL/blob/0c54ff74c776dadced4b2cc4e2d9da5f77ebdd8b/nemo_rl/models/generation/vllm/vllm_worker_async.py#L1769">:1769</a>);
-(2) save only the new tokens, using the count the capture state already keeps (<a href="https://github.com/NVIDIA-NeMo/RL/blob/0c54ff74c776dadced4b2cc4e2d9da5f77ebdd8b/nemo_rl/models/generation/generation_cut_capture.py#L107">generation_cut_capture.py:107</a>);
-(3) go back to the base code's <code>final_res = res</code>, and put the restored prefix in front of the last output only (<a href="https://github.com/NVIDIA-NeMo/RL/blob/0c54ff74c776dadced4b2cc4e2d9da5f77ebdd8b/nemo_rl/models/generation/vllm/vllm_worker_async.py#L1846">:1846</a>);
-(4) delete the two classes (<a href="https://github.com/NVIDIA-NeMo/RL/blob/0c54ff74c776dadced4b2cc4e2d9da5f77ebdd8b/nemo_rl/models/generation/vllm/vllm_worker_async.py#L226">:226</a>).
-Do not use vLLM's <code>RequestOutput.add</code> instead: it drops <code>routed_experts</code>, which router replay (#4612) needs.
-Two costs to check: the log-prob helper still reads the whole output each step, and vLLM's slow-tokenizer path copies the text each step.</p>
-<p class="cref"><a href="https://github.com/NVIDIA-NeMo/RL/pull/4506#discussion_r4262413930">review comment — vllm_worker_async.py:226</a></p>
-
-<div class="warn"><b>So what.</b> About 300 of the 2,007 source lines, and 55 test lines, repeat code that already exists. Applying these before the next PRs in the stack build on the same files keeps the feature smaller everywhere above this PR.
-<b>One open design question, not a finding:</b> the snapshot fence (~250 source lines) and #4655's 253-line cleanup module both exist so that a finishing call can delete its chunk rows while a checkpoint is being taken. Was moving that delete to a point outside the checkpoint considered? If it was, the PR body should say why it does not work.</div>
+<div class="hl"><b>So what.</b> The asks above take about 250–300 source lines and about 800 test and functional lines out of this PR, roughly 10% of its source, with no behavior change. The fence cut is the one to do first: it also lets completions return during a snapshot, which is what <a href="https://github.com/NVIDIA-NeMo/RL/pull/4655">#4655</a> is for, and it batches the deletes too, so most of that PR's 820 lines would not be needed.</div>
 
 </div>
 </body>
