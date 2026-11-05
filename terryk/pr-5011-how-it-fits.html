@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NVIDIA-NeMo/RL #5011 — how the new checkpoint classes fit together</title>
+<style>
+:root{
+  --bg:#0d1117; --surface:#161b22; --surface2:#1c2128; --border:#30363d;
+  --text:#e6edf3; --dim:#8b949e; --accent:#58a6ff; --green:#3fb950;
+  --orange:#d29922; --red:#f85149;
+}
+:root[data-theme="light"]{
+  --bg:#ffffff; --surface:#f6f8fa; --surface2:#eaeef2; --border:#d0d7de;
+  --text:#1f2328; --dim:#59636e; --accent:#0969da; --green:#1a7f37;
+  --orange:#9a6700; --red:#cf222e;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:28px 16px 70px}
+h1{font-size:22px;margin:0 0 8px;line-height:1.3}
+h2{font-size:18px;margin:32px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;
+  font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
+.sub{color:var(--dim);font-size:13.5px;margin:0 0 16px}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);
+  border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;
+  font:13px/1 ui-monospace,Menlo,monospace;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.18)}
+.status{border:1px solid var(--border);border-radius:10px;background:var(--surface);
+  padding:2px 16px 10px;margin:0 0 20px}
+.status dl{display:grid;grid-template-columns:max-content 1fr;gap:4px 14px;margin:12px 0 0}
+.status dt{color:var(--dim);font-size:12px;text-transform:uppercase;letter-spacing:.04em;
+  white-space:nowrap;padding-top:2px}
+.status dd{margin:0;font-size:14px}
+.verdict{font-weight:700}
+.verdict.good{color:var(--green)}
+.hl{border-left:3px solid var(--accent);background:var(--surface);
+  padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0}
+.cols{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+@media(max-width:700px){.cols{grid-template-columns:1fr}}
+.cols ul{margin:4px 0 0;padding-left:18px;font-size:14px}
+.cols h3{font-size:14.5px;margin:0}
+.good{color:var(--green)} .watch{color:var(--orange)}
+svg{max-width:100%;height:auto;display:block;margin:16px 0}
+svg .box{fill:var(--surface);stroke:var(--border)}
+svg .own{fill:none;stroke:var(--accent);stroke-width:1.5}
+svg .chip{fill:var(--surface2);stroke:var(--border)}
+svg .flag{fill:none;stroke:var(--orange);stroke-width:1.5;stroke-dasharray:5 3}
+svg .t{fill:var(--text);font:bold 12.5px -apple-system,sans-serif}
+svg .m{fill:var(--text);font:11px ui-monospace,Menlo,monospace}
+svg .d{fill:var(--dim);font:11px -apple-system,sans-serif}
+svg .o{fill:var(--orange);font:bold 11px -apple-system,sans-serif}
+svg .g{fill:var(--green);font:11px ui-monospace,Menlo,monospace}
+svg .call{stroke:var(--green);stroke-width:1.5;fill:none}
+svg .back{stroke:var(--orange);stroke-width:1.5;fill:none;stroke-dasharray:4 3}
+svg .use{stroke:var(--dim);stroke-width:1.2;fill:none;stroke-dasharray:3 3}
+svg a text{text-decoration:underline}
+nav.chain{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 6px;padding:0}
+nav.chain a,nav.chain span{display:inline-block;padding:5px 11px;border:1px solid var(--border);
+  border-radius:20px;background:var(--surface);text-decoration:none;color:var(--accent);
+  font-size:12.5px;line-height:1.3;white-space:nowrap}
+nav.chain a:hover{background:var(--surface2)}
+nav.chain span.here{background:var(--accent);color:var(--bg);border-color:var(--accent);font-weight:600}
+p.chainnote{color:var(--dim);font-size:12px;margin:0 0 18px}
+.cref{margin:6px 0 0;font-size:13px}
+.cref a{display:inline-block;padding:4px 10px;border:1px solid var(--border);
+  border-radius:16px;background:var(--surface);font:12.5px ui-monospace,Menlo,monospace;margin:2px 4px 2px 0}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+  document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head>
+<body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+  function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+  function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
+    b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
+      else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+  document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+<div class="wrap">
+
+<h1>How the new rollout-checkpoint classes fit together, and whether the shape is clean</h1>
+<p class="sub"><a href="https://github.com/NVIDIA-NeMo/RL/pull/5011">NVIDIA-NeMo/RL #5011</a>, part 1 of 11 in the partial-checkpointing stack.
+All permalinks pin the PR head <code>7171e5d</code>.</p>
+
+<div class="status">
+<dl>
+  <dt>Before</dt>
+  <dd>About 30 save and restore methods sat on the single controller itself, with "is Gym present?" checks inside them.</dd>
+  <dt>This PR</dt>
+  <dd>The controller now owns three objects and calls them from 6 of its methods, 15 calls in all. Gym-specific code sits behind one of the three.</dd>
+  <dt>Status</dt>
+  <dd><span class="verdict good">The shape is clean.</span> Calls go one way, down. A few extra pieces are flagged in review comments (C2, C3, C5). None is a bug.</dd>
+</dl>
+</div>
+
+<nav class="chain">
+  <span class="here">how it fits</span>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-5011-size-and-reuse.html">where the lines go</a>
+</nav>
+<p class="chainnote">Two pages on this PR, one question each. This one: what calls what.</p>
+
+<p>Read the figure top to bottom. The top box is the controller and the methods of its own that make calls.
+Each green arrow is a call, labelled with the method it calls. The middle row holds the three objects the controller owns: one that <b>restores</b>, one that <b>saves</b>, and one for the <b>environment</b> (Gym, or a do-nothing stand-in).
+The bottom row is the Gym chain under the environment object. Most of that chain existed before this PR.</p>
+
+<svg viewBox="0 0 960 640" role="img" aria-label="Block diagram: the controller calls three owned objects; they share one bundle of parts and helper functions; the environment object drives Gym through a coordinator, Ray actors and an adapter.">
+  <defs>
+    <marker id="ag" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0L10,5L0,10z" fill="var(--green)"/></marker>
+    <marker id="ao" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0L10,5L0,10z" fill="var(--orange)"/></marker>
+    <marker id="ad" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0L10,5L0,10z" fill="var(--dim)"/></marker>
+  </defs>
+
+  <!-- legend -->
+  <line class="call" x1="600" y1="14" x2="630" y2="14" marker-end="url(#ag)"/><text class="d" x="636" y="18">call</text>
+  <line class="use" x1="672" y1="14" x2="702" y2="14" marker-end="url(#ad)"/><text class="d" x="708" y="18">reads / uses</text>
+  <rect class="flag" x="790" y="6" width="18" height="14"/><text class="d" x="814" y="18">flagged in review</text>
+
+  <!-- controller -->
+  <rect class="own" x="10" y="28" width="940" height="92" rx="8"/>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/7171e5d2d945d56e99a8b5b8e10681783df9bf42/nemo_rl/algorithms/single_controller.py#L713-L749"><text class="t" x="22" y="48" fill="var(--accent)">SingleControllerActor</text></a>
+  <text class="d" x="180" y="48">builds the three objects once in __init__</text>
+  <rect class="flag" x="420" y="36" width="226" height="17"/><text class="o" x="426" y="48">C3: tests copy this wiring by hand</text>
+
+  <rect class="chip" x="22" y="62" width="140" height="24" rx="4"/>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/7171e5d2d945d56e99a8b5b8e10681783df9bf42/nemo_rl/algorithms/single_controller.py#L812-L866"><text class="m" x="32" y="78">_run_pumps</text></a>
+  <rect class="chip" x="236" y="62" width="140" height="24" rx="4"/>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/7171e5d2d945d56e99a8b5b8e10681783df9bf42/nemo_rl/algorithms/single_controller.py#L1833"><text class="m" x="246" y="78">_rollout_pump</text></a>
+  <rect class="chip" x="450" y="62" width="140" height="24" rx="4"/>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/7171e5d2d945d56e99a8b5b8e10681783df9bf42/nemo_rl/algorithms/single_controller.py#L2678"><text class="m" x="460" y="78">_train_pump</text></a>
+  <rect class="chip" x="664" y="62" width="276" height="24" rx="4"/>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/7171e5d2d945d56e99a8b5b8e10681783df9bf42/nemo_rl/algorithms/single_controller.py#L4056-L4250"><text class="m" x="674" y="78">_save_checkpoint + 3 save helpers</text></a>
+  <text class="d" x="22" y="110">the controller reads none of the objects' fields; they read its counters through read_progress()</text>
+
+  <!-- calls down -->
+  <path class="call" d="M60,86 L60,170" marker-end="url(#ag)"/><text class="g" x="66" y="140">check_startup()</text>
+  <path class="call" d="M120,86 C120,130 380,130 380,170" marker-end="url(#ag)"/><text class="g" x="250" y="124">restore()</text>
+  <path class="call" d="M150,86 C150,148 660,140 660,170" marker-end="url(#ag)"/><text class="g" x="520" y="148">run()</text>
+  <path class="call" d="M306,86 L470,170" marker-end="url(#ag)"/><text class="g" x="400" y="108">redispatch_restored()</text>
+  <path class="call" d="M520,86 L740,170" marker-end="url(#ag)"/><text class="g" x="470" y="162">begin/end_optimizer_commit()</text>
+  <path class="call" d="M800,86 L860,170" marker-end="url(#ag)"/><text class="g" x="948" y="108" text-anchor="end">trainer_checkpoint()</text>
+  <text class="g" x="948" y="122" text-anchor="end">capture(), published()</text>
+
+  <!-- row 2: three owned objects -->
+  <rect class="box" x="10" y="172" width="290" height="124" rx="6"/>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/7171e5d2d945d56e99a8b5b8e10681783df9bf42/nemo_rl/environments/checkpointing/nemo_gym.py#L144"><text class="t" x="20" y="192" fill="var(--accent)">environment checkpoint</text></a>
+  <text class="d" x="20" y="208">GymEnvironmentCheckpoint, or</text>
+  <text class="d" x="20" y="222">NoEnvironmentCheckpoint (does nothing)</text>
+  <text class="m" x="20" y="242">check_startup()  snapshot(path)</text>
+  <text class="m" x="20" y="258">restored(path)   is_unavailable(err)</text>
+  <text class="m" x="20" y="274">holds_rollout_state</text>
+  <rect class="flag" x="168" y="263" width="128" height="28"/><text class="o" x="174" y="276">C2: plus 2 Protocol</text><text class="o" x="174" y="288">classes, 1 real user</text>
+
+  <rect class="box" x="320" y="172" width="250" height="124" rx="6"/>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/7171e5d2d945d56e99a8b5b8e10681783df9bf42/nemo_rl/algorithms/rollout_checkpointing/restore.py#L160"><text class="t" x="330" y="192" fill="var(--accent)">RolloutRestorer</text></a>
+  <text class="d" x="330" y="208">restore.py · runs once at startup</text>
+  <text class="m" x="330" y="230">restore() -&gt; bool</text>
+  <text class="m" x="330" y="246">redispatch_restored(launch, admit)</text>
+  <text class="g" x="330" y="266">← calls env restored()</text>
+  <text class="d" x="330" y="284">replay index, ledger, spare prompts</text>
+
+  <rect class="box" x="590" y="172" width="360" height="124" rx="6"/>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/7171e5d2d945d56e99a8b5b8e10681783df9bf42/nemo_rl/algorithms/rollout_checkpointing/snapshots.py#L156"><text class="t" x="600" y="192" fill="var(--accent)">RolloutSnapshotter</text></a>
+  <text class="d" x="600" y="208">snapshots.py · owns save lock and its own pump task</text>
+  <text class="m" x="600" y="230">run()  stop_requested</text>
+  <text class="m" x="600" y="246">begin_optimizer_commit()  end_optimizer_commit()</text>
+  <text class="m" x="600" y="262">trainer_checkpoint()  capture(cut, path, kind)</text>
+  <text class="m" x="600" y="278">trainer_checkpoint_published()</text>
+
+  <!-- snapshotter uses env -->
+  <path class="call" d="M590,286 C470,320 330,310 300,286" marker-end="url(#ag)"/><text class="g" x="400" y="322">snapshot()  is_unavailable()</text>
+  <!-- restorer uses env -->
+  <path class="call" d="M320,262 L302,262" marker-end="url(#ag)"/>
+
+  <!-- row 3 -->
+  <rect class="box" x="10" y="336" width="290" height="66" rx="6"/>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/7171e5d2d945d56e99a8b5b8e10681783df9bf42/nemo_rl/environments/checkpointing/nemo_gym.py#L120-L141"><text class="t" x="20" y="356" fill="var(--accent)">GymEnvironmentSnapshot</text></a>
+  <text class="d" x="20" y="372">what snapshot() hands back while Gym is paused</text>
+  <text class="m" x="20" y="390">check_against_cut()  metrics()</text>
+  <path class="use" d="M150,296 L150,336" marker-end="url(#ad)"/>
+  <path class="back" d="M300,372 C314,372 314,300 300,290" marker-end="url(#ao)"/>
+  <rect class="flag" x="214" y="398" width="86" height="17"/><text class="o" x="220" y="410">C5: calls back</text>
+
+  <rect class="box" x="320" y="336" width="630" height="66" rx="6"/>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/7171e5d2d945d56e99a8b5b8e10681783df9bf42/nemo_rl/algorithms/rollout_checkpointing/state.py#L141-L181"><text class="t" x="330" y="356" fill="var(--accent)">RolloutParts + RolloutRuntimeState</text></a>
+  <text class="d" x="568" y="356">state.py · the only things both halves share</text>
+  <text class="m" x="330" y="374">12 refs: buffer, dataloader, sampler, rollout_manager, dp_client,</text>
+  <text class="m" x="330" y="390">env checkpoint, runtime_state, read_progress(), log_metrics(), …</text>
+  <path class="use" d="M445,336 L445,298" marker-end="url(#ad)"/>
+  <path class="use" d="M770,336 L770,298" marker-end="url(#ad)"/>
+  <text class="d" x="590" y="322">the two halves never call each other</text>
+
+  <!-- row 4 -->
+  <rect class="box" x="320" y="420" width="630" height="50" rx="6"/>
+  <text class="t" x="330" y="440">module functions (no state)</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/7171e5d2d945d56e99a8b5b8e10681783df9bf42/nemo_rl/algorithms/rollout_checkpointing/inventory.py#L62-L101"><text class="m" x="330" y="458" fill="var(--accent)">inventory.py: validate_*_inventory</text></a>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/7171e5d2d945d56e99a8b5b8e10681783df9bf42/nemo_rl/algorithms/rollout_checkpointing/manifest.py#L572"><text class="m" x="600" y="458" fill="var(--accent)">manifest.py: commit_snapshot, anchors</text></a>
+  <text class="d" x="560" y="440">used by both halves; manifest by the saver only</text>
+
+  <rect class="box" x="10" y="420" width="290" height="50" rx="6"/>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/7171e5d2d945d56e99a8b5b8e10681783df9bf42/nemo_rl/experience/rollout_recovery.py"><text class="t" x="20" y="440" fill="var(--accent)">RolloutRecoveryLedger</text></a>
+  <text class="d" x="20" y="458">owned by RolloutManager; all three read it</text>
+
+  <!-- row 5: Gym chain -->
+  <text class="t" x="10" y="508">Gym chain under GymEnvironmentCheckpoint</text>
+  <text class="d" x="300" y="508">only the first box is new in this PR; the rest came with #4500</text>
+  <path class="call" d="M24,296 L24,528" marker-end="url(#ag)"/>
+  <rect class="box" x="10" y="530" width="210" height="80" rx="6"/>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/7171e5d2d945d56e99a8b5b8e10681783df9bf42/nemo_rl/environments/gym_checkpoint_coordinator.py#L296"><text class="t" x="20" y="550" fill="var(--accent)">GymCheckpointCoordinator</text></a>
+  <text class="m" x="20" y="568">prepared() commit()</text>
+  <text class="m" x="20" y="584">retire() forget()</text>
+  <text class="m" x="20" y="600">restored() resume()</text>
+  <path class="call" d="M220,570 L246,570" marker-end="url(#ag)"/>
+  <rect class="box" x="248" y="530" width="220" height="80" rx="6"/>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/7171e5d2d945d56e99a8b5b8e10681783df9bf42/nemo_rl/environments/nemo_gym.py#L1291-L1390"><text class="t" x="258" y="550" fill="var(--accent)">Gym Ray actors (one per shard)</text></a>
+  <text class="m" x="258" y="568">checkpoint_prepare.remote()</text>
+  <text class="m" x="258" y="584">checkpoint_commit.remote()</text>
+  <text class="m" x="258" y="600">checkpoint_restore.remote() …</text>
+  <path class="call" d="M468,570 L494,570" marker-end="url(#ag)"/>
+  <rect class="box" x="496" y="530" width="210" height="80" rx="6"/>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/7171e5d2d945d56e99a8b5b8e10681783df9bf42/nemo_rl/environments/gym_checkpoint_adapter.py"><text class="t" x="506" y="550" fill="var(--accent)">GymCheckpointAdapter</text></a>
+  <text class="d" x="506" y="570">turns RL's request into</text>
+  <text class="d" x="506" y="586">Gym's HTTP calls, checks</text>
+  <text class="d" x="506" y="602">the replies</text>
+  <path class="call" d="M706,570 L732,570" marker-end="url(#ag)"/>
+  <rect class="box" x="734" y="530" width="216" height="80" rx="6"/>
+  <text class="t" x="744" y="550">Gym servers</text>
+  <text class="d" x="744" y="570">pause, save and restore their</text>
+  <text class="d" x="744" y="586">own episodes (outside RL)</text>
+  <text class="d" x="10" y="632">GymEnvironmentCheckpoint also writes the ledger (retire, forget) and pauses RolloutManager's request deadlines while Gym is paused.</text>
+</svg>
+
+<h2>Is this a good design?</h2>
+<div class="cols">
+<div>
+<h3 class="good">What is clean</h3>
+<ul>
+<li>Calls go one way: controller → three objects → Gym. Nothing below calls up into the controller. It reads the controller's step counters through one callback, <code>read_progress()</code>.</li>
+<li>The saver and the restorer never call each other. They share only <code>RolloutParts</code>, and the only thing in it they change is <code>RolloutRuntimeState</code>.</li>
+<li>All Gym-specific checkpoint code now sits behind one object. The do-nothing backend replaces the old "is Gym present?" checks in the controller.</li>
+<li>The controller's whole contact with checkpointing is 15 calls in 6 of its methods.</li>
+</ul>
+</div>
+<div>
+<h3 class="watch">What to watch</h3>
+<ul>
+<li><b>C2:</b> two Protocol classes describe the environment object, but only Gym implements them, and the do-nothing backend doesn't use them. Naming the two real classes is enough.</li>
+<li><b>C5:</b> <code>GymEnvironmentSnapshot.check_against_cut</code> only calls back into its parent's <code>validate_cut</code>. That is the one arrow that points back up.</li>
+<li><b>C3:</b> the controller's setup code (L713–L749) is copied by hand into a test helper. Both copies must be edited together.</li>
+<li>Gym is four hops deep: environment object → coordinator → Ray actor → adapter. Only the first hop is new. The other three came with #4500, so this PR is not the place to merge them.</li>
+<li>The recovery ledger is the shared hub: the restorer, the saver and the Gym object all read it, and it lives in <code>RolloutManager</code>.</li>
+</ul>
+</div>
+</div>
+
+<div class="hl"><b>So what.</b> The split is sound, and it is the right shape to build the next 10 PRs on. The extra pieces are small and each has a review comment.
+None of them changes behavior, so they can be fixed in this PR before later PRs copy the pattern.
+<p class="cref"><a href="https://github.com/NVIDIA-NeMo/RL/pull/5011#discussion_r4477630535">C2 — interfaces.py:106</a>
+<a href="https://github.com/NVIDIA-NeMo/RL/pull/5011#discussion_r4477630540">C3 — _rollout_checkpoints.py:32</a>
+<a href="https://github.com/NVIDIA-NeMo/RL/pull/5011#discussion_r4477630550">C5 — nemo_gym.py:131</a></p></div>
+
+</div>
+</body>
+</html>
