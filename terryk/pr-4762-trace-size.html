@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PR 4762: Trim the Checkpoint Trace</title>
+<style>
+:root{--bg:#0d1117;--surface:#161b22;--surface2:#1c2128;--border:#30363d;--text:#e6edf3;--dim:#8b949e;
+  --accent:#58a6ff;--green:#3fb950;--orange:#d29922;--red:#f85149}
+:root[data-theme="light"]{--bg:#ffffff;--surface:#f6f8fa;--surface2:#eaeef2;--border:#d0d7de;--text:#1f2328;
+  --dim:#59636e;--accent:#0969da;--green:#1a7f37;--orange:#9a6700;--red:#cf222e}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:28px 16px 70px}
+h1{font-size:22px;margin:0 0 8px;line-height:1.3}
+h2{font-size:18px;margin:32px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
+code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
+.sub{color:var(--dim);font-size:13.5px;margin:0 0 16px}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);border:1px solid var(--border);
+  color:var(--text);border-radius:20px;padding:6px 12px;font:13px/1 ui-monospace,Menlo,monospace;cursor:pointer}
+.status{border:1px solid var(--border);border-radius:10px;background:var(--surface);padding:2px 16px 10px;margin:0 0 20px}
+.status dl{display:grid;grid-template-columns:max-content 1fr;gap:4px 14px;margin:12px 0 0}
+.status dt{color:var(--dim);font-size:12px;text-transform:uppercase;letter-spacing:.04em;white-space:nowrap;padding-top:2px}
+.status dd{margin:0;font-size:14px}
+.verdict{font-weight:700}.verdict.open{color:var(--orange)}.verdict.bad{color:var(--red)}
+.bg{border:1px solid var(--border);border-radius:8px;background:var(--surface);padding:10px 14px;margin:0 0 14px;font-size:14px}
+.warn{border-left:3px solid var(--orange);background:var(--surface);padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0}
+.where{border-left:4px solid var(--accent);background:var(--surface);padding:6px 12px;margin:6px 0 10px}
+.diff{font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--surface);border:1px solid var(--border);
+  border-radius:8px;padding:12px;overflow-x:auto;white-space:pre;margin:10px 0}
+.diff .add{color:var(--green)}.diff .del{color:var(--red)}.diff .hunk{color:var(--accent)}.diff .skip{color:var(--dim);font-style:italic}
+table{border-collapse:collapse;width:100%;font-size:13.5px;margin:10px 0}
+th,td{border-bottom:1px solid var(--border);padding:5px 8px;text-align:left;vertical-align:top}
+th{color:var(--dim);font-weight:600;font-size:12px}
+.tbl{overflow-x:auto}
+.tip{border-bottom:1px dotted var(--dim);cursor:help;position:relative;outline:none}
+.tip:hover::after,.tip:focus::after{content:attr(data-tip);position:absolute;left:0;top:1.7em;z-index:60;width:max-content;
+  max-width:min(340px,80vw);white-space:normal;background:var(--surface2);color:var(--text);border:1px solid var(--border);
+  border-radius:6px;padding:7px 10px;font:13px/1.45 -apple-system,sans-serif;font-weight:400;box-shadow:0 4px 14px rgba(0,0,0,.3)}
+.cref{margin:6px 0 0;font-size:13px}
+.cref a{display:inline-block;padding:4px 10px;border:1px solid var(--border);border-radius:16px;background:var(--surface);
+  font:12.5px ui-monospace,Menlo,monospace;margin:2px 4px 2px 0}
+.cref a:hover{background:var(--surface2);text-decoration:none}
+nav.chain{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 6px;padding:0}
+nav.chain a,nav.chain span{display:inline-block;padding:5px 11px;border:1px solid var(--border);border-radius:20px;
+  background:var(--surface);text-decoration:none;color:var(--accent);font-size:12.5px;line-height:1.3;white-space:nowrap}
+nav.chain span.here{background:var(--accent);color:var(--bg);border-color:var(--accent);font-weight:600}
+p.chainnote{color:var(--dim);font-size:12px;margin:0 0 18px}
+svg{max-width:100%;height:auto;display:block;margin:16px 0}
+svg a text{text-decoration:underline}
+svg .lt{fill:var(--text);font:bold 13px -apple-system,sans-serif}
+svg .fl{fill:var(--accent);font:12px ui-monospace,Menlo,monospace}
+svg .num{fill:var(--text);font:bold 12px ui-monospace,Menlo,monospace}
+svg .tot{fill:var(--text);font:bold 13px -apple-system,sans-serif}
+svg .note{fill:var(--dim);font:11.5px -apple-system,sans-serif}
+svg .added{fill:var(--dim);fill-opacity:.45}
+svg .kept{fill:var(--green)}
+svg .bugdot{fill:var(--red)}
+svg .rule{stroke:var(--border);stroke-width:1}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+  document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head>
+<body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+  function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+  function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
+    b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
+      else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+  document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+<div class="wrap">
+<h1>The checkpoint trace can be about 300 lines, not 1,854: most of what it adds is already measured</h1>
+<p class="sub">Size review of <a href="https://github.com/NVIDIA-NeMo/RL/pull/4762">NVIDIA-NeMo/RL #4762</a>, the last PR in the partial-checkpointing stack. All permalinks pin the PR head <code>71d3b46</code>; the current stack is pinned at <code>fd86c61</code> (#4655 head, which includes #5011). Review comments are in a pending review; their links work once it is published.</p>
+
+<div class="status">
+<dl>
+  <dt>Before</dt>
+  <dd>A finished save already exports its step timings as metrics (#4730). TQ save and load already get a <span class="tip" tabindex="0" data-tip="A timed piece of work in a trace. Spans nest: a save span holds the spans of the steps inside it. OpenTelemetry sends a span only when it ends.">span</span>. On a Gym timeout, the error already names each <span class="tip" tabindex="0" data-tip="NeMo Gym servers run the agent environments. During a save, RL asks each Gym deployment to pause, save its state and resume.">Gym deployment</span> that did not answer.</dd>
+  <dt>This PR</dt>
+  <dd>Adds a live span tree around each save and restore, plus 3 live <span class="tip" tabindex="0" data-tip="A metric that holds one current value, read again every few seconds, such as how long the current step has been running.">gauges</span>, a duration histogram, a 30-second progress logger and per-worker prefix spans: 1,854 added lines in one commit. The branch predates #5011 and conflicts in 7 files.</dd>
+  <dt>Status</dt>
+  <dd><span class="verdict open">Proposed — not implemented.</span> The smaller version below is a review suggestion. <span class="verdict bad">Open:</span> one span opens in one task and closes in another, so every save logs an OpenTelemetry error (C1).</dd>
+</dl>
+</div>
+
+<div class="bg"><b>Background.</b> A rollout checkpoint save pauses new rollouts, asks every Gym deployment to prepare and commit, fences token capture on the vLLM workers, saves TQ, then publishes. The PR wants two things: see which step is slow or stuck, and see which Gym deployments have not replied. Dotted words have a short explanation: hover or tap them.</div>
+
+<svg viewBox="0 0 940 482" role="img" aria-label="For each file, the lines this PR adds, and the part the smaller version keeps.">
+<text class="lt" x="16" y="22">Lines each file adds today, and what the smaller version keeps</text>
+<rect class="added" x="16" y="36" width="16" height="12" rx="3"/><text class="note" x="38" y="46">added by this PR</text>
+<rect class="kept" x="160" y="36" width="16" height="12" rx="3"/><text class="note" x="182" y="46">kept in the smaller version (estimate)</text>
+<circle class="bugdot" cx="432" cy="42" r="6"/><text class="note" x="444" y="46">has the bug in C1</text>
+<text class="note" x="560" y="46">1 px = 1 line</text>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/71d3b467d31729585bbc80d302ee8fda338b4046/nemo_rl/telemetry/rollout_checkpoint.py"><text class="fl" x="16" y="77">telemetry/rollout_checkpoint.py</text></a>
+<rect class="added" x="286" y="66" width="513" height="14" rx="2"/>
+<rect class="kept" x="286" y="66" width="25" height="14" rx="2"/>
+<text class="num" x="807" y="77">513 → ≈25</text>
+<text class="note" x="286" y="95">observer, gauges, wrappers: Lens and #4730 already do this (C3, C4)</text>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/71d3b467d31729585bbc80d302ee8fda338b4046/nemo_rl/algorithms/single_controller.py#L5154"><text class="fl" x="16" y="117">single_controller.py</text></a>
+<rect class="added" x="286" y="106" width="198" height="14" rx="2"/>
+<rect class="kept" x="286" y="106" width="30" height="14" rx="2"/>
+<text class="num" x="492" y="117">198 → ≈30</text>
+<circle class="bugdot" cx="566.8" cy="113" r="6"/>
+<text class="note" x="286" y="135">≈150 are re-indents; decorators after the #5011 rebase (C1, C2)</text>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/71d3b467d31729585bbc80d302ee8fda338b4046/nemo_rl/environments/gym_checkpoint_coordinator.py#L342"><text class="fl" x="16" y="157">gym_checkpoint_coordinator.py</text></a>
+<rect class="added" x="286" y="146" width="80" height="14" rx="2"/>
+<rect class="kept" x="286" y="146" width="45" height="14" rx="2"/>
+<text class="num" x="374" y="157">80 → ≈45</text>
+<text class="note" x="286" y="175">keep the trace passing; log pending replies here (C6)</text>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/71d3b467d31729585bbc80d302ee8fda338b4046/nemo_rl/models/generation/vllm/vllm_worker_async.py#L3715"><text class="fl" x="16" y="197">worker prefix + fence files (3)</text></a>
+<rect class="added" x="286" y="186" width="37" height="14" rx="2"/>
+<rect class="kept" x="286" y="186" width="3" height="14" rx="2"/>
+<text class="num" x="331" y="197">37 → ≈3</text>
+<text class="note" x="286" y="215">per-worker spans with no reader; a no-op context copy (C7, C11)</text>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/71d3b467d31729585bbc80d302ee8fda338b4046/nemo_rl/data_plane/adapters/transfer_queue.py#L1472"><text class="fl" x="16" y="237">transfer_queue.py</text></a>
+<rect class="added" x="286" y="226" width="3" height="14" rx="2"/>
+<text class="num" x="297" y="237">3 → 0</text>
+<text class="note" x="286" y="255">a second span around TQ save/load (C5)</text>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/71d3b467d31729585bbc80d302ee8fda338b4046/nemo_rl/environments/nemo_gym.py"><text class="fl" x="16" y="277">nemo_gym.py</text></a>
+<rect class="added" x="286" y="266" width="7" height="14" rx="2"/>
+<rect class="kept" x="286" y="266" width="7" height="14" rx="2"/>
+<text class="num" x="301" y="277">7 → 7</text>
+<text class="note" x="286" y="295">trace-context receivers: keep as is</text>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/71d3b467d31729585bbc80d302ee8fda338b4046/tests/unit/telemetry/test_rollout_checkpoint.py"><text class="fl" x="16" y="317">test_rollout_checkpoint.py</text></a>
+<rect class="added" x="286" y="306" width="443" height="14" rx="2"/>
+<rect class="kept" x="286" y="306" width="75" height="14" rx="2"/>
+<text class="num" x="737" y="317">443 → ≈75</text>
+<text class="note" x="286" y="335">mostly tests the observer that goes away (C9)</text>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/71d3b467d31729585bbc80d302ee8fda338b4046/tests/unit/telemetry/test_checkpoint_control.py#L55"><text class="fl" x="16" y="357">test_checkpoint_control.py + conftest</text></a>
+<rect class="added" x="286" y="346" width="421" height="14" rx="2"/>
+<rect class="kept" x="286" y="346" width="75" height="14" rx="2"/>
+<text class="num" x="715" y="357">421 → ≈75</text>
+<text class="note" x="286" y="375">runs AST copies of methods; import the real ones (C9)</text>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/71d3b467d31729585bbc80d302ee8fda338b4046/docs/observability/rollout-checkpoint.md"><text class="fl" x="16" y="397">docs (2 files)</text></a>
+<rect class="added" x="286" y="386" width="151" height="14" rx="2"/>
+<rect class="kept" x="286" y="386" width="45" height="14" rx="2"/>
+<text class="num" x="445" y="397">151 → ≈45</text>
+<text class="note" x="286" y="415">not in the toctree; cut to how-to (C10)</text>
+<line class="rule" x1="16" y1="420" x2="924" y2="420"/>
+<text class="fl" x="16" y="438">Total</text>
+<text class="tot" x="286" y="438">1,854 added  →  about 300 (about 110 of them code)</text>
+</svg>
+
+<h2>What is already measured</h2>
+<p>The new module, <a href="https://github.com/NVIDIA-NeMo/RL/blob/71d3b467d31729585bbc80d302ee8fda338b4046/nemo_rl/telemetry/rollout_checkpoint.py"><code>rollout_checkpoint.py</code></a>, is 513 lines. Most of it records something that already exists:</p>
+<div class="tbl"><table>
+<tr><th>This PR adds</th><th>Already there</th></tr>
+<tr><td><code>dispatch_pause</code> span and histogram (<a href="https://github.com/NVIDIA-NeMo/RL/blob/71d3b467d31729585bbc80d302ee8fda338b4046/nemo_rl/algorithms/single_controller.py#L5154">L5154</a>)</td><td><a href="https://github.com/NVIDIA-NeMo/RL/blob/71d3b467d31729585bbc80d302ee8fda338b4046/nemo_rl/algorithms/single_controller.py#L5512"><code>gym_parked_seconds</code></a> (#4730), same window</td></tr>
+<tr><td><code>dp_barrier_wait</code> / <code>dp_barrier_hold</code> wrapper (<a href="https://github.com/NVIDIA-NeMo/RL/blob/71d3b467d31729585bbc80d302ee8fda338b4046/nemo_rl/telemetry/rollout_checkpoint.py#L494">L494</a>)</td><td><a href="https://github.com/NVIDIA-NeMo/RL/blob/71d3b467d31729585bbc80d302ee8fda338b4046/nemo_rl/algorithms/single_controller.py#L5494-L5495"><code>barrier_wait_seconds</code> / <code>exclusive_hold_seconds</code></a> (#4730)</td></tr>
+<tr><td><code>tq_save</code> / <code>tq_load</code> spans (<a href="https://github.com/NVIDIA-NeMo/RL/blob/71d3b467d31729585bbc80d302ee8fda338b4046/nemo_rl/data_plane/adapters/transfer_queue.py#L1472">L1472</a>)</td><td><a href="https://github.com/NVIDIA-NeMo/RL/blob/71d3b467d31729585bbc80d302ee8fda338b4046/nemo_rl/data_plane/observability.py#L1754"><code>rl.data_plane.save_checkpoint</code></a> span from <code>MetricsDataPlaneClient</code></td></tr>
+<tr><td>Pending-deployment gauge, 30 s observer, 2 lock-guarded classes (≈230 lines)</td><td><a href="https://github.com/NVIDIA-NeMo/RL/blob/71d3b467d31729585bbc80d302ee8fda338b4046/nemo_rl/environments/gym_checkpoint_coordinator.py#L69"><code>GymCheckpointOperationError</code></a> names every silent deployment on timeout. Missing only: a note <i>before</i> the timeout.</td></tr>
+<tr><td>Own span helper, group check, hand-set <code>error.type</code>, sync + async decorators</td><td>Lens <a href="https://github.com/NVIDIA-NeMo/Lens/blob/4d045c03186b90afdc815db46b671f6a21bc7e98/src/nemo/lens/helpers.py#L116"><code>managed_span</code></a> checks the group, records the error and ends the span</td></tr>
+<tr><td>Live <code>rl.rollout_checkpoint.save</code> span</td><td>#4730's <a href="https://github.com/NVIDIA-NeMo/RL/blob/fd86c61e78060a325b271242629be2f311e77ecd/nemo_rl/telemetry/metrics.py#L160"><code>rl.sc.rollout_checkpoint.save</code></a>: two save spans after the rebase</td></tr>
+</table></div>
+<p>What is new and worth keeping: the nesting (Gym prepare, commit and the fence shown inside one save), the trace context passed to Gym, and one line that names the deployments still silent while the save waits.</p>
+
+
+<h2>The smaller version — proposed, not in the PR</h2>
+<p>Nothing below is implemented. It is a sketch for after the rebase onto #5011.</p>
+<p class="where"><b>Where the change lands: RL only.</b>
+One ~25-line helper next to <a href="https://github.com/NVIDIA-NeMo/RL/blob/71d3b467d31729585bbc80d302ee8fda338b4046/nemo_rl/telemetry/instrumentation.py#L963"><code>checkpoint_finalize_span</code></a> in <code>instrumentation.py</code>, used as a decorator on the methods #5011 already split out (<a href="https://github.com/NVIDIA-NeMo/RL/blob/fd86c61e78060a325b271242629be2f311e77ecd/nemo_rl/algorithms/rollout_checkpointing/snapshots.py#L607"><code>save_snapshot</code></a>, <a href="https://github.com/NVIDIA-NeMo/RL/blob/fd86c61e78060a325b271242629be2f311e77ecd/nemo_rl/algorithms/rollout_checkpointing/snapshots.py#L347"><code>capture</code></a>, <a href="https://github.com/NVIDIA-NeMo/RL/blob/fd86c61e78060a325b271242629be2f311e77ecd/nemo_rl/algorithms/rollout_checkpointing/restore.py#L188"><code>restore</code></a>, …); a pending log in <a href="https://github.com/NVIDIA-NeMo/RL/blob/71d3b467d31729585bbc80d302ee8fda338b4046/nemo_rl/environments/gym_checkpoint_coordinator.py#L342"><code>_collect</code></a>. <b>No Gym change:</b> Gym already accepts the trace context this PR passes.</p>
+
+<pre class="diff"><span class="hunk">@@ instrumentation.py · new, next to checkpoint_finalize_span (L963)</span>
+<span class="add">+@contextmanager
++def rollout_checkpoint_span(phase: str, **attributes):
++    # Unbucketed: checkpoint steps nest, so a goodput bucket would double-count.
++    with managed_span(RLSpanGroup.CHECKPOINT, f"rl.rollout_checkpoint.{phase}", **attributes) as span:
++        yield span</span>
+<span class="skip">   … plus one decorator that wraps sync or async methods in this span</span>
+
+<span class="hunk">@@ gym_checkpoint_coordinator.py L356-L380 · _collect</span>
+<span class="del">-        with checkpoint_phase(
+-            _CONTROL_PHASES.get(operation, "gym_control")
+-        ) as progress:
+</span><span class="add">+        with rollout_checkpoint_span(f"gym_{operation}"):
+</span><span class="skip">   … (tasks built as today; the update_pending callbacks go)</span>
+             try:
+<span class="del">-                await asyncio.wait(tasks.values(), timeout=timeout_s)
+</span><span class="add">+                deadline = time.monotonic() + timeout_s
++                pending = set(tasks.values())
++                while pending and (left := deadline - time.monotonic()) > 0:
++                    _, pending = await asyncio.wait(pending, timeout=min(30.0, left))
++                    if pending:
++                        # The timeout error names them too, but only after control_timeout_s.
++                        LOGGER.warning("Gym checkpoint %s still waiting on %s", operation,
++                                       sorted(i for i, t in tasks.items() if not t.done())[:16])</span>
+             except BaseException:
+<span class="skip">   … plus LOGGER = logging.getLogger(__name__) at the top; this module has no logger yet</span></pre>
+
+<p>In order: (1) Lens already does the group check, the error status and the span end, so the helper is a name and a span group;
+(2) the decorator goes on methods #5011 already pulled out, so no block of <code>single_controller.py</code> is re-indented;
+(3) the loop in <code>_collect</code> wakes every 30 seconds and names the deployments still silent. That is the one live signal the gauges and the observer were giving, and it needs no extra task or lock.
+Dropping the observer task also drops its tricky cancellation teardown (<a href="https://github.com/NVIDIA-NeMo/RL/blob/71d3b467d31729585bbc80d302ee8fda338b4046/nemo_rl/telemetry/rollout_checkpoint.py#L347-L353">L347-L353</a>), and dropping the <code>dispatch_pause</code> span drops the bug in C1.</p>
+
+
+<div class="warn"><b>So what.</b> The partial-checkpointing stack is already past 20k lines. This PR's real need is a trace tree and a "who has not answered" line. Lens, #4730 and the data-plane wrapper already cover the rest, so about 300 lines (about 110 of code) would do. The PR also needs a rebase onto #5011 first. If nobody will read the trace nesting yet, the smallest option is to add only the pending log, for example in #5048.</div>
+
+</div>
+</body>
+</html>
