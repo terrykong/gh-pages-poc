@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NVIDIA-NeMo/RL #5049 — how batch age counts a call that runs across a refit</title>
+<style>
+:root{--bg:#0d1117;--surface:#161b22;--surface2:#1c2128;--border:#30363d;--text:#e6edf3;--dim:#8b949e;
+  --accent:#58a6ff;--green:#3fb950;--red:#f85149;--orange:#d29922}
+:root[data-theme="light"]{--bg:#ffffff;--surface:#f6f8fa;--surface2:#eaeef2;--border:#d0d7de;--text:#1f2328;
+  --dim:#59636e;--accent:#0969da;--green:#1a7f37;--red:#cf222e;--orange:#9a6700}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:28px 16px 70px}
+h1{font-size:22px;margin:0 0 8px;line-height:1.3}
+h2{font-size:18px;margin:30px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
+.sub{color:var(--dim);font-size:13.5px;margin:0 0 16px}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);
+  border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;
+  font:13px/1 ui-monospace,monospace;cursor:pointer}
+.status{border:1px solid var(--border);border-radius:10px;background:var(--surface);padding:2px 16px 10px;margin:0 0 20px}
+.status dl{display:grid;grid-template-columns:max-content 1fr;gap:4px 14px;margin:12px 0 0}
+.status dt{color:var(--dim);font-size:12px;text-transform:uppercase;letter-spacing:.04em;white-space:nowrap;padding-top:2px}
+.status dd{margin:0;font-size:14px}
+.verdict{font-weight:700}
+.verdict.good{color:var(--green)}
+.bg{border-left:4px solid var(--dim);background:var(--surface);padding:8px 14px;margin:0 0 16px;font-size:14px}
+.tip{border-bottom:1px dotted var(--dim);cursor:help;position:relative;outline:none}
+.tip:hover::after,.tip:focus::after{content:attr(data-tip);position:absolute;left:0;top:1.7em;z-index:60;
+  width:max-content;max-width:min(340px,80vw);white-space:normal;background:var(--surface2);color:var(--text);
+  border:1px solid var(--border);border-radius:6px;padding:7px 10px;font:13px/1.45 -apple-system,sans-serif;
+  font-weight:400;box-shadow:0 4px 14px rgba(0,0,0,.3)}
+table{border-collapse:collapse;margin:10px 0;font-size:14px;width:100%}
+th,td{border:1px solid var(--border);padding:6px 10px;text-align:left;vertical-align:top}
+th{background:var(--surface)}
+td.num{text-align:right;white-space:nowrap;font-family:ui-monospace,Menlo,monospace}
+.diff{font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--surface);
+  border:1px solid var(--border);border-radius:8px;padding:12px;overflow-x:auto;white-space:pre;margin:10px 0}
+.diff .add{color:var(--green)}
+.diff .del{color:var(--red)}
+.diff .hunk{color:var(--accent)}
+.where{border-left:4px solid var(--accent);background:var(--surface);padding:6px 12px;margin:6px 0 10px}
+.warn{border-left:3px solid var(--orange);background:var(--surface);padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0}
+.cref{margin:6px 0 0;font-size:13px}
+.cref a{display:inline-block;padding:4px 10px;border:1px solid var(--border);border-radius:16px;
+  background:var(--surface);font:12.5px ui-monospace,Menlo,monospace;margin:2px 4px 2px 0}
+.cref a:hover{background:var(--surface2);text-decoration:none}
+svg{max-width:100%;height:auto;display:block;margin:14px 0}
+svg .box{fill:var(--surface);stroke:var(--border);stroke-width:1.2}
+svg .band{fill:var(--surface2)}
+svg .v4{fill:var(--orange)}
+svg .v5{fill:var(--accent)}
+svg .wait{stroke:var(--dim);stroke-width:1.5;stroke-dasharray:4 4}
+svg .lbl{fill:var(--text);font:12.5px ui-monospace,Menlo,monospace}
+svg .lbl-b{fill:var(--text);font:bold 13.5px -apple-system,sans-serif}
+svg .note{fill:var(--dim);font:11.5px -apple-system,sans-serif}
+svg .ot{fill:var(--orange);font:bold 12.5px ui-monospace,Menlo,monospace}
+svg .bt{fill:var(--accent);font:bold 12.5px ui-monospace,Menlo,monospace}
+svg .r{fill:var(--red);font:bold 12.5px ui-monospace,Menlo,monospace}
+svg .g{fill:var(--green);font:bold 12.5px ui-monospace,Menlo,monospace}
+svg .sep{stroke:var(--border);stroke-width:1}
+svg .redbox{fill:none;stroke:var(--red);stroke-width:1.6;stroke-dasharray:5 3}
+svg a text{text-decoration:underline;fill:var(--accent);font:11.5px ui-monospace,Menlo,monospace}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+  document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head>
+<body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+  function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+  function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
+    b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
+      else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+  document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+<div class="wrap">
+
+<h1>How batch age counts a call that runs across a refit</h1>
+<p class="sub"><a href="https://github.com/NVIDIA-NeMo/RL/pull/5049">NVIDIA-NeMo/RL #5049</a>
+(part 3 of the rollout-checkpointing stack, on top of <a href="https://github.com/NVIDIA-NeMo/RL/pull/5048">#5048</a>;
+see also the <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-5048-rollout-trace.html">#5048 page</a>).
+Permalinks pin the PR head <code>c2bf309a</code>.</p>
+
+<div class="status">
+<dl>
+  <dt>Before</dt>
+  <dd>The only staleness number was <code>weight_version_lag</code>: how many updates old the <em>oldest</em> group in a step was. Nothing said how old the average trained token was.</dd>
+  <dt>This PR</dt>
+  <dd>Adds <b>batch age</b> per step to the rollout trace. Commit 1 counts each call's tokens under the version the call began on. Commit 2 also splits a call that runs across a refit, using vLLM's live token count at the pause.</dd>
+  <dt>Status</dt>
+  <dd><span class="verdict good">New feature, works as described.</span> The review asks to land commit 1 now and move commit 2 (+486/−102 lines) to a follow-up that shows how much it changes batch age. It also flags one older ordering issue that makes both versions read high.</dd>
+</dl>
+</div>
+
+<div class="bg"><b>Background.</b> The trainer updates the policy once per step. Each update gets a number, the <b>version</b>.
+A <span class="tip" tabindex="0" data-tip="Copying the trainer's new weights into the vLLM engines. Generation is paused while it runs.">refit</span>
+copies the new weights into vLLM while generation is paused. With
+<span class="tip" tabindex="0" data-tip="token_capture.enabled: the vLLM worker records every model call's token IDs, and stamps each call with the weight version in use when the call began.">token capture</span>,
+each model call is stamped with the version in use when it <em>began</em>
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/c2bf309a7caf49ec711f04fd72c03e25f29b1240/nemo_rl/models/generation/vllm/vllm_worker_async.py#L754">vllm_worker_async.py#L754</a>).
+<b>Batch age</b> = for every trained token, (version the step trains) − (version that made the token), averaged over tokens.
+Dotted words have a short explanation: hover or tap them.</div>
+
+<p>vLLM keeps a paused call alive across a refit, so its later tokens come from the new weights.
+Commit 1 does not see that: it sums each call under its start version
+(<a href="https://github.com/NVIDIA-NeMo/RL/pull/5049/commits/90297ce539197c66a04a02a3694fdc8b01f1d892">commit 1</a>).
+Commit 2 asks every vLLM engine, during the pause, how many tokens each running call has made
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/c2bf309a7caf49ec711f04fd72c03e25f29b1240/nemo_rl/models/generation/vllm/vllm_worker_async.py#L268-L292"><code>captured_call_progress</code></a>),
+writes that as a <code>refit_cut</code> event, and splits the call there offline
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/c2bf309a7caf49ec711f04fd72c03e25f29b1240/nemo_rl/algorithms/rollout_checkpointing/trace.py#L183-L224"><code>tokens_by_version</code></a>).
+The figure runs both on two calls trained by a step that updates version 6.</p>
+
+<svg viewBox="0 0 940 380" role="img" aria-label="Two calls across a refit from v4 to v5, counted three ways">
+  <!-- time axis -->
+  <rect class="box" x="20" y="14" width="900" height="200" rx="8"/>
+  <rect class="band" x="330" y="22" width="120" height="184"/>
+  <text class="ot" x="40" y="42">weights v4</text>
+  <text class="lbl-b" x="350" y="42">refit</text>
+  <text class="note" x="338" y="58">generation paused</text>
+  <text class="bt" x="470" y="42">weights v5</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/c2bf309a7caf49ec711f04fd72c03e25f29b1240/nemo_rl/algorithms/single_controller.py#L4459-L4467"><text x="338" y="200">refit_cut read</text></a>
+
+  <!-- call A -->
+  <text class="lbl" x="40" y="94">call A</text>
+  <text class="note" x="40" y="110">began on v4</text>
+  <rect class="v4" x="150" y="82" width="180" height="22" rx="3"/>
+  <text class="lbl" x="200" y="98" style="fill:var(--bg)">30 tokens</text>
+  <line class="wait" x1="330" y1="93" x2="450" y2="93"/>
+  <rect class="v5" x="450" y="82" width="360" height="22" rx="3"/>
+  <text class="lbl" x="590" y="98" style="fill:var(--bg)">60 tokens</text>
+
+  <!-- call B -->
+  <text class="lbl" x="40" y="154">call B</text>
+  <text class="note" x="40" y="170">began during refit</text>
+  <circle cx="380" cy="153" r="5" style="fill:var(--red)"/>
+  <text class="r" x="244" y="140">stamped v4</text>
+  <line class="wait" x1="385" y1="153" x2="450" y2="153"/>
+  <rect class="v5" x="450" y="142" width="240" height="22" rx="3"/>
+  <text class="lbl" x="530" y="158" style="fill:var(--bg)">40 tokens</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/c2bf309a7caf49ec711f04fd72c03e25f29b1240/nemo_rl/algorithms/single_controller.py#L4544-L4549"><text x="560" y="186">stamp moves to v5 only after resume</text></a>
+
+  <!-- results table -->
+  <text class="note" x="40" y="240">Counted as (tokens @ version). Age = 6 − version. Legend: </text>
+  <text class="ot" x="420" y="240">v4 = age 2</text>
+  <text class="bt" x="520" y="240">v5 = age 1</text>
+  <text class="r" x="620" y="240">red = wrong version</text>
+
+  <line class="sep" x1="20" y1="252" x2="920" y2="252"/>
+  <text class="lbl-b" x="40" y="274"></text>
+  <text class="lbl-b" x="150" y="274">by start version</text>
+  <text class="note" x="150" y="288">commit 1, +159 lines</text>
+  <text class="lbl-b" x="420" y="274">exact split</text>
+  <text class="note" x="420" y="288">commits 1+2, +544 lines</text>
+  <text class="lbl-b" x="690" y="274">what really happened</text>
+
+  <text class="lbl" x="40" y="314">call A</text>
+  <text class="r" x="150" y="314">90 @ v4</text>
+  <text class="lbl" x="420" y="314">30 @ v4 + 60 @ v5</text>
+  <text class="lbl" x="690" y="314">30 @ v4 + 60 @ v5</text>
+
+  <text class="lbl" x="40" y="340">call B</text>
+  <text class="r" x="150" y="340">40 @ v4</text>
+  <text class="r" x="420" y="340">40 @ v4</text>
+  <text class="lbl" x="690" y="340">40 @ v5</text>
+
+  <line class="sep" x1="20" y1="352" x2="920" y2="352"/>
+  <text class="lbl-b" x="40" y="372">batch age</text>
+  <text class="r" x="150" y="372">260/130 = 2.00</text>
+  <text class="r" x="420" y="372">200/130 = 1.54</text>
+  <text class="g" x="690" y="372">160/130 = 1.23</text>
+</svg>
+
+<p>Both methods read high, never low: a token is never made by a version older than its call's stamp.
+Commit 1 is exact for every call that does not span a refit. The gap here is large only because one of two calls spans the refit;
+in a real batch most calls span none, and the PR's 6-step GPU run reports batch age only with the split, so the real gap is unknown.
+Call B is a separate, older issue: requests keep arriving during the pause, and the stamp only moves to the new version
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/c2bf309a7caf49ec711f04fd72c03e25f29b1240/nemo_rl/algorithms/single_controller.py#L4544-L4549">after resume</a>
+(ordering from <a href="https://github.com/NVIDIA-NeMo/RL/pull/3837">#3837</a>), so neither method can count it right.</p>
+
+<h2>What the exact split costs</h2>
+<table>
+<tr><th>Piece</th><th>Commit 1</th><th>Commit 2 adds</th></tr>
+<tr><td>Reassembler</td><td>sums tokens by start version per group</td><td>a per-call <code>call_versions</code> list (<a href="https://github.com/NVIDIA-NeMo/RL/blob/c2bf309a7caf49ec711f04fd72c03e25f29b1240/nemo_rl/experience/rollout_reassembler.py#L704-L713">L704-L713</a>)</td></tr>
+<tr><td>vLLM</td><td>nothing</td><td>a context variable linking a request to its call, a read of vLLM's private request state, and <code>captured_call_progress</code> on the <a href="https://github.com/NVIDIA-NeMo/RL/blob/c2bf309a7caf49ec711f04fd72c03e25f29b1240/nemo_rl/models/generation/interfaces.py#L722">interface</a>, <a href="https://github.com/NVIDIA-NeMo/RL/blob/c2bf309a7caf49ec711f04fd72c03e25f29b1240/nemo_rl/models/generation/vllm/vllm_generation.py#L1805-L1813">VllmGeneration</a>, the <a href="https://github.com/NVIDIA-NeMo/RL/blob/c2bf309a7caf49ec711f04fd72c03e25f29b1240/nemo_rl/models/generation/vllm/vllm_worker_async.py#L771-L783">worker</a> and the <a href="https://github.com/NVIDIA-NeMo/RL/blob/c2bf309a7caf49ec711f04fd72c03e25f29b1240/nemo_rl/models/generation/vllm/vllm_worker_async.py#L268-L292">HTTP client</a></td></tr>
+<tr><td>Controller</td><td>one <code>group_published</code> emit</td><td>a progress read inside the refit, while generation is paused (<a href="https://github.com/NVIDIA-NeMo/RL/blob/c2bf309a7caf49ec711f04fd72c03e25f29b1240/nemo_rl/algorithms/single_controller.py#L4459-L4467">L4459-L4467</a>)</td></tr>
+<tr><td>Trace</td><td><code>batch_age_by_step</code></td><td><code>refit_cut</code>, a <code>_cut_calls</code> set in the writer (<a href="https://github.com/NVIDIA-NeMo/RL/blob/c2bf309a7caf49ec711f04fd72c03e25f29b1240/nemo_rl/algorithms/rollout_checkpointing/trace.py#L75">L75</a>), and the split loop</td></tr>
+<tr><td>Lines</td><td class="num">+159 / −2</td><td class="num">+486 / −102</td></tr>
+</table>
+<p>The split code also needs work before it lands: an error in the progress read ends the run with generation still paused
+(only <code>RefitAborted</code> and <code>RayActorError</code> are
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/c2bf309a7caf49ec711f04fd72c03e25f29b1240/nemo_rl/algorithms/single_controller.py#L4470">caught</a>),
+its <code>ray.get</code> has no timeout, <code>_cut_calls</code> never forgets calls whose group is dropped, and the tests use fake vLLM objects.
+All of this moves with commit 2.</p>
+
+<h2>The fix — proposed, not in the PR</h2>
+<p class="where"><b>Where the fix lands: RL only.</b> Drop commit 2 from this PR
+(<a href="https://github.com/NVIDIA-NeMo/RL/pull/5049/commits/c2bf309a7caf49ec711f04fd72c03e25f29b1240">c2bf309a</a>), and move the stamp in
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/c2bf309a7caf49ec711f04fd72c03e25f29b1240/nemo_rl/algorithms/single_controller.py#L4448-L4458"><code>_sync_weights</code></a>
+so call B gets v5. No vLLM change.</p>
+<p>Nothing below is implemented. The second piece moves the stamp to right after the pause. A request that arrives later does not run until resume, so it runs only on the new weights:</p>
+<pre class="diff"><span class="hunk">@@ single_controller.py L4449-L4454 · _sync_weights (after the pause)</span>
+             generation_paused_for_refit = await asyncio.to_thread(
+                 self._gen.pause_generation_for_refit,
+                 clear_cache=clear_cache,
+                 timeout_s=timeout_s,
+             )
+<span class="add">+            if self._master_config.token_capture.enabled:
++                # Calls that start from here on run only on the new weights.
++                await asyncio.to_thread(
++                    self._gen.set_rollout_weight_version, self._trainer_version
++                )</span>
+<span class="hunk">@@ single_controller.py L4544-L4549 · _sync_weights (after resume)</span>
+<span class="del">-        if self._master_config.token_capture.enabled:
+-            # Rotate the version vLLM workers stamp on captured model calls
+-            # (per-call tagging; group staleness = min over the group's calls).
+-            await asyncio.to_thread(
+-                self._gen.set_rollout_weight_version, self._trainer_version
+-            )</span></pre>
+<p>With commit 1 plus this move, the figure's batch age is (90×2 + 40×1)/130 = 220/130 = <b>1.69</b>: still high for call A, now right for call B.
+<code>_trainer_version</code> is already bumped before <code>_sync_weights</code> runs, and the recovery path installs the same version, so the stamp is right even when a refit is retried.</p>
+<p class="cref">review comments — pending</p>
+
+<div class="warn"><b>So what.</b> Commit 1 alone gives a batch age that can only read high, for about a third of the code.
+Whether the exact split is worth its +486 lines and a read of vLLM's private state is a measurement question:
+the follow-up PR should report batch age for one run computed both ways.</div>
+
+</div>
+</body>
+</html>
