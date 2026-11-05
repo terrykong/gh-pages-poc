@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NVIDIA-NeMo/RL #5080 — SingleController drops the extra logprob pass when the loss does the filtering</title>
+<style>
+:root{
+  --bg:#0d1117; --surface:#161b22; --surface2:#1c2128; --border:#30363d;
+  --text:#e6edf3; --dim:#8b949e; --accent:#58a6ff; --green:#3fb950;
+  --orange:#d29922; --red:#f85149;
+}
+:root[data-theme="light"]{
+  --bg:#ffffff; --surface:#f6f8fa; --surface2:#eaeef2; --border:#d0d7de;
+  --text:#1f2328; --dim:#59636e; --accent:#0969da; --green:#1a7f37;
+  --orange:#9a6700; --red:#cf222e;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:28px 16px 70px}
+h1{font-size:22px;margin:0 0 8px;line-height:1.3}
+h2{font-size:18px;margin:30px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;
+  font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
+.sub{color:var(--dim);font-size:13.5px;margin:0 0 16px}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);
+  border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;
+  font:13px/1 ui-monospace,Menlo,monospace;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.18)}
+.status{border:1px solid var(--border);border-radius:10px;background:var(--surface);
+  padding:2px 16px 10px;margin:0 0 20px}
+.status dl{display:grid;grid-template-columns:max-content 1fr;gap:4px 14px;margin:12px 0 0}
+.status dt{color:var(--dim);font-size:12px;text-transform:uppercase;letter-spacing:.04em;
+  white-space:nowrap;padding-top:2px}
+.status dd{margin:0;font-size:14px}
+.verdict{font-weight:700}
+.verdict.good{color:var(--green)}
+.bg{border-left:3px solid var(--accent);background:var(--surface);padding:10px 14px;
+  margin:0 0 16px;border-radius:0 8px 8px 0;font-size:14px}
+.hl{border-left:3px solid var(--green);background:var(--surface);
+  padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0}
+.warn{border-left:3px solid var(--orange);background:var(--surface);
+  padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0}
+.cref{margin:6px 0 0;font-size:13px}
+.cref a{display:inline-block;padding:4px 10px;border:1px solid var(--border);
+  border-radius:16px;background:var(--surface);font:12.5px ui-monospace,Menlo,monospace}
+.cref a:hover{background:var(--surface2);text-decoration:none}
+.tip{border-bottom:1px dotted var(--dim);cursor:help;position:relative;outline:none}
+.tip:hover::after,.tip:focus::after{content:attr(data-tip);position:absolute;left:0;top:1.7em;z-index:60;
+  width:max-content;max-width:min(340px,80vw);white-space:normal;background:var(--surface2);color:var(--text);
+  border:1px solid var(--border);border-radius:6px;padding:7px 10px;font:13px/1.45 -apple-system,sans-serif;
+  font-weight:400;box-shadow:0 4px 14px rgba(0,0,0,.3)}
+svg{max-width:100%;height:auto;display:block;margin:16px 0}
+svg .box{fill:var(--surface);stroke:var(--border);stroke-width:1.4}
+svg .box-off{fill:var(--surface);stroke:var(--dim);stroke-width:1.2;stroke-dasharray:5 4}
+svg .box-red{fill:var(--surface);stroke:var(--red);stroke-width:2}
+svg .box-grn{fill:var(--surface);stroke:var(--green);stroke-width:2}
+svg .lane{fill:var(--accent);font:bold 14px -apple-system,sans-serif}
+svg .step{fill:var(--text);font:bold 12.5px -apple-system,sans-serif}
+svg .d{fill:var(--text);font:11.5px ui-monospace,Menlo,monospace}
+svg .dim{fill:var(--dim);font:11.5px ui-monospace,Menlo,monospace}
+svg .r{fill:var(--red);font:bold 11.5px ui-monospace,Menlo,monospace}
+svg .g{fill:var(--green);font:bold 11.5px ui-monospace,Menlo,monospace}
+svg .o{fill:var(--orange);font:bold 11.5px ui-monospace,Menlo,monospace}
+svg .rowlbl{fill:var(--dim);font:11px -apple-system,sans-serif}
+svg .arr{stroke:var(--dim);stroke-width:1.4;fill:none;marker-end:url(#ah)}
+svg .ahf{fill:var(--dim)}
+svg a text{text-decoration:underline;fill:var(--accent);font:11px ui-monospace,Menlo,monospace}
+svg .sw-r{fill:var(--red)} svg .sw-g{fill:var(--green)} svg .sw-o{fill:var(--orange)}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+  document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head>
+<body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+  function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+  function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
+    b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
+      else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+  document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+<div class="wrap">
+
+<h1>How SingleController skips the extra logprob pass when the loss drops the bad rows itself</h1>
+<p class="sub"><a href="https://github.com/NVIDIA-NeMo/RL/pull/5080">PR #5080</a> · related:
+<a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4171-single-forward.html">#4171 (the same flag for the regular trainer)</a>,
+<a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-5079-forced-ratio-one-step.html">#5079 (ready_first + forced ratio)</a>
+· permalinks pinned to <code>8cb3b94a</code></p>
+
+<div class="status">
+<dl>
+  <dt>Before</dt>
+  <dd>SingleController refused <code>loss_fn.seq_logprob_error_in_loss: true</code> at startup, so it always ran a separate policy-logprob forward just to find the bad rows.</dd>
+  <dt>This PR</dt>
+  <dd>Allows the flag for SingleController GRPO, skips that forward, and divides the gradient by the number of tokens the loss kept.</dd>
+  <dt>Status</dt>
+  <dd><span class="verdict good">New path added by this PR.</span> The review found no bug in the gradient or metric math. Four smaller review comments are open (a test that can't fail, a doc sentence, a missing L1 run, shared code).</dd>
+</dl>
+</div>
+
+<div class="bg"><b>Background.</b> In GRPO, each prompt gets several answers, called rows. A row is <b>rejected</b> when the trainer's log-probability of the whole answer differs too much from the one the generator reported (<code>grpo.seq_logprob_error_threshold</code>). Rejected rows get no gradient. The <b>baseline</b> is the group's average reward that each row's reward is compared with. Dotted words have a short explanation: hover or tap them.</div>
+
+<p>With the flag off, SingleController runs a separate forward pass to get the trainer's logprobs, finds the rejected rows, and zeroes them in <code>sample_mask</code> before computing advantages
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/8cb3b94acb2ad28c3690cf88b51d440832a8e302/nemo_rl/algorithms/single_controller_utils/advantage_stage.py#L461-L510">advantage_stage.py</a>).
+With the flag on, <a href="https://github.com/NVIDIA-NeMo/RL/blob/8cb3b94acb2ad28c3690cf88b51d440832a8e302/nemo_rl/algorithms/single_controller_utils/config.py#L1008-L1014"><code>logprob_passes_required</code></a> turns that pass off.
+The loss makes the same check from the training forward it already runs, zeroes the rejected rows, and reports how many tokens it kept
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/8cb3b94acb2ad28c3690cf88b51d440832a8e302/nemo_rl/algorithms/loss/loss_functions.py#L794-L810">loss_functions.py</a>).
+The Megatron worker adds those counts up over all chunks and all <span class="tip" tabindex="0" data-tip="Data-parallel ranks: copies of the model that each train on a different slice of the batch.">DP ranks</span>, then divides the gradient by them
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/8cb3b94acb2ad28c3690cf88b51d440832a8e302/nemo_rl/models/policy/workers/megatron_policy_worker.py#L2333-L2388"><code>_finish_train_step_body</code></a>).</p>
+
+<h2>Same 4 rows, both ways</h2>
+<p style="font-size:14px;color:var(--dim);margin:0">One group of 4 rows with 6, 5, 7 and 8 answer tokens (26 total). Row 1's sequence error is 2.9, over the 2.0 threshold.</p>
+
+<svg viewBox="0 0 900 560" role="img" aria-label="Two lanes: separate pass vs in-loss filtering">
+<defs><marker id="ah" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path class="ahf" d="M0,0 L8,4 L0,8 z"/></marker></defs>
+<text class="lane" x="20" y="24">flag off — separate pass</text>
+<text class="lane" x="465" y="24">flag on — this PR</text>
+
+<!-- row 1: rollout -->
+<text class="rowlbl" x="20" y="46">1 · rollout</text>
+<rect class="box" x="20" y="52" width="420" height="50" rx="7"/>
+<text class="d" x="32" y="72">rows 0..3, tokens [6, 5, 7, 8] → 26</text>
+<text class="dim" x="32" y="90">gen logprobs from the generator</text>
+<rect class="box" x="465" y="52" width="420" height="50" rx="7"/>
+<text class="d" x="477" y="72">rows 0..3, tokens [6, 5, 7, 8] → 26</text>
+<text class="dim" x="477" y="90">gen logprobs from the generator</text>
+<path class="arr" d="M230,102 L230,118"/><path class="arr" d="M675,102 L675,118"/>
+
+<!-- row 2: logprob pass -->
+<text class="rowlbl" x="20" y="132">2 · find rejected rows</text>
+<rect class="box-red" x="20" y="138" width="420" height="72" rx="7"/>
+<text class="step" x="32" y="157">extra policy forward (74 s/step in the PR's run)</text>
+<text class="d" x="32" y="176">seq error [0.3, </text><text class="r" x="142" y="176">2.9</text><text class="d" x="163" y="176">, 0.1, 0.6]</text>
+<text class="d" x="32" y="196">sample_mask → [1, </text><text class="r" x="157" y="196">0</text><text class="d" x="164" y="196">, 1, 1]</text>
+<rect class="box-off" x="465" y="138" width="420" height="72" rx="7"/>
+<text class="dim" x="477" y="160">skipped: logprob_passes_required → False</text>
+<text class="d" x="477" y="182">sample_mask stays [1, 1, 1, 1]</text>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/8cb3b94acb2ad28c3690cf88b51d440832a8e302/nemo_rl/algorithms/single_controller_utils/config.py#L1008-L1014"><text x="477" y="200">config.py#L1008</text></a>
+<path class="arr" d="M230,210 L230,226"/><path class="arr" d="M675,210 L675,226"/>
+
+<!-- row 3: advantage -->
+<text class="rowlbl" x="20" y="240">3 · advantage baseline (group average)</text>
+<rect class="box" x="20" y="246" width="420" height="72" rx="7"/>
+<text class="d" x="32" y="266">exclude: average over rows {0, 2, 3}</text>
+<text class="d" x="32" y="286">include: average over rows {0, 1, 2, 3}</text>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/8cb3b94acb2ad28c3690cf88b51d440832a8e302/nemo_rl/algorithms/single_controller_utils/advantage_stage.py#L536"><text x="32" y="306">advantage_stage.py#L536</text></a>
+<rect class="box" x="465" y="246" width="420" height="72" rx="7"/>
+<text class="d" x="477" y="266">exclude: average over rows {0, </text><text class="o" x="691" y="266">1</text><text class="d" x="698" y="266">, 2, 3}</text>
+<text class="d" x="477" y="286">include: average over rows {0, 1, 2, 3}</text>
+<text class="o" x="477" y="306">row 1 still votes (same as regular trainer)</text>
+<path class="arr" d="M230,318 L230,334"/><path class="arr" d="M675,318 L675,334"/>
+
+<!-- row 4: train forward -->
+<text class="rowlbl" x="20" y="348">4 · training forward + loss (one chunk at a time)</text>
+<rect class="box" x="20" y="354" width="420" height="72" rx="7"/>
+<text class="d" x="32" y="374">loss over rows {0, 2, 3}</text>
+<text class="d" x="32" y="394">backward: raw sum S (no division yet)</text>
+<text class="dim" x="32" y="414">kept-token count from sample_mask: 21</text>
+<rect class="box-grn" x="465" y="354" width="420" height="72" rx="7"/>
+<text class="d" x="477" y="374">loss checks seq error [0.3, </text><text class="r" x="670" y="374">2.9</text><text class="d" x="691" y="374">, 0.1, 0.6]</text>
+<text class="d" x="477" y="394">drops row 1, backward: raw sum S</text>
+<text class="g" x="477" y="414">reports valid_tokens 21, valid_seqs 3</text>
+<path class="arr" d="M230,426 L230,442"/><path class="arr" d="M675,426 L675,442"/>
+
+<!-- row 5: finish -->
+<text class="rowlbl" x="20" y="456">5 · finish step: sum over chunks + DP ranks, divide</text>
+<rect class="box" x="20" y="462" width="420" height="72" rx="7"/>
+<text class="d" x="32" y="482">N = 21 (from sample_mask)</text>
+<text class="g" x="32" y="502">gradient = S / 21</text>
+<rect class="box-grn" x="465" y="462" width="420" height="72" rx="7"/>
+<text class="d" x="477" y="482">N = 21 (from the loss's counts)</text>
+<text class="g" x="477" y="502">gradient = S / 21 · if N = 0 → RuntimeError</text>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/8cb3b94acb2ad28c3690cf88b51d440832a8e302/nemo_rl/models/policy/workers/megatron_policy_worker.py#L2333-L2375"><text x="477" y="522">megatron_policy_worker.py#L2333</text></a>
+
+<!-- legend -->
+<rect class="sw-r" x="20" y="546" width="10" height="10"/><text class="rowlbl" x="36" y="555">rejected row / the extra pass</text>
+<rect class="sw-o" x="230" y="546" width="10" height="10"/><text class="rowlbl" x="246" y="555">where the two lanes differ</text>
+<rect class="sw-g" x="420" y="546" width="10" height="10"/><text class="rowlbl" x="436" y="555">new in this PR; ends at the same gradient</text>
+</svg>
+
+<p>The two lanes end at the same gradient, <code>S / 21</code>: the sum over kept tokens divided by the number of kept tokens. That is the same result as dropping row 1 before training
+(<a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4171-single-forward.html">why, for the regular trainer</a>).
+They differ in one place. Under <code>masked_reward_policy: exclude</code>, row 1 still counts in the group average when the flag is on, because the baseline is set before the loss sees the row. The regular trainer does the same thing with the flag on, so the PR keeps the two trainers in step.</p>
+
+<h2>What the PR blocks, and what changes in the logs</h2>
+<p><a href="https://github.com/NVIDIA-NeMo/RL/blob/8cb3b94acb2ad28c3690cf88b51d440832a8e302/nemo_rl/algorithms/single_controller_utils/config.py#L1579-L1591"><code>validate_single_controller_config</code></a> rejects the flag for PPO and for
+<span class="tip" tabindex="0" data-tip="Token-capture mode that trains on shared prefixes as one owner. It masks whole owners, while the loss drops single rows, so the two do not match.">forest training</span>, then reuses the regular trainer's checks (threshold set, token-level loss, no MTP, draft, KL-in-reward, or distillation).
+With the flag on, the controller's own seq-error range metrics are gone; the count of rejected rows comes from the loss as <code>num_masked_seqs_by_logprob_error</code>, as in the regular trainer.</p>
+<p class="cref">🔵 review comments (C1–C4): <a href="https://github.com/NVIDIA-NeMo/RL/pull/5080/files">PR #5080 files</a></p>
+
+<div class="hl"><b>So what.</b> In the PR's run (multi-node MoE, 8,192 rows per step), skipping the extra pass cut step time from 354 s to 284 s (−20%), with reward, loss and entropy inside normal step-to-step noise. The gain shows up only when steps are training-bound. One thing to check before relying on it: that run used <code>ready_first</code> with a forced ratio, which this branch alone still rejects unless CISPO is on; <a href="https://github.com/NVIDIA-NeMo/RL/pull/5079">#5079</a> lifts that.</div>
+
+</div>
+</body>
+</html>
