@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NVIDIA-NeMo/RL #5079 — forcing the ratio to 1 is exact only on the first optimizer step</title>
+<style>
+:root{
+  --bg:#0d1117; --surface:#161b22; --surface2:#1c2128; --border:#30363d;
+  --text:#e6edf3; --dim:#8b949e; --accent:#58a6ff; --green:#3fb950;
+  --orange:#d29922; --red:#f85149;
+}
+:root[data-theme="light"]{
+  --bg:#ffffff; --surface:#f6f8fa; --surface2:#eaeef2; --border:#d0d7de;
+  --text:#1f2328; --dim:#59636e; --accent:#0969da; --green:#1a7f37;
+  --orange:#9a6700; --red:#cf222e;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:28px 16px 70px}
+h1{font-size:22px;margin:0 0 8px;line-height:1.3}
+h2{font-size:18px;margin:32px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;
+  font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
+.sub{color:var(--dim);font-size:13.5px;margin:0 0 16px}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);
+  border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;
+  font:13px/1 ui-monospace,Menlo,monospace;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.18)}
+.status{border:1px solid var(--border);border-radius:10px;background:var(--surface);
+  padding:2px 16px 10px;margin:0 0 20px}
+.status dl{display:grid;grid-template-columns:max-content 1fr;gap:4px 14px;margin:12px 0 0}
+.status dt{color:var(--dim);font-size:12px;text-transform:uppercase;letter-spacing:.04em;
+  white-space:nowrap;padding-top:2px}
+.status dd{margin:0;font-size:14px}
+.verdict{font-weight:700}
+.verdict.good{color:var(--green)}
+.hl{border-left:3px solid var(--green);background:var(--surface);padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0}
+.where{border-left:4px solid var(--accent);background:var(--surface);padding:6px 12px;margin:6px 0 10px}
+.diff{font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--surface);
+  border:1px solid var(--border);border-radius:8px;padding:12px;overflow-x:auto;white-space:pre;margin:10px 0}
+.diff .add{color:var(--green)}
+.diff .del{color:var(--red)}
+.diff .hunk{color:var(--accent)}
+.cref{margin:6px 0 0;font-size:13px}
+.cref a{display:inline-block;padding:4px 10px;border:1px solid var(--border);
+  border-radius:16px;background:var(--surface);font:12.5px ui-monospace,Menlo,monospace;margin:2px 4px 2px 0}
+.cref a:hover{background:var(--surface2);text-decoration:none}
+.figscroll{overflow-x:auto}
+.tex{overflow-x:auto;overflow-y:hidden;background:var(--surface);border:1px solid var(--border);
+  border-radius:8px;padding:6px 12px;margin:10px 0;font-family:ui-monospace,Menlo,monospace;font-size:12px}
+.tex .katex{font-size:1.1em}
+.t1{color:var(--orange)} .t2{color:var(--accent)} .t3{color:var(--green)}
+ul.terms{margin:6px 0 10px;padding-left:20px;font-size:14px}
+svg{min-width:760px;width:100%;height:auto;display:block;margin:16px 0}
+svg .box{fill:var(--surface);stroke:var(--border);stroke-width:1.4}
+svg .box-ok{fill:var(--surface);stroke:var(--green);stroke-width:2}
+svg .box-bad{fill:var(--surface);stroke:var(--red);stroke-width:2.2}
+svg .t{fill:var(--text);font:bold 12.5px -apple-system,sans-serif}
+svg .d{fill:var(--text);font:11px ui-monospace,Menlo,monospace}
+svg .dim{fill:var(--dim);font:11px -apple-system,sans-serif}
+svg .red{fill:var(--red);font:bold 11.5px -apple-system,sans-serif}
+svg .grn{fill:var(--green);font:bold 11.5px -apple-system,sans-serif}
+svg .lane{fill:var(--accent);font:bold 13px -apple-system,sans-serif}
+svg .arr{stroke:var(--dim);stroke-width:1.4;fill:none;marker-end:url(#ah)}
+svg .ahf{fill:var(--dim)}
+svg a text{text-decoration:underline;fill:var(--accent);font:11px ui-monospace,Menlo,monospace}
+</style>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+<script>window.addEventListener('load',function(){if(!window.katex)return;
+  document.querySelectorAll('.tex').forEach(function(e){try{katex.render(e.textContent,e,
+    {displayMode:true,trust:true,strict:false,throwOnError:false});}catch(x){}});});</script>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+  document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head>
+<body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+  function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+  function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
+    b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
+      else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+  document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+<div class="wrap">
+
+<h1>Forcing the policy ratio to 1 is exact only on the first optimizer step, whatever the sampler</h1>
+<p class="sub"><a href="https://github.com/NVIDIA-NeMo/RL/pull/5079">NVIDIA-NeMo/RL #5079</a>
+· fix(sc): allow forced ratio with ready_first for GRPO, and one-epoch PPO · permalinks pin the PR head <code>84afc6e</code>
+· background: <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4670-single-forward-cispo.html">the #4670 page on the same flag</a></p>
+
+<div class="status">
+<dl>
+  <dt>Before</dt>
+  <dd>SingleController's <code>ready_first</code> sampler rejected <code>force_on_policy_ratio: true</code> unless CISPO was on, even for GRPO, where it is safe. PPO accepted it with <code>ppo_epochs: 4</code> (the default), where epochs 2–4 train with no trust region. Neither trainer checked.</dd>
+  <dt>This PR</dt>
+  <dd>Drops the <code>ready_first</code> rejection. Adds one rule in both PPO trainers: a forced ratio needs <code>ppo.ppo_epochs: 1</code>.</dd>
+  <dt>Status</dt>
+  <dd><span class="verdict good">Fixed by this PR.</span> The review found no bugs. It asks for two small cleanups (end of page).</dd>
+</dl>
+</div>
+
+<p><b>What the flag does.</b> <code>force_on_policy_ratio: true</code> skips the extra trainer forward that
+computes <code>prev</code> (the trainer's log-probs before this step's update). The loss then uses
+<code>curr.detach()</code> in its place
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/84afc6ed9143141c755134bf5a394f22694ab182/nemo_rl/algorithms/loss/loss_functions.py#L779-L780">loss_functions.py L779-L780</a>),
+so the PPO ratio is 1 and is never clipped
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/84afc6ed9143141c755134bf5a394f22694ab182/nemo_rl/algorithms/loss/clipped_pg.py#L152-L155">clipped_pg.py L152-L155</a>).</p>
+
+<div class="tex">\mathcal{L}(\theta)=-\frac{1}{N}\sum_{t}\;
+\htmlClass{t1}{\underbrace{\mathrm{TIS}\!\left(\frac{\pi_{\text{prev}}(o_t)}{\pi_{\text{gen}}(o_t)}\right)}_{\text{(1) fixes sampler lag}}}
+\cdot
+\htmlClass{t2}{\underbrace{\min\!\Big(r_t A_t,\;\mathrm{clip}(r_t,1-\varepsilon,1+\varepsilon)\,A_t\Big)}_{\text{(2) trust region},\;\; r_t=\pi_\theta(o_t)/\pi_{\text{prev}}(o_t)}}</div>
+
+<ul class="terms">
+<li>π<sub>gen</sub>: vLLM's probability when it sampled the token. π<sub>prev</sub>: the trainer's weights at the start of the batch. π<sub>θ</sub>: the weights being trained, the only term with a gradient.</li>
+<li><span class="t1"><b>(1)</b></span> covers the gap between the weights vLLM used and the trainer's weights. With <code>ready_first</code> that gap is large, so the sampler requires <code>use_importance_sampling_correction: true</code>. The forced ratio keeps this term, as TIS(sg[π<sub>θ</sub>] / π<sub>gen</sub>).</li>
+<li><span class="t2"><b>(2)</b></span> covers how far the optimizer has moved from π<sub>prev</sub> <i>within</i> one batch. A forced ratio replaces <i>r<sub>t</sub></i> with 1 and drops the clip. That is only right when π<sub>θ</sub> = π<sub>prev</sub>, which is true on the first optimizer step on a batch and on no later one.</li>
+</ul>
+
+<h2>Which runs get more than one optimizer step per batch</h2>
+
+<p>One rollout batch, sampled by vLLM one weight version behind the trainer (what <code>ready_first</code> allows).
+The trainer starts at weights W0. Each optimizer step moves it on: W1, W2, W3.</p>
+
+<div class="figscroll">
+<svg viewBox="0 0 940 372" role="img" aria-label="Forced ratio matches the true ratio only on the first optimizer step of a batch">
+<defs><marker id="ah" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path class="ahf" d="M0,0 L8,4 L0,8 z"/></marker></defs>
+
+<text class="lane" x="10" y="20">GRPO on SingleController: 1 optimizer step per batch</text>
+<rect class="box-ok" x="10" y="30" width="210" height="78" rx="7"/>
+<text class="t" x="22" y="50">step 1 · weights W0</text>
+<text class="d" x="22" y="70">true r = W0 / W0 = 1</text>
+<text class="d" x="22" y="87">forced r = 1</text>
+<text class="grn" x="22" y="102">same</text>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/84afc6ed9143141c755134bf5a394f22694ab182/nemo_rl/algorithms/single_controller_utils/config.py#L1714-L1725"><text x="240" y="62">config.py L1714: batch = 1 optimizer step, every algorithm</text></a>
+<text class="dim" x="240" y="80">Streaming chunks add up gradients and still take one step.</text>
+<text class="dim" x="240" y="98">Was rejected with ready_first before this PR. Now allowed.</text>
+
+<text class="lane" x="10" y="140">PPO, ppo_epochs: 4 (the default), forced ratio</text>
+<rect class="box-ok" x="10" y="150" width="210" height="78" rx="7"/>
+<text class="t" x="22" y="170">epoch 1 · weights W0</text>
+<text class="d" x="22" y="190">true r = W0 / W0 = 1</text>
+<text class="d" x="22" y="207">forced r = 1</text>
+<text class="grn" x="22" y="222">same</text>
+<path class="arr" d="M220,189 L238,189"/>
+<rect class="box-bad" x="240" y="150" width="220" height="78" rx="7"/>
+<text class="t" x="252" y="170">epoch 2 · weights W1</text>
+<text class="d" x="252" y="190">true r = W1 / W0, clipped</text>
+<text class="d" x="252" y="207">forced r = 1, no clip</text>
+<text class="red" x="252" y="222">no trust region</text>
+<path class="arr" d="M460,189 L478,189"/>
+<rect class="box-bad" x="480" y="150" width="210" height="78" rx="7"/>
+<text class="t" x="492" y="170">epoch 3 · weights W2</text>
+<text class="d" x="492" y="190">true r = W2 / W0</text>
+<text class="d" x="492" y="207">forced r = 1</text>
+<text class="red" x="492" y="222">no trust region</text>
+<path class="arr" d="M690,189 L708,189"/>
+<rect class="box-bad" x="710" y="150" width="220" height="78" rx="7"/>
+<text class="t" x="722" y="170">epoch 4 · weights W3</text>
+<text class="d" x="722" y="190">true r = W3 / W0</text>
+<text class="d" x="722" y="207">forced r = 1</text>
+<text class="red" x="722" y="222">no trust region</text>
+
+<text class="lane" x="10" y="262">PPO, ppo_epochs: 1, forced ratio (now required)</text>
+<rect class="box-ok" x="10" y="272" width="210" height="62" rx="7"/>
+<text class="t" x="22" y="292">epoch 1 · weights W0</text>
+<text class="d" x="22" y="311">true r = forced r = 1</text>
+<text class="grn" x="22" y="327">same</text>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/84afc6ed9143141c755134bf5a394f22694ab182/nemo_rl/algorithms/single_controller_utils/config.py#L1426-L1433"><text x="240" y="292">SingleController: config.py L1426-L1433 raises ValueError</text></a>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/84afc6ed9143141c755134bf5a394f22694ab182/nemo_rl/algorithms/ppo.py#L539-L542"><text x="240" y="310">legacy trainer: ppo.py L539-L542 asserts at setup</text></a>
+<text class="dim" x="240" y="328">Both fire before any GPU work, for every sampler.</text>
+
+<rect class="box-ok" x="10" y="350" width="16" height="12" rx="2"/>
+<text class="dim" x="32" y="360">forced ratio equals the true one</text>
+<rect class="box-bad" x="250" y="350" width="16" height="12" rx="2"/>
+<text class="dim" x="272" y="360">forced ratio is wrong: the update is not clipped</text>
+<text class="dim" x="590" y="360">Term (1) handles vLLM's lag in every box.</text>
+</svg>
+</div>
+
+<p>The sampler never decides this. <code>ready_first</code> only makes term (1) bigger, and TIS already
+handles that. What decides is the number of optimizer steps on one batch. SingleController pins that to one
+for every algorithm, and only PPO's <code>ppo_epochs</code> can raise it. <code>value_training_mode</code>
+and <code>critic_ppo_epochs</code> change only the critic.</p>
+
+<h2>What the PR changes</h2>
+
+<p class="where"><b>Where the change lands: RL only, setup checks only.</b> No loss or trainer code changes.
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/84afc6ed9143141c755134bf5a394f22694ab182/nemo_rl/algorithms/single_controller_utils/config.py"><code>single_controller_utils/config.py</code></a>
+and <a href="https://github.com/NVIDIA-NeMo/RL/blob/84afc6ed9143141c755134bf5a394f22694ab182/nemo_rl/algorithms/ppo.py"><code>ppo.py</code></a>,
+plus tests and one docs paragraph. Legacy async PPO already rejects the forced ratio
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/84afc6ed9143141c755134bf5a394f22694ab182/examples/run_ppo.py#L67-L68">run_ppo.py L67-L68</a>), so it needs nothing.</p>
+
+<pre class="diff"><span class="hunk">@@ single_controller_utils/config.py base L1735-L1742 · validate_single_controller_config, ready_first block</span>
+         if not master_config.loss_fn.use_importance_sampling_correction:
+             raise ValueError("the ready_first sampler requires ...use_importance_sampling_correction=true")
+<span class="del">-        if (
+-            master_config.loss_fn.force_on_policy_ratio
+-            and not master_config.loss_fn.use_cispo
+-        ):
+-            raise ValueError(
+-                "the ready_first sampler requires "
+-                "loss_fn.force_on_policy_ratio=false unless loss_fn.use_cispo=true"
+-            )
+</span><span class="add">+        # TIS corrects generation staleness; a forced ratio stays exact with one
++        # optimizer step per batch (enforced for PPO in _validate_algo_settings).</span>
+<span class="hunk">@@ single_controller_utils/config.py L1426-L1433 · _validate_algo_settings, PPO-only branch</span>
+<span class="add">+    # A forced ratio equals the true one only on the first optimizer step taken
++    # on a batch; later epochs would train without any trust region.
++    if master_config.loss_fn.force_on_policy_ratio and algo_cfg.ppo_epochs != 1:
++        raise ValueError(
++            "loss_fn.force_on_policy_ratio=true requires ppo.ppo_epochs=1, got "
++            f"ppo.ppo_epochs={algo_cfg.ppo_epochs}. Set "
++            "loss_fn.force_on_policy_ratio=false to run multiple policy epochs."
++        )</span>
+<span class="hunk">@@ ppo.py L539-L542 · setup, force_on_policy_ratio block</span>
+             "force_on_policy_ratio requires train_global_batch_size == num_prompts_per_step * num_generations_per_prompt"
+         )
+<span class="add">+        # Later epochs on the same batch would train without any trust region.
++        assert ppo_config.ppo_epochs == 1, (
++            f"force_on_policy_ratio requires ppo.ppo_epochs=1, got {ppo_config.ppo_epochs}"
++        )</span></pre>
+
+<p>The first hunk is the one the CISPO-only exception
+(<a href="https://github.com/NVIDIA-NeMo/RL/pull/4670">#4670</a>) had already loosened; this PR removes the rest of it.
+The second and third close the gap the #4670 page noted: "PPO's <code>ppo_epochs</code> is not checked".
+No shipped PPO config sets <code>force_on_policy_ratio: true</code>, so no recipe breaks.
+The review ran the changed tests on CPU (all pass) and reverted each source change one at a time; each revert
+made at least one new test fail.</p>
+<!--CREFS-->
+
+<div class="hl"><b>So what.</b> GRPO users on SingleController can now combine <code>ready_first</code> with
+<code>force_on_policy_ratio: true</code> and skip the extra <code>prev</code> forward pass. The update is the same,
+since the true ratio is 1 anyway. The author's multi-node MoE run matched (reward 0.832 vs 0.830 over 14 steps).
+PPO users who set the flag must also set <code>ppo.ppo_epochs: 1</code>. Before this PR, the default of 4 silently
+trained 3 of every 4 epochs with no clip.</div>
+
+</div>
+</body>
+</html>
