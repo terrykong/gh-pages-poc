@@ -97,7 +97,7 @@ All permalinks pin the PR head <code>7171e5d</code>; removed code is linked at t
   <dt>This PR</dt>
   <dd>Moves that code into two new packages, with the same behavior. The controller drops to 4,714 lines. Source grows by about 850 lines and tests by about 510.</dd>
   <dt>Status</dt>
-  <dd><span class="verdict open">Cuts proposed, not in the PR.</span> The review found no bugs. The cuts below are review asks (C2, C3, C5–C10). Nothing here has been run.</dd>
+  <dd><span class="verdict open">Cuts proposed, not in the PR.</span> The review found no bugs. The cuts below are review asks (C3, C5–C10). Nothing here has been run.</dd>
 </dl>
 </div>
 
@@ -147,8 +147,8 @@ a 99-line test helper that rebuilds the controller's setup; and a design doc tha
   <text class="num" x="446" y="158">556</text><text class="ct" x="482" y="158">−6 C5</text>
 
   <a href="https://github.com/NVIDIA-NeMo/RL/blob/7171e5d2d945d56e99a8b5b8e10681783df9bf42/nemo_rl/environments/checkpointing/interfaces.py#L106-L170"><text class="lbl" x="12" y="182">…/checkpointing/interfaces.py</text></a>
-  <rect class="hdrb" x="300" y="170" width="11" height="16"/><rect class="body" x="311" y="170" width="23" height="16"/><rect class="cut" x="334" y="170" width="16" height="16"/>
-  <text class="num" x="356" y="182">201</text><text class="ct" x="390" y="182">−65 Protocols, ~35 move to Gym docstrings · C2</text>
+  <rect class="hdrb" x="300" y="170" width="11" height="16"/><rect class="body" x="311" y="170" width="39" height="16"/>
+  <text class="num" x="356" y="182">201</text>
 
   <a href="https://github.com/NVIDIA-NeMo/RL/blob/7171e5d2d945d56e99a8b5b8e10681783df9bf42/nemo_rl/algorithms/rollout_checkpointing/state.py"><text class="lbl" x="12" y="206">…/state.py</text></a>
   <rect class="hdrb" x="300" y="194" width="13" height="16"/><rect class="body" x="313" y="194" width="32" height="16"/><text class="num" x="351" y="206">181</text>
@@ -187,40 +187,10 @@ a 99-line test helper that rebuilds the controller's setup; and a design doc tha
   <text class="note" x="12" y="464">The 1,054-line test file is mostly moved: 27 of its 29 tests came from test_checkpoint_dispatch_races.py.</text>
 </svg>
 
-<h2>The largest source cut: delete the two Protocol classes (C2)</h2>
-<p class="where"><b>Where the fix lands: RL only, four files.</b>
-<a href="https://github.com/NVIDIA-NeMo/RL/blob/7171e5d2d945d56e99a8b5b8e10681783df9bf42/nemo_rl/environments/checkpointing/interfaces.py#L106-L170"><code>interfaces.py</code></a> loses both classes;
-three type hints change. Gym itself needs no change.</p>
-<p>Only one real backend exists, <a href="https://github.com/NVIDIA-NeMo/RL/blob/7171e5d2d945d56e99a8b5b8e10681783df9bf42/nemo_rl/environments/checkpointing/nemo_gym.py#L144"><code>GymEnvironmentCheckpoint</code></a>.
-The do-nothing backend, <a href="https://github.com/NVIDIA-NeMo/RL/blob/7171e5d2d945d56e99a8b5b8e10681783df9bf42/nemo_rl/environments/checkpointing/interfaces.py#L172"><code>NoEnvironmentCheckpoint</code></a>, does not use the Protocol, and the test stand-ins inherit from it.
-Nothing checks the Protocol while the program runs, so naming the two real classes keeps behavior the same and adds no <code>is None</code> checks.</p>
-<pre class="diff"><span class="hunk">@@ environments/checkpointing/interfaces.py L106-L170 · both Protocols</span>
-<span class="del">-class EnvironmentSnapshot(Protocol):
--    """The backend's part of one rollout snapshot, while the backend is paused."""
--    ...                                   # 3 members, docstrings only
--class EnvironmentCheckpoint(Protocol):
--    """Rollout state an environment backend keeps between turns."""
--    ...                                   # 5 members, docstrings only
-</span> class NoEnvironmentCheckpoint:
-<span class="hunk">@@ algorithms/rollout_checkpointing/state.py L156 · RolloutParts</span>
-<span class="del">-    environment_checkpoint: EnvironmentCheckpoint
-</span><span class="add">+    environment_checkpoint: GymEnvironmentCheckpoint | NoEnvironmentCheckpoint
-</span><span class="hunk">@@ algorithms/rollout_checkpointing/snapshots.py L462-L464 · _enter_environment_phase_unless_a_step_commits</span>
-<span class="del">-    ) -> tuple[bool, Optional[EnvironmentSnapshot]]:
-</span><span class="add">+    ) -> tuple[bool, Optional[GymEnvironmentSnapshot]]:
-</span><span class="hunk">@@ single_controller.py L509 and environments/checkpointing/__init__.py L37</span>
-<span class="del">-EnvironmentCheckpoint
-</span><span class="add">+GymEnvironmentCheckpoint | NoEnvironmentCheckpoint   # Gym type imported under TYPE_CHECKING
-</span></pre>
-<p style="font-size:13.5px">The rules the Protocol docstrings state, such as "yields None when there is nothing to save" and "drops the restore on an exception", move onto <code>GymEnvironmentCheckpoint</code>'s methods, which have none today.
-That is why the net saving is about 30 lines, not 65. It also makes the PR description's "concrete classes and no abstract layers" true.</p>
-<p class="cref"><a href="https://github.com/NVIDIA-NeMo/RL/pull/5011#discussion_r4477630535">C2 — interfaces.py:106</a></p>
-
 <div class="hl"><b>So what.</b> The move is right and the review found no bugs. The size is the issue: a move that keeps behavior the same still adds about 850 source and 510 test lines, and the next 10 PRs build on this shape.
-The comments trim about 160 lines: the Protocols (C2), the copied setup code in the test helper (C3), a pass-through method (C5), the private-method table in the doc (C6), a dead test (C7), duplicate test builders (C8), the doc's history of the refactor and its list of future refactors (C9), and a module list in a package docstring that is already out of date (C10).
+The comments trim about 130 lines: the copied setup code in the test helper (C3), a pass-through method (C5), the private-method table in the doc (C6), a dead test (C7), duplicate test builders (C8), the doc's history of the refactor and its list of future refactors (C9), and a module list in a package docstring that is already out of date (C10).
 One is about clarity, not size. C11: the restore docstrings say "the rollout state" without naming the four parts restored, and setup restores the TQ rows separately.
-<p class="cref"><a href="https://github.com/NVIDIA-NeMo/RL/pull/5011#discussion_r4477630535">C2 — interfaces.py:106</a>
-<a href="https://github.com/NVIDIA-NeMo/RL/pull/5011#discussion_r4477630540">C3 — _rollout_checkpoints.py:32</a>
+<p class="cref"><a href="https://github.com/NVIDIA-NeMo/RL/pull/5011#discussion_r4477630540">C3 — _rollout_checkpoints.py:32</a>
 <a href="https://github.com/NVIDIA-NeMo/RL/pull/5011#discussion_r4477630550">C5 — nemo_gym.py:131</a>
 <a href="https://github.com/NVIDIA-NeMo/RL/pull/5011#discussion_r4477630554">C6 — design doc:72</a>
 <a href="https://github.com/NVIDIA-NeMo/RL/pull/5011#discussion_r4477630564">C7 — gym checkpoint test:984</a>
