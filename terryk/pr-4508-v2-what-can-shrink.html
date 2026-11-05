@@ -1,0 +1,214 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PR #4508 v2: what can shrink</title>
+<style>
+:root{--bg:#0d1117;--surface:#161b22;--surface2:#1c2128;--border:#30363d;--text:#e6edf3;--dim:#8b949e;
+  --accent:#58a6ff;--green:#3fb950;--orange:#d29922;--red:#f85149}
+:root[data-theme="light"]{--bg:#ffffff;--surface:#f6f8fa;--surface2:#eaeef2;--border:#d0d7de;--text:#1f2328;
+  --dim:#59636e;--accent:#0969da;--green:#1a7f37;--orange:#9a6700;--red:#cf222e}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:28px 16px 70px}
+h1{font-size:22px;margin:0 0 8px;line-height:1.3}
+h2{font-size:18px;margin:32px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
+.sub{color:var(--dim);font-size:13.5px;margin:0 0 16px}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);
+  border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;
+  font:13px/1 ui-monospace,Menlo,monospace;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.18)}
+.status{border:1px solid var(--border);border-radius:10px;background:var(--surface);padding:2px 16px 10px;margin:0 0 20px}
+.status dl{display:grid;grid-template-columns:max-content 1fr;gap:4px 14px;margin:12px 0 0}
+.status dt{color:var(--dim);font-size:12px;text-transform:uppercase;letter-spacing:.04em;white-space:nowrap;padding-top:2px}
+.status dd{margin:0;font-size:14px}
+.verdict{font-weight:700}
+.verdict.open{color:var(--orange)}
+.hl{border-left:3px solid var(--accent);background:var(--surface);padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0}
+.where{border-left:4px solid var(--accent);background:var(--surface);padding:6px 12px;margin:6px 0 10px;font-size:14px}
+svg{max-width:100%;height:auto;display:block;margin:16px 0}
+svg .lbl{fill:var(--text);font:11px ui-monospace,Menlo,monospace}
+svg .num{fill:var(--dim);font:11px ui-monospace,Menlo,monospace}
+svg .keep{fill:var(--surface2);stroke:var(--border)}
+svg .moved{fill:var(--border);opacity:.9}
+svg .mt{fill:var(--text);font:10.5px -apple-system,sans-serif}
+svg .cut{fill:var(--orange);opacity:.9}
+svg .note{fill:var(--dim);font:11px -apple-system,sans-serif}
+svg .sep{stroke:var(--border);stroke-dasharray:4 4}
+.diff{font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--surface);
+  border:1px solid var(--border);border-radius:8px;padding:12px;overflow-x:auto;white-space:pre;margin:10px 0}
+.diff .add{color:var(--green)}
+.diff .del{color:var(--red)}
+.diff .hunk{color:var(--accent)}
+table{border-collapse:collapse;width:100%;font-size:14px;margin:10px 0}
+th,td{border:1px solid var(--border);padding:6px 10px;text-align:left;vertical-align:top}
+th{background:var(--surface)}
+.cref{margin:6px 0 0;font-size:13px}
+.cref a{display:inline-block;padding:4px 10px;border:1px solid var(--border);border-radius:16px;background:var(--surface);
+  font:12.5px ui-monospace,Menlo,monospace;margin:2px 4px 2px 0}
+.cref a:hover{background:var(--surface2);text-decoration:none}
+nav.chain{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 6px;padding:0}
+nav.chain a,nav.chain span{display:inline-block;padding:5px 11px;border:1px solid var(--border);border-radius:20px;
+  background:var(--surface);text-decoration:none;color:var(--accent);font-size:12.5px;line-height:1.3;white-space:nowrap}
+nav.chain a:hover{background:var(--surface2)}
+nav.chain span.here{background:var(--accent);color:var(--bg);border-color:var(--accent);font-weight:600}
+p.chainnote{color:var(--dim);font-size:12px;margin:0 0 18px}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+  document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head>
+<body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+  function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+  function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
+    b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
+      else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+  document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+<div class="wrap">
+
+<h1>Where #4508's 1,758 added lines go, and the ~210 that can go without changing behavior</h1>
+<p class="sub"><a href="https://github.com/NVIDIA-NeMo/RL/pull/4508">NVIDIA-NeMo/RL #4508</a>, part 9 of 11 in the partial-checkpointing stack.
+Line counts are the PR against its real base <code>f47c6b4</code> (#4612). Permalinks pin the PR head <code>6c72a0f</code>.
+The review comments are in a pending review; their links work once it is published.</p>
+
+<div class="status">
+<dl>
+  <dt>Before</dt>
+  <dd>Round 1 cut the PR from +2,802 to +1,758 lines: benchmark scripts out, one save loop, no repeated defaults. All 7 round-1 comments are fixed.</dd>
+  <dt>This PR</dt>
+  <dd>About 767 product lines (164 of them moved, not new) and about 991 test lines.</dd>
+  <dt>Status</dt>
+  <dd><span class="verdict open">Proposed, not in the PR.</span> The cuts below are review asks C8–C11. Only C8 changes behavior, and only after an interruption, where it matches what the code did before this PR. Not run, except where a row says so.</dd>
+</dl>
+</div>
+
+<nav class="chain">
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4508-batched-prefix-io.html">round 1 · old vs new path</a>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4508-size-and-reuse.html">round 1 · size and reuse</a>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4508-v2-batched-prefix-io.html">round 2 · old vs new path</a>
+  <span class="here">round 2 · what can shrink</span>
+</nav>
+<p class="chainnote">Four pages on this PR. The round-1 pages describe an older head. This one: what is still bigger than it needs to be.</p>
+
+<p>Most of the source change is reuse: the row encoding is the old single-row body moved into
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/6c72a0f19a41326222dd437652c16dc6ab959a96/nemo_rl/data_plane/tq_token_sink.py#L576"><code>_encode_record</code></a>.
+What is left over comes from earlier versions of this PR. The batch used to succeed or fail as a whole. Since commit <code>6c72a0f</code> each call fails on its own, but the code that only the whole-batch version needed is still there. On the read side, a later commit added a second retry and kept the first.</p>
+
+<h2>Lines added per file, and what each comment removes</h2>
+<svg viewBox="0 0 940 330" role="img" aria-label="Lines added per file with proposed cuts">
+<text class="note" x="262" y="24">gray = added by this PR · dark gray = moved from existing code · orange = what C8–C11 remove</text>
+<text class="lbl" x="10" y="54">test_vllm_token_capture_hosting.py</text>
+<rect class="keep" x="262" y="40" width="484" height="20" rx="3"/>
+<rect class="cut" x="718" y="40" width="28" height="20" rx="3"/>
+<text class="num" x="754" y="54">+510  −30 (C11)</text>
+<text class="lbl" x="10" y="86">tq_token_sink.py</text>
+<rect class="keep" x="262" y="72" width="255" height="20" rx="3"/>
+<rect class="moved" x="262" y="72" width="156" height="20" rx="3"/><text class="mt" x="268" y="86">164 moved, not new</text>
+<rect class="cut" x="497" y="72" width="20" height="20" rx="3"/>
+<text class="num" x="525" y="86">+268  −21 (C9)</text>
+<text class="lbl" x="10" y="118">test_prefix_read_batcher.py</text>
+<rect class="keep" x="262" y="104" width="244" height="20" rx="3"/>
+<rect class="cut" x="440" y="104" width="66" height="20" rx="3"/>
+<text class="num" x="514" y="118">+257  −70 (C10, C11)</text>
+<text class="lbl" x="10" y="150">generation_cut_capture.py</text>
+<rect class="keep" x="262" y="136" width="241" height="20" rx="3"/>
+<rect class="cut" x="477" y="136" width="27" height="20" rx="3"/>
+<text class="num" x="511" y="150">+254  −28 (C8)</text>
+<text class="lbl" x="10" y="182">prefix_read_batcher.py</text>
+<rect class="keep" x="262" y="168" width="166" height="20" rx="3"/>
+<rect class="cut" x="411" y="168" width="17" height="20" rx="3"/>
+<text class="num" x="436" y="182">+175  −18 (C10)</text>
+<text class="lbl" x="10" y="214">test_tq_token_sink.py</text>
+<rect class="keep" x="262" y="200" width="163" height="20" rx="3"/>
+<rect class="cut" x="383" y="200" width="43" height="20" rx="3"/>
+<text class="num" x="433" y="214">+172  −45 (C9, C11)</text>
+<text class="lbl" x="10" y="246">vllm_worker_async.py</text>
+<rect class="keep" x="262" y="232" width="36" height="20" rx="3"/>
+<text class="num" x="306" y="246">+38</text>
+<text class="lbl" x="10" y="278">config plumbing, other tests</text>
+<rect class="keep" x="262" y="264" width="80" height="20" rx="3"/>
+<text class="num" x="350" y="278">+84</text>
+<text class="note" x="10" y="314">Total about −67 product and −145 test lines. C10 also adds about 35 test lines, for two cases no test checks today.</text>
+</svg>
+
+<table>
+<tr><th>Comment</th><th>What goes</th><th>Why behavior stays</th></tr>
+<tr><td>C8</td><td>The second <code>yield</code> in <a href="https://github.com/NVIDIA-NeMo/RL/blob/6c72a0f19a41326222dd437652c16dc6ab959a96/nemo_rl/models/generation/generation_cut_capture.py#L1299-L1303"><code>_generation_cut_transaction</code></a>, the second loop in <code>flush()</code>, and a copy of the one-row write in <code>stage()</code></td><td>Each call already fails on its own. No test reaches the two branches that go: both were made to raise, and 144 tests still pass.</td></tr>
+<tr><td>C9</td><td><a href="https://github.com/NVIDIA-NeMo/RL/blob/6c72a0f19a41326222dd437652c16dc6ab959a96/nemo_rl/data_plane/tq_token_sink.py#L531"><code>_stage_at_key</code></a> (now one caller), a one-line <code>_discard_failed_write</code> wrapper, and an <code>attachments</code> argument no caller passes</td><td>Leftovers from deleting the one-row save. Nothing in the product code reaches them.</td></tr>
+<tr><td>C10</td><td>The key-by-key retry in <a href="https://github.com/NVIDIA-NeMo/RL/blob/6c72a0f19a41326222dd437652c16dc6ab959a96/nemo_rl/models/generation/prefix_read_batcher.py#L95-L102"><code>PrefixReadBatcher._read</code></a>, and <code>max_pending</code>, which no caller sets</td><td>The request already re-reads its own keys when the shared read fails, so a bad row still fails only its owner.</td></tr>
+<tr><td>C11</td><td>Repeated test helpers and checks in three test files</td><td>Test-only. The trimmed batcher file passes 12/12; the rollback helper passes 144.</td></tr>
+</table>
+<p class="cref"><a href="#C8_URL">C8 — generation_cut_capture.py:1299</a>
+<a href="#C9_URL">C9 — tq_token_sink.py:531</a>
+<a href="#C10_URL">C10 — prefix_read_batcher.py:95</a>
+<a href="#C11_URL">C11 — test_prefix_read_batcher.py:23</a></p>
+
+<h2>The biggest source cut: one step per call, one loop (C8) — proposed, not in the PR</h2>
+<p class="where"><b>Where the fix lands: RL only, one file.</b>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/6c72a0f19a41326222dd437652c16dc6ab959a96/nemo_rl/models/generation/generation_cut_capture.py#L1093"><code>_generation_cut_transaction</code></a> and
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/6c72a0f19a41326222dd437652c16dc6ab959a96/nemo_rl/models/generation/generation_cut_capture.py#L1408"><code>flush()</code></a> in generation_cut_capture.py.
+<b>No Gym change:</b> Gym already takes one acknowledgement per call.</p>
+
+<pre class="diff"><span class="hunk">@@ generation_cut_capture.py L1296-L1304 · _generation_cut_transaction</span>
+                         terminal_stop_reason=terminal_stop_reason,
+                     )
+<span class="del">-                if chunk_token_ids:
+-                    # Validate every acknowledgement in a batch before sealing
+-                    # any frozen cut into its live request state. A failed
+-                    # acknowledgement leaves the cut available for rollback.
+-                    yield acknowledgement
+</span>                 with state.lock:
+                     state.seal_frozen_cut(checkpoint_id)
+<span class="hunk">@@ generation_cut_capture.py L1421-L1447 · flush</span>
+                 keys = stage(batch)
+<span class="del">-                ready = []
+</span>                 for (transaction, _, _, prefix), key in zip(batch, keys, strict=True):
+                     handed += 1
+                     if key is None:
+                         # Closing rolls the frozen cut back.
+                         transaction.close()
+                         continue
+                     try:
+<span class="del">-                        # A failure here rolls the call back and clears its row.
+-                        ready.append((transaction, prefix, transaction.send(key)))
+-                    except Exception:
+-                        fail(prefix)
+-                # Every acknowledgement in the batch is built before any call
+-                # seals its frozen cut into its live request state.
+-                for transaction, prefix, acknowledgement in ready:
+-                    try:
+-                        transaction.send(None)
+-                    except StopIteration:
+-                        acknowledgements.append(acknowledgement)
+-                    except Exception:
+-                        fail(prefix)
+-                    else:
+-                        transaction.close()
+-                        acknowledgements.append(
+-                            self._failed_generation_cut_ack(prefix, reason="cut_error")
+-                        )
+</span><span class="add">+                        # Builds the ack and seals; a failure rolls back and clears the row.
++                        transaction.send(key)
++                    except StopIteration as done:
++                        acknowledgements.append(done.value)
++                    except Exception:
++                        fail(prefix)</span></pre>
+<p style="font-size:13.5px">What each piece does: the generator now builds the acknowledgement and seals in one step, as the code before this PR did for every call
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/f47c6b48b86c7edcf3342ba65b5a57ad1d66b665/nemo_rl/models/generation/generation_cut_capture.py#L1074">base <code>_checkpoint_active_generation_cut</code></a>).
+<code>send(key)</code> then ends with <code>StopIteration</code>, which carries the acknowledgement. A failure still rolls the call back, through the generator's own <code>except BaseException</code>.
+The one change: if the batch is interrupted partway (for example by <code>KeyboardInterrupt</code>), calls earlier in that batch stay saved instead of rolling back. Batch size 1 already behaves this way today, and so did the code before this PR.
+One test, <code>test_worker_batch_interruption_clears_rows_no_call_received</code>, needs its expectation updated. Not run.</p>
+<p class="cref"><a href="#C8_URL">C8 — generation_cut_capture.py:1299</a></p>
+
+<div class="hl"><b>So what.</b> Nothing here is a bug in normal use, and the design is sound. But this is part 9 of a stack past 20k lines. About 67 source lines and 145 test lines can go without changing what the code does.
+Two smaller items are in the same review: <code>aclose()</code> can wait forever on a stopped event loop (C12, a one-line fix). And before merge the PR still needs CI on this head, the end-to-end save time, and the size of the largest put with routes on.
+<p class="cref"><a href="#C12_URL">C12 — prefix_read_batcher.py:156</a></p></div>
+
+</div>
+</body>
+</html>
