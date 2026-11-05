@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NVIDIA-NeMo/RL #5095 — detached MTP heads under in-loss filtering</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+<script>window.addEventListener('load',function(){if(!window.katex)return;
+  document.querySelectorAll('.tex').forEach(function(e){try{katex.render(e.textContent,e,
+    {displayMode:true,trust:true,strict:false,throwOnError:false});}catch(x){}});});</script>
+<style>
+:root{--bg:#0d1117;--surface:#161b22;--surface2:#1c2128;--border:#30363d;--text:#e6edf3;--dim:#8b949e;
+  --accent:#58a6ff;--green:#3fb950;--red:#f85149;--orange:#d29922;--purple:#bc8cff}
+:root[data-theme="light"]{--bg:#ffffff;--surface:#f6f8fa;--surface2:#eaeef2;--border:#d0d7de;--text:#1f2328;
+  --dim:#59636e;--accent:#0969da;--green:#1a7f37;--red:#cf222e;--orange:#9a6700;--purple:#8250df}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:28px 16px 70px}
+h1{font-size:22px;margin:0 0 8px;line-height:1.3}
+h2{font-size:18px;margin:30px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
+.sub{color:var(--dim);font-size:13.5px;margin:0 0 16px}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);
+  border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;
+  font:13px/1 ui-monospace,Menlo,monospace;cursor:pointer}
+.status{border:1px solid var(--border);border-radius:10px;background:var(--surface);padding:2px 16px 10px;margin:0 0 20px}
+.status dl{display:grid;grid-template-columns:max-content 1fr;gap:4px 14px;margin:12px 0 0}
+.status dt{color:var(--dim);font-size:12px;text-transform:uppercase;letter-spacing:.04em;white-space:nowrap;padding-top:2px}
+.status dd{margin:0;font-size:14px}
+.verdict{font-weight:700}.verdict.good{color:var(--green)}.verdict.open{color:var(--red)}
+.bg{border-left:3px solid var(--accent);background:var(--surface);padding:10px 14px;margin:0 0 16px;border-radius:0 8px 8px 0;font-size:14px}
+.tex{overflow-x:auto;overflow-y:hidden;padding:4px 0}
+.t1{color:var(--green)}.t2{color:var(--purple)}.t3{color:var(--orange)}
+.tip{border-bottom:1px dotted var(--dim);cursor:help;position:relative;outline:none}
+.tip:hover::after,.tip:focus::after{content:attr(data-tip);position:absolute;left:0;top:1.7em;z-index:60;
+  width:max-content;max-width:min(340px,80vw);white-space:normal;background:var(--surface2);color:var(--text);
+  border:1px solid var(--border);border-radius:6px;padding:7px 10px;font:13px/1.45 -apple-system,sans-serif;
+  font-weight:400;box-shadow:0 4px 14px rgba(0,0,0,.3)}
+svg{max-width:100%;height:auto;display:block;margin:14px 0}
+svg .box{fill:var(--surface);stroke:var(--border);stroke-width:1.3}
+svg .lbl{fill:var(--text);font:12.5px ui-monospace,Menlo,monospace}
+svg .lbl-b{fill:var(--text);font:bold 13px -apple-system,sans-serif}
+svg .note{fill:var(--dim);font:11.5px -apple-system,sans-serif}
+svg .hdr{fill:var(--accent);font:bold 12.5px -apple-system,sans-serif}
+svg .ok{fill:var(--green);opacity:.55;stroke:var(--green)}
+svg .rej{fill:var(--red);opacity:.5;stroke:var(--red)}
+svg .good{fill:var(--green);font:bold 12.5px ui-monospace,Menlo,monospace}
+svg .bad{fill:var(--red);font:bold 12.5px ui-monospace,Menlo,monospace}
+svg .mtp{fill:var(--purple);font:bold 12.5px ui-monospace,Menlo,monospace}
+svg .arr{stroke:var(--dim);stroke-width:1.4;fill:none}
+svg a text{text-decoration:underline;fill:var(--accent);font:11.5px ui-monospace,Menlo,monospace}
+.diff{font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--surface);
+  border:1px solid var(--border);border-radius:8px;padding:12px;overflow-x:auto;white-space:pre;margin:10px 0}
+.diff .add{color:var(--green)}.diff .del{color:var(--red)}.diff .hunk{color:var(--accent)}
+.where{border-left:4px solid var(--accent);background:var(--surface);padding:6px 12px;margin:6px 0 10px}
+.warn{border-left:3px solid var(--orange);background:var(--surface);padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0}
+.cref{margin:6px 0 0;font-size:13px}
+.cref a{display:inline-block;padding:4px 10px;border:1px solid var(--border);border-radius:16px;background:var(--surface);font:12.5px ui-monospace,Menlo,monospace}
+.cref a:hover{background:var(--surface2);text-decoration:none}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+  document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head>
+<body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+  function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+  function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
+    b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
+      else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+  document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+<div class="wrap">
+
+<h1>How detached MTP heads keep the right gradient scale when the loss drops sequences</h1>
+<p class="sub"><a href="https://github.com/NVIDIA-NeMo/RL/pull/5095">NVIDIA-NeMo/RL #5095</a>, stacked on
+<a href="https://github.com/NVIDIA-NeMo/RL/pull/5080">#5080</a> (in-loss filtering).
+All permalinks pin the PR head <code>a0185fd3</code>.</p>
+
+<div class="status"><dl>
+  <dt>Before</dt>
+  <dd>Turning on <code>loss_fn.seq_logprob_error_in_loss</code> with any MTP config failed at startup with an error.</dd>
+  <dt>This PR</dt>
+  <dd>Allows it when MTP heads are detached, and divides the MTP gradients by the token count from <em>before</em> filtering, in both trainers.</dd>
+  <dt>Status</dt>
+  <dd><span class="verdict good">New in this PR. The math is correct in both trainers.</span>
+  <span class="verdict open">One existing unit test now fails</span> because the PR adds a value to a reduce that test checks
+  (review C1, below). Attached heads are still rejected.</dd>
+</dl></div>
+
+<div class="bg"><b>Background.</b> <span class="tip" tabindex="0" data-tip="Multi-token prediction: extra heads that predict tokens 2, 3, … ahead. They are used as a draft model for speculative decoding and train with their own auxiliary loss.">MTP heads</span>
+are small extra layers trained next to the policy. With
+<span class="tip" tabindex="0" data-tip="policy.megatron_cfg.mtp_detach_heads. Megatron-LM detaches the backbone hidden state, the embedding input and the output-layer weight before the MTP heads use them, and tags every MTP weight grad_norm_group='mtp'.">detached heads</span>,
+their loss changes only their own weights
+(<a href="https://github.com/NVIDIA/Megatron-LM/blob/3e95097b4a9ab6ea6b2a39eb2b2b24e4a6dfa54a/megatron/core/transformer/multi_token_prediction.py#L1168-L1172">output weight</a>,
+<a href="https://github.com/NVIDIA/Megatron-LM/blob/3e95097b4a9ab6ea6b2a39eb2b2b24e4a6dfa54a/megatron/core/transformer/multi_token_prediction.py#L2666-L2667">hidden state</a>,
+<a href="https://github.com/NVIDIA/Megatron-LM/blob/3e95097b4a9ab6ea6b2a39eb2b2b24e4a6dfa54a/megatron/core/transformer/multi_token_prediction.py#L2416-L2419">tagging</a>).
+<span class="tip" tabindex="0" data-tip="seq_logprob_error_in_loss (#5080): instead of a separate forward pass to find sequences whose trainer and vLLM logprobs disagree, the training loss itself zeroes those sequences. The survivor count is only known after every microbatch has run.">In-loss filtering</span>
+drops bad sequences inside the training loss, so the number of surviving tokens is only known at the end of the step.
+Dotted words have a short explanation: hover or tap them.</div>
+
+<p>The two losses see different tokens. The policy loss counts only the surviving tokens (<b>K</b>).
+The MTP loss mask is <code>token_mask × sample_mask</code>, built before the forward pass
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/a0185fd36f36a3d390615152b9d55aa4a85148db/nemo_rl/models/policy/workers/megatron_policy_worker.py#L1480-L1483">train</a>,
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/a0185fd36f36a3d390615152b9d55aa4a85148db/nemo_rl/models/policy/workers/megatron_policy_worker.py#L2165">split path</a>).
+The filter never touches it, so MTP sums over <em>all</em> tokens (<b>G</b>).
+Each sum must be divided by its own count. Since only MTP weights get the MTP gradient, the PR can fix their scale on its own.</p>
+
+<div class="tex">\text{policy grad} = \frac{1}{\htmlClass{t1}{K}}\sum_{\text{kept tokens}}\nabla\ell
+\qquad
+\text{MTP grad} = \frac{1}{\htmlClass{t2}{G}}\sum_{\text{all tokens}}\nabla\ell_{\text{mtp}}</div>
+<p style="font-size:14px"><span class="t1"><b>K</b></span>: tokens that survive the filter.
+<span class="t2"><b>G</b></span>: tokens before filtering. The step that fixes MTP is always the
+<span class="t3"><b>×K/G</b></span> on MTP-tagged weights only, by
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/a0185fd36f36a3d390615152b9d55aa4a85148db/nemo_rl/models/policy/workers/megatron_policy_worker.py#L3527"><code>_scale_mtp_param_grads</code></a>.</p>
+
+<h2>One batch, two trainers, same result</h2>
+
+<svg viewBox="0 0 900 470" role="img" aria-label="Three sequences of 4, 5 and 6 tokens; the 6-token one is rejected. K=9, G=15. Both trainers end with policy divided by 9 and MTP by 15.">
+  <text class="hdr" x="16" y="22">One step: 3 sequences, the 6-token one is rejected by the threshold</text>
+  <text class="lbl" x="16" y="56">seq A</text>
+  <rect class="ok" x="90" y="42" width="30" height="20"/><rect class="ok" x="124" y="42" width="30" height="20"/><rect class="ok" x="158" y="42" width="30" height="20"/><rect class="ok" x="192" y="42" width="30" height="20"/>
+  <text class="lbl" x="16" y="84">seq B</text>
+  <rect class="ok" x="90" y="70" width="30" height="20"/><rect class="ok" x="124" y="70" width="30" height="20"/><rect class="ok" x="158" y="70" width="30" height="20"/><rect class="ok" x="192" y="70" width="30" height="20"/><rect class="ok" x="226" y="70" width="30" height="20"/>
+  <text class="lbl" x="16" y="112">seq C</text>
+  <rect class="rej" x="90" y="98" width="30" height="20"/><rect class="rej" x="124" y="98" width="30" height="20"/><rect class="rej" x="158" y="98" width="30" height="20"/><rect class="rej" x="192" y="98" width="30" height="20"/><rect class="rej" x="226" y="98" width="30" height="20"/><rect class="rej" x="260" y="98" width="30" height="20"/>
+  <rect class="ok" x="330" y="46" width="16" height="12"/><text class="note" x="352" y="57">kept: policy and MTP both train on it</text>
+  <rect class="rej" x="330" y="102" width="16" height="12"/><text class="note" x="352" y="113">rejected: policy loss zeroes it; MTP still trains on it</text>
+  <text class="good" x="330" y="82">K = 4 + 5 = 9 kept tokens</text>
+  <text class="mtp" x="600" y="82">G = 9 + 6 = 15 all tokens</text>
+
+  <text class="lbl-b" x="16" y="160">Non-streaming trainer</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/a0185fd36f36a3d390615152b9d55aa4a85148db/nemo_rl/models/policy/workers/megatron_policy_worker.py#L1306"><text x="200" y="160">_normalize_in_loss_seq_filter</text></a>
+  <rect class="box" x="16" y="172" width="250" height="56" rx="6"/>
+  <text class="lbl" x="28" y="194">forward: every loss ÷ 15</text>
+  <text class="note" x="28" y="214">both policy and MTP use G here</text>
+  <rect class="box" x="300" y="172" width="250" height="56" rx="6"/>
+  <text class="lbl" x="312" y="194">all grads × 15/9</text>
+  <text class="note" x="312" y="214">policy now ÷9 ✓, MTP now ÷9 ✗</text>
+  <rect class="box" x="584" y="172" width="300" height="56" rx="6" style="stroke:var(--orange);stroke-width:2"/>
+  <text class="lbl" x="596" y="194">NEW: MTP grads × 9/15</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/a0185fd36f36a3d390615152b9d55aa4a85148db/nemo_rl/models/policy/workers/megatron_policy_worker.py#L1373-L1375"><text x="596" y="214">L1373-1375</text></a>
+  <path class="arr" d="M266 200 L298 200 M292 195 L298 200 L292 205"/>
+  <path class="arr" d="M550 200 L582 200 M576 195 L582 200 L576 205"/>
+
+  <text class="lbl-b" x="16" y="270">SingleController (split) trainer</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/a0185fd36f36a3d390615152b9d55aa4a85148db/nemo_rl/models/policy/workers/megatron_policy_worker.py#L2331"><text x="250" y="270">_finish_train_step_body</text></a>
+  <rect class="box" x="16" y="282" width="250" height="56" rx="6" style="stroke:var(--orange);stroke-width:2"/>
+  <text class="lbl" x="28" y="304">NEW: DP all-reduce sends</text>
+  <text class="lbl" x="28" y="322">[seqs 2, kept 9, all 15]</text>
+  <rect class="box" x="300" y="282" width="250" height="56" rx="6"/>
+  <text class="lbl" x="312" y="304">raw sums; all grads × 1/9</text>
+  <text class="note" x="312" y="324">policy ÷9 ✓, MTP ÷9 ✗</text>
+  <rect class="box" x="584" y="282" width="300" height="56" rx="6" style="stroke:var(--orange);stroke-width:2"/>
+  <text class="lbl" x="596" y="304">CHANGED: MTP × 9/15 (was 9/9)</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/a0185fd36f36a3d390615152b9d55aa4a85148db/nemo_rl/models/policy/workers/megatron_policy_worker.py#L2413-L2416"><text x="596" y="324">L2382, L2413-2416</text></a>
+  <path class="arr" d="M266 310 L298 310 M292 305 L298 310 L292 315"/>
+  <path class="arr" d="M550 310 L582 310 M576 305 L582 310 L576 315"/>
+
+  <rect class="box" x="16" y="370" width="868" height="84" rx="8" style="stroke:var(--green)"/>
+  <text class="lbl-b" x="30" y="394">Both trainers end the same</text>
+  <text class="good" x="30" y="418">policy weights: sum over 9 kept tokens ÷ 9</text>
+  <text class="mtp" x="460" y="418">MTP weights: sum over 15 tokens ÷ 15</text>
+  <text class="note" x="30" y="440">Without the ×9/15 step, MTP gradients would be 15/9 ≈ 1.67× too large in this step. Orange = changed by this PR.</text>
+</svg>
+
+<h2>The change</h2>
+<p class="where"><b>Where it lands: RL only.</b>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/a0185fd36f36a3d390615152b9d55aa4a85148db/nemo_rl/algorithms/grpo.py#L590-L598"><code>grpo.py</code></a> lets detached MTP through the check;
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/a0185fd36f36a3d390615152b9d55aa4a85148db/nemo_rl/models/policy/workers/megatron_policy_worker.py#L1373-L1375"><code>megatron_policy_worker.py</code></a> fixes the scale in both trainers.
+<b>No Megatron-LM change:</b> detached heads already keep the MTP gradient off shared weights.</p>
+<pre class="diff"><span class="hunk">@@ megatron_policy_worker.py L1372-L1375 · _normalize_in_loss_seq_filter (non-streaming)</span>
+             self.model.scale_gradients(token_factor)          # all grads × G/K
+<span class="add">+            if mtp_detached:
++                self._scale_mtp_param_grads(1.0 / token_factor)  # MTP back to ÷G</span>
+<span class="hunk">@@ megatron_policy_worker.py L2362, L2382 · _finish_train_step_body (SingleController)</span>
+                         m["seq_logprob_error_valid_tokens"] ...
+<span class="add">+                    state["local_valid_toks"].item(),          # pre-filter count, rides the same all-reduce</span>
+<span class="del">-        draft_step_state.set_global_counts(to_reduce[2:])</span>
+<span class="add">+        mtp_valid_toks = to_reduce[2] if in_loss_filter else global_valid_toks
++        draft_step_state.set_global_counts(to_reduce[policy_counts.numel() :])</span>
+<span class="hunk">@@ megatron_policy_worker.py L2414-L2415</span>
+             self._scale_mtp_param_grads(
+<span class="del">-                float((n_safe / global_valid_toks.clamp(min=1)).item())</span>
+<span class="add">+                float((n_safe / mtp_valid_toks.clamp(min=1)).item())</span>
+             )</pre>
+<p>In the SingleController trainer the policy count and the pre-filter count share one DP all-reduce, so no new collective is added.
+The draft counts move one slot to the right; draft training is still rejected with in-loss filtering, so that slice is empty here.</p>
+
+<div class="warn"><b>So what.</b> Detached MTP now works with in-loss filtering. The author measured a 19% faster step on an MoE model with 5 MTP heads, and reward and MTP acceptance stayed within one step-to-step standard deviation.
+Two things to know. <b>(1)</b> MTP now also trains on sequences the threshold rejects. In the separate-pass mode those are dropped from MTP too, so switching modes changes MTP's training data.
+<b>(2)</b> The PR adds a third value to the all-reduce, but an existing test still expects two values, so it fails (review C1).
+<span id="crefs"></span></div>
+
+</div>
+</body>
+</html>
