@@ -196,6 +196,24 @@ if chunk &lt; floor: no chunk — wait 5 ms, ask again</div>
   <text class="d" x="210" y="396">faded = this sampler does not allow it right now</text>
 </svg>
 
+<h2>Eager, not patient: before vs after this PR</h2>
+<p>The sampler never waits to collect more than the floor. As soon as at least the floor is ready, it sends
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/391cb0fc7f4f4f6ea6d6b57d553e1c290eedcf90/nemo_rl/algorithms/async_utils/staleness_sampler.py#L345-L351">everything ready, up to the max</a>. Also, the pump does not ask again while it is training a chunk,
+so groups pile up meanwhile and the next ask takes the pile. Example: floor 8, step of 32, any sampler that allows these groups:</p>
+<table>
+<tr><th>Moment</th><th>Ready</th><th>Before: no cap</th><th>This PR: cap 8</th></tr>
+<tr><td>first ask</td><td>8</td><td>sends 8 (24 left)</td><td>sends 8 (24 left)</td></tr>
+<tr><td>12 more finish while chunk 1 trains</td><td>12</td><td>sends <b>all 12</b> (12 left)</td><td>sends <b>8</b>, 4 stay in the buffer (16 left)</td></tr>
+<tr><td>buffer already full at step start</td><td>32</td><td>sends <b>all 32</b>: one chunk</td><td>sends <b>8</b>, four times</td></tr>
+</table>
+<p>It only waits for the whole step if the floor equals <code>num_prompts_per_step</code> — which is what both example YAMLs set.
+PPO adds two small exceptions: it rounds each chunk down to its group multiple, and it can
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/391cb0fc7f4f4f6ea6d6b57d553e1c290eedcf90/nemo_rl/algorithms/async_utils/staleness_sampler.py#L350-L351">hold back a chunk</a> that would leave a very small leftover at the end of the step.</p>
+<p><b>Why a cap?</b> Not because 32 is too much work: the step trains on 32 groups either way, and more chunks mean more per-chunk work.
+The author's goal is the last row: on a large run the whole step was ready at once, became one chunk, and generation sat idle
+during training. Smaller chunks are meant to let generation keep working. Whether they do is open — the gates that hold generation
+back only open when the step closes (<a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-5036-chunk-cap.html">page 1</a>, review comment <a href="https://github.com/NVIDIA-NeMo/RL/pull/5036#discussion_r4486856908">C2</a>).</p>
+
 <h2>What each sampler allows</h2>
 <table>
 <tr><th>Sampler</th><th>Ready groups it allows into a chunk</th></tr>
