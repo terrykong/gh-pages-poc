@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NVIDIA-NeMo/RL #5036 — why a cap the GRPO guard accepts can still crash mid-step</title>
+<style>
+:root{--bg:#0d1117;--surface:#161b22;--surface2:#1c2128;--border:#30363d;--text:#e6edf3;--dim:#8b949e;
+  --accent:#58a6ff;--green:#3fb950;--red:#f85149;--orange:#d29922}
+:root[data-theme="light"]{--bg:#ffffff;--surface:#f6f8fa;--surface2:#eaeef2;--border:#d0d7de;--text:#1f2328;
+  --dim:#59636e;--accent:#0969da;--green:#1a7f37;--red:#cf222e;--orange:#9a6700}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:28px 20px 70px}
+h1{font-size:22px;margin:0 0 8px;line-height:1.3}
+h2{font-size:18px;margin:30px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+a{color:var(--accent);text-decoration:none} a:hover{text-decoration:underline}
+code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
+.sub{color:var(--dim);font-size:13.5px;margin:0 0 14px}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);border:1px solid var(--border);
+  color:var(--text);border-radius:20px;padding:6px 12px;font:13px/1 ui-monospace,Menlo,monospace;cursor:pointer}
+.status{border:1px solid var(--border);border-radius:10px;background:var(--surface);padding:2px 16px 10px;margin:0 0 16px}
+.status dl{display:grid;grid-template-columns:max-content 1fr;gap:4px 14px;margin:12px 0 0}
+.status dt{color:var(--dim);font-size:12px;text-transform:uppercase;letter-spacing:.04em;white-space:nowrap;padding-top:2px}
+.status dd{margin:0;font-size:14px}
+.verdict{font-weight:700} .verdict.open{color:var(--red)}
+nav.chain{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 6px;padding:0}
+nav.chain a,nav.chain span{display:inline-block;padding:5px 11px;border:1px solid var(--border);border-radius:20px;
+  background:var(--surface);text-decoration:none;color:var(--accent);font-size:12.5px;line-height:1.3;white-space:nowrap}
+nav.chain a:hover{background:var(--surface2)}
+nav.chain span.here{background:var(--accent);color:var(--bg);border-color:var(--accent);font-weight:600}
+p.chainnote{color:var(--dim);font-size:12px;margin:0 0 18px}
+.mono{font:12.5px ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--surface);border:1px solid var(--border);
+  border-radius:8px;padding:12px;overflow-x:auto;white-space:pre;margin:8px 0}
+.diff{font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--surface);border:1px solid var(--border);
+  border-radius:8px;padding:12px;overflow-x:auto;white-space:pre;margin:10px 0}
+.diff .add{color:var(--green)} .diff .del{color:var(--red)} .diff .hunk{color:var(--accent)}
+.where{border-left:4px solid var(--accent);background:var(--surface);padding:6px 12px;margin:6px 0 10px}
+.warn{border-left:3px solid var(--red);background:var(--surface);padding:12px 16px;margin:18px 0;border-radius:0 8px 8px 0}
+.cref{margin:6px 0 0;font-size:13px}
+.cref a{display:inline-block;padding:4px 10px;border:1px solid var(--border);border-radius:16px;background:var(--surface);
+  font:12.5px ui-monospace,Menlo,monospace}
+.tip{border-bottom:1px dotted var(--dim);cursor:help;position:relative;outline:none}
+.tip:hover::after,.tip:focus::after{content:attr(data-tip);position:absolute;left:0;top:1.7em;z-index:60;width:max-content;
+  max-width:min(340px,80vw);white-space:normal;background:var(--surface2);color:var(--text);border:1px solid var(--border);
+  border-radius:6px;padding:7px 10px;font:13px/1.45 -apple-system,sans-serif;font-weight:400;box-shadow:0 4px 14px rgba(0,0,0,.3)}
+ol li{margin:3px 0}
+svg{max-width:100%;height:auto;display:block;margin:14px 0}
+svg .box{fill:var(--surface);stroke:var(--border);stroke-width:1.4}
+svg .ok{fill:var(--surface);stroke:var(--green);stroke-width:2}
+svg .bad{fill:var(--surface);stroke:var(--red);stroke-width:2}
+svg .t{fill:var(--text);font:12.5px -apple-system,sans-serif}
+svg .tb{fill:var(--text);font:bold 13px -apple-system,sans-serif}
+svg .m{fill:var(--text);font:12px ui-monospace,Menlo,monospace}
+svg .d{fill:var(--dim);font:11.5px -apple-system,sans-serif}
+svg .g{fill:var(--green);font:bold 12.5px -apple-system,sans-serif}
+svg .r{fill:var(--red);font:bold 12.5px -apple-system,sans-serif}
+svg .arr{stroke:var(--dim);stroke-width:1.6;fill:none;marker-end:url(#ah)}
+svg .row{fill:var(--accent);fill-opacity:.35;stroke:var(--accent)}
+svg .slot{fill:none;stroke:var(--red);stroke-width:1.2;stroke-dasharray:3 2}
+svg a text{text-decoration:underline;fill:var(--accent);font:11.5px ui-monospace,Menlo,monospace}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+  document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head>
+<body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+  function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+  function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
+    b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
+      else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+  document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+<div class="wrap">
+
+<h1>Why a chunk cap the GRPO guard accepts can still crash mid-step</h1>
+<p class="sub"><a href="https://github.com/NVIDIA-NeMo/RL/pull/5036">NVIDIA-NeMo/RL #5036</a>.
+All permalinks pin the PR head <code>391cb0fc</code>.</p>
+
+<div class="status"><dl>
+  <dt>Before</dt><dd>No cap and no check on GRPO chunk sizes. A warm buffer usually handed over the whole step in one chunk, so uneven chunks were rare.</dd>
+  <dt>This PR</dt><dd>Adds the cap and a setup check that a full-cap chunk splits evenly across training ranks — but not into micro-batches.</dd>
+  <dt>After C1</dt><dd>Proposed: check against ranks × micro-batch size, the rule PPO already uses. Not in the PR.</dd>
+  <dt>Status</dt><dd><span class="verdict open">Open — not fixed in this PR.</span> Raised in review comment C1.</dd>
+</dl></div>
+
+<nav class="chain">
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-5036-chunk-cap.html">1 · what the cap does</a>
+  <span class="here">2 · the GRPO guard gap</span>
+</nav>
+<p class="chainnote">Two pages on this PR, one question each — this one: a config that passes setup and then crashes.</p>
+
+<p>The trainer splits each chunk two ways. First across
+<span class="tip" tabindex="0" data-tip="Data-parallel ranks: copies of the model that each train on their own share of the rows.">training ranks</span>,
+then, on each rank, into <span class="tip" tabindex="0" data-tip="train_micro_batch_size: how many rows one forward/backward pass takes. With sequence packing and dynamic batching both off, rows are cut by this fixed count.">micro-batches</span>
+of a fixed row count. The new
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/391cb0fc7f4f4f6ea6d6b57d553e1c290eedcf90/nemo_rl/algorithms/single_controller_utils/config.py#L1637">GRPO guard</a>
+checks only the first split. With sequence packing and dynamic batching both off, the second split
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/391cb0fc7f4f4f6ea6d6b57d553e1c290eedcf90/nemo_rl/distributed/batched_data_dict.py#L1145-L1146">asserts</a>
+that each rank's rows divide by the micro-batch size. One <b>sample</b> = one row = one answer to one prompt.</p>
+<div class="mono">policy:   {train_micro_batch_size: 8, sequence_packing: {enabled: false}, dynamic_batching: {enabled: false}}   # 2 training ranks
+grpo:     {num_prompts_per_step: 32, num_generations_per_prompt: 4}
+async_rl: {min_groups_for_streaming_train: 1, max_groups_for_streaming_train: 3}</div>
+
+<svg viewBox="0 0 940 330" role="img" aria-label="12 samples pass the guard, split 6 per rank, and fail the micro-batch split of 8">
+  <defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+    <path d="M0,0 L10,5 L0,10 z" fill="var(--dim)"/></marker></defs>
+  <rect class="box" x="14" y="20" width="196" height="96" rx="8"/>
+  <text class="tb" x="26" y="42">a full-cap chunk</text>
+  <text class="t" x="26" y="64">3 groups × 4 answers</text>
+  <text class="m" x="26" y="86">= 12 samples</text>
+  <text class="d" x="26" y="106">[12 rows, tokens]</text>
+  <path class="arr" d="M212,68 L244,68"/>
+  <rect class="ok" x="248" y="20" width="196" height="96" rx="8"/>
+  <text class="tb" x="260" y="42">PR's GRPO guard</text>
+  <text class="m" x="260" y="64">12 % 2 ranks = 0</text>
+  <text class="g" x="260" y="88">✓ accepted at setup</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/391cb0fc7f4f4f6ea6d6b57d553e1c290eedcf90/nemo_rl/algorithms/single_controller_utils/config.py#L1637"><text x="260" y="108">the check: config.py L1637</text></a>
+  <path class="arr" d="M446,68 L478,68"/>
+  <rect class="box" x="482" y="20" width="196" height="96" rx="8"/>
+  <text class="tb" x="494" y="42">split across ranks</text>
+  <text class="m" x="494" y="64">rank 0: 6 rows</text>
+  <text class="m" x="494" y="84">rank 1: 6 rows</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/391cb0fc7f4f4f6ea6d6b57d553e1c290eedcf90/nemo_rl/distributed/batched_data_dict.py#L491"><text x="494" y="106">shard_by_batch_size</text></a>
+  <path class="arr" d="M680,68 L712,68"/>
+  <rect class="bad" x="716" y="20" width="210" height="96" rx="8"/>
+  <text class="tb" x="728" y="42">micro-batches of 8 rows</text>
+  <text class="m" x="728" y="64">6 % 8 ≠ 0</text>
+  <text class="r" x="728" y="88">✗ AssertionError, mid-step</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/391cb0fc7f4f4f6ea6d6b57d553e1c290eedcf90/nemo_rl/models/megatron/data.py#L475"><text x="728" y="108">data.py L475 → assert</text></a>
+
+  <text class="d" x="482" y="140">rank 0's rows vs one micro-batch:</text>
+  <rect class="row" x="482" y="148" width="22" height="18"/><rect class="row" x="506" y="148" width="22" height="18"/>
+  <rect class="row" x="530" y="148" width="22" height="18"/><rect class="row" x="554" y="148" width="22" height="18"/>
+  <rect class="row" x="578" y="148" width="22" height="18"/><rect class="row" x="602" y="148" width="22" height="18"/>
+  <rect class="slot" x="626" y="148" width="22" height="18"/><rect class="slot" x="650" y="148" width="22" height="18"/>
+  <text class="d" x="482" y="184">6 rows filled, 2 of the 8 slots empty</text>
+
+  <path class="arr" d="M112,118 L112,226 L244,226"/>
+  <rect class="ok" x="248" y="196" width="430" height="60" rx="8"/>
+  <text class="tb" x="260" y="218">with C1's fix: 12 % (2 ranks × 8 rows) = 12 % 16 ≠ 0</text>
+  <text class="g" x="260" y="242">✗ rejected at setup, before any GPU work</text>
+
+  <text class="tb" x="14" y="290">Legend</text>
+  <rect class="ok" x="70" y="279" width="18" height="14" rx="3"/><text class="t" x="96" y="291">passes / fails safely</text>
+  <rect class="bad" x="250" y="279" width="18" height="14" rx="3"/><text class="t" x="276" y="291">crashes after the whole job is up</text>
+  <text class="d" x="14" y="316">Real run of the PR's own guard function and the repo's split code with these numbers (no GPU; not a full training job).</text>
+</svg>
+
+<ol>
+<li>The guard <a href="https://github.com/NVIDIA-NeMo/RL/blob/391cb0fc7f4f4f6ea6d6b57d553e1c290eedcf90/nemo_rl/algorithms/single_controller_utils/config.py#L1637">only divides by the number of ranks</a>, so 12 samples on 2 ranks passes.</li>
+<li>With a full buffer the pump takes 3 groups, the cap. The trainer gives each rank 6 rows.</li>
+<li>The Megatron worker cuts each rank's rows <a href="https://github.com/NVIDIA-NeMo/RL/blob/391cb0fc7f4f4f6ea6d6b57d553e1c290eedcf90/nemo_rl/models/megatron/data.py#L475">into micro-batches of 8</a> and the split
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/391cb0fc7f4f4f6ea6d6b57d553e1c290eedcf90/nemo_rl/distributed/batched_data_dict.py#L1145-L1146">fails</a>:
+<code>Data dict size (6) is not a multiple of the provided microbatch size (8)</code>.</li>
+</ol>
+<p>The shipped example configs turn sequence packing on (<a href="https://github.com/NVIDIA-NeMo/RL/blob/391cb0fc7f4f4f6ea6d6b57d553e1c290eedcf90/examples/configs/grpo_math_1B.yaml#L437-L438">grpo_math_1B.yaml</a>),
+which cuts micro-batches by token count instead, so they are not affected.</p>
+
+<h2>The fix — proposed in C1, not in the PR</h2>
+<p class="where"><b>Where the fix lands: RL only, one file</b>,
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/391cb0fc7f4f4f6ea6d6b57d553e1c290eedcf90/nemo_rl/algorithms/single_controller_utils/config.py#L1555-L1562"><code>config.py</code></a>.
+PPO already has the right rule, <code>sample_multiple</code>, but it is nested inside the PPO function. Nothing below is implemented or run.</p>
+<pre class="diff"><span class="hunk">@@ config.py L1545-L1562 · move sample_multiple to module level</span>
+<span class="add">+def sample_multiple(config: PolicyConfig | ValueConfig, dp_size: int) -> int:
++    # Rows per chunk must divide by ranks, and by micro-batch sizes when rows are cut by count.
++    if config["dynamic_batching"]["enabled"] or (
++        config.get("sequence_packing") and config["sequence_packing"]["enabled"]
++    ):
++        return dp_size
++    train_micro_batch_size = config["train_micro_batch_size"]
++    logprob_batch_size = config.get("logprob_batch_size") or train_micro_batch_size
++    return dp_size * math.lcm(train_micro_batch_size, logprob_batch_size)
++
++
+</span> def resolve_ppo_chunk_alignment(
+     master_config: MasterConfig, policy_dp: int, value_dp: int
+ ) -> tuple[int, int]:
+@@ … @@
+         raise ValueError("PPO requires a value model configuration")
+
+<span class="del">-    def sample_multiple(config: PolicyConfig | ValueConfig, dp_size: int) -> int:
+-        if config["dynamic_batching"]["enabled"] or (
+-            config.get("sequence_packing") and config["sequence_packing"]["enabled"]
+-        ):
+-            return dp_size
+-        train_micro_batch_size = config["train_micro_batch_size"]
+-        logprob_batch_size = config.get("logprob_batch_size") or train_micro_batch_size
+-        return dp_size * math.lcm(train_micro_batch_size, logprob_batch_size)
+-
+</span>     sample_alignment = math.lcm(
+<span class="hunk">@@ config.py L1637 · validate_grpo_chunk_cap_alignment</span>
+<span class="del">-    if (chunk_cap * algo_cfg.num_generations_per_prompt) % policy_dp != 0:</span>
+<span class="add">+    multiple = sample_multiple(master_config.policy, policy_dp)
++    if (chunk_cap * algo_cfg.num_generations_per_prompt) % multiple != 0:</span>
+         raise ValueError(</pre>
+<p>With packing or dynamic batching on, <code>sample_multiple</code> returns plain ranks, so those configs behave exactly as today.
+The error text, the docs line and one test case (micro-batch 8, 2 ranks, 4 answers, cap 3 → rejected) change with it.</p>
+<p class="cref">🔴 <a href="https://github.com/NVIDIA-NeMo/RL/pull/5036#discussion_r4486856888">review comment C1 — config.py:1637</a></p>
+
+<div class="warn"><b>So what.</b> Today this config gets through setup, allocates the whole job, and dies on the first full chunk.
+The same crash was already possible on main through an uneven floor, but rarely; a cap makes split steps the normal case.
+The one-function change above turns it into a setup error. Making <i>every</i> GRPO chunk line up (as PPO does) is a follow-up.</div>
+
+</div>
+</body>
+</html>

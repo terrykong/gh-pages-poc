@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NVIDIA-NeMo/RL #5036 — how max_groups_for_streaming_train splits a training step</title>
+<style>
+:root{--bg:#0d1117;--surface:#161b22;--surface2:#1c2128;--border:#30363d;--text:#e6edf3;--dim:#8b949e;
+  --accent:#58a6ff;--green:#3fb950;--red:#f85149;--orange:#d29922}
+:root[data-theme="light"]{--bg:#ffffff;--surface:#f6f8fa;--surface2:#eaeef2;--border:#d0d7de;--text:#1f2328;
+  --dim:#59636e;--accent:#0969da;--green:#1a7f37;--red:#cf222e;--orange:#9a6700}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:28px 20px 70px}
+h1{font-size:22px;margin:0 0 8px;line-height:1.3}
+h2{font-size:18px;margin:30px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+a{color:var(--accent);text-decoration:none} a:hover{text-decoration:underline}
+code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
+.sub{color:var(--dim);font-size:13.5px;margin:0 0 14px}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);border:1px solid var(--border);
+  color:var(--text);border-radius:20px;padding:6px 12px;font:13px/1 ui-monospace,Menlo,monospace;cursor:pointer}
+.status{border:1px solid var(--border);border-radius:10px;background:var(--surface);padding:2px 16px 10px;margin:0 0 16px}
+.status dl{display:grid;grid-template-columns:max-content 1fr;gap:4px 14px;margin:12px 0 0}
+.status dt{color:var(--dim);font-size:12px;text-transform:uppercase;letter-spacing:.04em;white-space:nowrap;padding-top:2px}
+.status dd{margin:0;font-size:14px}
+.verdict{font-weight:700} .verdict.good{color:var(--green)} .verdict.open{color:var(--orange)}
+nav.chain{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 6px;padding:0}
+nav.chain a,nav.chain span{display:inline-block;padding:5px 11px;border:1px solid var(--border);border-radius:20px;
+  background:var(--surface);text-decoration:none;color:var(--accent);font-size:12.5px;line-height:1.3;white-space:nowrap}
+nav.chain a:hover{background:var(--surface2)}
+nav.chain span.here{background:var(--accent);color:var(--bg);border-color:var(--accent);font-weight:600}
+p.chainnote{color:var(--dim);font-size:12px;margin:0 0 18px}
+.bg{border-left:4px solid var(--accent);background:var(--surface);padding:8px 14px;margin:0 0 14px;font-size:14px}
+.mono{font:12.5px ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--surface);border:1px solid var(--border);
+  border-radius:8px;padding:12px;overflow-x:auto;white-space:pre;margin:8px 0}
+.diff{font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--surface);border:1px solid var(--border);
+  border-radius:8px;padding:12px;overflow-x:auto;white-space:pre;margin:10px 0}
+.diff .add{color:var(--green)} .diff .del{color:var(--red)} .diff .hunk{color:var(--accent)}
+table{border-collapse:collapse;font-size:13.5px;margin:8px 0;width:100%}
+th,td{border:1px solid var(--border);padding:5px 9px;text-align:left;vertical-align:top}
+th{background:var(--surface2)}
+.hl{border-left:3px solid var(--orange);background:var(--surface);padding:12px 16px;margin:18px 0;border-radius:0 8px 8px 0}
+.cref{margin:6px 0 0;font-size:13px}
+.cref a{display:inline-block;padding:4px 10px;border:1px solid var(--border);border-radius:16px;background:var(--surface);
+  font:12.5px ui-monospace,Menlo,monospace}
+.tip{border-bottom:1px dotted var(--dim);cursor:help;position:relative;outline:none}
+.tip:hover::after,.tip:focus::after{content:attr(data-tip);position:absolute;left:0;top:1.7em;z-index:60;width:max-content;
+  max-width:min(340px,80vw);white-space:normal;background:var(--surface2);color:var(--text);border:1px solid var(--border);
+  border-radius:6px;padding:7px 10px;font:13px/1.45 -apple-system,sans-serif;font-weight:400;box-shadow:0 4px 14px rgba(0,0,0,.3)}
+ol li{margin:3px 0}
+svg{max-width:100%;height:auto;display:block;margin:14px 0}
+svg .t{fill:var(--text);font:12.5px -apple-system,sans-serif}
+svg .tb{fill:var(--text);font:bold 13px -apple-system,sans-serif}
+svg .d{fill:var(--dim);font:11.5px -apple-system,sans-serif}
+svg .n{fill:var(--text);font:bold 12px ui-monospace,Menlo,monospace}
+svg .seg{fill:var(--green);fill-opacity:.32;stroke:var(--green);stroke-width:1.4}
+svg .frame{fill:none;stroke:var(--border);stroke-width:1}
+svg .gate{stroke:var(--orange);stroke-width:3}
+svg .gl{fill:var(--orange);font:bold 11.5px -apple-system,sans-serif}
+svg a text{text-decoration:underline;fill:var(--accent);font:11.5px ui-monospace,Menlo,monospace}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+  document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head>
+<body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+  function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+  function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
+    b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
+      else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+  document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+<div class="wrap">
+
+<h1>How <code>max_groups_for_streaming_train</code> splits a training step into chunks — and what it does not change</h1>
+<p class="sub"><a href="https://github.com/NVIDIA-NeMo/RL/pull/5036">NVIDIA-NeMo/RL #5036</a>.
+All permalinks pin the PR head <code>391cb0fc</code>.</p>
+
+<div class="status"><dl>
+  <dt>Before</dt><dd>The trainer had only a floor (<code>min_groups_for_streaming_train</code>). Once generation ran ahead, one
+  hand-off could take the whole step, so the step became a single chunk.</dd>
+  <dt>This PR</dt><dd>Adds an optional ceiling. Each hand-off takes at most <code>max_groups_for_streaming_train</code> prompt groups. Default <code>null</code> keeps today's behavior.</dd>
+  <dt>Status</dt><dd><span class="verdict good">Chunking works as described</span> (the author's 1-node run below).
+  <span class="verdict open">Open: whether it frees generation is not shown</span> — asked in review comment C2.</dd>
+</dl></div>
+
+<nav class="chain">
+  <span class="here">1 · what the cap does</span>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-5036-grpo-cap-crash.html">2 · the GRPO guard gap</a>
+</nav>
+<p class="chainnote">Two pages on this PR, one question each — this one: what the new knob changes.</p>
+
+<div class="bg"><b>Where this sits.</b> Single controller (v2) only: the
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/391cb0fc7f4f4f6ea6d6b57d553e1c290eedcf90/nemo_rl/algorithms/single_controller.py#L3261-L3265"><code>_train_pump</code></a>
+loop that hands finished rollouts to the trainer. GRPO and PPO both use it; the v1 loops (<code>grpo_train</code>, <code>async_grpo_train</code>) are untouched.
+A <b>prompt group</b> is one prompt plus all its sampled answers. A <b>chunk</b> is one hand-off to the trainer; a step is done when its chunks add up to <code>num_prompts_per_step</code>.
+Dotted words have a short explanation: hover or tap them.
+<div class="mono">async_rl:
+  min_groups_for_streaming_train: 8      # floor: wait for at least this many ready groups
+  max_groups_for_streaming_train: 8      # NEW ceiling; null = no ceiling (default)
+grpo:
+  num_prompts_per_step: 32               # a step always trains on exactly 32 groups</div></div>
+
+<p>Each time round the loop, the pump asks the
+<span class="tip" tabindex="0" data-tip="The object that picks which finished prompt groups in the buffer go to the trainer next.">sampler</span>
+for between a floor and a maximum of ready groups. The maximum was always "groups still missing from this step"
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/391cb0fc7f4f4f6ea6d6b57d553e1c290eedcf90/nemo_rl/algorithms/single_controller.py#L3258">L3258</a>),
+so a full buffer handed over the whole step at once. The PR lowers that maximum to the cap
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/391cb0fc7f4f4f6ea6d6b57d553e1c290eedcf90/nemo_rl/algorithms/single_controller.py#L3263-L3265">L3263-L3265</a>).
+The step still trains on exactly 32 groups; only where the chunk boundaries fall changes.</p>
+
+<svg viewBox="0 0 940 318" role="img" aria-label="Chunks per step, uncapped vs capped">
+  <text class="tb" x="14" y="22">Author's 1-node run, GRPO, 32 groups per step, floor 8 (real chunk sizes from the PR description)</text>
+  <text class="t" x="196" y="52">step 0</text><text class="t" x="446" y="52">step 1</text><text class="t" x="696" y="52">step 2</text>
+  <text class="tb" x="14" y="92">uncapped</text><text class="d" x="14" y="108">max = null</text>
+  <rect class="seg" x="150" y="72" width="48" height="36"/><text class="n" x="168" y="95">8</text>
+  <rect class="seg" x="198" y="72" width="144" height="36"/><text class="n" x="262" y="95">24</text>
+  <rect class="seg" x="400" y="72" width="192" height="36"/><text class="n" x="488" y="95">32</text>
+  <rect class="seg" x="650" y="72" width="192" height="36"/><text class="n" x="738" y="95">32</text>
+  <line class="gate" x1="344" y1="66" x2="344" y2="114"/><line class="gate" x1="594" y1="66" x2="594" y2="114"/><line class="gate" x1="844" y1="66" x2="844" y2="114"/>
+  <text class="d" x="150" y="128">2 chunks (cold buffer)</text><text class="d" x="400" y="128">1 chunk: buffer was full</text><text class="d" x="650" y="128">1 chunk</text>
+
+  <text class="tb" x="14" y="172">capped</text><text class="d" x="14" y="188">max = 8</text>
+  <rect class="seg" x="150" y="152" width="48" height="36"/><rect class="seg" x="198" y="152" width="48" height="36"/>
+  <rect class="seg" x="246" y="152" width="48" height="36"/><rect class="seg" x="294" y="152" width="48" height="36"/>
+  <text class="n" x="168" y="175">8</text><text class="n" x="216" y="175">8</text><text class="n" x="264" y="175">8</text><text class="n" x="312" y="175">8</text>
+  <rect class="seg" x="400" y="152" width="48" height="36"/><rect class="seg" x="448" y="152" width="48" height="36"/>
+  <rect class="seg" x="496" y="152" width="48" height="36"/><rect class="seg" x="544" y="152" width="48" height="36"/>
+  <text class="n" x="418" y="175">8</text><text class="n" x="466" y="175">8</text><text class="n" x="514" y="175">8</text><text class="n" x="562" y="175">8</text>
+  <rect class="seg" x="650" y="152" width="48" height="36"/><rect class="seg" x="698" y="152" width="48" height="36"/>
+  <rect class="seg" x="746" y="152" width="48" height="36"/><rect class="seg" x="794" y="152" width="48" height="36"/>
+  <text class="n" x="668" y="175">8</text><text class="n" x="716" y="175">8</text><text class="n" x="764" y="175">8</text><text class="n" x="812" y="175">8</text>
+  <line class="gate" x1="344" y1="146" x2="344" y2="194"/><line class="gate" x1="594" y1="146" x2="594" y2="194"/><line class="gate" x1="844" y1="146" x2="844" y2="194"/>
+  <text class="d" x="150" y="208">4 chunks every step, never more than 8 groups each</text>
+
+  <rect x="14" y="232" width="22" height="14" class="seg"/><text class="t" x="44" y="244">one chunk handed to the trainer (number = prompt groups)</text>
+  <line class="gate" x1="25" y1="258" x2="25" y2="292"/>
+  <text class="t" x="44" y="268">step closes: the only point where generation's two gates open —</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/391cb0fc7f4f4f6ea6d6b57d553e1c290eedcf90/nemo_rl/algorithms/single_controller.py#L3870-L3872"><text x="44" y="287">buffer slots returned (L3870)</text></a>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/391cb0fc7f4f4f6ea6d6b57d553e1c290eedcf90/nemo_rl/algorithms/single_controller.py#L3771"><text x="290" y="287">trainer version +1 (L3771)</text></a>
+  <text class="d" x="44" y="309">Same orange lines in both rows: the cap moves chunk boundaries, not the points where generation is let go.</text>
+</svg>
+
+<h2>What the code changes</h2>
+<p>The whole runtime change is three lines in the pump:</p>
+<pre class="diff"><span class="hunk">@@ single_controller.py L3258-L3268 · _train_pump</span>
+                         max_prompt_groups = target_groups - groups_dispatched
+                         if max_prompt_groups &lt;= 0:
+                             break
+<span class="add">+                        # Bound the chunk so a warm buffer cannot hand the whole step
++                        # over at once; the floor below still clamps to this maximum.
++                        chunk_cap = self._async_cfg.max_groups_for_streaming_train
++                        if chunk_cap is not None:
++                            max_prompt_groups = min(max_prompt_groups, chunk_cap)</span>
+                         min_prompt_groups = min(
+                             self._async_cfg.min_groups_for_streaming_train,
+                             max_prompt_groups,</pre>
+<p>The rest of the PR is setup checks that reject a cap the run could not use:</p>
+<table>
+<tr><th>Check</th><th>Rejects</th><th>Why</th></tr>
+<tr><td><a href="https://github.com/NVIDIA-NeMo/RL/blob/391cb0fc7f4f4f6ea6d6b57d553e1c290eedcf90/nemo_rl/algorithms/single_controller_utils/config.py#L576-L600"><code>_check_streaming_chunk_bounds</code></a></td>
+<td>cap &lt; 1, or cap &lt; floor</td><td>A cap below the floor would override the floor on every chunk.</td></tr>
+<tr><td><a href="https://github.com/NVIDIA-NeMo/RL/blob/391cb0fc7f4f4f6ea6d6b57d553e1c290eedcf90/nemo_rl/algorithms/single_controller_utils/config.py#L1585-L1597">PPO alignment</a></td>
+<td>a cap below the step that is not a multiple of the PPO group multiple</td><td>PPO's sampler refuses an unaligned maximum.</td></tr>
+<tr><td><a href="https://github.com/NVIDIA-NeMo/RL/blob/391cb0fc7f4f4f6ea6d6b57d553e1c290eedcf90/nemo_rl/algorithms/single_controller_utils/config.py#L1604-L1644"><code>validate_grpo_chunk_cap_alignment</code></a></td>
+<td>a GRPO cap whose samples don't divide by the data-parallel size</td><td>The trainer splits a chunk evenly across ranks. Misses the micro-batch rule — <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-5036-grpo-cap-crash.html">page 2</a>.</td></tr>
+</table>
+
+<h2>Open question: does a cap let generation work during training?</h2>
+<p>The PR's goal is less idle generation. But generation is held back by two gates, and neither opens at a chunk boundary:</p>
+<ol>
+<li><b>Buffer slots.</b> The rollout side <a href="https://github.com/NVIDIA-NeMo/RL/blob/391cb0fc7f4f4f6ea6d6b57d553e1c290eedcf90/nemo_rl/algorithms/single_controller.py#L2751">takes one slot per group</a>;
+trained groups <a href="https://github.com/NVIDIA-NeMo/RL/blob/391cb0fc7f4f4f6ea6d6b57d553e1c290eedcf90/nemo_rl/algorithms/single_controller.py#L3870-L3872">give theirs back only when the step closes</a>.</li>
+<li><b>The staleness limit.</b> New prompts <a href="https://github.com/NVIDIA-NeMo/RL/blob/391cb0fc7f4f4f6ea6d6b57d553e1c290eedcf90/nemo_rl/algorithms/single_controller.py#L2798-L2800">wait on the trainer's weight version</a>,
+which <a href="https://github.com/NVIDIA-NeMo/RL/blob/391cb0fc7f4f4f6ea6d6b57d553e1c290eedcf90/nemo_rl/algorithms/single_controller.py#L3771">moves only after the optimizer step</a>.</li>
+</ol>
+<p>So with a full buffer, both rows in the figure let generation go at the same moments. The cap may only add per-chunk work
+(a logprob pass, advantages and training setup for each chunk). The 1-node run shows chunk counts, not timings.</p>
+<p class="cref">🟠 <a href="https://github.com/NVIDIA-NeMo/RL/pull/5036#discussion_r4486856908">review comment C2 — config.py:523</a></p>
+
+<div class="hl"><b>So what.</b> The knob does what it says to chunk sizes, and it is off by default, so it cannot hurt existing runs.
+Before anyone turns it on to save GPU time, the review asks for one capped vs uncapped timing run
+(<code>exposed_generation</code>, step time). If generation stays idle, the docs should stop promising overlap.</div>
+
+</div>
+</body>
+</html>
