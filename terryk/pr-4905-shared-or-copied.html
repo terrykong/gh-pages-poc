@@ -71,6 +71,9 @@ svg .arrr{stroke:var(--red);stroke-width:1.4;fill:none;stroke-dasharray:4 3}
   border:1px solid var(--border);border-radius:8px;padding:12px;overflow-x:auto;white-space:pre;margin:10px 0}
 .diff .add{color:var(--green)}.diff .del{color:var(--red)}.diff .hunk{color:var(--accent)}
 .where{border-left:4px solid var(--accent);background:var(--surface);padding:6px 12px;margin:6px 0 10px}
+.cref{margin:6px 0 0;font-size:13px}
+.cref a{display:inline-block;padding:4px 10px;border:1px solid var(--border);border-radius:16px;background:var(--surface);font:12.5px ui-monospace,Menlo,monospace}
+.cref a:hover{background:var(--surface2);text-decoration:none}
 .ok{color:var(--green);font-weight:700}.warn{color:var(--orange);font-weight:700}.bug{color:var(--red);font-weight:700}
 </style>
 <script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
@@ -97,7 +100,7 @@ svg .arrr{stroke:var(--red);stroke-width:1.4;fill:none;stroke-dasharray:4 3}
 <div class="status"><dl>
 <dt>Before</dt><dd>The native chat server runs the Gym capture steps in one place: read the capture context, resolve a forest-training "candidate", fetch the earlier turns from TQ, splice, begin capture, stage.</dd>
 <dt>This stack</dt><dd>#4905 (rollouts) reuses everything. #4979 (Gym) calls the same helpers but copies the order of steps into <code>_generate_gym</code>, and the copy leaves out step 2.</dd>
-<dt>Status</dt><dd><span class="verdict open">Open — not fixed in either PR.</span> Traced in code, not run: with <code>token_capture.forest_training</code> on, Gym calls through Dynamo fail at begin capture. Not yet a review comment.</dd>
+<dt>Status</dt><dd><span class="verdict open">Open — not fixed in either PR.</span> Traced in code, not run: with <code>token_capture.forest_training</code> on, Gym calls through Dynamo fail at begin capture. Staged as review comments C26 (the fix) and C27 (one shared method, tested first) on #4979, not yet published.</dd>
 </dl></div>
 
 <h2>The three features, one line each</h2>
@@ -236,32 +239,40 @@ svg .arrr{stroke:var(--red);stroke-width:1.4;fill:none;stroke-dasharray:4 3}
 <text class="n" x="16" y="684">Worked example: one 2-turn forest-training call. Turn 1 = prompt [11,12,13] + output [220,17,2]; turn 2 adds a user message [21,22].</text>
 </svg>
 </div>
-<p>Steps 1, 3, 5, 6 and 8 are true reuse. Step 4 calls the shared function, but with a different way of finding the cut. Step 2 cannot just be copied over: <a href="https://github.com/NVIDIA-NeMo/RL/blob/c4fe2bd540cb1be02daf82f6f2961a80ab4f3d59/nemo_rl/models/generation/capture_context.py#L25"><code>decide_capture_input</code></a> checks message roles at the cut, and the Dynamo engine never sees messages, because the frontend renders them into tokens.</p>
+<p>Steps 1, 3, 5, 6 and 8 are true reuse. Step 4 calls the shared function, but with a different way of finding the cut. Step 2 cannot just be copied over: <a href="https://github.com/NVIDIA-NeMo/RL/blob/c4fe2bd540cb1be02daf82f6f2961a80ab4f3d59/nemo_rl/models/generation/capture_context.py#L25"><code>decide_capture_input</code></a> checks message roles at the cut, and the Dynamo engine never sees messages, because the frontend renders them into tokens. So the sender has to pass the roles along.</p>
 
 <h2>What I'd change — proposed, not in any PR</h2>
 <p>Nothing below is implemented.</p>
-<p class="where"><b>Where the fix lands: RL only, in #4979.</b> <a href="https://github.com/NVIDIA-NeMo/RL/blob/c4fe2bd540cb1be02daf82f6f2961a80ab4f3d59/nemo_rl/environments/nemo_gym.py#L2944"><code>setup_nemo_gym_config</code></a> in <code>nemo_gym.py</code>. <b>No Gym change:</b> Gym already rejects the call; the fix is to fail at startup with a clear message instead of on every multi-turn call.</p>
-<pre class="diff"><span class="hunk">@@ nemo_gym.py L2944-L2945 · setup_nemo_gym_config</span>
-     if dynamo_enabled(generation_config):
-<span class="add">+        token_capture = config.env.get("nemo_gym", {}).get("token_capture") or {}
-+        if token_capture.get("forest_training"):
-+            # The frontend sends no messages, so the engine cannot run
-+            # decide_capture_input, which forest training's candidates need.
-+            raise ValueError(
-+                "token_capture.forest_training is not supported with "
-+                "policy.generation.dynamo=true yet."
-+            )</span>
-         # Gym's policy model calls the Dynamo frontend in Gym's Dynamo dialect,</pre>
-<p><b>Follow-up, to stop the copies drifting:</b> move steps 1–6 into one worker method that both callers use, and pass in the one thing that differs: a way to render the history, or <code>None</code> when the caller has only tokens.</p>
+<p class="where"><b>Where the fix lands: Gym and RL, in #4979.</b> Gym's Dynamo dialect, which already sends the <code>ng_capture:</code> annotation, also sends the chat messages' roles. RL's <a href="https://github.com/NVIDIA-NeMo/RL/blob/a1659e9d673f74a6470f842cace6c7fed0ef4f31/nemo_rl/models/generation/dynamo/native_engine.py#L531"><code>_generate_gym</code></a> runs step 2 on them.</p>
+<pre class="diff"><span class="hunk">@@ native_engine.py L531-L536 · _generate_gym</span>
+         admission = host._parse_capture_admission(...)
+<span class="add">+        serving_admission, verify_retained_media = admission, False
++        if admission is not None and (
++            admission.mode == "candidate" or admission.request_replay is not None
++        ):
++            decision = decide_capture_input(
++                admission,
++                # roles from Gym's new ng_roles: annotation
++                messages=[{"role": role} for role in roles],
++                # the engine sees no message content, so it cannot prove this case
++                allow_empty_tool_content=False,
++            )
++            admission, serving_admission = decision.storage, decision.serving
++            verify_retained_media = decision.verify_retained_media</span>
+         prefix_token_ids = None</pre>
+<p>Then the TQ read uses <code>serving_admission</code>, and the media check gets <code>verify_retained_media</code>, as on the native server. <b>Functional test:</b> the native L1 list already runs forest training with token capture (<a href="https://github.com/NVIDIA-NeMo/RL/blob/a1659e9d673f74a6470f842cace6c7fed0ef4f31/tests/functional/L1_Functional_Tests_SingleController_3.sh#L55"><code>…_context_compaction.sh</code></a>). Adding the same run with <code>++policy.generation.dynamo=true</code> to the Dynamo list covers all three features in one run, and it would have caught this.</p>
+<p class="cref">🔴 <a href="https://github.com/NVIDIA-NeMo/RL/pull/4979#discussion_r4497298899">review comment C26 — native_engine.py:531</a></p>
+<p><b>Then, to stop the copies drifting:</b> move steps 1–6 into one worker method that both callers use. The only input that differs is a way to render the history, or <code>None</code> when the caller has only tokens.</p>
 <pre class="diff"><span class="hunk">@@ vllm_worker_async.py · new method on VllmAsyncGenerationWorkerImpl, next to _begin_request_capture (L811)</span>
 <span class="add">+    async def _prepare_gym_prompt(
-+        self, request, *, admission, inline_prefix, engine_prompt,
-+        messages=None,           # None on Dynamo: step 2 then raises a clear error
++        self, request, engine_prompt, *, admission, inline_prefix,
++        messages,                # role-only dicts on Dynamo
 +        render_history=None,     # None on Dynamo: splice counts EOS in the prefix
 +        eos_token_ids,           # one stop set for both callers (fixes C16 too)
 +    ) -> PreparedGymPrompt:      # token_ids, splice, media, prefix_token_ids
 +        # steps 1-6 from the figure, in this order, once</span></pre>
-<p>The native <code>preprocess_chat</code> block (<a href="https://github.com/NVIDIA-NeMo/RL/blob/c4fe2bd540cb1be02daf82f6f2961a80ab4f3d59/nemo_rl/models/generation/vllm/vllm_worker_async.py#L1329">L1329-L1490</a>) and <a href="https://github.com/NVIDIA-NeMo/RL/blob/c4fe2bd540cb1be02daf82f6f2961a80ab4f3d59/nemo_rl/models/generation/dynamo/native_engine.py#L530"><code>_generate_gym</code> L530-L631</a> each shrink to one call. Step 8 is already shared.</p>
+<p>The native <code>preprocess_chat</code> block (<a href="https://github.com/NVIDIA-NeMo/RL/blob/a1659e9d673f74a6470f842cace6c7fed0ef4f31/nemo_rl/models/generation/vllm/vllm_worker_async.py#L1329">L1329-L1490</a>) and <a href="https://github.com/NVIDIA-NeMo/RL/blob/a1659e9d673f74a6470f842cace6c7fed0ef4f31/nemo_rl/models/generation/dynamo/native_engine.py#L530"><code>_generate_gym</code> L530-L631</a> each shrink to one call. <b>Unit test first:</b> no test checks this order on either server today. Before the refactor, add one test run against both servers with the same inputs: a candidate whose cut holds, one whose cut does not, and a prefix ending in a stop token that is not the tokenizer's EOS. If it passes for both before and after, the shared method kept the order.</p>
+<p class="cref">🟡 <a href="https://github.com/NVIDIA-NeMo/RL/pull/4979#discussion_r4497299583">review comment C27 — native_engine.py:492</a></p>
 
 <div class="hl"><b>So what.</b> #4905 is clean: refit, capture and the rollout code are the worker's own, and it deletes the old Dynamo copies. The copying starts in #4979, which repeats the native server's capture steps instead of calling one shared method. The copy already differs from the original in three ways: no candidate step, a different EOS set, and media checks that are always off. The first one breaks forest training.</div>
 </div>
