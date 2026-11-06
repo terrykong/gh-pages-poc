@@ -1,0 +1,398 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NVIDIA-NeMo/RL #5036 — a chunk cap saves no time when generation is faster</title>
+<style>
+:root{--bg:#0d1117;--surface:#161b22;--surface2:#1c2128;--border:#30363d;--text:#e6edf3;--dim:#8b949e;
+  --accent:#58a6ff;--green:#3fb950;--red:#f85149;--orange:#d29922}
+:root[data-theme="light"]{--bg:#ffffff;--surface:#f6f8fa;--surface2:#eaeef2;--border:#d0d7de;--text:#1f2328;
+  --dim:#59636e;--accent:#0969da;--green:#1a7f37;--red:#cf222e;--orange:#9a6700}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:28px 20px 70px}
+h1{font-size:22px;margin:0 0 8px;line-height:1.3}
+h2{font-size:18px;margin:30px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+a{color:var(--accent);text-decoration:none} a:hover{text-decoration:underline}
+code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
+.sub{color:var(--dim);font-size:13.5px;margin:0 0 14px}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);border:1px solid var(--border);
+  color:var(--text);border-radius:20px;padding:6px 12px;font:13px/1 ui-monospace,Menlo,monospace;cursor:pointer}
+.status{border:1px solid var(--border);border-radius:10px;background:var(--surface);padding:2px 16px 10px;margin:0 0 16px}
+.status dl{display:grid;grid-template-columns:max-content 1fr;gap:4px 14px;margin:12px 0 0}
+.status dt{color:var(--dim);font-size:12px;text-transform:uppercase;letter-spacing:.04em;white-space:nowrap;padding-top:2px}
+.status dd{margin:0;font-size:14px}
+.verdict{font-weight:700} .verdict.good{color:var(--green)} .verdict.open{color:var(--orange)}
+nav.chain{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 6px;padding:0}
+nav.chain a,nav.chain span{display:inline-block;padding:5px 11px;border:1px solid var(--border);border-radius:20px;
+  background:var(--surface);text-decoration:none;color:var(--accent);font-size:12.5px;line-height:1.3;white-space:nowrap}
+nav.chain a:hover{background:var(--surface2)}
+nav.chain span.here{background:var(--accent);color:var(--bg);border-color:var(--accent);font-weight:600}
+p.chainnote{color:var(--dim);font-size:12px;margin:0 0 18px}
+.bg{border-left:4px solid var(--accent);background:var(--surface);padding:8px 14px;margin:0 0 14px;font-size:14px}
+.mono{font:12.5px ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--surface);border:1px solid var(--border);
+  border-radius:8px;padding:12px;overflow-x:auto;white-space:pre;margin:8px 0}
+.diff{font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--surface);border:1px solid var(--border);
+  border-radius:8px;padding:12px;overflow-x:auto;white-space:pre;margin:10px 0}
+.diff .add{color:var(--green)} .diff .del{color:var(--red)} .diff .hunk{color:var(--accent)}
+table{border-collapse:collapse;font-size:13.5px;margin:8px 0;width:100%}
+th,td{border:1px solid var(--border);padding:5px 9px;text-align:left;vertical-align:top}
+th{background:var(--surface2)}
+.hl{border-left:3px solid var(--orange);background:var(--surface);padding:12px 16px;margin:18px 0;border-radius:0 8px 8px 0}
+.cref{margin:6px 0 0;font-size:13px}
+.cref a{display:inline-block;padding:4px 10px;border:1px solid var(--border);border-radius:16px;background:var(--surface);
+  font:12.5px ui-monospace,Menlo,monospace}
+.tip{border-bottom:1px dotted var(--dim);cursor:help;position:relative;outline:none}
+.tip:hover::after,.tip:focus::after{content:attr(data-tip);position:absolute;left:0;top:1.7em;z-index:60;width:max-content;
+  max-width:min(340px,80vw);white-space:normal;background:var(--surface2);color:var(--text);border:1px solid var(--border);
+  border-radius:6px;padding:7px 10px;font:13px/1.45 -apple-system,sans-serif;font-weight:400;box-shadow:0 4px 14px rgba(0,0,0,.3)}
+ol li{margin:3px 0}
+svg{max-width:100%;height:auto;display:block;margin:14px 0}
+svg .t{fill:var(--text);font:12.5px -apple-system,sans-serif}
+svg .tb{fill:var(--text);font:bold 13px -apple-system,sans-serif}
+svg .d{fill:var(--dim);font:11.5px -apple-system,sans-serif}
+svg .n{fill:var(--text);font:bold 12px ui-monospace,Menlo,monospace}
+svg .seg{fill:var(--green);fill-opacity:.32;stroke:var(--green);stroke-width:1.4}
+svg .frame{fill:none;stroke:var(--border);stroke-width:1}
+svg .gate{stroke:var(--orange);stroke-width:3}
+svg .gl{fill:var(--orange);font:bold 11.5px -apple-system,sans-serif}
+svg .zoom{stroke:var(--dim);stroke-width:1;stroke-dasharray:4 3;fill:none}
+svg .brk{stroke:var(--text);stroke-width:1.2;fill:none}
+svg .ans0{fill:var(--accent);fill-opacity:.55;stroke:var(--accent)}
+svg .ans0b{fill:var(--accent);fill-opacity:.25;stroke:var(--accent)}
+svg .ans1{fill:var(--orange);fill-opacity:.45;stroke:var(--orange)}
+svg .gen{fill:var(--accent);fill-opacity:.5;stroke:none}
+svg .tr{fill:var(--green);fill-opacity:.5;stroke:var(--green);stroke-width:.6}
+svg .ov{fill:var(--orange);fill-opacity:.85;stroke:none}
+svg .lane{fill:none;stroke:var(--border);stroke-width:1}
+svg .stp{stroke:var(--red);stroke-width:1.6;stroke-dasharray:3 2}
+svg .ax{stroke:var(--dim);stroke-width:1}
+svg .big{fill:var(--text);font:bold 13px ui-monospace,Menlo,monospace}
+svg a text{text-decoration:underline;fill:var(--accent);font:11.5px ui-monospace,Menlo,monospace}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+  document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head>
+<body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+  function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+  function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
+    b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
+      else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+  document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+<div class="wrap">
+
+<h1>A chunk cap cannot make a step faster when generation is faster than training — a worked example</h1>
+<p class="sub"><a href="https://github.com/NVIDIA-NeMo/RL/pull/5036">NVIDIA-NeMo/RL #5036</a>.
+All permalinks pin the PR head <code>391cb0fc</code>.</p>
+
+<div class="status"><dl>
+  <dt>Before</dt><dd>When generation runs ahead, the whole step is ready at once, goes to the trainer as one chunk, and generation sits idle while it trains.</dd>
+  <dt>This PR</dt><dd>Caps chunks so the trainer takes the step in small bites, hoping generation can keep working in between.</dd>
+  <dt>Status</dt><dd><span class="verdict open">Open — this model predicts no gain, only extra cost.</span>
+  Review comment <a href="https://github.com/NVIDIA-NeMo/RL/pull/5036#discussion_r4486856908">C2</a> asks for one real capped vs uncapped timing run.</dd>
+</dl></div>
+
+<nav class="chain">
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-5036-chunk-cap.html">1 · what the cap does</a>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-5036-chunk-size.html">2 · how a chunk's size is picked</a>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-5036-grpo-cap-crash.html">3 · the GRPO guard gap</a>
+  <span class="here">4 · does the cap save time?</span>
+</nav>
+<p class="chainnote">Four pages on this PR, one question each — this one: can a cap ever make a step faster when generation is ahead?</p>
+
+<p>The question: if generation is several times faster than training, does taking 8 groups at a time instead of the whole step
+ever shorten a step? To answer it without hand-waving, a small simulation (code at the bottom of the page) plays out the pump's rules from the code:</p>
+<ul>
+<li>Buffer slots come back only when the step closes (<a href="https://github.com/NVIDIA-NeMo/RL/blob/391cb0fc7f4f4f6ea6d6b57d553e1c290eedcf90/nemo_rl/algorithms/single_controller.py#L3870-L3872">L3870</a>).</li>
+<li>Generation may be at most one step ahead, because the lookahead gate waits on the trainer's version
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/391cb0fc7f4f4f6ea6d6b57d553e1c290eedcf90/nemo_rl/algorithms/async_utils/staleness_sampler.py#L506">L506</a>), which moves only after the optimizer step (<a href="https://github.com/NVIDIA-NeMo/RL/blob/391cb0fc7f4f4f6ea6d6b57d553e1c290eedcf90/nemo_rl/algorithms/single_controller.py#L3771">L3771</a>).</li>
+<li>The chunk loop takes everything ready, up to the max, once the floor is met (<a href="https://github.com/NVIDIA-NeMo/RL/blob/391cb0fc7f4f4f6ea6d6b57d553e1c290eedcf90/nemo_rl/algorithms/async_utils/staleness_sampler.py#L345-L351">L345</a>).</li>
+</ul>
+<div class="mono">step:        32 prompt groups, floor 8, cap 8 (or none)
+generation:  2 groups per second      → 16 s to make a whole step     (6× faster than training)
+training:    3 s per group            → 96 s of real work per step
+per chunk:   5 s of fixed work        (a logprob pass, advantages, training setup)
+lookahead:   generation at most 1 step ahead; buffer holds 64 groups (2 steps)</div>
+
+<svg viewBox="0 0 940 486" role="img" aria-label="Timelines: step time does not drop with a cap">
+  <text class="tb" x="14" y="20">First 360 s of each run — model of the pump's rules (see settings above)</text>
+  <line class="ax" x1="170" y1="44" x2="926" y2="44"/>
+  <line class="ax" x1="170.0" y1="40" x2="170.0" y2="48"/>
+  <text class="d" x="170.0" y="36" text-anchor="start">0 s</text>
+  <line class="ax" x1="296.0" y1="40" x2="296.0" y2="48"/>
+  <text class="d" x="296.0" y="36" text-anchor="middle">60 s</text>
+  <line class="ax" x1="422.0" y1="40" x2="422.0" y2="48"/>
+  <text class="d" x="422.0" y="36" text-anchor="middle">120 s</text>
+  <line class="ax" x1="548.0" y1="40" x2="548.0" y2="48"/>
+  <text class="d" x="548.0" y="36" text-anchor="middle">180 s</text>
+  <line class="ax" x1="674.0" y1="40" x2="674.0" y2="48"/>
+  <text class="d" x="674.0" y="36" text-anchor="middle">240 s</text>
+  <line class="ax" x1="800.0" y1="40" x2="800.0" y2="48"/>
+  <text class="d" x="800.0" y="36" text-anchor="middle">300 s</text>
+  <line class="ax" x1="926.0" y1="40" x2="926.0" y2="48"/>
+  <text class="d" x="926.0" y="36" text-anchor="end">360 s</text>
+  <text class="tb" x="14" y="74">no cap <tspan class="d">— today</tspan></text>
+  <text class="big" x="926" y="74" text-anchor="end">step = 101 s</text>
+  <text class="d" x="14" y="97">generation</text><text class="d" x="14" y="121">training</text>
+  <rect class="lane" x="170" y="84" width="756" height="18"/><rect class="lane" x="170" y="108" width="756" height="18"/>
+  <rect class="gen" x="170.0" y="85" width="67.2" height="16"/>
+  <rect class="gen" x="401.0" y="85" width="33.6" height="16"/>
+  <rect class="gen" x="613.1" y="85" width="33.6" height="16"/>
+  <rect class="gen" x="825.2" y="85" width="33.6" height="16"/>
+  <rect class="ov" x="178.4" y="109" width="10.5" height="16"/>
+  <rect class="tr" x="188.9" y="109" width="50.4" height="16"/>
+  <rect class="ov" x="239.3" y="109" width="10.5" height="16"/>
+  <rect class="tr" x="249.8" y="109" width="151.2" height="16"/>
+  <rect class="ov" x="401.0" y="109" width="10.5" height="16"/>
+  <rect class="tr" x="411.5" y="109" width="201.6" height="16"/>
+  <rect class="ov" x="613.1" y="109" width="10.5" height="16"/>
+  <rect class="tr" x="623.6" y="109" width="201.6" height="16"/>
+  <rect class="ov" x="825.2" y="109" width="10.5" height="16"/>
+  <rect class="tr" x="835.7" y="109" width="90.3" height="16"/>
+  <line class="stp" x1="401.0" y1="82" x2="401.0" y2="128"/>
+  <line class="stp" x1="613.1" y1="82" x2="613.1" y2="128"/>
+  <line class="stp" x1="825.2" y1="82" x2="825.2" y2="128"/>
+  <text class="tb" x="14" y="166">cap 8 <tspan class="d">— this PR, as the code works</tspan></text>
+  <text class="big" x="926" y="166" text-anchor="end">step = 116 s</text>
+  <text class="d" x="14" y="189">generation</text><text class="d" x="14" y="213">training</text>
+  <rect class="lane" x="170" y="176" width="756" height="18"/><rect class="lane" x="170" y="200" width="756" height="18"/>
+  <rect class="gen" x="170.0" y="177" width="67.2" height="16"/>
+  <rect class="gen" x="422.0" y="177" width="33.6" height="16"/>
+  <rect class="gen" x="665.6" y="177" width="33.6" height="16"/>
+  <rect class="gen" x="909.2" y="177" width="16.8" height="16"/>
+  <rect class="ov" x="178.4" y="201" width="10.5" height="16"/>
+  <rect class="tr" x="188.9" y="201" width="50.4" height="16"/>
+  <rect class="ov" x="239.3" y="201" width="10.5" height="16"/>
+  <rect class="tr" x="249.8" y="201" width="50.4" height="16"/>
+  <rect class="ov" x="300.2" y="201" width="10.5" height="16"/>
+  <rect class="tr" x="310.7" y="201" width="50.4" height="16"/>
+  <rect class="ov" x="361.1" y="201" width="10.5" height="16"/>
+  <rect class="tr" x="371.6" y="201" width="50.4" height="16"/>
+  <rect class="ov" x="422.0" y="201" width="10.5" height="16"/>
+  <rect class="tr" x="432.5" y="201" width="50.4" height="16"/>
+  <rect class="ov" x="482.9" y="201" width="10.5" height="16"/>
+  <rect class="tr" x="493.4" y="201" width="50.4" height="16"/>
+  <rect class="ov" x="543.8" y="201" width="10.5" height="16"/>
+  <rect class="tr" x="554.3" y="201" width="50.4" height="16"/>
+  <rect class="ov" x="604.7" y="201" width="10.5" height="16"/>
+  <rect class="tr" x="615.2" y="201" width="50.4" height="16"/>
+  <rect class="ov" x="665.6" y="201" width="10.5" height="16"/>
+  <rect class="tr" x="676.1" y="201" width="50.4" height="16"/>
+  <rect class="ov" x="726.5" y="201" width="10.5" height="16"/>
+  <rect class="tr" x="737.0" y="201" width="50.4" height="16"/>
+  <rect class="ov" x="787.4" y="201" width="10.5" height="16"/>
+  <rect class="tr" x="797.9" y="201" width="50.4" height="16"/>
+  <rect class="ov" x="848.3" y="201" width="10.5" height="16"/>
+  <rect class="tr" x="858.8" y="201" width="50.4" height="16"/>
+  <rect class="ov" x="909.2" y="201" width="10.5" height="16"/>
+  <rect class="tr" x="919.7" y="201" width="6.3" height="16"/>
+  <line class="stp" x1="422.0" y1="174" x2="422.0" y2="220"/>
+  <line class="stp" x1="665.6" y1="174" x2="665.6" y2="220"/>
+  <line class="stp" x1="909.2" y1="174" x2="909.2" y2="220"/>
+  <text class="tb" x="14" y="258">cap 8 + slots freed per chunk <tspan class="d">— the author's hope (not in the code)</tspan></text>
+  <text class="big" x="926" y="258" text-anchor="end">step = 116 s</text>
+  <text class="d" x="14" y="281">generation</text><text class="d" x="14" y="305">training</text>
+  <rect class="lane" x="170" y="268" width="756" height="18"/><rect class="lane" x="170" y="292" width="756" height="18"/>
+  <rect class="gen" x="170.0" y="269" width="67.2" height="16"/>
+  <rect class="gen" x="422.0" y="269" width="33.6" height="16"/>
+  <rect class="gen" x="665.6" y="269" width="33.6" height="16"/>
+  <rect class="gen" x="909.2" y="269" width="16.8" height="16"/>
+  <rect class="ov" x="178.4" y="293" width="10.5" height="16"/>
+  <rect class="tr" x="188.9" y="293" width="50.4" height="16"/>
+  <rect class="ov" x="239.3" y="293" width="10.5" height="16"/>
+  <rect class="tr" x="249.8" y="293" width="50.4" height="16"/>
+  <rect class="ov" x="300.2" y="293" width="10.5" height="16"/>
+  <rect class="tr" x="310.7" y="293" width="50.4" height="16"/>
+  <rect class="ov" x="361.1" y="293" width="10.5" height="16"/>
+  <rect class="tr" x="371.6" y="293" width="50.4" height="16"/>
+  <rect class="ov" x="422.0" y="293" width="10.5" height="16"/>
+  <rect class="tr" x="432.5" y="293" width="50.4" height="16"/>
+  <rect class="ov" x="482.9" y="293" width="10.5" height="16"/>
+  <rect class="tr" x="493.4" y="293" width="50.4" height="16"/>
+  <rect class="ov" x="543.8" y="293" width="10.5" height="16"/>
+  <rect class="tr" x="554.3" y="293" width="50.4" height="16"/>
+  <rect class="ov" x="604.7" y="293" width="10.5" height="16"/>
+  <rect class="tr" x="615.2" y="293" width="50.4" height="16"/>
+  <rect class="ov" x="665.6" y="293" width="10.5" height="16"/>
+  <rect class="tr" x="676.1" y="293" width="50.4" height="16"/>
+  <rect class="ov" x="726.5" y="293" width="10.5" height="16"/>
+  <rect class="tr" x="737.0" y="293" width="50.4" height="16"/>
+  <rect class="ov" x="787.4" y="293" width="10.5" height="16"/>
+  <rect class="tr" x="797.9" y="293" width="50.4" height="16"/>
+  <rect class="ov" x="848.3" y="293" width="10.5" height="16"/>
+  <rect class="tr" x="858.8" y="293" width="50.4" height="16"/>
+  <rect class="ov" x="909.2" y="293" width="10.5" height="16"/>
+  <rect class="tr" x="919.7" y="293" width="6.3" height="16"/>
+  <line class="stp" x1="422.0" y1="266" x2="422.0" y2="312"/>
+  <line class="stp" x1="665.6" y1="266" x2="665.6" y2="312"/>
+  <line class="stp" x1="909.2" y1="266" x2="909.2" y2="312"/>
+  <text class="tb" x="14" y="350">cap 8 + slots and gate freed per chunk <tspan class="d">— most generous possible (not in the code)</tspan></text>
+  <text class="big" x="926" y="350" text-anchor="end">step = 116 s</text>
+  <text class="d" x="14" y="373">generation</text><text class="d" x="14" y="397">training</text>
+  <rect class="lane" x="170" y="360" width="756" height="18"/><rect class="lane" x="170" y="384" width="756" height="18"/>
+  <rect class="gen" x="170.0" y="361" width="67.2" height="16"/>
+  <rect class="gen" x="239.3" y="361" width="8.4" height="16"/>
+  <rect class="gen" x="300.2" y="361" width="8.4" height="16"/>
+  <rect class="gen" x="361.1" y="361" width="8.4" height="16"/>
+  <rect class="gen" x="422.0" y="361" width="8.4" height="16"/>
+  <rect class="gen" x="482.9" y="361" width="8.4" height="16"/>
+  <rect class="gen" x="543.8" y="361" width="8.4" height="16"/>
+  <rect class="gen" x="604.7" y="361" width="8.4" height="16"/>
+  <rect class="gen" x="665.6" y="361" width="8.4" height="16"/>
+  <rect class="gen" x="726.5" y="361" width="8.4" height="16"/>
+  <rect class="gen" x="787.4" y="361" width="8.4" height="16"/>
+  <rect class="gen" x="848.3" y="361" width="8.4" height="16"/>
+  <rect class="gen" x="909.2" y="361" width="8.4" height="16"/>
+  <rect class="ov" x="178.4" y="385" width="10.5" height="16"/>
+  <rect class="tr" x="188.9" y="385" width="50.4" height="16"/>
+  <rect class="ov" x="239.3" y="385" width="10.5" height="16"/>
+  <rect class="tr" x="249.8" y="385" width="50.4" height="16"/>
+  <rect class="ov" x="300.2" y="385" width="10.5" height="16"/>
+  <rect class="tr" x="310.7" y="385" width="50.4" height="16"/>
+  <rect class="ov" x="361.1" y="385" width="10.5" height="16"/>
+  <rect class="tr" x="371.6" y="385" width="50.4" height="16"/>
+  <rect class="ov" x="422.0" y="385" width="10.5" height="16"/>
+  <rect class="tr" x="432.5" y="385" width="50.4" height="16"/>
+  <rect class="ov" x="482.9" y="385" width="10.5" height="16"/>
+  <rect class="tr" x="493.4" y="385" width="50.4" height="16"/>
+  <rect class="ov" x="543.8" y="385" width="10.5" height="16"/>
+  <rect class="tr" x="554.3" y="385" width="50.4" height="16"/>
+  <rect class="ov" x="604.7" y="385" width="10.5" height="16"/>
+  <rect class="tr" x="615.2" y="385" width="50.4" height="16"/>
+  <rect class="ov" x="665.6" y="385" width="10.5" height="16"/>
+  <rect class="tr" x="676.1" y="385" width="50.4" height="16"/>
+  <rect class="ov" x="726.5" y="385" width="10.5" height="16"/>
+  <rect class="tr" x="737.0" y="385" width="50.4" height="16"/>
+  <rect class="ov" x="787.4" y="385" width="10.5" height="16"/>
+  <rect class="tr" x="797.9" y="385" width="50.4" height="16"/>
+  <rect class="ov" x="848.3" y="385" width="10.5" height="16"/>
+  <rect class="tr" x="858.8" y="385" width="50.4" height="16"/>
+  <rect class="ov" x="909.2" y="385" width="10.5" height="16"/>
+  <rect class="tr" x="919.7" y="385" width="6.3" height="16"/>
+  <line class="stp" x1="422.0" y1="358" x2="422.0" y2="404"/>
+  <line class="stp" x1="665.6" y1="358" x2="665.6" y2="404"/>
+  <line class="stp" x1="909.2" y1="358" x2="909.2" y2="404"/>
+  <rect class="gen" x="14" y="436" width="18" height="12"/><text class="t" x="38" y="447">generating</text>
+  <rect class="tr" x="140" y="436" width="18" height="12"/><text class="t" x="164" y="447">training (3 s per group)</text>
+  <rect class="ov" x="340" y="436" width="18" height="12"/><text class="t" x="364" y="447">fixed work per chunk (5 s)</text>
+  <line class="stp" x1="560" y1="434" x2="560" y2="450"/><text class="t" x="570" y="447">step closes (optimizer runs)</text>
+</svg>
+
+<table>
+<tr><th>Case</th><th>Step time</th><th>Generation busy</th><th>Why</th></tr>
+<tr><td>no cap</td><td><b>101 s</b></td><td>19%</td><td>One chunk of 32: 96 s of training + one 5 s fixed cost.</td></tr>
+<tr><td>cap 8</td><td><b>116 s</b></td><td>16%</td><td>Four chunks of 8: the same 96 s + four 5 s fixed costs.</td></tr>
+<tr><td>cap 8 + slots freed per chunk</td><td><b>116 s</b></td><td>16%</td><td>Freed slots do not help: the lookahead gate still stops generation until the step closes.</td></tr>
+<tr><td>cap 8 + slots and gate freed per chunk</td><td><b>116 s</b></td><td>18%</td><td>Generation can now run, but training is still 96 s of work per step; it was never waiting on generation.</td></tr>
+</table>
+
+<h2>Why no case beats 101 s</h2>
+<p>Every step must train 32 groups × 3 s = <b>96 s</b>. Chunking cannot remove any of that work; it only adds the 5 s fixed cost once per chunk:
+1 chunk → 96 + 5 = <b>101 s</b>, 4 chunks → 96 + 20 = <b>116 s</b>.
+Generation needs only 16 s per step and is already finished before the trainer asks, so the trainer never waits on it.
+Freeing generation earlier gives it more chances to work, but there is nothing on the training side for that work to speed up.
+The idle generation time is real, but it means too many GPUs are on generation for this ratio — the fix is to move GPUs
+to training (or allow more staleness), not to cut the step into chunks.</p>
+
+<div class="hl"><b>So what.</b> When generation is ahead — the only time a cap changes anything — training is the slow side, and a cap can only add
+per-chunk cost (here +15 s, about 15%). The cap could still matter for something other than speed, such as lower peak memory per chunk,
+but that is not what the PR claims. This is a model of the rules, not a hardware timing: <a href="https://github.com/NVIDIA-NeMo/RL/pull/5036#discussion_r4486856908">C2</a> asks the author to settle it with one real run.</div>
+
+<details><summary>The simulation code (Python, no dependencies)</summary>
+<pre class="mono">&quot;&quot;&quot;Tiny event simulation of the SC chunk loop vs generation, for the PR #5036 explainer.
+
+Model (mirrors the code&#x27;s rules, not its timings):
+- Step = 32 prompt groups. Floor 8. Cap = None or 8.
+- Generation makes 2 groups/s, one after another, whenever it is allowed to.
+- Allowed = (a) the lookahead gate: groups started &lt; (steps closed + 2) * 32, i.e. at most
+  one step ahead of the step being trained (the trainer version only moves at step close);
+  (b) a free buffer slot: capacity 64 = 2 steps.
+- Slots come back at step close (the code today) or right after each chunk trains (the hope).
+- Trainer chunk loop: take min(ready, max) if &gt;= floor, else poll. Training a chunk of k
+  groups takes 3*k + 5 s (5 s = fixed per-chunk work: logprobs, advantages, setup).
+&quot;&quot;&quot;
+import json
+
+STEP, FLOOR, GEN_RATE, T_GROUP, T_CHUNK, CAP_SLOTS, AHEAD = 32, 8, 2.0, 3.0, 5.0, 64, 1
+N_STEPS = 5
+
+
+def run(cap, release_per_chunk, gate_per_chunk=False):
+    dt = 0.05
+    t = 0.0
+    started = 0          # groups generation has started
+    ready = 0            # finished, not yet taken by the trainer
+    in_gen = 0.0         # progress on the group being generated
+    slots_used = 0
+    steps_closed = 0
+    trained_this_step = 0
+    train_busy_until = None
+    chunk_k = 0
+    gen_segments, train_segments, step_ends = [], [], []
+    gen_on = None
+    while steps_closed &lt; N_STEPS:
+        # trainer
+        if train_busy_until is not None and t &gt;= train_busy_until - 1e-9:
+            trained_this_step += chunk_k
+            if release_per_chunk:
+                slots_used -= chunk_k
+            train_busy_until = None
+            if trained_this_step == STEP:
+                steps_closed += 1
+                trained_this_step = 0
+                if not release_per_chunk:
+                    slots_used -= STEP
+                step_ends.append(round(t, 2))
+        if train_busy_until is None and steps_closed &lt; N_STEPS:
+            mx = STEP - trained_this_step
+            if cap is not None:
+                mx = min(mx, cap)
+            take = min(ready, mx)
+            if take &gt;= min(FLOOR, mx):
+                ready -= take
+                chunk_k = take
+                dur = T_GROUP * take + T_CHUNK
+                train_segments.append((round(t, 2), round(t + dur, 2), take, steps_closed))
+                train_busy_until = t + dur
+        # generation
+        consumed = steps_closed * STEP + (trained_this_step if gate_per_chunk else 0)
+        allowed = (started &lt; consumed + (1 + AHEAD) * STEP if gate_per_chunk else started &lt; (steps_closed + 1 + AHEAD) * STEP) and slots_used &lt; CAP_SLOTS
+        working = in_gen &gt; 0 or allowed
+        if working:
+            if in_gen == 0:
+                started += 1
+                slots_used += 1
+            in_gen += GEN_RATE * dt
+            if in_gen &gt;= 1 - 1e-9:
+                in_gen = 0.0
+                ready += 1
+            if gen_on is None:
+                gen_on = t
+        elif gen_on is not None:
+            gen_segments.append((round(gen_on, 2), round(t, 2)))
+            gen_on = None
+        t += dt
+    if gen_on is not None:
+        gen_segments.append((round(gen_on, 2), round(t, 2)))
+    total = step_ends[-1]
+    steady = [round(step_ends[i] - step_ends[i - 1], 2) for i in range(1, len(step_ends))]
+    gen_busy = sum(min(b, total) - a for a, b in gen_segments if a &lt; total)
+    return dict(cap=cap, release_per_chunk=release_per_chunk, step_ends=step_ends, steady_step_times=steady,
+                total=round(total, 2), gen_busy_frac=round(gen_busy / total, 3),
+                gen_segments=gen_segments, train_segments=train_segments)
+
+
+out = {&#x27;uncapped&#x27;: run(None, False), &#x27;cap8&#x27;: run(8, False), &#x27;cap8_hope&#x27;: run(8, True), &#x27;cap8_all&#x27;: run(8, True, True)}
+for k, v in out.items():
+    print(k, &#x27;step ends&#x27;, v[&#x27;step_ends&#x27;], &#x27;steady&#x27;, v[&#x27;steady_step_times&#x27;], &#x27;gen busy&#x27;, v[&#x27;gen_busy_frac&#x27;])
+    print(&#x27;   chunks&#x27;, [(s[2], s[3]) for s in v[&#x27;train_segments&#x27;]])
+json.dump(out, open(&#x27;sim.json&#x27;, &#x27;w&#x27;))
+</pre>
+</details>
+
+</div>
+</body>
+</html>
