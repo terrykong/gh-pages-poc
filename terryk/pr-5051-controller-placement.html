@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>NVIDIA-NeMo/RL #5051 — where the single-controller actor runs, with and without the pin</title>
+<title>NVIDIA-NeMo/RL #5051 — where the single-controller actor runs: hard pin or preference</title>
 <style>
 :root{
   --bg:#0d1117; --surface:#161b22; --surface2:#1c2128; --border:#30363d;
@@ -86,7 +86,7 @@ svg a text{text-decoration:underline;fill:var(--accent);font:11px ui-monospace,M
   document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
 <div class="wrap">
 
-<h1>Where the single-controller actor runs on a Slurm cluster — with and without the new pin</h1>
+<h1>Where the single-controller actor runs on a Slurm cluster — a hard pin to the head, or a preference for it</h1>
 <p class="sub"><a href="https://github.com/NVIDIA-NeMo/RL/pull/5051">NVIDIA-NeMo/RL #5051</a>
 (pin the SingleController actor to the dedicated Ray head) ·
 <a href="https://github.com/NVIDIA-NeMo/RL/pull/5051#pullrequestreview-5793092066">review</a> ·
@@ -99,7 +99,7 @@ permalinks pin the PR head <code>365c591</code> and Ray <code>2.58.0</code>.</p>
   <dt>This PR</dt>
   <dd>Makes the controller request the head's <code>ray_head</code> resource, so it can run <em>only</em> there. Adds an env var to turn that off.</dd>
   <dt>Status</dt>
-  <dd><span class="verdict open">Proposed; the review asks for evidence that it is needed.</span> The pin changes placement in one case only (case 3 below), and there it turns a working run into a hang.</dd>
+  <dd><span class="verdict open">Open: the review asks to make the head a preference, not a requirement.</span> Always aiming for the head is right. But when the head has no free CPU (case 3 below), the hard pin turns a working run into a failed one.</dd>
 </dl>
 </div>
 
@@ -119,11 +119,13 @@ For such an actor, Ray's default scheduler first tries only nodes with no GPUs
 On a dedicated-head cluster the head is the only such node, so the controller goes there.
 The PR adds <code>resources={"ray_head": 1}</code>
 (<a href="https://github.com/NVIDIA-NeMo/RL/blob/365c591481060e4eace6ca84a8fa7b6fbf8c5967/examples/run_grpo_single_controller.py#L101-L105">run_grpo_single_controller.py:101-105</a>),
-which only the head has. The two rules agree until the head has no free CPU.</p>
+which only the head has, so the controller can go nowhere else. The review proposes Ray's
+<a href="https://github.com/ray-project/ray/blob/ray-2.58.0/src/ray/raylet/scheduling/policy/node_affinity_scheduling_policy.cc#L27-L40">soft node affinity with <code>_spill_on_unavailable=True</code></a>:
+use the head if it has a free CPU, otherwise fall back to the default rule.</p>
 
 <h2>Three cluster states, two ways to place the controller</h2>
 
-<svg viewBox="0 0 900 470" role="img" aria-label="Three cluster states by two placement rules. Without a dedicated head both put the controller beside GPU workers. With a free head CPU both put it on the head. With no free head CPU the default spills to a GPU node and runs, while the pin waits forever.">
+<svg viewBox="0 0 900 470" role="img" aria-label="Three cluster states by two placement rules. Without a dedicated head both put the controller beside GPU workers. With a free head CPU both put it on the head. With no free head CPU the PR's hard pin leaves the controller unplaced until the driver gives up, while the proposed preference falls back to a GPU node and runs.">
   <text class="hdr" x="170" y="22">1 · no dedicated head</text>
   <text class="note" x="170" y="40">DEDICATED_RAY_HEAD=0 (the default)</text>
   <text class="hdr" x="406" y="22">2 · dedicated head, CPU free</text>
@@ -132,15 +134,16 @@ which only the head has. The two rules agree until the head has no free CPU.</p>
   <text class="note" x="642" y="40">rare: other actors took every CPU</text>
 
   <!-- row labels -->
-  <text class="row" x="16" y="112">Ray default</text>
-  <text class="note" x="16" y="128">(main today)</text>
-  <a href="https://github.com/ray-project/ray/blob/ray-2.58.0/src/ray/raylet/scheduling/policy/hybrid_scheduling_policy.cc#L183-L220" target="_blank" rel="noopener"><text x="16" y="146">GPU-free nodes first</text></a>
-  <text class="row" x="16" y="282">With the pin</text>
-  <text class="note" x="16" y="298">(this PR)</text>
-  <a href="https://github.com/NVIDIA-NeMo/RL/blob/365c591481060e4eace6ca84a8fa7b6fbf8c5967/examples/run_grpo_single_controller.py#L237" target="_blank" rel="noopener"><text x="16" y="316">.options(**placement)</text></a>
+  <text class="row" x="16" y="112">Hard pin</text>
+  <text class="note" x="16" y="128">(this PR)</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/365c591481060e4eace6ca84a8fa7b6fbf8c5967/examples/run_grpo_single_controller.py#L101-L105" target="_blank" rel="noopener"><text x="16" y="146">{"ray_head": 1}</text></a>
+  <text class="row" x="16" y="282">Prefer head</text>
+  <text class="note" x="16" y="298">(review proposal)</text>
+  <a href="https://github.com/ray-project/ray/blob/ray-2.58.0/src/ray/raylet/scheduling/policy/node_affinity_scheduling_policy.cc#L27-L40" target="_blank" rel="noopener"><text x="16" y="316">soft + spill</text></a>
   <line class="sep" x1="16" y1="234" x2="886" y2="234"/>
 
-  <!-- ===== ROW 1: default ===== -->
+  <!-- ===== proposal, drawn in the lower row ===== -->
+  <g transform="translate(0,194)">
   <!-- case 1 -->
   <rect class="node" x="170" y="58" width="108" height="116" rx="7"/>
   <text class="ntitle" x="176" y="74">head (has GPUs)</text>
@@ -174,9 +177,11 @@ which only the head has. The two rules agree until the head has no free CPU.</p>
   <text class="ntitle" x="768" y="74">GPU node</text>
   <rect class="chip" x="770" y="82" width="92" height="18" rx="4"/><text class="ct" x="776" y="95">4 GPU workers</text>
   <rect class="chip-o" x="770" y="104" width="92" height="18" rx="4"/><text class="ct" x="776" y="117">controller</text>
-  <text class="res-o" x="642" y="194">spills to a GPU node, still runs</text>
+  <text class="res-o" x="642" y="194">falls back to a GPU node, runs</text>
+  </g>
 
-  <!-- ===== ROW 2: pin ===== -->
+  <!-- ===== this PR, drawn in the upper row ===== -->
+  <g transform="translate(0,-194)">
   <!-- case 1 -->
   <rect class="node" x="170" y="252" width="108" height="116" rx="7"/>
   <text class="ntitle" x="176" y="268">head (has GPUs)</text>
@@ -197,7 +202,7 @@ which only the head has. The two rules agree until the head has no free CPU.</p>
   <rect class="node" x="526" y="252" width="108" height="116" rx="7"/>
   <text class="ntitle" x="532" y="268">GPU node</text>
   <rect class="chip" x="534" y="276" width="92" height="18" rx="4"/><text class="ct" x="540" y="289">4 GPU workers</text>
-  <text class="res-g" x="406" y="388">on the head (same as default)</text>
+  <text class="res-g" x="406" y="388">on the head</text>
 
   <!-- case 3 -->
   <rect class="node" x="642" y="252" width="108" height="116" rx="7"/>
@@ -209,8 +214,9 @@ which only the head has. The two rules agree until the head has no free CPU.</p>
   <rect class="node" x="762" y="252" width="108" height="116" rx="7"/>
   <text class="ntitle" x="768" y="268">GPU node</text>
   <rect class="chip" x="770" y="276" width="92" height="18" rx="4"/><text class="ct" x="776" y="289">4 GPU workers</text>
-  <text class="res-r" x="642" y="388">waits forever, no error from Ray</text>
-  <a href="https://github.com/NVIDIA-NeMo/RL/blob/365c591481060e4eace6ca84a8fa7b6fbf8c5967/examples/run_grpo_single_controller.py#L310-L314" target="_blank" rel="noopener"><text x="642" y="404">driver fails after stall_timeout_s</text></a>
+  <text class="res-r" x="642" y="388">never placed, no error from Ray</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/365c591481060e4eace6ca84a8fa7b6fbf8c5967/examples/run_grpo_single_controller.py#L310-L314" target="_blank" rel="noopener"><text x="642" y="404">run fails after 600 s</text></a>
+  </g>
 
   <!-- legend -->
   <rect class="chip-g" x="170" y="432" width="16" height="14" rx="3"/>
@@ -218,47 +224,56 @@ which only the head has. The two rules agree until the head has no free CPU.</p>
   <rect class="chip-o" x="420" y="432" width="16" height="14" rx="3"/>
   <text class="note" x="442" y="443">beside GPU workers, but runs</text>
   <rect class="chip-r" x="630" y="432" width="16" height="14" rx="3"/>
-  <text class="note" x="652" y="443">OOM risk or hang</text>
+  <text class="note" x="652" y="443">OOM risk or failed run</text>
 </svg>
 
-<p>Rows 1 and 2 are the same in cases 1 and 2. In case 1 there is no <code>ray_head</code>, so the
-pin never turns on; the failed job the PR cites was this case, and <code>DEDICATED_RAY_HEAD=1</code>
-alone moves it to case 2. Case 3 needs every head CPU taken (the head starts with all of its
-cores), so it is rare — but it is the only case the pin changes. The repo already avoids this
-kind of hang elsewhere:
-<a href="https://github.com/NVIDIA-NeMo/RL/blob/365c591481060e4eace6ca84a8fa7b6fbf8c5967/nemo_rl/algorithms/advantage_actor.py#L110-L111">advantage actors pin softly "because a hard pin deadlocks"</a>.</p>
+<p>The two rows differ only in case 3. In case 1 there is no <code>ray_head</code>, so neither rule
+turns on; the failed job the PR cites was this case, and <code>DEDICATED_RAY_HEAD=1</code> is what
+moves it to case 2. Case 3 needs every head CPU taken by actors created earlier, such as the
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/365c591481060e4eace6ca84a8fa7b6fbf8c5967/nemo_rl/algorithms/single_controller_utils/setup.py#L1021-L1025">router</a>.
+It is rare, but with the hard pin the controller stays PENDING and the driver's
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/365c591481060e4eace6ca84a8fa7b6fbf8c5967/examples/run_grpo_single_controller.py#L310-L314">liveness check</a>
+ends the run after <code>stall_timeout_s</code> (600 s by default), blaming the event loop.</p>
 
 <h2>What the review asks — proposed, not in the PR</h2>
 
 <p class="where"><b>Where the change would land: RL only, one example script plus its test and doc.</b>
 <a href="https://github.com/NVIDIA-NeMo/RL/blob/365c591481060e4eace6ca84a8fa7b6fbf8c5967/examples/run_grpo_single_controller.py#L81-L105"><code>_controller_placement</code></a>.
-No Ray change: the default rule already does the useful part.</p>
+No Ray change: Ray already has the "prefer this node, else anywhere" rule.</p>
 
-<p>First, a run on <code>DEDICATED_RAY_HEAD=1</code> without the PR where the controller landed off
-the head. If there is none, the PR can close. If it stays, the opt-out env var goes, since turning
-the pin off gives the same placement as row 1:</p>
-
-<pre class="diff"><span class="hunk">@@ run_grpo_single_controller.py L100-L105 · _controller_placement</span>
-     """
+<pre class="diff"><span class="hunk">@@ run_grpo_single_controller.py L101-L105 · _controller_placement</span>
 <span class="del">-    if os.environ.get("NRL_PIN_CONTROLLER_TO_HEAD", "1") != "1":
 -        return {}
-</span>     if ray.cluster_resources().get("ray_head", 0) >= 1:
-         return {"resources": {"ray_head": 1}}
-     return {}</pre>
+-    if ray.cluster_resources().get("ray_head", 0) >= 1:
+-        return {"resources": {"ray_head": 1}}
+-    return {}
+</span><span class="add">+    head = next(
++        (n for n in ray.nodes() if n["Alive"] and n["Resources"].get("ray_head")),
++        None,
++    )
++    if head is None:
++        return {}
++    # Prefer the head; if it has no free CPU, Ray places the controller as usual.
++    return {
++        "scheduling_strategy": NodeAffinitySchedulingStrategy(
++            node_id=head["NodeID"], soft=True, _spill_on_unavailable=True
++        )
++    }</span></pre>
 
-<p>and the launch waits on the controller's readiness with a timeout, so case 3 raises
-"could not be placed on the dedicated head" instead of a stall error that names the wrong cause.
-The 19-line docstring and the docs paragraph also shrink; both say the claim keeps everything
-else off the head, which it does not (the
-<a href="https://github.com/NVIDIA-NeMo/RL/blob/365c591481060e4eace6ca84a8fa7b6fbf8c5967/nemo_rl/algorithms/single_controller_utils/setup.py#L1021-L1025">router is pinned to the head</a> too).</p>
+<p>The env-var opt-out goes, since the head is always the right first choice. <code>soft=True</code>
+alone is not enough: Ray
+<a href="https://github.com/ray-project/ray/blob/ray-2.58.0/python/ray/util/scheduling_strategies.py#L58-L66">still waits indefinitely</a>
+when the node exists but is busy. <code>_spill_on_unavailable=True</code> turns that wait into a
+fallback, so no timeout is needed. (A timeout on the controller's readiness would also count its
+own start-up time, so a slow start on the head would look like a placement failure.) The 19-line
+docstring and the docs paragraph also shrink to match.</p>
 
 <p class="cref">🟠 <a href="https://github.com/NVIDIA-NeMo/RL/pull/5051#discussion_r4486858915">C1 — run_grpo_single_controller.py:237</a><a href="https://github.com/NVIDIA-NeMo/RL/pull/5051#discussion_r4486858931">C2 — :101</a><a href="https://github.com/NVIDIA-NeMo/RL/pull/5051#discussion_r4486858938">C3 — :82-100</a><a href="https://github.com/NVIDIA-NeMo/RL/pull/5051#discussion_r4486858974">C4 — cluster.md:160-165</a></p>
 
 <div class="warn">
-<strong>So what.</strong> To keep the controller off GPU nodes, set <code>DEDICATED_RAY_HEAD=1</code>;
-that already works. The pin adds a guarantee that matters only when the head is full, and there
-it trades a run that works for one that hangs. Keep it only with a fail-fast check and a real run
-showing it is needed.
+<strong>So what.</strong> Aim the controller at the dedicated head whenever there is one, with no
+switch. Make it a preference, so a full head costs some host-memory headroom instead of the whole
+run. And set <code>DEDICATED_RAY_HEAD=1</code>: without it there is no head to aim at.
 </div>
 
 </div>
