@@ -3,16 +3,16 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>NVIDIA-NeMo/RL #4905 — how a generation request reaches vLLM: native, router, Dynamo</title>
+<title>NVIDIA-NeMo/RL #4905 + #4979 — how a generation request reaches vLLM: native, router, Dynamo</title>
 <style>
 :root{--bg:#0d1117;--surface:#161b22;--surface2:#1c2128;--border:#30363d;--text:#e6edf3;--dim:#8b949e;
-  --accent:#58a6ff;--green:#3fb950;--red:#f85149;--orange:#d29922}
+  --accent:#58a6ff;--green:#3fb950;--red:#f85149;--orange:#d29922;--purple:#bc8cff}
 :root[data-theme="light"]{--bg:#ffffff;--surface:#f6f8fa;--surface2:#eaeef2;--border:#d0d7de;--text:#1f2328;
-  --dim:#59636e;--accent:#0969da;--green:#1a7f37;--red:#cf222e;--orange:#9a6700}
+  --dim:#59636e;--accent:#0969da;--green:#1a7f37;--red:#cf222e;--orange:#9a6700;--purple:#8250df}
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--text);
   font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
-.wrap{max-width:1000px;margin:0 auto;padding:28px 16px 70px}
+.wrap{max-width:1080px;margin:0 auto;padding:28px 16px 70px}
 h1{font-size:22px;margin:0 0 8px;line-height:1.3}
 h2{font-size:18px;margin:30px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
 a{color:var(--accent);text-decoration:none}
@@ -45,18 +45,21 @@ table{border-collapse:collapse;width:100%;font-size:14px;margin:8px 0}
 th,td{border:1px solid var(--border);padding:6px 9px;text-align:left;vertical-align:top}
 th{background:var(--surface)}
 .scroll{overflow-x:auto}
+.pr05{color:var(--orange);font-weight:700}.pr79{color:var(--purple);font-weight:700}
 svg{max-width:100%;height:auto;display:block;margin:14px 0}
 svg .box{fill:var(--surface);stroke:var(--border);stroke-width:1.3}
 svg .panel{fill:none;stroke:var(--border);stroke-width:1.2;stroke-dasharray:4 4}
 svg .proc{fill:none;stroke:var(--accent);stroke-width:1.6}
 svg .same{fill:var(--surface);stroke:var(--green);stroke-width:2}
 svg .new{fill:var(--surface);stroke:var(--orange);stroke-width:2}
+svg .nxt{fill:var(--surface);stroke:var(--purple);stroke-width:2;stroke-dasharray:6 3}
 svg .http{fill:var(--surface);stroke:var(--accent);stroke-width:1.6}
 svg .t{fill:var(--text);font:bold 12.5px -apple-system,sans-serif}
 svg .d{fill:var(--dim);font:10.5px ui-monospace,Menlo,monospace}
 svg .n{fill:var(--dim);font:11.5px -apple-system,sans-serif}
 svg .h{fill:var(--accent);font:bold 13px -apple-system,sans-serif}
 svg .o{fill:var(--orange);font:bold 11px -apple-system,sans-serif}
+svg .p{fill:var(--purple);font:bold 11px -apple-system,sans-serif}
 svg .g{fill:var(--green);font:bold 11px -apple-system,sans-serif}
 svg .arr{stroke:var(--dim);stroke-width:1.4;fill:none;marker-end:url(#ah)}
 svg .ahf{fill:var(--dim)}
@@ -76,198 +79,236 @@ svg a text{text-decoration:underline;fill:var(--accent);font:10.5px ui-monospace
 <div class="wrap">
 
 <h1>How a generation request reaches vLLM: native, native with the router, and Dynamo</h1>
-<p class="sub"><a href="https://github.com/NVIDIA-NeMo/RL/pull/4905">NVIDIA-NeMo/RL #4905</a>.
-Permalinks pin RL head <code>44671d3b</code> and Gym <code>5911d628</code>.</p>
+<p class="sub"><a href="https://github.com/NVIDIA-NeMo/RL/pull/4905">NVIDIA-NeMo/RL #4905</a> and the PR stacked on it,
+<a href="https://github.com/NVIDIA-NeMo/RL/pull/4979">#4979</a> (with <a href="https://github.com/NVIDIA-NeMo/Gym/pull/4817">NVIDIA-NeMo/Gym#4817</a>).
+Permalinks pin #4905 <code>44671d3b</code>, #4979 <code>c4fe2bd5</code>, Gym <code>5911d628</code>.</p>
 
 <nav class="chain">
   <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4905-dynamo-native-worker.html">what the PR replaces</a>
   <span class="here">how requests reach vLLM</span>
 </nav>
-<p class="chainnote">Two pages on this PR, one question each. This one: which classes and servers each request passes through.</p>
+<p class="chainnote">Two pages on this PR, one question each. This one: which classes and servers each request passes through, including the next PR in the stack.</p>
 
 <div class="status"><dl>
-<dt>Before</dt><dd>Two ways in: NeMo RL's own rollouts reach the worker by a Ray call, and NeMo-Gym reaches it over HTTP, either straight to each worker or through NeMo RL's router.</dd>
-<dt>This PR</dt><dd>Adds a third way for NeMo RL's own rollouts: HTTP to Dynamo's frontend, which picks the worker by cached prompt and reaches it over Dynamo's own TCP channel. Gym with Dynamo is rejected until <a href="https://github.com/NVIDIA-NeMo/RL/pull/4979">#4979</a>.</dd>
-<dt>Status</dt><dd><span class="verdict open">In review, not merged.</span> Lanes A–C exist on main today.</dd>
+<dt>Today (main)</dt><dd>Three ways in. NeMo RL's own rollouts reach the worker by a Ray call (A). NeMo-Gym reaches it over HTTP, either straight to each worker (B) or through NeMo RL's router (C).</dd>
+<dt><span class="pr05">#4905</span></dt><dd>Adds lane D: NeMo RL's own rollouts can go through Dynamo instead of the Ray call. Gym with <code>dynamo: true</code> is <b>rejected at startup</b> in this PR.</dd>
+<dt><span class="pr79">#4979</span></dt><dd>The next PR in the stack. Adds lane E: Gym through Dynamo, and lifts that rejection. It needs a matching Gym change (Gym#4817).</dd>
+<dt>Status</dt><dd><span class="verdict open">Both in review, not merged.</span> #4979's base branch is #4905's branch.</dd>
 </dl></div>
 
 <div class="bg"><b>Background.</b> Each <span class="tip" tabindex="0" data-tip="A copy of the model that serves requests on its own GPUs. With N data-parallel shards there are N vLLM engines, one per Ray worker actor.">data-parallel shard</span>
 runs one Ray actor, <a href="https://github.com/NVIDIA-NeMo/RL/blob/44671d3bf5f017fbef5e7455f5686cf994ef9106/nemo_rl/models/generation/vllm/vllm_worker_async.py#L2603-L2607"><code>VllmAsyncGenerationWorker</code></a>, which owns one vLLM
 <a href="https://github.com/NVIDIA-NeMo/RL/blob/44671d3bf5f017fbef5e7455f5686cf994ef9106/nemo_rl/models/generation/vllm/vllm_worker_async.py#L472"><code>AsyncLLM</code></a>
-engine. Everything below is a different door into that same engine. N is the number of shards. Dotted words have a short explanation: hover or tap them.</div>
+engine. Every lane below is a different door into that same engine. N is the number of shards.
+A <span class="tip" tabindex="0" data-tip="A NeMo RL rollout: the training loop hands the generator a token-id prompt and gets token ids and log-probs back. No chat messages, no environment server.">NeMo RL rollout</span>
+is the training loop's own token-in, token-out call; a <span class="tip" tabindex="0" data-tip="NeMo-Gym: the environment library. Its vllm_model server sends the policy's chat calls as OpenAI-style HTTP and records the exact tokens for training.">NeMo-Gym</span> call is an OpenAI-style chat request from Gym's environment servers. Dotted words have a short explanation: hover or tap them.</div>
 
-<h2>Four ways in, one engine</h2>
+<h2>Five ways in, one engine</h2>
 
-<svg viewBox="0 0 960 700" role="img" aria-label="Four lanes, A native Ray, D Dynamo, B Gym native, C Gym with router, all ending in one vLLM worker process. A and D enter on the engine loop and share _serve_rollout. B and C enter through the worker's HTTP server thread.">
+<svg viewBox="0 0 1200 714" role="img" aria-label="Five lanes: A native Ray, D Dynamo rollout from #4905, E Gym through Dynamo from #4979, B Gym native, C Gym with router. All end in one vLLM worker process. A and D share _serve_rollout. E shares token capture with B and C, but skips the worker's HTTP server.">
 <defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="ahf" d="M0,0 L10,5 L0,10 z"/></marker></defs>
 
 <!-- lane titles -->
 <text class="h" x="12" y="20">A · NeMo RL rollout, native</text>
 <text class="h" x="250" y="20">D · NeMo RL rollout, Dynamo</text>
-<text class="h" x="488" y="20">B · NeMo-Gym, native</text>
-<text class="h" x="726" y="20">C · NeMo-Gym + router</text>
+<text class="h" x="488" y="20">E · NeMo-Gym, Dynamo</text>
+<text class="h" x="726" y="20">B · NeMo-Gym, native</text>
+<text class="h" x="964" y="20">C · NeMo-Gym + router</text>
 <text class="n" x="12" y="36">no HTTP at all</text>
 <text class="o" x="250" y="36">new in #4905</text>
-<text class="n" x="488" y="36">Gym gets N URLs</text>
-<text class="n" x="726" y="36">Gym gets 1 URL</text>
+<text class="p" x="488" y="36">next PR, #4979</text>
+<text class="n" x="726" y="36">Gym gets N URLs</text>
+<text class="n" x="964" y="36">Gym gets 1 URL</text>
 
-<!-- row 1 -->
-<rect class="box" x="8" y="46" width="230" height="74" rx="7"/>
+<!-- row 1: caller -->
+<rect class="box" x="8" y="46" width="228" height="74" rx="7"/>
 <text class="t" x="18" y="64">Driver: VllmGeneration</text>
 <text class="d" x="18" y="81">generate_async(input_ids</text>
 <text class="d" x="18" y="95"> [1 prompt, P tokens])</text>
 <a href="https://github.com/NVIDIA-NeMo/RL/blob/44671d3bf5f017fbef5e7455f5686cf994ef9106/nemo_rl/models/generation/vllm/vllm_generation.py#L1486-L1511" target="_blank" rel="noopener"><text x="18" y="112">vllm_generation.py:1486</text></a>
 
-<rect class="new" x="246" y="46" width="230" height="74" rx="7"/>
+<rect class="new" x="246" y="46" width="228" height="74" rx="7"/>
 <text class="t" x="256" y="64">Driver: VllmGeneration</text>
 <text class="d" x="256" y="81">POST frontend/v1/completions</text>
 <text class="d" x="256" y="95">{prompt:[t0..tP-1], tag}</text>
 <a href="https://github.com/NVIDIA-NeMo/RL/blob/44671d3bf5f017fbef5e7455f5686cf994ef9106/nemo_rl/models/generation/vllm/vllm_generation.py#L1523-L1563" target="_blank" rel="noopener"><text x="256" y="112">_generate_through_dynamo</text></a>
 
-<rect class="box" x="484" y="46" width="230" height="74" rx="7"/>
+<rect class="nxt" x="484" y="46" width="228" height="74" rx="7"/>
 <text class="t" x="494" y="64">Gym's vllm_model server</text>
-<text class="d" x="494" y="81">POST /v1/chat/completions</text>
-<text class="d" x="494" y="95">{messages, tools}</text>
+<text class="d" x="494" y="81">POST frontend/v1/chat/…</text>
+<text class="d" x="494" y="95">{messages, tools} + tag</text>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/c4fe2bd540cb1be02daf82f6f2961a80ab4f3d59/nemo_rl/environments/nemo_gym.py#L3029-L3049" target="_blank" rel="noopener"><text x="494" y="112">_apply_dynamo_dialect</text></a>
 
-<rect class="box" x="722" y="46" width="230" height="74" rx="7"/>
+<rect class="box" x="722" y="46" width="228" height="74" rx="7"/>
 <text class="t" x="732" y="64">Gym's vllm_model server</text>
-<text class="d" x="732" y="81">same request as B,</text>
-<text class="d" x="732" y="95">sent to the router's 1 URL</text>
-<path class="arr" d="M123 120 L123 138"/><path class="arr" d="M361 120 L361 138"/><path class="arr" d="M599 120 L599 138"/><path class="arr" d="M837 120 L837 138"/>
+<text class="d" x="732" y="81">POST /v1/chat/completions</text>
+<text class="d" x="732" y="95">{messages, tools}</text>
 
-<!-- row 2: who picks the worker -->
-<rect class="box" x="8" y="140" width="230" height="74" rx="7"/>
+<rect class="box" x="960" y="46" width="228" height="74" rx="7"/>
+<text class="t" x="970" y="64">Gym's vllm_model server</text>
+<text class="d" x="970" y="81">same request as B,</text>
+<text class="d" x="970" y="95">sent to the router's 1 URL</text>
+<path class="arr" d="M122 120 L122 138"/><path class="arr" d="M360 120 L360 138"/><path class="arr" d="M598 120 L598 138"/><path class="arr" d="M836 120 L836 138"/><path class="arr" d="M1074 120 L1074 138"/>
+
+<!-- row 2: who picks the shard -->
+<rect class="box" x="8" y="140" width="228" height="74" rx="7"/>
 <text class="t" x="18" y="158">Driver picks shard k</text>
 <text class="d" x="18" y="175">round-robin over N</text>
 <text class="d" x="18" y="189">(or the fleet selector)</text>
 <a href="https://github.com/NVIDIA-NeMo/RL/blob/44671d3bf5f017fbef5e7455f5686cf994ef9106/nemo_rl/models/generation/vllm/vllm_generation.py#L1362-L1371" target="_blank" rel="noopener"><text x="18" y="206">_next_dp_shard_idx · :1362</text></a>
 
-<rect class="new" x="246" y="140" width="230" height="74" rx="7"/>
+<rect class="new" x="246" y="140" width="228" height="74" rx="7"/>
 <text class="t" x="256" y="158">Dynamo frontend (Rust)</text>
 <text class="d" x="256" y="175">KV router picks shard k</text>
 <text class="d" x="256" y="189">by cached prompt blocks</text>
 <a href="https://github.com/NVIDIA-NeMo/RL/blob/44671d3bf5f017fbef5e7455f5686cf994ef9106/nemo_rl/models/generation/dynamo/managed_runtime.py#L53-L70" target="_blank" rel="noopener"><text x="256" y="206">managed_runtime.py:53</text></a>
 
-<rect class="box" x="484" y="140" width="230" height="74" rx="7"/>
-<text class="t" x="494" y="158">Gym picks 1 of N URLs</text>
-<text class="d" x="494" y="175">sha256(rollout id) % N,</text>
-<text class="d" x="494" y="189">same URL every turn</text>
-<a href="https://github.com/NVIDIA-NeMo/Gym/blob/5911d628c744d0bf43fe1d9ddf3bda72d59b0f9a/responses_api_models/vllm_model/app.py#L2258-L2291" target="_blank" rel="noopener"><text x="494" y="206">Gym _resolve_client</text></a>
+<rect class="nxt" x="484" y="140" width="228" height="74" rx="7"/>
+<text class="t" x="494" y="158">Same Dynamo frontend</text>
+<text class="d" x="494" y="175">renders the chat template,</text>
+<text class="d" x="494" y="189">then KV router picks k</text>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/c4fe2bd540cb1be02daf82f6f2961a80ab4f3d59/nemo_rl/models/generation/vllm/vllm_generation.py#L750-L758" target="_blank" rel="noopener"><text x="494" y="206">Gym gets this 1 URL · :750</text></a>
 
-<rect class="box" x="722" y="140" width="230" height="74" rx="7"/>
-<text class="t" x="732" y="158">GenerationRouter actor</text>
-<text class="d" x="732" y="175">aiohttp proxy holding N</text>
-<text class="d" x="732" y="189">URLs; least in-flight wins</text>
-<a href="https://github.com/NVIDIA-NeMo/RL/blob/44671d3bf5f017fbef5e7455f5686cf994ef9106/nemo_rl/models/generation/generation_router.py#L183-L188" target="_blank" rel="noopener"><text x="732" y="206">generation_router.py:183</text></a>
-<path class="arr" d="M123 214 L123 232"/><path class="arr" d="M361 214 L361 232"/><path class="arr" d="M599 214 L599 232"/><path class="arr" d="M837 214 L837 232"/>
+<rect class="box" x="722" y="140" width="228" height="74" rx="7"/>
+<text class="t" x="732" y="158">Gym picks 1 of N URLs</text>
+<text class="d" x="732" y="175">sha256(rollout id) % N,</text>
+<text class="d" x="732" y="189">same URL every turn</text>
+<a href="https://github.com/NVIDIA-NeMo/Gym/blob/5911d628c744d0bf43fe1d9ddf3bda72d59b0f9a/responses_api_models/vllm_model/app.py#L2258-L2291" target="_blank" rel="noopener"><text x="732" y="206">Gym _resolve_client</text></a>
 
-<!-- row 3: how it gets into the worker -->
-<rect class="box" x="8" y="234" width="230" height="52" rx="7"/>
+<rect class="box" x="960" y="140" width="228" height="74" rx="7"/>
+<text class="t" x="970" y="158">GenerationRouter actor</text>
+<text class="d" x="970" y="175">aiohttp proxy holding N</text>
+<text class="d" x="970" y="189">URLs; least in-flight wins</text>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/44671d3bf5f017fbef5e7455f5686cf994ef9106/nemo_rl/models/generation/generation_router.py#L183-L188" target="_blank" rel="noopener"><text x="970" y="206">generation_router.py:183</text></a>
+<path class="arr" d="M122 214 L122 232"/><path class="arr" d="M360 214 L360 232"/><path class="arr" d="M598 214 L598 232"/><path class="arr" d="M836 214 L836 232"/><path class="arr" d="M1074 214 L1074 232"/>
+
+<!-- row 3: transport into the worker -->
+<rect class="box" x="8" y="234" width="228" height="52" rx="7"/>
 <text class="t" x="18" y="252">Ray actor call</text>
 <text class="d" x="18" y="270">worker_k.generate_async.remote</text>
-
-<rect class="new" x="246" y="234" width="230" height="52" rx="7"/>
+<rect class="new" x="246" y="234" width="228" height="52" rx="7"/>
 <text class="t" x="256" y="252">Dynamo request plane (TCP)</text>
 <text class="d" x="256" y="270">not HTTP; found via etcd</text>
-
-<rect class="http" x="484" y="234" width="230" height="52" rx="7"/>
-<text class="t" x="494" y="252">HTTP to worker k</text>
-<text class="d" x="494" y="270">http://node:port/v1/chat/…</text>
-
-<rect class="http" x="722" y="234" width="230" height="52" rx="7"/>
+<rect class="nxt" x="484" y="234" width="228" height="52" rx="7"/>
+<text class="t" x="494" y="252">Dynamo request plane (TCP)</text>
+<text class="d" x="494" y="270">token ids, not messages</text>
+<rect class="http" x="722" y="234" width="228" height="52" rx="7"/>
 <text class="t" x="732" y="252">HTTP to worker k</text>
-<text class="d" x="732" y="270">router streams reply back</text>
+<text class="d" x="732" y="270">http://node:port/v1/chat/…</text>
+<rect class="http" x="960" y="234" width="228" height="52" rx="7"/>
+<text class="t" x="970" y="252">HTTP to worker k</text>
+<text class="d" x="970" y="270">router streams reply back</text>
 
 <!-- worker process -->
-<rect class="proc" x="8" y="316" width="944" height="336" rx="10"/>
-<text class="h" x="20" y="336">One vLLM worker process · Ray actor VllmAsyncGenerationWorker · ×N, one per shard</text>
+<rect class="proc" x="8" y="306" width="1180" height="372" rx="10"/>
+<text class="h" x="20" y="326">One vLLM worker process · Ray actor VllmAsyncGenerationWorker · ×N, one per shard</text>
+<rect class="panel" x="18" y="336" width="696" height="200" rx="8"/>
+<text class="n" x="28" y="354">Engine event loop (the Ray actor's own loop)</text>
+<rect class="panel" x="726" y="336" width="452" height="200" rx="8"/>
+<text class="n" x="736" y="354">HTTP server thread (uvicorn), only if expose_http_server</text>
 
-<rect class="panel" x="18" y="346" width="446" height="190" rx="8"/>
-<text class="n" x="28" y="364">Engine event loop (the Ray actor's own loop)</text>
-<rect class="panel" x="476" y="346" width="466" height="190" rx="8"/>
-<text class="n" x="486" y="364">HTTP server thread (uvicorn), only if expose_http_server</text>
+<path class="arr" d="M122 286 L122 364"/><path class="arr" d="M360 286 L360 364"/><path class="arr" d="M598 286 L598 364"/>
+<path class="arr" d="M836 286 L836 364"/><path class="arr" d="M1074 286 L1074 364"/>
 
-<!-- lane arrows into worker -->
-<path class="arr" d="M123 286 L123 374"/>
-<path class="arr" d="M361 286 L361 374"/>
-<path class="arr" d="M599 286 L599 374"/>
-<path class="arr" d="M837 286 L837 374"/>
+<!-- engine-loop entries -->
+<rect class="box" x="28" y="366" width="196" height="62" rx="7"/>
+<text class="t" x="38" y="384">generate_async</text>
+<text class="d" x="38" y="400">Ray entry (lane A)</text>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/44671d3bf5f017fbef5e7455f5686cf994ef9106/nemo_rl/models/generation/vllm/vllm_worker_async.py#L2112-L2156" target="_blank" rel="noopener"><text x="38" y="418">vllm_worker_async.py:2112</text></a>
 
-<rect class="box" x="28" y="376" width="200" height="56" rx="7"/>
-<text class="t" x="38" y="394">generate_async</text>
-<text class="d" x="38" y="410">Ray entry (lane A)</text>
-<a href="https://github.com/NVIDIA-NeMo/RL/blob/44671d3bf5f017fbef5e7455f5686cf994ef9106/nemo_rl/models/generation/vllm/vllm_worker_async.py#L2112-L2156" target="_blank" rel="noopener"><text x="38" y="425">vllm_worker_async.py:2112</text></a>
+<rect class="new" x="246" y="366" width="226" height="62" rx="7"/>
+<text class="t" x="256" y="384">NativeVllmEngine</text>
+<text class="d" x="256" y="400">._generate_rollout (D)</text>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/44671d3bf5f017fbef5e7455f5686cf994ef9106/nemo_rl/models/generation/dynamo/native_engine.py#L183-L227" target="_blank" rel="noopener"><text x="256" y="418">native_engine.py:183</text></a>
 
-<rect class="new" x="244" y="376" width="210" height="56" rx="7"/>
-<text class="t" x="254" y="394">NativeVllmEngine.generate</text>
-<text class="d" x="254" y="410">Dynamo entry (lane D)</text>
-<a href="https://github.com/NVIDIA-NeMo/RL/blob/44671d3bf5f017fbef5e7455f5686cf994ef9106/nemo_rl/models/generation/dynamo/native_engine.py#L183-L227" target="_blank" rel="noopener"><text x="254" y="425">native_engine.py:183</text></a>
+<rect class="nxt" x="484" y="366" width="220" height="62" rx="7"/>
+<text class="t" x="494" y="384">NativeVllmEngine</text>
+<text class="d" x="494" y="400">._generate_gym (E)</text>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/c4fe2bd540cb1be02daf82f6f2961a80ab4f3d59/nemo_rl/models/generation/dynamo/native_engine.py#L492-L530" target="_blank" rel="noopener"><text x="494" y="418">#4979 native_engine.py:492</text></a>
 
-<path class="arr" d="M128 432 L128 464"/><path class="arr" d="M349 432 L349 464"/>
-<rect class="same" x="28" y="466" width="426" height="60" rx="7"/>
-<text class="t" x="38" y="484">_serve_rollout(TokensPrompt([t0..tP-1]))</text>
-<text class="d" x="38" y="500">token budget, sampling from the generation config</text>
-<a href="https://github.com/NVIDIA-NeMo/RL/blob/44671d3bf5f017fbef5e7455f5686cf994ef9106/nemo_rl/models/generation/vllm/vllm_worker_async.py#L2059-L2110" target="_blank" rel="noopener"><text x="38" y="517">vllm_worker_async.py:2059</text></a>
-<text class="g" x="260" y="517">same code for A and D</text>
+<path class="arr" d="M126 428 L126 456"/><path class="arr" d="M359 428 L359 456"/>
+<rect class="same" x="28" y="458" width="444" height="66" rx="7"/>
+<text class="t" x="38" y="476">_serve_rollout(TokensPrompt([t0..tP-1]))</text>
+<text class="d" x="38" y="492">token budget, sampling from the generation config</text>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/44671d3bf5f017fbef5e7455f5686cf994ef9106/nemo_rl/models/generation/vllm/vllm_worker_async.py#L2059-L2110" target="_blank" rel="noopener"><text x="38" y="512">vllm_worker_async.py:2059</text></a>
+<text class="g" x="262" y="512">same code for A and D</text>
 
-<rect class="http" x="486" y="376" width="446" height="40" rx="7"/>
-<text class="t" x="496" y="393">FastAPI app built by NeMo RL (not vllm serve)</text>
-<text class="d" x="496" y="408">/v1/chat/completions · /tokenize · /health</text>
+<text class="d" x="494" y="452">tag nemo_gym:rollout →</text>
+<text class="d" x="494" y="466">on-policy sampling check,</text>
+<text class="d" x="494" y="480">prefix splice, then capture</text>
 
-<rect class="http" x="486" y="424" width="446" height="58" rx="7"/>
-<text class="t" x="496" y="441">NeMoRLOpenAIServingChat</text>
-<text class="d" x="496" y="457">vLLM's OpenAIServingChat + NeMo RL mixins:</text>
-<text class="d" x="496" y="471">chat template, prefix splice, token capture</text>
-<a href="https://github.com/NVIDIA-NeMo/RL/blob/44671d3bf5f017fbef5e7455f5686cf994ef9106/nemo_rl/models/generation/vllm/vllm_worker_async.py#L1613-L1618" target="_blank" rel="noopener"><text x="760" y="441">:1613</text></a>
+<!-- HTTP server thread -->
+<rect class="http" x="736" y="366" width="432" height="40" rx="7"/>
+<text class="t" x="746" y="383">FastAPI app built by NeMo RL (not vllm serve)</text>
+<text class="d" x="746" y="398">/v1/chat/completions · /tokenize · /health</text>
+<rect class="http" x="736" y="414" width="432" height="58" rx="7"/>
+<text class="t" x="746" y="431">NeMoRLOpenAIServingChat</text>
+<text class="d" x="746" y="447">vLLM's OpenAIServingChat + NeMo RL mixins:</text>
+<text class="d" x="746" y="461">chat template, prefix splice, token capture</text>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/44671d3bf5f017fbef5e7455f5686cf994ef9106/nemo_rl/models/generation/vllm/vllm_worker_async.py#L1613-L1618" target="_blank" rel="noopener"><text x="1010" y="431">:1613</text></a>
+<rect class="http" x="736" y="480" width="432" height="44" rx="7"/>
+<text class="t" x="746" y="497">_AsyncLLMHTTPClient</text>
+<text class="d" x="746" y="513">hands each call to the engine loop</text>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/44671d3bf5f017fbef5e7455f5686cf994ef9106/nemo_rl/models/generation/vllm/vllm_worker_async.py#L151-L178" target="_blank" rel="noopener"><text x="1010" y="497">:151</text></a>
 
-<rect class="http" x="486" y="490" width="446" height="38" rx="7"/>
-<text class="t" x="496" y="506">_AsyncLLMHTTPClient</text>
-<text class="d" x="496" y="521">hands each call to the engine loop</text>
-<a href="https://github.com/NVIDIA-NeMo/RL/blob/44671d3bf5f017fbef5e7455f5686cf994ef9106/nemo_rl/models/generation/vllm/vllm_worker_async.py#L151-L178" target="_blank" rel="noopener"><text x="760" y="506">:151</text></a>
+<!-- shared capture -->
+<path class="arr" d="M598 488 L598 548"/>
+<rect class="same" x="484" y="550" width="560" height="52" rx="7"/>
+<text class="t" x="494" y="568">worker._begin_request_capture → token capture</text>
+<text class="d" x="494" y="585">E calls the same capture code as B and C's chat server</text>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/44671d3bf5f017fbef5e7455f5686cf994ef9106/nemo_rl/models/generation/vllm/vllm_worker_async.py#L808" target="_blank" rel="noopener"><text x="494" y="598">vllm_worker_async.py:808</text></a>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/44671d3bf5f017fbef5e7455f5686cf994ef9106/nemo_rl/models/generation/vllm/vllm_worker_async.py#L1381" target="_blank" rel="noopener"><text x="700" y="598">chat server call · :1381</text></a>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/c4fe2bd540cb1be02daf82f6f2961a80ab4f3d59/nemo_rl/models/generation/dynamo/native_engine.py#L624" target="_blank" rel="noopener"><text x="880" y="598">E's call · :624</text></a>
+<path class="arr" d="M952 472 L1010 548"/>
 
-<path class="arr" d="M240 526 L240 580"/><path class="arr" d="M708 528 L708 580"/>
-<rect class="same" x="18" y="582" width="924" height="56" rx="7"/>
-<text class="t" x="30" y="602">vLLM AsyncLLM (self.llm): the one engine every lane ends in</text>
-<text class="d" x="30" y="619">AsyncLLM.generate → generated token ids [G] + log-probs [G]</text>
-<a href="https://github.com/NVIDIA-NeMo/RL/blob/44671d3bf5f017fbef5e7455f5686cf994ef9106/nemo_rl/models/generation/vllm/vllm_worker_async.py#L472" target="_blank" rel="noopener"><text x="700" y="602">vllm_worker_async.py:472</text></a>
+<!-- engine -->
+<path class="arr" d="M250 524 L250 618"/><path class="arr" d="M760 602 L760 618"/><path class="arr" d="M1110 524 L1110 618"/>
+<rect class="same" x="18" y="620" width="1160" height="48" rx="7"/>
+<text class="t" x="30" y="640">vLLM AsyncLLM (self.llm): the one engine every lane ends in</text>
+<text class="d" x="30" y="657">AsyncLLM.generate → generated token ids [G] + log-probs [G]</text>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/44671d3bf5f017fbef5e7455f5686cf994ef9106/nemo_rl/models/generation/vllm/vllm_worker_async.py#L472" target="_blank" rel="noopener"><text x="860" y="640">vllm_worker_async.py:472</text></a>
 
 <!-- legend -->
-<rect class="same" x="12" y="668" width="16" height="12"/><text class="n" x="34" y="678">shared by lanes</text>
-<rect class="new" x="160" y="668" width="16" height="12"/><text class="n" x="182" y="678">new in #4905</text>
-<rect class="http" x="300" y="668" width="16" height="12"/><text class="n" x="322" y="678">HTTP into the worker</text>
-<rect class="box" x="470" y="668" width="16" height="12"/><text class="n" x="492" y="678">caller or routing step</text>
+<rect class="same" x="12" y="692" width="16" height="12"/><text class="n" x="34" y="702">shared by lanes</text>
+<rect class="new" x="160" y="692" width="16" height="12"/><text class="n" x="182" y="702">new in #4905</text>
+<rect class="nxt" x="300" y="692" width="16" height="12"/><text class="n" x="322" y="702">new in #4979 (next PR)</text>
+<rect class="http" x="490" y="692" width="16" height="12"/><text class="n" x="512" y="702">HTTP into the worker</text>
+<rect class="box" x="660" y="692" width="16" height="12"/><text class="n" x="682" y="702">caller or routing step</text>
 </svg>
 
-<p>Lanes A and D meet at <code>_serve_rollout</code>, so a NeMo RL rollout is sampled the same way either way. Lanes B and C meet at the worker's HTTP server. Lane D never touches that server.</p>
+<p>A and D meet at <code>_serve_rollout</code>, so a NeMo RL rollout is sampled the same way either way.
+B and C meet at the worker's HTTP server. E, Gym through Dynamo, skips that server: the Dynamo frontend renders the chat template, and
+<code>NativeVllmEngine</code> redoes on token ids what the server's chat route does on messages. It then calls the same token-capture code.</p>
 
-<h2>Classes and URLs</h2>
+<h2>Classes, URLs, and keeping a rollout on one worker</h2>
 <div class="scroll"><table>
 <tr><th>Class</th><th>Runs in</th><th>What it does</th></tr>
-<tr><td><a href="https://github.com/NVIDIA-NeMo/RL/blob/44671d3bf5f017fbef5e7455f5686cf994ef9106/nemo_rl/models/generation/vllm/vllm_generation.py#L201"><code>VllmGeneration</code></a></td><td>driver (training loop)</td><td>The handle training calls. Owns the N worker actors and collects their URLs for Gym. Per rollout, <a href="https://github.com/NVIDIA-NeMo/RL/blob/44671d3bf5f017fbef5e7455f5686cf994ef9106/nemo_rl/models/generation/vllm/vllm_generation.py#L1513-L1521"><code>_dynamo_serves</code></a> chooses lane D (Dynamo on, no images) or lane A. <code>_generate_through_dynamo</code> is an HTTP <i>client</i>, not a server.</td></tr>
-<tr><td><a href="https://github.com/NVIDIA-NeMo/RL/blob/44671d3bf5f017fbef5e7455f5686cf994ef9106/nemo_rl/models/generation/vllm/vllm_worker_async.py#L261-L263"><code>VllmAsyncGenerationWorkerImpl</code></a></td><td>Ray actor, one per shard</td><td>Owns <code>AsyncLLM</code>. Has the Ray entry <code>generate_async</code>, the shared <code>_serve_rollout</code>, the optional HTTP server, and (new) <a href="https://github.com/NVIDIA-NeMo/RL/blob/44671d3bf5f017fbef5e7455f5686cf994ef9106/nemo_rl/models/generation/vllm/vllm_worker_async.py#L652-L671"><code>start_dynamo_endpoint_async</code></a>.</td></tr>
+<tr><td><a href="https://github.com/NVIDIA-NeMo/RL/blob/44671d3bf5f017fbef5e7455f5686cf994ef9106/nemo_rl/models/generation/vllm/vllm_generation.py#L201"><code>VllmGeneration</code></a></td><td>driver (training loop)</td><td>The handle training calls. Owns the N worker actors. Hands Gym its URL list: the N worker URLs, or with Dynamo in #4979 the one frontend URL (<a href="https://github.com/NVIDIA-NeMo/RL/blob/c4fe2bd540cb1be02daf82f6f2961a80ab4f3d59/nemo_rl/models/generation/vllm/vllm_generation.py#L750-L758"><code>client_base_urls</code></a>). Per rollout, <a href="https://github.com/NVIDIA-NeMo/RL/blob/44671d3bf5f017fbef5e7455f5686cf994ef9106/nemo_rl/models/generation/vllm/vllm_generation.py#L1513-L1521"><code>_dynamo_serves</code></a> picks lane D (Dynamo on, no images) or lane A. <code>_generate_through_dynamo</code> is an HTTP <i>client</i>, not a server.</td></tr>
+<tr><td><a href="https://github.com/NVIDIA-NeMo/RL/blob/44671d3bf5f017fbef5e7455f5686cf994ef9106/nemo_rl/models/generation/vllm/vllm_worker_async.py#L261-L263"><code>VllmAsyncGenerationWorkerImpl</code></a></td><td>Ray actor, one per shard</td><td>Owns <code>AsyncLLM</code>. Has the Ray entry <code>generate_async</code>, the shared <code>_serve_rollout</code>, token capture, the optional HTTP server, and (new in #4905) <a href="https://github.com/NVIDIA-NeMo/RL/blob/44671d3bf5f017fbef5e7455f5686cf994ef9106/nemo_rl/models/generation/vllm/vllm_worker_async.py#L652-L671"><code>start_dynamo_endpoint_async</code></a>.</td></tr>
 <tr><td><code>NeMoRLOpenAIServingChat</code></td><td>worker, server thread</td><td>vLLM's own chat handler class, subclassed with NeMo RL mixins. NeMo RL builds the FastAPI app and adds the routes itself (<a href="https://github.com/NVIDIA-NeMo/RL/blob/44671d3bf5f017fbef5e7455f5686cf994ef9106/nemo_rl/models/generation/vllm/vllm_worker_async.py#L1933-L1950"><code>_setup_vllm_server</code></a>); vLLM's <code>vllm serve</code> process is not used.</td></tr>
 <tr><td><a href="https://github.com/NVIDIA-NeMo/RL/blob/44671d3bf5f017fbef5e7455f5686cf994ef9106/nemo_rl/models/generation/generation_router.py#L65"><code>GenerationRouterImpl</code></a></td><td>its own Ray actor</td><td>Reverse proxy for Gym only. Forwards to the same worker servers as lane B; it does not call the engine itself.</td></tr>
-<tr><td><a href="https://github.com/NVIDIA-NeMo/RL/blob/44671d3bf5f017fbef5e7455f5686cf994ef9106/nemo_rl/models/generation/dynamo/native_engine.py#L137-L144"><code>NativeVllmEngine</code></a> (new)</td><td>worker, engine loop</td><td>Adapter for Dynamo's <code>LLMEngine</code> interface. Holds the worker and calls its <code>_serve_rollout</code>. Dynamo's Rust <code>Worker</code> runs it on the actor's loop and registers it in etcd.</td></tr>
-<tr><td><a href="https://github.com/NVIDIA-NeMo/RL/blob/44671d3bf5f017fbef5e7455f5686cf994ef9106/nemo_rl/models/generation/dynamo/managed_runtime.py#L113"><code>ManagedDynamoRuntime</code></a> (rewritten)</td><td>driver</td><td>Starts and stops etcd, NATS and the Dynamo frontend as subprocesses.</td></tr>
+<tr><td><a href="https://github.com/NVIDIA-NeMo/RL/blob/44671d3bf5f017fbef5e7455f5686cf994ef9106/nemo_rl/models/generation/dynamo/native_engine.py#L137-L144"><code>NativeVllmEngine</code></a></td><td>worker, engine loop</td><td>Adapter for Dynamo's <code>LLMEngine</code> interface, holding the worker. Dynamo's <code>Worker</code> runs it on the actor's loop and registers it in etcd. It reads each request's tag: <code>nemo_rl:rollout</code> → <code>_serve_rollout</code> (#4905); <a href="https://github.com/NVIDIA-NeMo/RL/blob/c4fe2bd540cb1be02daf82f6f2961a80ab4f3d59/nemo_rl/models/generation/dynamo/native_engine.py#L390-L399"><code>nemo_gym:rollout</code> → <code>_generate_gym</code></a> (#4979). In #4905 any other request is refused.</td></tr>
+<tr><td><a href="https://github.com/NVIDIA-NeMo/RL/blob/44671d3bf5f017fbef5e7455f5686cf994ef9106/nemo_rl/models/generation/dynamo/managed_runtime.py#L113"><code>ManagedDynamoRuntime</code></a></td><td>driver</td><td>Starts and stops etcd, NATS and the Dynamo frontend as subprocesses.</td></tr>
 </table></div>
 
 <div class="scroll"><table>
-<tr><th>Lane</th><th>URLs the caller holds</th><th>HTTP servers on the path</th><th>Who picks the shard</th></tr>
-<tr><td>A · native rollout</td><td>none</td><td>none (Ray)</td><td>driver, round-robin</td></tr>
-<tr><td>B · Gym native</td><td>N worker URLs</td><td>N worker FastAPI servers</td><td>Gym, hash of rollout id</td></tr>
-<tr><td>C · Gym + router</td><td>1 router URL</td><td>router, then 1 of N worker servers</td><td>router, fewest in-flight</td></tr>
-<tr><td>D · Dynamo (#4905)</td><td>1 frontend URL (driver only)</td><td>Dynamo frontend only; it reaches the worker over Dynamo TCP</td><td>Dynamo KV router, most cached prompt</td></tr>
+<tr><th>Lane</th><th>URLs the caller holds</th><th>HTTP servers on the path</th><th>Who picks the shard</th><th>Does turn 2 land where turn 1's prompt is cached?</th></tr>
+<tr><td>A · native rollout</td><td>none</td><td>none (Ray)</td><td>driver, round-robin</td><td><b>No.</b> Every call takes the next shard, so a later turn usually lands on a shard that must recompute the whole history.</td></tr>
+<tr><td><span class="pr05">D</span> · Dynamo rollout (#4905)</td><td>1 frontend URL (driver)</td><td>Dynamo frontend; then TCP to the worker</td><td>Dynamo KV router, most cached prompt</td><td><b>Yes, with no session key.</b> The router sees the prompt's token blocks and sends the call to the shard that already holds most of them, weighed against load. A later turn's prompt starts with the earlier turn, so it follows that cache, and the repeated samples of one prompt tend to land together.</td></tr>
+<tr><td><span class="pr79">E</span> · Gym via Dynamo (#4979)</td><td>1 frontend URL (Gym)</td><td>Dynamo frontend; then TCP to the worker</td><td>Dynamo KV router, plus a session pin</td><td><b>Yes, with a session pin.</b> The engine swaps Gym's staged prefix in <i>after</i> routing, so the router cannot see where it is cached. Gym names the session on token-capture calls, and the frontend keeps it on one engine for 300 s idle (<a href="https://github.com/NVIDIA-NeMo/RL/blob/c4fe2bd540cb1be02daf82f6f2961a80ab4f3d59/nemo_rl/models/generation/dynamo/config.py#L67-L74"><code>session_affinity_ttl_secs</code></a>).</td></tr>
+<tr><td>B · Gym native</td><td>N worker URLs</td><td>N worker FastAPI servers</td><td>Gym, hash of rollout id</td><td><b>Yes, by hash.</b> <code>sha256(rollout id) % N</code> sends every turn of a rollout to the same worker (<a href="https://github.com/NVIDIA-NeMo/Gym/blob/5911d628c744d0bf43fe1d9ddf3bda72d59b0f9a/responses_api_models/vllm_model/app.py#L2258-L2291"><code>_resolve_client</code></a>). Different rollouts of the same prompt hash to different workers.</td></tr>
+<tr><td>C · Gym + router</td><td>1 router URL</td><td>router, then 1 of N worker servers</td><td>router, fewest in-flight</td><td><b>No.</b> Each request goes to the least busy worker, with no session key. The router's own docstring names this as the trade-off (<a href="https://github.com/NVIDIA-NeMo/RL/blob/44671d3bf5f017fbef5e7455f5686cf994ef9106/nemo_rl/models/generation/generation_router.py#L40-L43">generation_router.py:40</a>).</td></tr>
 </table></div>
 
 <h2>Short answers</h2>
 <ul>
+<li><b>What is #4979?</b> The PR stacked on top of #4905. #4905 builds the Dynamo plumbing and uses it only for NeMo RL's own rollouts, so it refuses Gym. #4979 points Gym at the same frontend and teaches <code>NativeVllmEngine</code> to serve Gym's chat calls. The author split it out because it needs a Gym change too. (<a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4979-gym-through-dynamo.html">#4979's own page</a>.)</li>
 <li><b>Is the worker's server vLLM's API server?</b> No. It is NeMo RL's FastAPI app, but its chat route runs vLLM's own request classes, extended with mixins.</li>
 <li><b>Does the router reuse those servers?</b> Yes. It is a proxy in front of the same N worker URLs.</li>
-<li><b>Does Dynamo sit in front of the worker's server?</b> No. Its Rust frontend is the HTTP server, and it calls <code>NativeVllmEngine</code> inside the worker over its own TCP channel. The worker's FastAPI server is not on that path.</li>
-<li><b>What does Dynamo replace?</b> Lane A's Ray hop, for NeMo RL's own rollouts. The sampling code underneath is unchanged. Gym through Dynamo comes in <a href="https://github.com/NVIDIA-NeMo/RL/pull/4979">#4979</a> (<a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4979-gym-through-dynamo.html">its page</a>): Gym calls the frontend's <code>/v1/chat/completions</code>, and <code>NativeVllmEngine</code> handles it, again bypassing the worker's server.</li>
+<li><b>Does Dynamo sit in front of the worker's server?</b> No, in both D and E. Dynamo's Rust frontend is the HTTP server. It reaches <code>NativeVllmEngine</code> inside the worker over its own TCP channel, and the worker's FastAPI server is not on that path.</li>
 </ul>
 
-<div class="hl"><b>So what.</b> All four lanes end in the same <code>AsyncLLM</code>, so refit and pause behave the same for every caller. What Dynamo changes is who picks the shard (cached prompt blocks instead of round-robin) and the transport (HTTP plus TCP instead of a Ray call). That routing is the benefit, and the extra HTTP hop is the cost the review asks the author to measure.</div>
+<div class="hl"><b>So what.</b> All five lanes end in the same <code>AsyncLLM</code>, so refit and pause behave the same for every caller. Dynamo changes two things: who picks the shard (cached prompt blocks instead of round-robin or a hash) and how the request gets there (HTTP to the frontend, then TCP, instead of a Ray call or HTTP to the worker). For NeMo RL's own multi-turn rollouts, D is the first lane that aims a later turn at the shard holding its earlier turns; A reuses that cache only when round-robin happens to land there. The extra hop is the cost the #4905 review asks the author to measure.</div>
 
 </div>
 </body>
