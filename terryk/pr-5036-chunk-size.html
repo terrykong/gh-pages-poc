@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NVIDIA-NeMo/RL #5036 — how each chunk's size is picked, per sampler</title>
+<style>
+:root{--bg:#0d1117;--surface:#161b22;--surface2:#1c2128;--border:#30363d;--text:#e6edf3;--dim:#8b949e;
+  --accent:#58a6ff;--green:#3fb950;--red:#f85149;--orange:#d29922}
+:root[data-theme="light"]{--bg:#ffffff;--surface:#f6f8fa;--surface2:#eaeef2;--border:#d0d7de;--text:#1f2328;
+  --dim:#59636e;--accent:#0969da;--green:#1a7f37;--red:#cf222e;--orange:#9a6700}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:28px 20px 70px}
+h1{font-size:22px;margin:0 0 8px;line-height:1.3}
+h2{font-size:18px;margin:30px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+a{color:var(--accent);text-decoration:none} a:hover{text-decoration:underline}
+code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
+.sub{color:var(--dim);font-size:13.5px;margin:0 0 14px}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);border:1px solid var(--border);
+  color:var(--text);border-radius:20px;padding:6px 12px;font:13px/1 ui-monospace,Menlo,monospace;cursor:pointer}
+.status{border:1px solid var(--border);border-radius:10px;background:var(--surface);padding:2px 16px 10px;margin:0 0 16px}
+.status dl{display:grid;grid-template-columns:max-content 1fr;gap:4px 14px;margin:12px 0 0}
+.status dt{color:var(--dim);font-size:12px;text-transform:uppercase;letter-spacing:.04em;white-space:nowrap;padding-top:2px}
+.status dd{margin:0;font-size:14px}
+.verdict{font-weight:700} .verdict.good{color:var(--green)} .verdict.open{color:var(--orange)}
+nav.chain{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 6px;padding:0}
+nav.chain a,nav.chain span{display:inline-block;padding:5px 11px;border:1px solid var(--border);border-radius:20px;
+  background:var(--surface);text-decoration:none;color:var(--accent);font-size:12.5px;line-height:1.3;white-space:nowrap}
+nav.chain a:hover{background:var(--surface2)}
+nav.chain span.here{background:var(--accent);color:var(--bg);border-color:var(--accent);font-weight:600}
+p.chainnote{color:var(--dim);font-size:12px;margin:0 0 18px}
+.bg{border-left:4px solid var(--accent);background:var(--surface);padding:8px 14px;margin:0 0 14px;font-size:14px}
+.mono{font:12.5px ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--surface);border:1px solid var(--border);
+  border-radius:8px;padding:12px;overflow-x:auto;white-space:pre;margin:8px 0}
+.diff{font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--surface);border:1px solid var(--border);
+  border-radius:8px;padding:12px;overflow-x:auto;white-space:pre;margin:10px 0}
+.diff .add{color:var(--green)} .diff .del{color:var(--red)} .diff .hunk{color:var(--accent)}
+table{border-collapse:collapse;font-size:13.5px;margin:8px 0;width:100%}
+th,td{border:1px solid var(--border);padding:5px 9px;text-align:left;vertical-align:top}
+th{background:var(--surface2)}
+.hl{border-left:3px solid var(--orange);background:var(--surface);padding:12px 16px;margin:18px 0;border-radius:0 8px 8px 0}
+.cref{margin:6px 0 0;font-size:13px}
+.cref a{display:inline-block;padding:4px 10px;border:1px solid var(--border);border-radius:16px;background:var(--surface);
+  font:12.5px ui-monospace,Menlo,monospace}
+.tip{border-bottom:1px dotted var(--dim);cursor:help;position:relative;outline:none}
+.tip:hover::after,.tip:focus::after{content:attr(data-tip);position:absolute;left:0;top:1.7em;z-index:60;width:max-content;
+  max-width:min(340px,80vw);white-space:normal;background:var(--surface2);color:var(--text);border:1px solid var(--border);
+  border-radius:6px;padding:7px 10px;font:13px/1.45 -apple-system,sans-serif;font-weight:400;box-shadow:0 4px 14px rgba(0,0,0,.3)}
+ol li{margin:3px 0}
+svg{max-width:100%;height:auto;display:block;margin:14px 0}
+svg .t{fill:var(--text);font:12.5px -apple-system,sans-serif}
+svg .tb{fill:var(--text);font:bold 13px -apple-system,sans-serif}
+svg .d{fill:var(--dim);font:11.5px -apple-system,sans-serif}
+svg .n{fill:var(--text);font:bold 12px ui-monospace,Menlo,monospace}
+svg .seg{fill:var(--green);fill-opacity:.32;stroke:var(--green);stroke-width:1.4}
+svg .frame{fill:none;stroke:var(--border);stroke-width:1}
+svg .gate{stroke:var(--orange);stroke-width:3}
+svg .gl{fill:var(--orange);font:bold 11.5px -apple-system,sans-serif}
+svg .zoom{stroke:var(--dim);stroke-width:1;stroke-dasharray:4 3;fill:none}
+svg .brk{stroke:var(--text);stroke-width:1.2;fill:none}
+svg .ans0{fill:var(--accent);fill-opacity:.55;stroke:var(--accent)}
+svg .ans0b{fill:var(--accent);fill-opacity:.25;stroke:var(--accent)}
+svg .ans1{fill:var(--orange);fill-opacity:.45;stroke:var(--orange)}
+svg .sg{fill:var(--green);fill-opacity:.55;stroke:var(--green)}
+svg .sb{fill:var(--accent);fill-opacity:.5;stroke:var(--accent)}
+svg .sx{fill:none;stroke:var(--dim);stroke-dasharray:3 2}
+svg .off{opacity:.15}
+svg .take{fill:none;stroke:var(--orange);stroke-width:2.6}
+svg .r{fill:var(--orange);font:bold 12.5px -apple-system,sans-serif}
+svg a text{text-decoration:underline;fill:var(--accent);font:11.5px ui-monospace,Menlo,monospace}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+  document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head>
+<body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+  function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+  function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
+    b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
+      else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+  document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+<div class="wrap">
+
+<h1>How each chunk's size is picked — and why the sampler changes it</h1>
+<p class="sub"><a href="https://github.com/NVIDIA-NeMo/RL/pull/5036">NVIDIA-NeMo/RL #5036</a>.
+All permalinks pin the PR head <code>391cb0fc</code>.</p>
+
+<div class="status"><dl>
+  <dt>Before</dt><dd>Chunk size = groups the sampler allows, up to what the step still needs, and at least the floor.</dd>
+  <dt>This PR</dt><dd>Adds one more upper limit: the cap. Nothing else about the choice changes.</dd>
+  <dt>Status</dt><dd><span class="verdict good">Explains existing behavior plus the new cap</span> — no bug on this page.</dd>
+</dl></div>
+
+<nav class="chain">
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-5036-chunk-cap.html">1 · what the cap does</a>
+  <span class="here">2 · how a chunk's size is picked</span>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-5036-grpo-cap-crash.html">3 · the GRPO guard gap</a>
+</nav>
+<p class="chainnote">Three pages on this PR, one question each — this one: where a number like "8 groups" comes from.</p>
+
+<p>No setting says "chunks are 8 groups". Inside one training step, the pump runs a <b>chunk loop</b> (<a href="https://github.com/NVIDIA-NeMo/RL/blob/391cb0fc7f4f4f6ea6d6b57d553e1c290eedcf90/nemo_rl/algorithms/single_controller.py#L3224-L3226"><code>while groups_dispatched &lt; target</code></a>): each pass asks the sampler for one chunk, trains on it, and goes round again until the step has its 32 groups. This is not the step loop (one level up) or the micro-batch loop (inside the training of one chunk). The chunk size falls out of four things.
+The sampler only decides <b>which</b> ready groups are allowed; all samplers then share the same
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/391cb0fc7f4f4f6ea6d6b57d553e1c290eedcf90/nemo_rl/algorithms/async_utils/staleness_sampler.py#L345-L352">size rule</a>:</p>
+<div class="mono">max   = min(groups the step still needs, max_groups_for_streaming_train)   # cap: new in this PR
+floor = min(min_groups_for_streaming_train, max)
+chunk = min(number of allowed groups, max)     # PPO also rounds down to its group multiple
+if chunk &lt; floor: no chunk — wait 5 ms, ask again</div>
+
+<svg viewBox="0 0 940 410" role="img" aria-label="One buffer, two samplers, two chunk sizes">
+  <text class="tb" x="14" y="20">One call to select(), same buffer, two samplers</text>
+  <text class="d" x="14" y="38">Settings: 32 groups per step, floor 4, cap 8. The trainer is on step 3 and has taken nothing yet, so max = min(32, 8) = 8.</text>
+  <text class="tb" x="14" y="76">buffer</text><text class="d" x="14" y="92">19 slots</text>
+  <rect class="sg" x="150" y="60" width="32" height="26" rx="4"/>
+  <rect class="sb" x="186" y="60" width="32" height="26" rx="4"/>
+  <rect class="sg" x="222" y="60" width="32" height="26" rx="4"/>
+  <rect class="sb" x="258" y="60" width="32" height="26" rx="4"/>
+  <rect class="sb" x="294" y="60" width="32" height="26" rx="4"/>
+  <rect class="sg" x="330" y="60" width="32" height="26" rx="4"/>
+  <rect class="sb" x="366" y="60" width="32" height="26" rx="4"/>
+  <rect class="sg" x="402" y="60" width="32" height="26" rx="4"/>
+  <rect class="sx" x="438" y="60" width="32" height="26" rx="4"/>
+  <rect class="sb" x="474" y="60" width="32" height="26" rx="4"/>
+  <rect class="sb" x="510" y="60" width="32" height="26" rx="4"/>
+  <rect class="sg" x="546" y="60" width="32" height="26" rx="4"/>
+  <rect class="sb" x="582" y="60" width="32" height="26" rx="4"/>
+  <rect class="sb" x="618" y="60" width="32" height="26" rx="4"/>
+  <rect class="sg" x="654" y="60" width="32" height="26" rx="4"/>
+  <rect class="sb" x="690" y="60" width="32" height="26" rx="4"/>
+  <rect class="sx" x="726" y="60" width="32" height="26" rx="4"/>
+  <rect class="sb" x="762" y="60" width="32" height="26" rx="4"/>
+  <rect class="sb" x="798" y="60" width="32" height="26" rx="4"/>
+  <rect class="sg" x="150" y="100" width="16" height="12" rx="2"/><text class="t" x="172" y="111">ready, for step 3 (6)</text>
+  <rect class="sb" x="330" y="100" width="16" height="12" rx="2"/><text class="t" x="352" y="111">ready, admitted early for step 4 (11)</text>
+  <rect class="sx" x="640" y="100" width="16" height="12" rx="2"/><text class="t" x="662" y="111">still generating (2)</text>
+  <text class="tb" x="14" y="160">in_order</text><text class="d" x="14" y="176">only step 3</text>
+  <rect class="sg" x="150" y="144" width="32" height="26" rx="4"/>
+  <rect class="sb off" x="186" y="144" width="32" height="26" rx="4"/>
+  <rect class="sg" x="222" y="144" width="32" height="26" rx="4"/>
+  <rect class="sb off" x="258" y="144" width="32" height="26" rx="4"/>
+  <rect class="sb off" x="294" y="144" width="32" height="26" rx="4"/>
+  <rect class="sg" x="330" y="144" width="32" height="26" rx="4"/>
+  <rect class="sb off" x="366" y="144" width="32" height="26" rx="4"/>
+  <rect class="sg" x="402" y="144" width="32" height="26" rx="4"/>
+  <rect class="sx off" x="438" y="144" width="32" height="26" rx="4"/>
+  <rect class="sb off" x="474" y="144" width="32" height="26" rx="4"/>
+  <rect class="sb off" x="510" y="144" width="32" height="26" rx="4"/>
+  <rect class="sg" x="546" y="144" width="32" height="26" rx="4"/>
+  <rect class="sb off" x="582" y="144" width="32" height="26" rx="4"/>
+  <rect class="sb off" x="618" y="144" width="32" height="26" rx="4"/>
+  <rect class="sg" x="654" y="144" width="32" height="26" rx="4"/>
+  <rect class="sb off" x="690" y="144" width="32" height="26" rx="4"/>
+  <rect class="sx off" x="726" y="144" width="32" height="26" rx="4"/>
+  <rect class="sb off" x="762" y="144" width="32" height="26" rx="4"/>
+  <rect class="sb off" x="798" y="144" width="32" height="26" rx="4"/>
+  <text class="t" x="150" y="194">6 allowed → min(6, 8) = 6, and 6 ≥ floor 4 →</text><text class="r" x="474" y="194">chunk of 6</text>
+  <text class="d" x="150" y="211">The 11 early groups wait for step 4, even though they are finished.</text>
+  <text class="tb" x="14" y="250">ready_first</text><text class="d" x="14" y="266">any ready group</text>
+  <rect class="sg" x="150" y="234" width="32" height="26" rx="4"/>
+  <rect class="take" x="148" y="232" width="36" height="30" rx="5"/>
+  <rect class="sb" x="186" y="234" width="32" height="26" rx="4"/>
+  <rect class="take" x="184" y="232" width="36" height="30" rx="5"/>
+  <rect class="sg" x="222" y="234" width="32" height="26" rx="4"/>
+  <rect class="take" x="220" y="232" width="36" height="30" rx="5"/>
+  <rect class="sb" x="258" y="234" width="32" height="26" rx="4"/>
+  <rect class="take" x="256" y="232" width="36" height="30" rx="5"/>
+  <rect class="sb" x="294" y="234" width="32" height="26" rx="4"/>
+  <rect class="take" x="292" y="232" width="36" height="30" rx="5"/>
+  <rect class="sg" x="330" y="234" width="32" height="26" rx="4"/>
+  <rect class="take" x="328" y="232" width="36" height="30" rx="5"/>
+  <rect class="sb" x="366" y="234" width="32" height="26" rx="4"/>
+  <rect class="take" x="364" y="232" width="36" height="30" rx="5"/>
+  <rect class="sg" x="402" y="234" width="32" height="26" rx="4"/>
+  <rect class="take" x="400" y="232" width="36" height="30" rx="5"/>
+  <rect class="sx off" x="438" y="234" width="32" height="26" rx="4"/>
+  <rect class="sb" x="474" y="234" width="32" height="26" rx="4"/>
+  <rect class="sb" x="510" y="234" width="32" height="26" rx="4"/>
+  <rect class="sg" x="546" y="234" width="32" height="26" rx="4"/>
+  <rect class="sb" x="582" y="234" width="32" height="26" rx="4"/>
+  <rect class="sb" x="618" y="234" width="32" height="26" rx="4"/>
+  <rect class="sg" x="654" y="234" width="32" height="26" rx="4"/>
+  <rect class="sb" x="690" y="234" width="32" height="26" rx="4"/>
+  <rect class="sx off" x="726" y="234" width="32" height="26" rx="4"/>
+  <rect class="sb" x="762" y="234" width="32" height="26" rx="4"/>
+  <rect class="sb" x="798" y="234" width="32" height="26" rx="4"/>
+  <text class="t" x="150" y="284">17 allowed → min(17, 8) = 8: the cap decides →</text><text class="r" x="484" y="284">chunk of 8</text>
+  <text class="d" x="150" y="301">Takes the first 8 in buffer order (orange outline), mixing step-3 and early groups. 9 stay for the next chunk.</text>
+  <text class="tb" x="14" y="340">in_order,</text><text class="d" x="14" y="356">later in step 3</text>
+  <rect class="sg" x="150" y="324" width="32" height="26" rx="4"/>
+  <rect class="sg" x="186" y="324" width="32" height="26" rx="4"/>
+  <rect class="sg" x="222" y="324" width="32" height="26" rx="4"/>
+  <text class="t" x="270" y="342">3 allowed → 3 &lt; floor 4 → no chunk yet.</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/391cb0fc7f4f4f6ea6d6b57d553e1c290eedcf90/nemo_rl/algorithms/single_controller.py#L3346-L3347"><text x="270" y="360">the pump sleeps 5 ms and asks again</text></a>
+  <rect class="take" x="14" y="384" width="20" height="14" rx="3"/><text class="t" x="42" y="396">taken into this chunk</text>
+  <text class="d" x="210" y="396">faded = this sampler does not allow it right now</text>
+</svg>
+
+<h2>What each sampler allows</h2>
+<table>
+<tr><th>Sampler</th><th>Ready groups it allows into a chunk</th></tr>
+<tr><td><a href="https://github.com/NVIDIA-NeMo/RL/blob/391cb0fc7f4f4f6ea6d6b57d553e1c290eedcf90/nemo_rl/algorithms/async_utils/staleness_sampler.py#L690-L694"><code>in_order</code></a></td><td>Only groups made for the trainer's current step. Early groups for the next step wait.</td></tr>
+<tr><td><a href="https://github.com/NVIDIA-NeMo/RL/blob/391cb0fc7f4f4f6ea6d6b57d553e1c290eedcf90/nemo_rl/algorithms/async_utils/staleness_sampler.py#L564-L568"><code>ready_first</code></a></td><td>Any finished group generated with weights no newer than the trainer's, including ones admitted early.</td></tr>
+<tr><td><a href="https://github.com/NVIDIA-NeMo/RL/blob/391cb0fc7f4f4f6ea6d6b57d553e1c290eedcf90/nemo_rl/algorithms/async_utils/staleness_sampler.py#L618-L623"><code>weight_fifo</code></a></td><td>Only groups from the oldest weight version still in the window.</td></tr>
+<tr><td><a href="https://github.com/NVIDIA-NeMo/RL/blob/391cb0fc7f4f4f6ea6d6b57d553e1c290eedcf90/nemo_rl/algorithms/async_utils/staleness_sampler.py#L443-L456"><code>windowed</code></a></td><td>Any finished group inside the staleness window; optionally newest first.</td></tr>
+</table>
+<p>Within the allowed set, groups are taken in buffer order — the order of their slots, not the order they finished — except <code>windowed</code> with newest-first on.</p>
+
+<div class="hl"><b>So what.</b> With <code>in_order</code>, a chunk only reaches the cap once enough of <i>this</i> step's groups have finished, so chunks are often smaller than the cap.
+With <code>ready_first</code>, early groups count too, so a warm buffer almost always has more than the cap ready — there, the cap is what sets the chunk size.
+Either way the step still trains on exactly 32 groups.</div>
+
+</div>
+</body>
+</html>

@@ -91,14 +91,15 @@ All permalinks pin the PR head <code>391cb0fc</code>.</p>
 
 <nav class="chain">
   <span class="here">1 · what the cap does</span>
-  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-5036-grpo-cap-crash.html">2 · the GRPO guard gap</a>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-5036-chunk-size.html">2 · how a chunk's size is picked</a>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-5036-grpo-cap-crash.html">3 · the GRPO guard gap</a>
 </nav>
-<p class="chainnote">Two pages on this PR, one question each — this one: what the new knob changes.</p>
+<p class="chainnote">Three pages on this PR, one question each — this one: what the new knob changes.</p>
 
 <div class="bg"><b>Where this sits.</b> Single controller (v2) only: the
 <a href="https://github.com/NVIDIA-NeMo/RL/blob/391cb0fc7f4f4f6ea6d6b57d553e1c290eedcf90/nemo_rl/algorithms/single_controller.py#L3261-L3265"><code>_train_pump</code></a>
 loop that hands finished rollouts to the trainer. GRPO and PPO both use it; the v1 loops (<code>grpo_train</code>, <code>async_grpo_train</code>) are untouched.
-A <b>prompt group</b> is one prompt plus all its sampled answers. A <b>chunk</b> is one hand-off of whole groups from the buffer to the trainer; a step is done when its chunks add up to <code>num_prompts_per_step</code>. Packing into micro-batches happens later, inside each chunk — see the zoomed-in picture below.
+A <b>prompt group</b> is one prompt plus all its sampled answers. A <b>chunk</b> is one hand-off of whole groups from the buffer to the trainer; a step is done when its chunks add up to <code>num_prompts_per_step</code>. Packing into micro-batches happens later, inside each chunk — see the zoomed-in picture below. How many groups go into each chunk: <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-5036-chunk-size.html">page 2</a>.
 Dotted words have a short explanation: hover or tap them.
 <div class="mono">async_rl:
   min_groups_for_streaming_train: 8      # floor: wait for at least this many ready groups
@@ -201,10 +202,12 @@ grpo:
   <rect class="ans0b" x="624" y="290" width="58" height="16" rx="2"/>
   <text class="d" x="770" y="262">one row = one</text><text class="d" x="770" y="277">micro-batch;</text><text class="d" x="770" y="292">one block = one</text><text class="d" x="770" y="307">answer (sample)</text>
   <text class="d" x="150" y="336">Sequence packing on: answers of different lengths share a row, so the micro-batch count depends on lengths.</text>
-  <text class="d" x="150" y="350">Packing off: each micro-batch is a fixed number of rows, and that number must divide 20 evenly (page 2).</text>
+  <text class="d" x="150" y="350">Packing off: each micro-batch is a fixed number of rows, and that number must divide 20 evenly (page 3).</text>
 </svg>
 
-<p>Each time round the loop, the pump asks the
+<p>Inside one training step, the pump runs a chunk loop
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/391cb0fc7f4f4f6ea6d6b57d553e1c290eedcf90/nemo_rl/algorithms/single_controller.py#L3224-L3226"><code>while groups_dispatched &lt; target</code></a>;
+not the step loop, not the micro-batch loop). Each pass asks the
 <span class="tip" tabindex="0" data-tip="The object that picks which finished prompt groups in the buffer go to the trainer next.">sampler</span>
 for between a floor and a maximum of ready groups. The maximum was always "groups still missing from this step"
 (<a href="https://github.com/NVIDIA-NeMo/RL/blob/391cb0fc7f4f4f6ea6d6b57d553e1c290eedcf90/nemo_rl/algorithms/single_controller.py#L3258">L3258</a>),
@@ -266,7 +269,7 @@ The step still trains on exactly 32 groups; only where the chunk boundaries fall
 <tr><td><a href="https://github.com/NVIDIA-NeMo/RL/blob/391cb0fc7f4f4f6ea6d6b57d553e1c290eedcf90/nemo_rl/algorithms/single_controller_utils/config.py#L1585-L1597">PPO alignment</a></td>
 <td>a cap below the step that is not a multiple of the PPO group multiple</td><td>PPO's sampler refuses an unaligned maximum.</td></tr>
 <tr><td><a href="https://github.com/NVIDIA-NeMo/RL/blob/391cb0fc7f4f4f6ea6d6b57d553e1c290eedcf90/nemo_rl/algorithms/single_controller_utils/config.py#L1604-L1644"><code>validate_grpo_chunk_cap_alignment</code></a></td>
-<td>a GRPO cap whose samples don't divide by the data-parallel size</td><td>The trainer splits a chunk evenly across ranks. Misses the micro-batch rule — <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-5036-grpo-cap-crash.html">page 2</a>.</td></tr>
+<td>a GRPO cap whose samples don't divide by the data-parallel size</td><td>The trainer splits a chunk evenly across ranks. Misses the micro-batch rule — <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-5036-grpo-cap-crash.html">page 3</a>.</td></tr>
 </table>
 
 <h2>Open question: does a cap let generation work during training?</h2>
