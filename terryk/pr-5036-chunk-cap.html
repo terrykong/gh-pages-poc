@@ -57,6 +57,11 @@ svg .seg{fill:var(--green);fill-opacity:.32;stroke:var(--green);stroke-width:1.4
 svg .frame{fill:none;stroke:var(--border);stroke-width:1}
 svg .gate{stroke:var(--orange);stroke-width:3}
 svg .gl{fill:var(--orange);font:bold 11.5px -apple-system,sans-serif}
+svg .zoom{stroke:var(--dim);stroke-width:1;stroke-dasharray:4 3;fill:none}
+svg .brk{stroke:var(--text);stroke-width:1.2;fill:none}
+svg .ans0{fill:var(--accent);fill-opacity:.55;stroke:var(--accent)}
+svg .ans0b{fill:var(--accent);fill-opacity:.25;stroke:var(--accent)}
+svg .ans1{fill:var(--orange);fill-opacity:.45;stroke:var(--orange)}
 svg a text{text-decoration:underline;fill:var(--accent);font:11.5px ui-monospace,Menlo,monospace}
 </style>
 <script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
@@ -93,13 +98,111 @@ All permalinks pin the PR head <code>391cb0fc</code>.</p>
 <div class="bg"><b>Where this sits.</b> Single controller (v2) only: the
 <a href="https://github.com/NVIDIA-NeMo/RL/blob/391cb0fc7f4f4f6ea6d6b57d553e1c290eedcf90/nemo_rl/algorithms/single_controller.py#L3261-L3265"><code>_train_pump</code></a>
 loop that hands finished rollouts to the trainer. GRPO and PPO both use it; the v1 loops (<code>grpo_train</code>, <code>async_grpo_train</code>) are untouched.
-A <b>prompt group</b> is one prompt plus all its sampled answers. A <b>chunk</b> is one hand-off to the trainer; a step is done when its chunks add up to <code>num_prompts_per_step</code>.
+A <b>prompt group</b> is one prompt plus all its sampled answers. A <b>chunk</b> is one hand-off of whole groups from the buffer to the trainer; a step is done when its chunks add up to <code>num_prompts_per_step</code>. Packing into micro-batches happens later, inside each chunk — see the zoomed-in picture below.
 Dotted words have a short explanation: hover or tap them.
 <div class="mono">async_rl:
   min_groups_for_streaming_train: 8      # floor: wait for at least this many ready groups
   max_groups_for_streaming_train: 8      # NEW ceiling; null = no ceiling (default)
 grpo:
   num_prompts_per_step: 32               # a step always trains on exactly 32 groups</div></div>
+
+<svg viewBox="0 0 940 352" role="img" aria-label="One step zoomed in: step, chunks, prompt groups, ranks, packed micro-batches">
+  <text class="tb" x="14" y="20">One step, zoomed in — from step down to packed micro-batches</text>
+  <text class="d" x="14" y="38">Illustrative numbers: 32 groups per step, cap 8, 5 answers per prompt, 2 training ranks.</text>
+  <text class="tb" x="14" y="72">step</text><text class="d" x="14" y="88">32 groups</text>
+  <rect class="seg" x="150" y="56" width="170" height="36" rx="4"/>
+  <text class="t" x="162" y="79">chunk 1 · 8 groups</text>
+  <rect class="frame" x="324" y="56" width="170" height="36" rx="4"/>
+  <text class="t" x="336" y="79">chunk 2 · 8 groups</text>
+  <rect class="frame" x="498" y="56" width="170" height="36" rx="4"/>
+  <text class="t" x="510" y="79">chunk 3 · 8 groups</text>
+  <rect class="frame" x="672" y="56" width="170" height="36" rx="4"/>
+  <text class="t" x="684" y="79">chunk 4 · 8 groups</text>
+  <line class="gate" x1="848" y1="50" x2="848" y2="98"/>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/391cb0fc7f4f4f6ea6d6b57d553e1c290eedcf90/nemo_rl/algorithms/single_controller.py#L3133-L3136"><text x="856" y="70">optimizer</text></a>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/391cb0fc7f4f4f6ea6d6b57d553e1c290eedcf90/nemo_rl/algorithms/single_controller.py#L3133-L3136"><text x="856" y="86">step: once</text></a>
+  <path class="zoom" d="M150,92 L150,124 M320,92 L760,124"/>
+  <rect class="frame" x="150" y="124" width="610" height="76" rx="6"/>
+  <text class="tb" x="14" y="146">chunk 1</text><text class="d" x="14" y="162">8 groups × 5</text><text class="d" x="14" y="177">answers</text><text class="d" x="14" y="192">= 40 samples</text>
+  <rect class="ans0" x="164" y="136" width="10" height="16" rx="2"/>
+  <rect class="ans0" x="176" y="136" width="10" height="16" rx="2"/>
+  <rect class="ans0" x="188" y="136" width="10" height="16" rx="2"/>
+  <rect class="ans0" x="200" y="136" width="10" height="16" rx="2"/>
+  <rect class="ans0" x="212" y="136" width="10" height="16" rx="2"/>
+  <text class="d" x="172" y="168">group 1</text>
+  <rect class="ans0" x="236" y="136" width="10" height="16" rx="2"/>
+  <rect class="ans0" x="248" y="136" width="10" height="16" rx="2"/>
+  <rect class="ans0" x="260" y="136" width="10" height="16" rx="2"/>
+  <rect class="ans0" x="272" y="136" width="10" height="16" rx="2"/>
+  <rect class="ans0" x="284" y="136" width="10" height="16" rx="2"/>
+  <text class="d" x="244" y="168">group 2</text>
+  <rect class="ans0" x="308" y="136" width="10" height="16" rx="2"/>
+  <rect class="ans0" x="320" y="136" width="10" height="16" rx="2"/>
+  <rect class="ans0" x="332" y="136" width="10" height="16" rx="2"/>
+  <rect class="ans0" x="344" y="136" width="10" height="16" rx="2"/>
+  <rect class="ans0" x="356" y="136" width="10" height="16" rx="2"/>
+  <text class="d" x="316" y="168">group 3</text>
+  <rect class="ans0" x="380" y="136" width="10" height="16" rx="2"/>
+  <rect class="ans0" x="392" y="136" width="10" height="16" rx="2"/>
+  <rect class="ans0" x="404" y="136" width="10" height="16" rx="2"/>
+  <rect class="ans0" x="416" y="136" width="10" height="16" rx="2"/>
+  <rect class="ans0" x="428" y="136" width="10" height="16" rx="2"/>
+  <text class="d" x="388" y="168">group 4</text>
+  <rect class="ans0" x="452" y="136" width="10" height="16" rx="2"/>
+  <rect class="ans0" x="464" y="136" width="10" height="16" rx="2"/>
+  <rect class="ans0" x="476" y="136" width="10" height="16" rx="2"/>
+  <rect class="ans0" x="488" y="136" width="10" height="16" rx="2"/>
+  <rect class="ans0" x="500" y="136" width="10" height="16" rx="2"/>
+  <text class="d" x="460" y="168">group 5</text>
+  <rect class="ans0" x="524" y="136" width="10" height="16" rx="2"/>
+  <rect class="ans0" x="536" y="136" width="10" height="16" rx="2"/>
+  <rect class="ans0" x="548" y="136" width="10" height="16" rx="2"/>
+  <rect class="ans0" x="560" y="136" width="10" height="16" rx="2"/>
+  <rect class="ans0" x="572" y="136" width="10" height="16" rx="2"/>
+  <text class="d" x="532" y="168">group 6</text>
+  <rect class="ans0" x="596" y="136" width="10" height="16" rx="2"/>
+  <rect class="ans0" x="608" y="136" width="10" height="16" rx="2"/>
+  <rect class="ans0" x="620" y="136" width="10" height="16" rx="2"/>
+  <rect class="ans0" x="632" y="136" width="10" height="16" rx="2"/>
+  <rect class="ans0" x="644" y="136" width="10" height="16" rx="2"/>
+  <text class="d" x="604" y="168">group 7</text>
+  <rect class="ans0" x="668" y="136" width="10" height="16" rx="2"/>
+  <rect class="ans0" x="680" y="136" width="10" height="16" rx="2"/>
+  <rect class="ans0" x="692" y="136" width="10" height="16" rx="2"/>
+  <rect class="ans0" x="704" y="136" width="10" height="16" rx="2"/>
+  <rect class="ans0" x="716" y="136" width="10" height="16" rx="2"/>
+  <text class="d" x="676" y="168">group 8</text>
+  <path class="brk" d="M164,176 L164,182 L734,182 L734,176"/><text class="t" x="270" y="196">split across 2 ranks → 20 samples each</text>
+  <text class="d" x="150" y="222">Each chunk runs on its own: logprobs → advantages →</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/391cb0fc7f4f4f6ea6d6b57d553e1c290eedcf90/nemo_rl/algorithms/single_controller.py#L3604-L3608"><text x="480" y="222">train_microbatches_from_meta</text></a>
+  <text class="d" x="682" y="222">(adds to gradients only)</text>
+  <path class="zoom" d="M300,200 L150,238 M560,200 L760,238"/>
+  <rect class="frame" x="150" y="238" width="610" height="76" rx="6"/>
+  <text class="tb" x="14" y="258">one rank</text><text class="d" x="14" y="274">20 samples →</text><text class="d" x="14" y="289">3 packed</text><text class="d" x="14" y="304">micro-batches</text>
+  <rect class="ans0" x="164" y="248" width="88" height="16" rx="2"/>
+  <rect class="ans0b" x="254" y="248" width="58" height="16" rx="2"/>
+  <rect class="ans0" x="314" y="248" width="118" height="16" rx="2"/>
+  <rect class="ans0b" x="434" y="248" width="68" height="16" rx="2"/>
+  <rect class="ans0" x="504" y="248" width="98" height="16" rx="2"/>
+  <rect class="ans0b" x="604" y="248" width="78" height="16" rx="2"/>
+  <rect class="ans0" x="684" y="248" width="48" height="16" rx="2"/>
+  <rect class="ans0b" x="164" y="269" width="108" height="16" rx="2"/>
+  <rect class="ans0" x="274" y="269" width="68" height="16" rx="2"/>
+  <rect class="ans0b" x="344" y="269" width="88" height="16" rx="2"/>
+  <rect class="ans0" x="434" y="269" width="58" height="16" rx="2"/>
+  <rect class="ans0b" x="494" y="269" width="128" height="16" rx="2"/>
+  <rect class="ans0" x="624" y="269" width="78" height="16" rx="2"/>
+  <rect class="ans0b" x="704" y="269" width="38" height="16" rx="2"/>
+  <rect class="ans0" x="164" y="290" width="98" height="16" rx="2"/>
+  <rect class="ans0b" x="264" y="290" width="78" height="16" rx="2"/>
+  <rect class="ans0" x="344" y="290" width="118" height="16" rx="2"/>
+  <rect class="ans0b" x="464" y="290" width="88" height="16" rx="2"/>
+  <rect class="ans0" x="554" y="290" width="68" height="16" rx="2"/>
+  <rect class="ans0b" x="624" y="290" width="58" height="16" rx="2"/>
+  <text class="d" x="770" y="262">one row = one</text><text class="d" x="770" y="277">micro-batch;</text><text class="d" x="770" y="292">one block = one</text><text class="d" x="770" y="307">answer (sample)</text>
+  <text class="d" x="150" y="336">Sequence packing on: answers of different lengths share a row, so the micro-batch count depends on lengths.</text>
+  <text class="d" x="150" y="350">Packing off: each micro-batch is a fixed number of rows, and that number must divide 20 evenly (page 2).</text>
+</svg>
 
 <p>Each time round the loop, the pump asks the
 <span class="tip" tabindex="0" data-tip="The object that picks which finished prompt groups in the buffer go to the trainer next.">sampler</span>
