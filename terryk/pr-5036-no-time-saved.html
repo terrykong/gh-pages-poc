@@ -299,6 +299,21 @@ Freeing generation earlier gives it more chances to work, but there is nothing o
 The idle generation time is real, but it means too many GPUs are on generation for this ratio — the fix is to move GPUs
 to training (or allow more staleness), not to cut the step into chunks.</p>
 
+<h2>Does generation speed change this?</h2>
+<p>It changes which side is slow, but the cap loses or ties every time. Same model and settings as above, with only generation speed changed
+(training stays at 3 s per group, so "1×" = 1 group every 3 s):</p>
+<table>
+<tr><th>Generation vs training</th><th>No cap</th><th>Cap 8</th><th>Cap 8 + slots and gate freed per chunk</th><th>What happens</th></tr>
+<tr><td>0.5× (slower)</td><td>192 s</td><td>192 s</td><td>192 s</td><td>Generation is the slow side: groups trickle in, so eager sending already makes chunks of 8. The cap never binds.</td></tr>
+<tr><td>0.75×</td><td>128 s</td><td>128 s</td><td>128 s</td><td>Same: the cap never binds.</td></tr>
+<tr><td>0.9× (almost equal)</td><td><b>111 s</b></td><td>116 s</td><td>116 s</td><td>Uncapped takes chunks of 16; the cap forces 8s, which adds two more fixed costs.</td></tr>
+<tr><td>1× (equal)</td><td><b>101 s</b></td><td>116 s</td><td>116 s</td><td>Uncapped already gets the whole step as one chunk.</td></tr>
+<tr><td>1.1× to 6× (faster)</td><td><b>101 s</b></td><td>116 s</td><td>116 s</td><td>Training is the slow side; the cap only adds cost.</td></tr>
+</table>
+<p>Generation slower: the cap does nothing, because chunks are already small and the floor is what gives streaming.
+About equal or faster: the cap costs time, because it forces more chunks and each one pays the fixed cost again.
+A cap could only help if training got slower per group in big chunks (for example, from memory pressure) — a different argument from the one the PR makes.</p>
+
 <div class="hl"><b>So what.</b> When generation is ahead — the only time a cap changes anything — training is the slow side, and a cap can only add
 per-chunk cost (here +15 s, about 15%). The cap could still matter for something other than speed, such as lower peak memory per chunk,
 but that is not what the PR claims. This is a model of the rules, not a hardware timing: <a href="https://github.com/NVIDIA-NeMo/RL/pull/5036#discussion_r4486856908">C2</a> asks the author to settle it with one real run.</div>
