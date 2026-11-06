@@ -107,15 +107,16 @@ All permalinks pin the PR head <code>391cb0fc</code>.</p>
 ever shorten a step? To answer it without hand-waving, a small simulation (code at the bottom of the page) plays out the pump's rules from the code:</p>
 <ul>
 <li>Buffer slots come back only when the step closes (<a href="https://github.com/NVIDIA-NeMo/RL/blob/391cb0fc7f4f4f6ea6d6b57d553e1c290eedcf90/nemo_rl/algorithms/single_controller.py#L3870-L3872">L3870</a>).</li>
-<li>Generation may be at most one step ahead, because the lookahead gate waits on the trainer's version
-(<a href="https://github.com/NVIDIA-NeMo/RL/blob/391cb0fc7f4f4f6ea6d6b57d553e1c290eedcf90/nemo_rl/algorithms/async_utils/staleness_sampler.py#L506">L506</a>), which moves only after the optimizer step (<a href="https://github.com/NVIDIA-NeMo/RL/blob/391cb0fc7f4f4f6ea6d6b57d553e1c290eedcf90/nemo_rl/algorithms/single_controller.py#L3771">L3771</a>).</li>
+<li>With <code>ready_first</code>, generation may run <code>max_staleness_versions</code> steps ahead (default 1, used here):
+the gate admits a batch only while it is fewer than that many steps ahead of the trainer's version (<a href="https://github.com/NVIDIA-NeMo/RL/blob/391cb0fc7f4f4f6ea6d6b57d553e1c290eedcf90/nemo_rl/algorithms/async_utils/staleness_sampler.py#L506">L506</a>,
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/391cb0fc7f4f4f6ea6d6b57d553e1c290eedcf90/nemo_rl/algorithms/async_utils/staleness_sampler.py#L728-L733">default</a>), and that version moves only after the optimizer step (<a href="https://github.com/NVIDIA-NeMo/RL/blob/391cb0fc7f4f4f6ea6d6b57d553e1c290eedcf90/nemo_rl/algorithms/single_controller.py#L3771">L3771</a>).</li>
 <li>The chunk loop takes everything ready, up to the max, once the floor is met (<a href="https://github.com/NVIDIA-NeMo/RL/blob/391cb0fc7f4f4f6ea6d6b57d553e1c290eedcf90/nemo_rl/algorithms/async_utils/staleness_sampler.py#L345-L351">L345</a>).</li>
 </ul>
 <div class="mono">step:        32 prompt groups, floor 8, cap 8 (or none)
 generation:  2 groups per second      → 16 s to make a whole step     (6× faster than training)
 training:    3 s per group            → 96 s of real work per step
 per chunk:   5 s of fixed work        (a logprob pass, advantages, training setup)
-lookahead:   generation at most 1 step ahead; buffer holds 64 groups (2 steps)</div>
+lookahead:   ready_first, max_staleness_versions 1 → at most 1 step ahead; buffer holds 64 groups (2 steps)</div>
 
 <svg viewBox="0 0 940 486" role="img" aria-label="Timelines: step time does not drop with a cap">
   <text class="tb" x="14" y="20">First 360 s of each run — model of the pump's rules (see settings above)</text>
@@ -293,6 +294,7 @@ lookahead:   generation at most 1 step ahead; buffer holds 64 groups (2 steps)</
 <p>Every step must train 32 groups × 3 s = <b>96 s</b>. Chunking cannot remove any of that work; it only adds the 5 s fixed cost once per chunk:
 1 chunk → 96 + 5 = <b>101 s</b>, 4 chunks → 96 + 20 = <b>116 s</b>.
 Generation needs only 16 s per step and is already finished before the trainer asks, so the trainer never waits on it.
+A larger <code>max_staleness_versions</code> lets generation run further ahead, but the steps still take 96 s of training each, so the result is the same.
 Freeing generation earlier gives it more chances to work, but there is nothing on the training side for that work to speed up.
 The idle generation time is real, but it means too many GPUs are on generation for this ratio — the fix is to move GPUs
 to training (or allow more staleness), not to cut the step into chunks.</p>
