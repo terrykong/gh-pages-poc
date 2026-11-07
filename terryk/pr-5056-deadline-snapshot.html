@@ -87,7 +87,7 @@ svg a text{text-decoration:underline;fill:var(--accent);font:11.5px ui-monospace
   <dt>This PR</dt>
   <dd>After that trainer checkpoint, the run takes one forced environment snapshot, then stops. A new key lets a run save environment state <em>only</em> at the deadline.</dd>
   <dt>Status</dt>
-  <dd><span class="verdict good">New feature, works as described.</span> The review asks for a smaller version (about 70 fewer lines) and one doc fix; no correctness bug blocks it.</dd>
+  <dd><span class="verdict good">New feature, works as described.</span> The review asks for a smaller version (about 70 fewer lines), one doc fix, and for the two deadline saves to overlap; no correctness bug blocks it.</dd>
 </dl>
 </div>
 
@@ -175,8 +175,9 @@ because a snapshot must point at a published trainer checkpoint. The review asks
 <li>Drop the <code>checkpointing["enabled"]</code> check above. It never changes anything, because turn-level recovery already requires checkpointing.</li>
 <li><code>save_at_deadline()</code> repeats the try / log / re-raise code of the background loop. One shared <code>_attempt()</code> helper saves about 12 lines.</li>
 <li>Delete <code>save_reserve_seconds</code> (below), merge a duplicate test, share setup across three new tests, and keep the docs to one table.</li>
+<li><b>Overlap the two saves.</b> Today the snapshot waits until the trainer checkpoint&rsquo;s weights are fully on disk. Nothing in it reads the weights, so take it inside the trainer save, into <code>tmp_step_N</code>, while the weights are still being written. The last save then takes the longer of the two instead of their sum, and the branch above goes away (C3 and C6 then no longer apply).</li>
 </ul>
-<p class="cref" id="crefs">Review comments: <a href="https://github.com/NVIDIA-NeMo/RL/pull/5056#discussion_r4477486467">C3 · single_controller.py:3259</a><a href="https://github.com/NVIDIA-NeMo/RL/pull/5056#discussion_r4477486459">C2 · snapshots.py:960</a><a href="https://github.com/NVIDIA-NeMo/RL/pull/5056#discussion_r4477486453">C1 · timer.py:466</a><a href="https://github.com/NVIDIA-NeMo/RL/pull/5056#discussion_r4477486487">C5 · single-controller.md:235</a><a href="https://github.com/NVIDIA-NeMo/RL/pull/5056#discussion_r4477486493">C6 · test_checkpointing.py:1679</a><a href="https://github.com/NVIDIA-NeMo/RL/pull/5056#discussion_r4477486498">C7 · test_checkpointing.py:2858</a><a href="https://github.com/NVIDIA-NeMo/RL/pull/5056#discussion_r4477486509">C8 · test_setup.py:1377</a><a href="https://github.com/NVIDIA-NeMo/RL/pull/5056#discussion_r4477486479">C4 · snapshots.py:949 — GPU run</a></p>
+<p class="cref" id="crefs">Review comments: <a href="https://github.com/NVIDIA-NeMo/RL/pull/5056#discussion_r4477486467">C3 · single_controller.py:3259</a><a href="https://github.com/NVIDIA-NeMo/RL/pull/5056#discussion_r4477486459">C2 · snapshots.py:960</a><a href="https://github.com/NVIDIA-NeMo/RL/pull/5056#discussion_r4477486453">C1 · timer.py:466</a><a href="https://github.com/NVIDIA-NeMo/RL/pull/5056#discussion_r4477486487">C5 · single-controller.md:235</a><a href="https://github.com/NVIDIA-NeMo/RL/pull/5056#discussion_r4477486493">C6 · test_checkpointing.py:1679</a><a href="https://github.com/NVIDIA-NeMo/RL/pull/5056#discussion_r4477486498">C7 · test_checkpointing.py:2858</a><a href="https://github.com/NVIDIA-NeMo/RL/pull/5056#discussion_r4477486509">C8 · test_setup.py:1377</a><a href="https://github.com/NVIDIA-NeMo/RL/pull/5056#discussion_r4477486479">C4 · snapshots.py:949 — GPU run</a><a href="https://github.com/NVIDIA-NeMo/RL/pull/5056#discussion_r4500841161">C9 · single_controller.py:3272 — overlap</a></p>
 
 <div class="warn"><b>So what.</b> Turn-level runs now keep their unfinished turns across a walltime stop. One catch:
 the PR moves the deadline earlier by the length of the last snapshot
