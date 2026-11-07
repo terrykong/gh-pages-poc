@@ -79,9 +79,16 @@ Permalinks pin head <code>0b7d378</code>.</p>
 <dt>Before</dt><dd>With <code>policy.generation.dynamo: true</code>, any NeMo-Gym run was refused at startup
 (<a href="https://github.com/NVIDIA-NeMo/RL/blob/44671d3bf5f017fbef5e7455f5686cf994ef9106/nemo_rl/environments/nemo_gym.py#L487-L492">base nemo_gym.py</a>).
 Gym talked only to each vLLM shard's own OpenAI server.</dd>
-<dt>This PR</dt><dd>Gym calls one Dynamo frontend URL in a new "Dynamo dialect", and the same vLLM workers serve the call the way their own chat endpoint does.</dd>
-<dt>Status</dt><dd><span class="verdict open">In review, not merged.</span> Rewards match the native server on the author's small runs.
-One gap is open: the prefix splice counts fewer turn-end tokens than native does (below).</dd>
+<dt>This PR</dt><dd>Gym calls one Dynamo frontend URL in a new "Dynamo dialect". Dynamo's own renderer applies the chat template, and the same vLLM workers run a copy of the native capture steps on the token ids.</dd>
+<dt>Status</dt><dd><span class="verdict open">Open: changes requested, not merged.</span> Rewards match the native server on the author's small runs, but the
+<a href="https://github.com/NVIDIA-NeMo/RL/pull/4979#pullrequestreview-5790083159">published review</a> found these gaps, none fixed yet:
+the prefix splice counts fewer turn-end tokens than native (<a href="https://github.com/NVIDIA-NeMo/RL/pull/4979#discussion_r4484475956">C16</a>, below);
+forest training fails (<a href="https://github.com/NVIDIA-NeMo/RL/pull/4979#discussion_r4497298899">C26</a>);
+score centering fails (<a href="https://github.com/NVIDIA-NeMo/RL/pull/4979#discussion_r4499367139">C29</a>);
+Dynamo's renderer can build different prompts than vLLM (<a href="https://github.com/NVIDIA-NeMo/RL/pull/4979#discussion_r4499366880">C28</a>);
+images can be processed twice (<a href="https://github.com/NVIDIA-NeMo/RL/pull/4979#discussion_r4499367333">C30</a>).
+The proposed fix is one shared copy of the steps, run by NeMo RL's own chat engine inside the Dynamo frontend
+(<a href="https://github.com/NVIDIA-NeMo/RL/pull/4979#discussion_r4497299583">C27</a>, <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4905-one-chat-path.html">picture</a>).</dd>
 </dl></div>
 
 <div class="bg"><b>Background.</b> <span class="tip" tabindex="0" data-tip="NVIDIA's serving layer: a Rust HTTP frontend that renders chat templates, parses tool calls, and routes each request to one of many engines by where its prompt is already cached.">Dynamo</span>
