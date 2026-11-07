@@ -83,7 +83,7 @@ svg a text{text-decoration:underline;fill:var(--accent);font:11.5px ui-monospace
 <p class="sub"><a href="https://github.com/NVIDIA-NeMo/RL/pull/5049">NVIDIA-NeMo/RL #5049</a>
 (part 3 of the rollout-checkpointing stack, on top of <a href="https://github.com/NVIDIA-NeMo/RL/pull/5048">#5048</a>;
 see also the <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-5048-rollout-trace.html">#5048 page</a>).
-Permalinks pin the PR head <code>c2bf309a</code>.</p>
+Permalinks pin the reviewed head <code>c2bf309a</code>, and <code>09627ac2</code> (the same two commits rebased onto main) for the W&amp;B section.</p>
 
 <div class="status">
 <dl>
@@ -92,7 +92,7 @@ Permalinks pin the PR head <code>c2bf309a</code>.</p>
   <dt>This PR</dt>
   <dd>Adds <b>batch age</b> per step to the rollout trace. Commit 1 counts each call's tokens under the version the call began on. Commit 2 also splits a call that runs across a refit, using vLLM's live token count at the pause.</dd>
   <dt>Status</dt>
-  <dd><span class="verdict good">New feature, works as described.</span> The review asks to land commit 1 now and move commit 2 (+486/−102 lines) to a follow-up that shows how much it changes batch age. It also flags one older ordering issue that makes both versions read high.</dd>
+  <dd><span class="verdict good">New feature, works as described.</span> The review asks to replace the whole PR (+541 lines) with about 15 lines that log batch age to W&amp;B, dropping the exact split at refits until numbers show it matters. It also flags one older ordering issue that makes batch age read high.</dd>
 </dl>
 </div>
 
@@ -152,9 +152,9 @@ The figure runs both on two calls trained by a step that updates version 6.</p>
   <line class="sep" x1="20" y1="252" x2="920" y2="252"/>
   <text class="lbl-b" x="40" y="274"></text>
   <text class="lbl-b" x="150" y="274">by start version</text>
-  <text class="note" x="150" y="288">commit 1, +159 lines</text>
+  <text class="note" x="150" y="288">commit 1, +157 lines</text>
   <text class="lbl-b" x="420" y="274">exact split</text>
-  <text class="note" x="420" y="288">commits 1+2, +544 lines</text>
+  <text class="note" x="420" y="288">commits 1+2, +541 lines</text>
   <text class="lbl-b" x="690" y="274">what really happened</text>
 
   <text class="lbl" x="40" y="314">call A</text>
@@ -188,21 +188,19 @@ Call B is a separate, older issue: requests keep arriving during the pause, and 
 <tr><td>vLLM</td><td>nothing</td><td>a context variable linking a request to its call, a read of vLLM's private request state, and <code>captured_call_progress</code> on the <a href="https://github.com/NVIDIA-NeMo/RL/blob/c2bf309a7caf49ec711f04fd72c03e25f29b1240/nemo_rl/models/generation/interfaces.py#L722">interface</a>, <a href="https://github.com/NVIDIA-NeMo/RL/blob/c2bf309a7caf49ec711f04fd72c03e25f29b1240/nemo_rl/models/generation/vllm/vllm_generation.py#L1805-L1813">VllmGeneration</a>, the <a href="https://github.com/NVIDIA-NeMo/RL/blob/c2bf309a7caf49ec711f04fd72c03e25f29b1240/nemo_rl/models/generation/vllm/vllm_worker_async.py#L771-L783">worker</a> and the <a href="https://github.com/NVIDIA-NeMo/RL/blob/c2bf309a7caf49ec711f04fd72c03e25f29b1240/nemo_rl/models/generation/vllm/vllm_worker_async.py#L268-L292">HTTP client</a></td></tr>
 <tr><td>Controller</td><td>one <code>group_published</code> emit</td><td>a progress read inside the refit, while generation is paused (<a href="https://github.com/NVIDIA-NeMo/RL/blob/c2bf309a7caf49ec711f04fd72c03e25f29b1240/nemo_rl/algorithms/single_controller.py#L4459-L4467">L4459-L4467</a>)</td></tr>
 <tr><td>Trace</td><td><code>batch_age_by_step</code></td><td><code>refit_cut</code>, a <code>_cut_calls</code> set in the writer (<a href="https://github.com/NVIDIA-NeMo/RL/blob/c2bf309a7caf49ec711f04fd72c03e25f29b1240/nemo_rl/algorithms/rollout_checkpointing/trace.py#L75">L75</a>), and the split loop</td></tr>
-<tr><td>Lines</td><td class="num">+159 / −2</td><td class="num">+486 / −102</td></tr>
+<tr><td>Lines</td><td class="num">+157 / −1</td><td class="num">+484 / −99</td></tr>
 </table>
 <p>The split code also needs work before it lands: an error in the progress read ends the run with generation still paused
 (only <code>RefitAborted</code> and <code>RayActorError</code> are
 <a href="https://github.com/NVIDIA-NeMo/RL/blob/c2bf309a7caf49ec711f04fd72c03e25f29b1240/nemo_rl/algorithms/single_controller.py#L4470">caught</a>),
 its <code>ray.get</code> has no timeout, <code>_cut_calls</code> never forgets calls whose group is dropped, and the tests use fake vLLM objects.
-All of this moves with commit 2.</p>
-<p class="cref">🟠 <a href="https://github.com/NVIDIA-NeMo/RL/pull/5049#discussion_r4477576128">C1 — trace.py:97 (move the split to a follow-up)</a></p>
+All of this goes away if commit 2 is dropped.</p>
 
 <h2>The fix — proposed, not in the PR</h2>
-<p class="where"><b>Where the fix lands: RL only.</b> Drop commit 2 from this PR
-(<a href="https://github.com/NVIDIA-NeMo/RL/pull/5049/commits/c2bf309a7caf49ec711f04fd72c03e25f29b1240">c2bf309a</a>), and move the stamp in
+<p class="where"><b>Where the fix lands: RL only, no vLLM change.</b> Log batch age to W&amp;B in about 15 lines (next section) instead of the trace pipeline and the exact split, and move the stamp in
 <a href="https://github.com/NVIDIA-NeMo/RL/blob/c2bf309a7caf49ec711f04fd72c03e25f29b1240/nemo_rl/algorithms/single_controller.py#L4448-L4458"><code>_sync_weights</code></a>
-so call B gets v5. No vLLM change.</p>
-<p>Nothing below is implemented. The second piece moves the stamp to right after the pause. A request that arrives later does not run until resume, so it runs only on the new weights:</p>
+so call B gets v5.</p>
+<p>Nothing below is implemented. The stamp moves to right after the pause. A request that arrives later does not run until resume, so it runs only on the new weights:</p>
 <pre class="diff"><span class="hunk">@@ single_controller.py L4449-L4454 · _sync_weights (after the pause)</span>
              generation_paused_for_refit = await asyncio.to_thread(
                  self._gen.pause_generation_for_refit,
@@ -221,12 +219,32 @@ so call B gets v5. No vLLM change.</p>
 -            await asyncio.to_thread(
 -                self._gen.set_rollout_weight_version, self._trainer_version
 -            )</span></pre>
-<p>With commit 1 plus this move, the figure's batch age is (90×2 + 40×1)/130 = 220/130 = <b>1.69</b>: still high for call A, now right for call B.
+<p>Counting by start version plus this move, the figure's batch age is (90×2 + 40×1)/130 = 220/130 = <b>1.69</b>: still high for call A, now right for call B.
 <code>_trainer_version</code> is already bumped before <code>_sync_weights</code> runs, and the recovery path installs the same version, so the stamp is right even when a refit is retried.</p>
 <p class="cref">🟠 <a href="https://github.com/NVIDIA-NeMo/RL/pull/5049#discussion_r4477576137">C2 — trace.py:227 (stamp after pause)</a></p>
 
-<div class="warn"><b>So what.</b> Commit 1 alone gives a batch age that can only read high, for about a third of the code.
-Whether the exact split is worth its +486 lines and a read of vLLM's private state is a measurement question:
+<h2>The whole feature in about 15 lines</h2>
+<p>In this PR, batch age lives only in <code>rollout_trace.jsonl</code>, which is off unless <code>rollout_checkpointing.trace: true</code>,
+and you get it by running <code>python -m nemo_rl.algorithms.rollout_checkpointing.trace</code> afterwards.
+The review asks to log it to W&amp;B instead, next to <code>weight_version_lag</code>.
+Each group already sends verified token metrics to the train pump
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/09627ac2ea4f91e8ee9baf0092779c518fac34a6/nemo_rl/experience/rollout_reassembler.py#L217-L241"><code>_capture_token_metrics</code></a> →
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/09627ac2ea4f91e8ee9baf0092779c518fac34a6/nemo_rl/algorithms/single_controller.py#L2996-L3004"><code>per_group_rollout_metrics</code></a>).
+Two sums per group (tokens, and tokens × version) and one division per step give the same number:</p>
+<pre class="diff"><span class="hunk">proposed — rollout_reassembler.py, _capture_token_metrics</span>
+<span class="add">+metrics["batch_age/trained_tokens"] = sum(n for n, _ in pairs)
++metrics["batch_age/token_version_sum"] = sum(n * v for n, v in pairs)</span>
+<span class="hunk">proposed — single_controller.py, _train_pump, next to weight_version_lag</span>
+<span class="add">+tokens = sum(per_group_rollout_metrics.pop("batch_age/trained_tokens", []))
++version_sum = sum(per_group_rollout_metrics.pop("batch_age/token_version_sum", []))
++if tokens:
++    step_metrics["batch_age"] = version_during_step - version_sum / tokens</span></pre>
+<p><code>pairs</code> is each trained call's (tokens, start version), from one new field next to <code>generation_lengths</code>.
+The trace event, <code>trained_version</code>, the offline script and its tests, and commit 2 all become unnecessary.</p>
+<p class="cref">🟠 <a href="https://github.com/NVIDIA-NeMo/RL/pull/5049#discussion_r4500696629">C7 — single_controller.py:1409 (log batch age to W&amp;B)</a></p>
+
+<div class="warn"><b>So what.</b> Counting by start version gives a batch age that can only read high, in about 15 lines instead of 541, and logged to W&amp;B every run can see it.
+Whether the exact split is worth its +484 lines and a read of vLLM's private state is a measurement question:
 the follow-up PR should report batch age for one run computed both ways.</div>
 
 </div>
