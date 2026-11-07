@@ -81,6 +81,16 @@ svg .tag{fill:var(--dim);font:bold 9.5px ui-monospace,Menlo,monospace;letter-spa
 svg .rowl{fill:var(--dim);font:bold 10.5px -apple-system,sans-serif}
 .gl td:first-child{white-space:nowrap;font-weight:600}
 .verdict.prop{color:var(--orange)}
+
+svg .ret{stroke:var(--purple);stroke-width:1.6;fill:none;stroke-dasharray:6 4;marker-end:url(#ahr)}
+svg .ahr{fill:var(--purple)}
+svg .rl{fill:var(--purple);font:bold 10.5px -apple-system,sans-serif}
+svg .tqb{fill:var(--surface);stroke:var(--orange);stroke-width:1.6;stroke-dasharray:3 2}
+svg .tqr{stroke:var(--orange);stroke-width:1.5;fill:none;stroke-dasharray:4 3;marker-end:url(#ah)}
+svg .tqw{stroke:var(--green);stroke-width:1.8;fill:none;marker-end:url(#ah)}
+svg .tr{fill:var(--orange);font:bold 11px -apple-system,sans-serif}
+svg .tw{fill:var(--green);font:bold 11px -apple-system,sans-serif}
+svg .d{font-size:9.8px}
 </style>
 <script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
   document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
@@ -110,167 +120,191 @@ svg .rowl{fill:var(--dim);font:bold 10.5px -apple-system,sans-serif}
 <dt>Status</dt><dd><span class="verdict prop">Proposed — not implemented.</span> Nothing here is staged as a review comment yet. Built from reading Dynamo 1.5.1, vLLM 0.29 and the PR code; nothing was run.</dd>
 </dl></div>
 <div class="bg"><b>Background.</b> The <span class="tip" tabindex="0" data-tip="Dynamo&#x27;s HTTP server. You can run several; each takes OpenAI chat calls and hands them to an engine.">Dynamo frontend</span> takes chat calls and its <span class="tip" tabindex="0" data-tip="Picks the engine whose cache already holds most of this prompt. It needs the final token ids to do that.">KV router</span> picks the engine. <span class="tip" tabindex="0" data-tip="Instead of sending token ids, log probabilities and routed experts back over HTTP, the engine writes them to TQ and returns only where it put them.">Token capture</span> writes each call's tokens, <span class="tip" tabindex="0" data-tip="Which MoE experts each token used. Large: tokens × layers × top-k.">routed experts</span> and pixels to <span class="tip" tabindex="0" data-tip="TransferQueue, NeMo RL&#x27;s data plane. Training later reads each call from it.">TQ</span>. Dotted words have a short explanation: hover or tap them.</div>
-<p>Each column below follows one Gym call, top to bottom. Read across a row to see where that job happens in each setup. Today, every row runs in one Python process. #4979 moves the chat template into Dynamo's Rust code (row 2) and moves the capture steps after routing, as a copy (row 3). The proposal keeps Dynamo's frontend and router in front but runs our own Python there, through Dynamo's <span class="tip" tabindex="0" data-tip="A Python hook in Dynamo 1.5.1&#x27;s frontend. Dynamo calls it per model; whatever it sends on still goes through the KV router.">chat_engine_factory</span> hook. So rows 2 and 3 are the same code as today, and row 6 stays in the engine.</p>
+<p>Each column follows one Gym call through seven steps: ① receive the call, ② apply the chat template, ③ read the earlier tokens from TQ and splice them in, ④ pick an engine, ⑤ turn images into pixels, ⑥ run the model and write the call to TQ, ⑦ reply. Dashed boxes are OS processes, and the boxes inside are the classes that run each step. Today all of it runs in one process per vLLM worker. #4979 moves ② into Dynamo's Rust code and runs a copy of ③ after routing. The proposal keeps Dynamo's frontend and router, but runs our own Python inside the frontend process, through Dynamo's <span class="tip" tabindex="0" data-tip="A Python hook in Dynamo 1.5.1&#x27;s frontend. Dynamo calls it per model; whatever it sends on still goes through the KV router.">chat_engine_factory</span> hook.</p>
 
 <h2>Three setups, one Gym call</h2>
-<div class="scroll"><svg viewBox="0 0 1060 662" role="img" aria-label="Three serving setups side by side">
-<defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="ahf" d="M0,0L10,5L0,10z"/></marker></defs>
-<rect class="same" x="96" y="8" width="18" height="12" rx="3"/><text class="n" x="120" y="18">same as today</text>
-<rect class="new" x="226" y="8" width="18" height="12" rx="3"/><text class="n" x="250" y="18">new piece or new cost</text>
-<rect class="bad" x="396" y="8" width="18" height="12" rx="3"/><text class="n" x="420" y="18">differs from today (risk)</text>
-<rect class="box" x="586" y="8" width="18" height="12" rx="3"/><text class="n" x="610" y="18">neutral</text>
-<text class="n" x="676" y="18">tag = which process runs it</text>
-<text class="colh" x="96" y="50">Today: native vLLM + Gym</text>
-<text class="n" x="96" y="68">the standard to match</text>
-<text class="colh" x="418" y="50">#4979 as written</text>
-<text class="n" x="418" y="68">Rust renders, engine re-does steps</text>
-<text class="colh" x="740" y="50">Proposed</text>
-<text class="n" x="740" y="68">our Python inside Dynamo&#x27;s frontend</text>
-<text class="rowl" x="8" y="122">1</text>
-<text class="rowl" x="20" y="122">gets the</text>
-<text class="rowl" x="20" y="136">chat call</text>
-<text class="rowl" x="8" y="202">2</text>
-<text class="rowl" x="20" y="202">chat template</text>
-<text class="rowl" x="20" y="216">+ processor</text>
-<text class="rowl" x="8" y="282">3</text>
-<text class="rowl" x="20" y="282">TQ prefix read</text>
-<text class="rowl" x="20" y="296">+ splice</text>
-<text class="rowl" x="8" y="362">4</text>
-<text class="rowl" x="20" y="362">picks the</text>
-<text class="rowl" x="20" y="376">engine</text>
-<text class="rowl" x="8" y="442">5</text>
-<text class="rowl" x="20" y="442">pixels</text>
-<text class="rowl" x="8" y="522">6</text>
-<text class="rowl" x="20" y="522">runs model,</text>
-<text class="rowl" x="20" y="536">writes TQ</text>
-<text class="rowl" x="8" y="602">7</text>
-<text class="rowl" x="20" y="602">back to Gym</text>
-<rect class="same" x="96" y="92" width="300" height="66" rx="7"/>
-<text class="tag" x="388" y="152" text-anchor="end">worker</text>
-<text class="t" x="105" y="110">vLLM worker&#x27;s own chat server ×N</text>
-<text class="d" x="105" y="127">messages + 1 image + ng_capture</text>
-<text class="n" x="105" y="143">Gym spreads calls over the N servers</text>
-<path class="arr" d="M246.0,158 L246.0,170"/>
-<rect class="same" x="96" y="172" width="300" height="66" rx="7"/>
-<text class="tag" x="388" y="232" text-anchor="end">worker</text>
-<text class="t" x="105" y="190">vLLM renderer: HF template + processor</text>
-<text class="d" x="105" y="207">template from the checkpoint</text>
-<text class="n" x="105" y="223">image → its full run of image tokens</text>
-<a href="https://github.com/NVIDIA-NeMo/RL/blob/a1659e9d673f74a6470f842cace6c7fed0ef4f31/nemo_rl/models/generation/vllm/vllm_worker_async.py#L1261"><text x="105" y="233">preprocess_chat · L1261</text></a>
-<path class="arr" d="M246.0,238 L246.0,250"/>
-<rect class="same" x="96" y="252" width="300" height="66" rx="7"/>
-<text class="tag" x="388" y="312" text-anchor="end">worker</text>
-<text class="t" x="105" y="270">capture decision, TQ read, splice</text>
-<text class="d" x="105" y="287">candidate → token_in or new root</text>
-<a href="https://github.com/NVIDIA-NeMo/RL/blob/a1659e9d673f74a6470f842cace6c7fed0ef4f31/nemo_rl/models/generation/vllm/vllm_worker_async.py#L1329"><text x="105" y="304">vllm_worker_async.py L1329-L1490</text></a>
-<path class="arr" d="M246.0,318 L246.0,330"/>
-<rect class="box" x="96" y="332" width="300" height="66" rx="7"/>
-<text class="tag" x="388" y="392" text-anchor="end">Gym</text>
-<text class="t" x="105" y="350">Gym&#x27;s client picks a server</text>
-<text class="d" x="105" y="367">no KV-aware routing</text>
-<path class="arr" d="M246.0,398 L246.0,410"/>
-<rect class="same" x="96" y="412" width="300" height="66" rx="7"/>
-<text class="tag" x="388" y="472" text-anchor="end">worker</text>
-<text class="t" x="105" y="430">HF processor runs once</text>
-<text class="d" x="105" y="447">pixel_values → AsyncLLM, same process</text>
-<a href="https://github.com/NVIDIA-NeMo/RL/blob/a1659e9d673f74a6470f842cace6c7fed0ef4f31/nemo_rl/models/generation/vllm/vllm_worker_async.py#L852"><text x="105" y="464">_capture_request_media · L852</text></a>
-<path class="arr" d="M246.0,478 L246.0,490"/>
-<rect class="same" x="96" y="492" width="300" height="66" rx="7"/>
-<text class="tag" x="388" y="552" text-anchor="end">worker</text>
-<text class="t" x="105" y="510">AsyncLLM, then ONE TQ write</text>
-<text class="d" x="105" y="527">ids · logprobs · routed experts · pixels</text>
-<a href="https://github.com/NVIDIA-NeMo/RL/blob/a1659e9d673f74a6470f842cace6c7fed0ef4f31/nemo_rl/models/generation/vllm/vllm_worker_async.py#L1030"><text x="105" y="544">_finish_request_capture · L1030</text></a>
-<path class="arr" d="M246.0,558 L246.0,570"/>
-<rect class="same" x="96" y="572" width="300" height="66" rx="7"/>
-<text class="tag" x="388" y="632" text-anchor="end">worker</text>
-<text class="t" x="105" y="590">text + commit coordinates</text>
-<text class="d" x="105" y="607">no big arrays over HTTP</text>
-<rect class="box" x="418" y="92" width="300" height="66" rx="7"/>
-<text class="tag" x="710" y="152" text-anchor="end">frontend</text>
-<text class="t" x="427" y="110">Dynamo frontend ×N</text>
-<text class="d" x="427" y="127">messages + 1 image + annotation</text>
-<text class="n" x="427" y="143">Dynamo spreads the load</text>
-<path class="arr" d="M568.0,158 L568.0,170"/>
-<rect class="bad" x="418" y="172" width="300" height="66" rx="7"/>
-<text class="tag" x="710" y="232" text-anchor="end">frontend</text>
-<text class="t" x="427" y="190">Dynamo&#x27;s Rust renderer (minijinja)</text>
-<text class="d" x="427" y="207">no processor, no Python</text>
-<text class="r" x="427" y="223">silent rewrites; 1 unexpanded image token</text>
-<a href="https://github.com/NVIDIA-NeMo/RL/blob/a1659e9d673f74a6470f842cace6c7fed0ef4f31/nemo_rl/models/generation/dynamo/native_engine.py#L907"><text x="427" y="233">custom_jinja_template · L907</text></a>
-<path class="arr" d="M568.0,238 L568.0,250"/>
-<rect class="bad" x="418" y="252" width="300" height="66" rx="7"/>
-<text class="tag" x="710" y="312" text-anchor="end">engine</text>
-<text class="t" x="427" y="270">copied steps, after routing</text>
-<text class="d" x="427" y="287">no candidate step; EOS-only cut</text>
-<a href="https://github.com/NVIDIA-NeMo/RL/blob/a1659e9d673f74a6470f842cace6c7fed0ef4f31/nemo_rl/models/generation/dynamo/native_engine.py#L531"><text x="427" y="304">_generate_gym · L531-L589</text></a>
-<path class="arr" d="M568.0,318 L568.0,330"/>
-<rect class="new" x="418" y="332" width="300" height="66" rx="7"/>
-<text class="tag" x="710" y="392" text-anchor="end">frontend</text>
-<text class="t" x="427" y="350">KV router</text>
-<text class="d" x="427" y="367">hashes the Rust-rendered ids</text>
-<text class="o" x="427" y="383">not the ids the engine will run</text>
-<path class="arr" d="M568.0,398 L568.0,410"/>
-<rect class="box" x="418" y="412" width="300" height="66" rx="7"/>
-<text class="tag" x="710" y="472" text-anchor="end">engine</text>
-<text class="t" x="427" y="430">HF processor runs in the engine</text>
-<text class="d" x="427" y="447">from image URLs, via vLLM</text>
-<a href="https://github.com/NVIDIA-NeMo/RL/blob/a1659e9d673f74a6470f842cace6c7fed0ef4f31/nemo_rl/models/generation/dynamo/native_engine.py#L732"><text x="427" y="464">_engine_input · L732</text></a>
-<path class="arr" d="M568.0,478 L568.0,490"/>
-<rect class="bad" x="418" y="492" width="300" height="66" rx="7"/>
-<text class="tag" x="710" y="552" text-anchor="end">engine</text>
-<text class="t" x="427" y="510">AsyncLLM, then ONE TQ write</text>
-<text class="d" x="427" y="527">same write, but no sampler top-k</text>
-<text class="r" x="427" y="543">score centering: every capture fails</text>
-<a href="https://github.com/NVIDIA-NeMo/RL/blob/a1659e9d673f74a6470f842cace6c7fed0ef4f31/nemo_rl/models/generation/dynamo/native_engine.py#L785"><text x="427" y="553">_stage_gym_call · L785</text></a>
-<path class="arr" d="M568.0,558 L568.0,570"/>
-<rect class="same" x="418" y="572" width="300" height="66" rx="7"/>
-<text class="tag" x="710" y="632" text-anchor="end">frontend</text>
-<text class="t" x="427" y="590">text + commit coordinates</text>
-<text class="d" x="427" y="607">coords ride in nvext.engine_data</text>
-<rect class="same" x="740" y="92" width="300" height="66" rx="7"/>
-<text class="tag" x="1032" y="152" text-anchor="end">frontend</text>
-<text class="t" x="749" y="110">Dynamo frontend ×N</text>
-<text class="d" x="749" y="127">messages + 1 image + ng_capture</text>
-<text class="n" x="749" y="143">Dynamo spreads the load, as now</text>
-<path class="arr" d="M890.0,158 L890.0,170"/>
-<rect class="same" x="740" y="172" width="300" height="66" rx="7"/>
-<text class="tag" x="1032" y="232" text-anchor="end">frontend</text>
-<text class="t" x="749" y="190">OUR Python chat engine</text>
-<text class="d" x="749" y="207">same vLLM renderer + HF processor</text>
-<text class="g" x="749" y="223">template + processor code from checkpoint</text>
-<a href="https://github.com/ai-dynamo/dynamo/blob/v1.5.1/components/src/dynamo/frontend/main.py#L451"><text x="749" y="233">chat_engine_factory · main.py L451</text></a>
-<path class="arr" d="M890.0,238 L890.0,250"/>
-<rect class="same" x="740" y="252" width="300" height="66" rx="7"/>
-<text class="tag" x="1032" y="312" text-anchor="end">frontend</text>
-<text class="t" x="749" y="270">same capture decision + splice code</text>
-<text class="d" x="749" y="287">read-only TQ client in the frontend</text>
-<text class="g" x="749" y="303">one copy, shared with the native server</text>
-<path class="arr" d="M890.0,318 L890.0,330"/>
-<rect class="same" x="740" y="332" width="300" height="66" rx="7"/>
-<text class="tag" x="1032" y="392" text-anchor="end">frontend</text>
-<text class="t" x="749" y="350">KV router</text>
-<text class="d" x="749" y="367">hashes the final, spliced ids</text>
-<text class="g" x="749" y="383">the ids the engine will really run</text>
-<path class="arr" d="M890.0,398 L890.0,410"/>
-<rect class="new" x="740" y="412" width="300" height="66" rx="7"/>
-<text class="tag" x="1032" y="472" text-anchor="end">frontend</text>
-<text class="t" x="749" y="430">HF processor runs once, in frontend</text>
-<text class="d" x="749" y="447">pixels → engine: shared memory / NIXL</text>
-<a href="https://github.com/ai-dynamo/dynamo/blob/v1.5.1/components/src/dynamo/frontend/vllm_processor.py#L505"><text x="749" y="464">Dynamo&#x27;s sender · L505</text></a>
-<path class="arr" d="M890.0,478 L890.0,490"/>
-<rect class="same" x="740" y="492" width="300" height="66" rx="7"/>
-<text class="tag" x="1032" y="552" text-anchor="end">engine</text>
-<text class="t" x="749" y="510">AsyncLLM, then ONE TQ write</text>
-<text class="d" x="749" y="527">ids · logprobs · routed experts · pixels</text>
-<text class="g" x="749" y="543">routed experts never leave the engine</text>
-<path class="arr" d="M890.0,558 L890.0,570"/>
-<rect class="same" x="740" y="572" width="300" height="66" rx="7"/>
-<text class="tag" x="1032" y="632" text-anchor="end">frontend</text>
-<text class="t" x="749" y="590">text + commit coordinates</text>
-<text class="d" x="749" y="607">no big arrays over HTTP</text>
-<text class="n" x="96" y="656">Same Gym call in every column: turn 2 of a chat with one image, token capture on, forest training on (Gym sends mode="candidate").</text>
+<div class="scroll"><svg viewBox="0 0 1060 900" role="img" aria-label="Where each step runs in the three setups">
+<defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="ahf" d="M0,0L10,5L0,10z"/></marker><marker id="ahr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="ahr" d="M0,0L10,5L0,10z"/></marker></defs>
+<text class="colh" x="16" y="26">Today: native vLLM + Gym</text>
+<text class="n" x="16" y="43">the standard to match</text>
+<rect class="box" x="28" y="58" width="286" height="40" rx="6"/>
+<text class="t" x="36" y="74">Gym process</text>
+<text class="d" x="36" y="89">POST /v1/chat/completions, ng_capture</text>
+<text class="colh" x="366" y="26">#4979 as written</text>
+<text class="n" x="366" y="43">Rust renders, engine copies steps</text>
+<rect class="box" x="378" y="58" width="286" height="40" rx="6"/>
+<text class="t" x="386" y="74">Gym process</text>
+<text class="d" x="386" y="89">POST /v1/chat/completions, ng_capture</text>
+<text class="colh" x="716" y="26">Proposed</text>
+<text class="n" x="716" y="43">our Python inside Dynamo&#x27;s frontend</text>
+<rect class="box" x="728" y="58" width="286" height="40" rx="6"/>
+<text class="t" x="736" y="74">Gym process</text>
+<text class="d" x="736" y="89">POST /v1/chat/completions, ng_capture</text>
+<path class="arr" d="M88,98 L88,166"/>
+<text class="n" x="96" y="112">④ Gym&#x27;s own client picks</text>
+<text class="n" x="96" y="125">1 of N worker servers</text>
+<rect class="panel" x="16" y="136" width="328" height="586" rx="9"/>
+<text class="h" x="24" y="152">vLLM worker process (Ray actor) × N</text>
+<rect class="same" x="28" y="168" width="286" height="50" rx="6"/>
+<text class="t" x="36" y="184">FastAPI route (HTTP thread)</text>
+<text class="d" x="36" y="199">① receives the chat call</text>
+<text class="d" x="36" y="212">⑦ returns JSON: text + commit coords</text>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/a1659e9d673f74a6470f842cace6c7fed0ef4f31/nemo_rl/models/generation/vllm/vllm_worker_async.py#L1699"><text x="36" y="225">create_chat_completion · L1699</text></a>
+<path class="arr" d="M88,232 L88,246"/>
+<rect class="same" x="28" y="248" width="286" height="102" rx="6"/>
+<text class="t" x="36" y="264">NeMoRLOnlineRenderer.preprocess_chat</text>
+<text class="d" x="36" y="279">② vLLM renderer, checkpoint template</text>
+<text class="d" x="36" y="292">⑤ HF processor → pixels (this process)</text>
+<text class="d" x="36" y="305">③ decide_capture_input, then splice</text>
+<text class="d" x="36" y="318">   (asks the worker for the TQ prefix)</text>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/a1659e9d673f74a6470f842cace6c7fed0ef4f31/nemo_rl/models/generation/vllm/vllm_worker_async.py#L1261"><text x="36" y="331">preprocess_chat · L1261</text></a>
+<path class="arr" d="M88,350 L88,368"/>
+<rect class="same" x="28" y="370" width="286" height="76" rx="6"/>
+<text class="t" x="36" y="386">VllmAsyncGenerationWorkerImpl</text>
+<text class="d" x="36" y="401">③ _resolve_admission_prefix → TQ read</text>
+<text class="d" x="36" y="414">⑥ _begin_/_finish_request_capture</text>
+<text class="d" x="36" y="427">   → ONE TQ write (TQTokenSink)</text>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/a1659e9d673f74a6470f842cace6c7fed0ef4f31/nemo_rl/models/generation/vllm/vllm_worker_async.py#L1030"><text x="36" y="440">_finish_request_capture · L1030</text></a>
+<path class="arr" d="M88,460 L88,648"/>
+<text class="n" x="96" y="535.0">same process:</text>
+<text class="n" x="96" y="548.0">no network hop,</text>
+<text class="n" x="96" y="561.0">pixels handed over</text>
+<text class="n" x="96" y="574.0">in memory</text>
+<rect class="same" x="28" y="650" width="286" height="62" rx="6"/>
+<text class="t" x="36" y="666">vLLM AsyncLLM → GPU</text>
+<text class="d" x="36" y="681">⑥ ids · logprobs · routed experts</text>
+<text class="d" x="36" y="694">   come back into this process</text>
+<path class="ret" d="M334,650 L334,104"/>
+<text class="rl" x="331" y="116" text-anchor="end">⑦ reply</text>
+<rect class="tqb" x="28" y="770" width="286" height="48" rx="6"/>
+<text class="t" x="36" y="786">TQ (data plane storage)</text>
+<text class="d" x="36" y="800">read by: ③ worker, in this process</text>
+<text class="d" x="36" y="812">written by: ⑥ worker, in this process</text>
+<path class="tqr" d="M28,790 L21,790 L21,400 L26,400"/>
+<text class="tr" x="20" y="396">R</text>
+<path class="tqw" d="M314,425 L323,425 L323,800 L316,800"/>
+<text class="tw" x="326" y="421">W</text>
+<path class="arr" d="M438,98 L438,166"/>
+<text class="n" x="446" y="112">Dynamo spreads calls</text>
+<text class="n" x="446" y="125">over N frontends</text>
+<rect class="panel" x="366" y="136" width="328" height="258" rx="9"/>
+<text class="h" x="374" y="152">Dynamo frontend process × N</text>
+<rect class="box" x="378" y="168" width="286" height="50" rx="6"/>
+<text class="t" x="386" y="184">Rust HTTP server</text>
+<text class="d" x="386" y="199">① receives the chat call</text>
+<text class="d" x="386" y="212">⑦ returns JSON: text + coords</text>
+<path class="arr" d="M438,218 L438,234"/>
+<rect class="bad" x="378" y="236" width="286" height="62" rx="6"/>
+<text class="t" x="386" y="252">Rust preprocessor (dynamo-renderer)</text>
+<text class="d" x="386" y="267">② minijinja template + Rust tokenizer</text>
+<text class="d" x="386" y="280">   1 unexpanded token per image</text>
+<text class="d" x="386" y="293">   no processor code runs</text>
+<path class="arr" d="M438,298 L438,314"/>
+<rect class="box" x="378" y="316" width="286" height="62" rx="6"/>
+<text class="t" x="386" y="332">Rust KV router (same process)</text>
+<text class="d" x="386" y="347">④ picks 1 of M engines by cache</text>
+<text class="d" x="386" y="360">   overlap, on the Rust-rendered ids</text>
+<path class="arr" d="M438,394 L438,456"/>
+<text class="n" x="446" y="408">Dynamo request plane (TCP):</text>
+<text class="n" x="446" y="421">token ids + annotations + image URLs</text>
+<rect class="panel" x="366" y="434" width="328" height="288" rx="9"/>
+<text class="h" x="374" y="450">vLLM worker process (Ray actor) × M</text>
+<rect class="box" x="378" y="458" width="286" height="40" rx="6"/>
+<text class="t" x="386" y="474">Dynamo Worker (Rust, inside the actor)</text>
+<text class="d" x="386" y="489">receives the call; streams the reply</text>
+<path class="arr" d="M438,498 L438,510"/>
+<rect class="bad" x="378" y="512" width="286" height="116" rx="6"/>
+<text class="t" x="386" y="528">NativeVllmEngine._generate_gym</text>
+<text class="d" x="386" y="543">③ TQ read + splice: COPIED steps,</text>
+<text class="d" x="386" y="556">   no candidate step, EOS-only cut</text>
+<text class="d" x="386" y="569">⑤ HF processor again, from image URLs</text>
+<text class="d" x="386" y="582">⑥ begin capture … _stage_gym_call</text>
+<text class="d" x="386" y="595">   → ONE TQ write (TQTokenSink)</text>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/a1659e9d673f74a6470f842cace6c7fed0ef4f31/nemo_rl/models/generation/dynamo/native_engine.py#L492"><text x="386" y="608">_generate_gym · L492</text></a>
+<path class="arr" d="M438,628 L438,648"/>
+<rect class="same" x="378" y="650" width="286" height="62" rx="6"/>
+<text class="t" x="386" y="666">vLLM AsyncLLM → GPU</text>
+<text class="d" x="386" y="681">⑥ routed experts stay in this</text>
+<text class="d" x="386" y="694">   process</text>
+<path class="ret" d="M684,650 L684,104"/>
+<text class="rl" x="681" y="116" text-anchor="end">⑦ reply</text>
+<rect class="tqb" x="378" y="770" width="286" height="48" rx="6"/>
+<text class="t" x="386" y="786">TQ (data plane storage)</text>
+<text class="d" x="386" y="800">read by: ③ _generate_gym, worker process</text>
+<text class="d" x="386" y="812">written by: ⑥ _stage_gym_call, worker process</text>
+<path class="tqr" d="M378,790 L371,790 L371,538 L376,538"/>
+<text class="tr" x="370" y="534">R</text>
+<path class="tqw" d="M664,600 L673,600 L673,800 L666,800"/>
+<text class="tw" x="676" y="596">W</text>
+<path class="arr" d="M788,98 L788,166"/>
+<text class="n" x="796" y="112">Dynamo spreads calls</text>
+<text class="n" x="796" y="125">over N frontends</text>
+<rect class="panel" x="716" y="136" width="328" height="326" rx="9"/>
+<text class="h" x="724" y="152">Dynamo frontend process × N</text>
+<rect class="box" x="728" y="168" width="286" height="50" rx="6"/>
+<text class="t" x="736" y="184">Rust HTTP server</text>
+<text class="d" x="736" y="199">① receives the chat call</text>
+<text class="d" x="736" y="212">⑦ returns JSON: text + coords</text>
+<path class="arr" d="M788,218 L788,234"/>
+<rect class="new" x="728" y="236" width="286" height="142" rx="6"/>
+<text class="t" x="736" y="252">OUR chat engine (Python, same process)</text>
+<text class="d" x="736" y="267">set up through chat_engine_factory</text>
+<text class="d" x="736" y="280">② NeMoRLOnlineRenderer (moved, shared)</text>
+<text class="d" x="736" y="293">⑤ HF processor → pixels, ONCE</text>
+<text class="d" x="736" y="306">③ decide_capture_input + splice</text>
+<text class="d" x="736" y="319">   TQ read via TQTokenSource</text>
+<text class="d" x="736" y="332">⑦ turns engine output into the reply</text>
+<a href="https://github.com/ai-dynamo/dynamo/blob/v1.5.1/components/src/dynamo/frontend/main.py#L451"><text x="736" y="345">chat_engine_factory · main.py L451</text></a>
+<path class="arr" d="M788,378 L788,392"/>
+<rect class="same" x="728" y="394" width="286" height="52" rx="6"/>
+<text class="t" x="736" y="410">Rust KV router (routed_engine)</text>
+<text class="d" x="736" y="425">④ picks 1 of M engines on the</text>
+<text class="d" x="736" y="438">   final, spliced ids</text>
+<path class="arr" d="M788,462 L788,524"/>
+<text class="n" x="796" y="476">request plane (TCP): ids + capture plan</text>
+<text class="n" x="796" y="489">pixels: shared memory / NIXL</text>
+<rect class="panel" x="716" y="502" width="328" height="220" rx="9"/>
+<text class="h" x="724" y="518">vLLM worker process (Ray actor) × M</text>
+<rect class="box" x="728" y="526" width="286" height="40" rx="6"/>
+<text class="t" x="736" y="542">Dynamo Worker (Rust, inside the actor)</text>
+<text class="d" x="736" y="557">receives the call; streams the reply</text>
+<path class="arr" d="M788,566 L788,578"/>
+<rect class="same" x="728" y="580" width="286" height="54" rx="6"/>
+<text class="t" x="736" y="596">DynamoVllmAdapter (was NativeVllmEngine)</text>
+<text class="d" x="736" y="611">⑥ begin capture → generate → ONE TQ</text>
+<text class="d" x="736" y="624">   write; replies with coords only</text>
+<path class="arr" d="M788,634 L788,648"/>
+<rect class="same" x="728" y="650" width="286" height="62" rx="6"/>
+<text class="t" x="736" y="666">vLLM AsyncLLM → GPU</text>
+<text class="d" x="736" y="681">⑥ routed experts stay in this</text>
+<text class="d" x="736" y="694">   process</text>
+<path class="ret" d="M1034,650 L1034,104"/>
+<text class="rl" x="1031" y="116" text-anchor="end">⑦ reply</text>
+<rect class="tqb" x="728" y="770" width="286" height="48" rx="6"/>
+<text class="t" x="736" y="786">TQ (data plane storage)</text>
+<text class="d" x="736" y="800">read by: ③ chat engine, frontend process</text>
+<text class="d" x="736" y="812">written by: ⑥ adapter, worker process</text>
+<path class="tqr" d="M728,790 L721,790 L721,330 L726,330"/>
+<text class="tr" x="720" y="326">R</text>
+<path class="tqw" d="M1014,606 L1023,606 L1023,800 L1016,800"/>
+<text class="tw" x="1026" y="602">W</text>
+<rect class="same" x="16" y="846" width="18" height="12" rx="3"/>
+<text class="n" x="40" y="856">same as today</text>
+<rect class="new" x="150" y="846" width="18" height="12" rx="3"/>
+<text class="n" x="174" y="856">new piece</text>
+<rect class="bad" x="260" y="846" width="18" height="12" rx="3"/>
+<text class="n" x="284" y="856">differs from today (risk)</text>
+<rect class="panel" x="460" y="846" width="18" height="12" rx="3"/>
+<text class="n" x="484" y="856">dashed = one OS process</text>
+<path class="ret" d="M660,852 L700,852"/>
+<text class="n" x="706" y="856">reply path</text>
+<path class="tqr" d="M790,852 L820,852"/>
+<text class="n" x="826" y="856">TQ read</text>
+<path class="tqw" d="M890,852 L920,852"/>
+<text class="n" x="926" y="856">TQ write</text>
+<text class="n" x="16" y="880">Circled numbers are the 7 steps of one Gym call. ①–⑦ appear in the class that runs them; Gym itself does ④ only in today&#x27;s setup.</text>
 </svg></div>
-<p>Rows 2, 3 and 6 decide the design. In the proposal, row 2 uses the checkpoint's own template and processor code, as today. Row 3 runs before the router, so the router sees the ids the engine will really run. Row 6 keeps routed experts and pixels inside the engine process, as today.</p>
+<p><b>Where each piece lives in the proposal.</b> The Dynamo frontend is one process. Its HTTP server and KV router are Rust, and our chat engine is a Python object in that same process: Dynamo's Rust code calls into it. The chat engine does ②, ③ and ⑤, so the TQ read happens there, through a read-only <a href="https://github.com/NVIDIA-NeMo/RL/blob/a1659e9d673f74a6470f842cace6c7fed0ef4f31/nemo_rl/data_plane/tq_token_sink.py#L867"><code>TQTokenSource</code></a>. It hands the final ids to the KV router in the same process (④). The call then crosses the network to one vLLM worker, a Ray actor process. There, Dynamo's Rust <code>Worker</code> calls <code>DynamoVllmAdapter</code>, which wraps vLLM's <code>AsyncLLM</code> in that same process. It begins capture, runs the model and does the one TQ write (⑥), using the same worker methods as today. The reply goes back the same way with only the text and where the call was stored, so routed experts never leave the worker.</p>
 
 <h2>What each step means, and where pixels and TQ go</h2>
 <div class="scroll"><table class="gl">
@@ -284,7 +318,7 @@ svg .rowl{fill:var(--dim);font:bold 10.5px -apple-system,sans-serif}
 <ul>
 <li><b>Pixels: process them in the frontend.</b> The splice and the router both need the image already expanded into its image tokens, and only the processor knows that count. So the processor has to run before routing, in the frontend. It then runs once, as today. The cost is sending pixel values to the engine: Dynamo already does this over shared memory on the same node or NIXL across nodes (<a href="https://github.com/ai-dynamo/dynamo/blob/v1.5.1/components/src/dynamo/frontend/vllm_processor.py#L505">vllm_processor.py L505-L556</a>). <b>Gap to fix:</b> Dynamo's sender handles <b>one modality per call</b> (<a href="https://github.com/ai-dynamo/dynamo/blob/v1.5.1/components/src/dynamo/frontend/vllm_processor.py#L225">L225-L229</a>). A call with a video and two images skips the transfer, and the engine runs the processor a second time. Today's native path has no such limit: the processor runs once, in the same process as vLLM, for any mix. So we need a sender that carries mixed calls. Otherwise the processor runs twice, and the pixels written to TQ may not be the ones the frontend used for the splice and routing.</li>
 <li><b>TQ: read in the frontend, write in the engine.</b> The frontend needs a read-only TQ client for the prefix and the retained-media check (<a href="https://github.com/NVIDIA-NeMo/RL/blob/a1659e9d673f74a6470f842cace6c7fed0ef4f31/nemo_rl/models/generation/vllm/vllm_worker_async.py#L852">L852-L967</a>). The engine keeps the single write it has today: ids, logprobs, routed experts and pixels together (<a href="https://github.com/NVIDIA-NeMo/RL/blob/a1659e9d673f74a6470f842cace6c7fed0ef4f31/nemo_rl/models/generation/vllm/vllm_worker_async.py#L1030">L1030-L1113</a>). Both run inside the frontend process and the engine process, not in a new process.</li>
-<li><b>Logprobs: our chat engine must accept and forward them.</b> Dynamo's own vLLM chat engine refuses any call that sets <code>logprobs</code> or <code>top_logprobs</code> with a 400 (<a href="https://github.com/ai-dynamo/dynamo/blob/v1.5.1/components/src/dynamo/frontend/vllm_processor.py#L584">L584-L600</a>). We need both. Score centering works by Gym adding <code>logprobs: true, top_logprobs: K</code> to every call (<a href="https://github.com/NVIDIA-NeMo/RL/blob/a1659e9d673f74a6470f842cace6c7fed0ef4f31/nemo_rl/models/generation/score_centering.py#L38">score_centering.py L38-L57</a>), so vLLM returns the top-K candidates per token and the engine writes them to TQ. Gym calls without capture also need them to get token log probabilities back. So our chat engine must not copy that check: it passes both fields to the engine as sampling options. The values still go to TQ from the engine, not back over HTTP.</li>
+<li><b>Logprobs: our chat engine must accept and forward them.</b> Dynamo's own vLLM chat engine refuses any call that sets <code>logprobs</code> or <code>top_logprobs</code> with a 400 (<a href="https://github.com/ai-dynamo/dynamo/blob/v1.5.1/components/src/dynamo/frontend/vllm_processor.py#L584">L584-L600</a>). We need both. Score centering works by Gym adding <code>logprobs: true, top_logprobs: K</code> to every call (<a href="https://github.com/NVIDIA-NeMo/RL/blob/a1659e9d673f74a6470f842cace6c7fed0ef4f31/nemo_rl/models/generation/score_centering.py#L39">score_centering.py L39-L57</a>), so vLLM returns the top-K candidates per token and the engine writes them to TQ. Gym calls without capture also need them to get token log probabilities back. So our chat engine must not copy that check. <b>How to get them:</b> the chat engine copies <code>top_logprobs</code> into the request's <code>output_options</code>, which Dynamo already carries to the engine. #4979 already reads them there (<a href="https://github.com/NVIDIA-NeMo/RL/blob/a1659e9d673f74a6470f842cace6c7fed0ef4f31/nemo_rl/models/generation/dynamo/native_engine.py#L412"><code>parse_logprob_options</code> L412</a>). The adapter sets vLLM's <code>logprobs=K</code>. With capture on, it pulls the top-K with <a href="https://github.com/NVIDIA-NeMo/RL/blob/a1659e9d673f74a6470f842cace6c7fed0ef4f31/nemo_rl/models/generation/score_centering.py#L80"><code>extract_score_centering_samples</code></a> and passes them to <code>_finish_request_capture</code>, as the native server does. They go into the same single TQ write. Without capture, they go back in <code>engine_data</code>, and the chat engine builds the OpenAI <code>logprobs</code> field from them.</li>
 <li><b>Why not Dynamo's Rust renderer.</b> It silently changes prompts: it adds <code>reasoning_content</code> as <code>&lt;think&gt;</code> when the template doesn't use it (<a href="https://docs.rs/crate/dynamo-renderer/5.1.2/source/src/template/oai.rs#628">oai.rs L628</a>), keeps tool arguments as strings where vLLM makes them dicts, flattens content differently, and never reads processor code. Templates and processors change often, so we should run the checkpoint's own code, not a fast copy of it.</li>
 </ul>
 
