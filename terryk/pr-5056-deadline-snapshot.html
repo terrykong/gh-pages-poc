@@ -44,6 +44,13 @@ th{background:var(--surface)}
 .diff .hunk{color:var(--accent)}
 .where{border-left:4px solid var(--accent);background:var(--surface);padding:6px 12px;margin:6px 0 10px}
 .warn{border-left:3px solid var(--orange);background:var(--surface);padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0}
+nav.chain{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 6px;padding:0}
+nav.chain a,nav.chain span{display:inline-block;padding:5px 11px;border:1px solid var(--border);
+  border-radius:20px;background:var(--surface);text-decoration:none;color:var(--accent);
+  font-size:12.5px;line-height:1.3;white-space:nowrap}
+nav.chain a:hover{background:var(--surface2)}
+nav.chain span.here{background:var(--accent);color:var(--bg);border-color:var(--accent);font-weight:600}
+p.chainnote{color:var(--dim);font-size:12px;margin:0 0 18px}
 .cref{margin:6px 0 0;font-size:13px}
 .cref a{display:inline-block;padding:4px 10px;border:1px solid var(--border);border-radius:16px;
   background:var(--surface);font:12.5px ui-monospace,Menlo,monospace;margin:2px 4px 2px 0}
@@ -79,6 +86,12 @@ svg a text{text-decoration:underline;fill:var(--accent);font:11.5px ui-monospace
 <p class="sub"><a href="https://github.com/NVIDIA-NeMo/RL/pull/5056">NVIDIA-NeMo/RL #5056</a>
 (part 4 of the rollout-checkpointing stack, on top of
 <a href="https://github.com/NVIDIA-NeMo/RL/pull/5049">#5049</a>). Permalinks pin the PR head <code>dea7ae5a</code>.</p>
+
+<nav class="chain">
+  <span class="here">what the PR adds</span>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-5056-overlap-saves.html">overlap the two saves</a>
+</nav>
+<p class="chainnote">Two pages on this PR, one question each. This one: what the PR changes at the deadline.</p>
 
 <div class="status">
 <dl>
@@ -172,12 +185,11 @@ and setup checks in <a href="https://github.com/NVIDIA-NeMo/RL/blob/dea7ae5a7434
 <p><code>_finish_pending_save</code> publishes <code>step_7</code> first when the save is still finishing in the background,
 because a snapshot must point at a published trainer checkpoint. The review asks for these cuts (none are in the PR yet):</p>
 <ul>
-<li>Drop the <code>checkpointing["enabled"]</code> check above. It never changes anything, because turn-level recovery already requires checkpointing.</li>
 <li><code>save_at_deadline()</code> repeats the try / log / re-raise code of the background loop. One shared <code>_attempt()</code> helper saves about 12 lines.</li>
 <li>Delete <code>save_reserve_seconds</code> (below), merge a duplicate test, share setup across three new tests, and keep the docs to one table.</li>
-<li><b>Overlap the two saves.</b> Today the snapshot waits until the trainer checkpoint&rsquo;s weights are fully on disk. Nothing in it reads the weights, so take it inside the trainer save, into <code>tmp_step_N</code>, while the weights are still being written. The last save then takes the longer of the two instead of their sum, and the branch above goes away (C3 and C6 then no longer apply).</li>
+<li><b>Overlap the two saves.</b> Today the snapshot waits until the trainer checkpoint&rsquo;s weights are fully on disk. Nothing in it reads the weights, so take it inside the trainer save, into <code>tmp_step_N</code>, while the weights are still being written. The last save then takes the longer of the two instead of their sum, and the branch above goes away (C6 then no longer applies; <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-5056-overlap-saves.html">how the overlap works</a>).</li>
 </ul>
-<p class="cref" id="crefs">Review comments: <a href="https://github.com/NVIDIA-NeMo/RL/pull/5056#discussion_r4477486467">C3 · single_controller.py:3259</a><a href="https://github.com/NVIDIA-NeMo/RL/pull/5056#discussion_r4477486459">C2 · snapshots.py:960</a><a href="https://github.com/NVIDIA-NeMo/RL/pull/5056#discussion_r4477486453">C1 · timer.py:466</a><a href="https://github.com/NVIDIA-NeMo/RL/pull/5056#discussion_r4477486487">C5 · single-controller.md:235</a><a href="https://github.com/NVIDIA-NeMo/RL/pull/5056#discussion_r4477486493">C6 · test_checkpointing.py:1679</a><a href="https://github.com/NVIDIA-NeMo/RL/pull/5056#discussion_r4477486498">C7 · test_checkpointing.py:2858</a><a href="https://github.com/NVIDIA-NeMo/RL/pull/5056#discussion_r4477486509">C8 · test_setup.py:1377</a><a href="https://github.com/NVIDIA-NeMo/RL/pull/5056#discussion_r4477486479">C4 · snapshots.py:949 — GPU run</a><a href="https://github.com/NVIDIA-NeMo/RL/pull/5056#discussion_r4500841161">C9 · single_controller.py:3272 — overlap</a></p>
+<p class="cref" id="crefs">Review comments: <a href="https://github.com/NVIDIA-NeMo/RL/pull/5056#discussion_r4477486459">C2 · snapshots.py:960</a><a href="https://github.com/NVIDIA-NeMo/RL/pull/5056#discussion_r4477486453">C1 · timer.py:466</a><a href="https://github.com/NVIDIA-NeMo/RL/pull/5056#discussion_r4477486487">C5 · single-controller.md:235</a><a href="https://github.com/NVIDIA-NeMo/RL/pull/5056#discussion_r4477486493">C6 · test_checkpointing.py:1679</a><a href="https://github.com/NVIDIA-NeMo/RL/pull/5056#discussion_r4477486498">C7 · test_checkpointing.py:2858</a><a href="https://github.com/NVIDIA-NeMo/RL/pull/5056#discussion_r4477486509">C8 · test_setup.py:1377</a><a href="https://github.com/NVIDIA-NeMo/RL/pull/5056#discussion_r4477486479">C4 · snapshots.py:949 — GPU run</a><a href="https://github.com/NVIDIA-NeMo/RL/pull/5056#discussion_r4500841161">C9 · single_controller.py:3272 — overlap</a></p>
 
 <div class="warn"><b>So what.</b> Turn-level runs now keep their unfinished turns across a walltime stop. One catch:
 the PR moves the deadline earlier by the length of the last snapshot
