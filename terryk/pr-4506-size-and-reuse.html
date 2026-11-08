@@ -130,7 +130,23 @@ p.chainnote{color:var(--dim);font-size:12px;margin:0 0 18px}
 
 <h2>The biggest cut: the snapshot fence</h2>
 
-<p>To keep that delete out of the snapshot window, the PR closes a <a href="https://github.com/NVIDIA-NeMo/RL/blob/b6aff18f982137a538bbf5d3540983e0d094a95c/nemo_rl/models/generation/generation_cut_capture.py#L241-L285">gate</a> on every worker from the snapshot's start until the TQ save is done. Every terminal write waits, so a call that finishes inside the window cannot return its reply. The gate needs begin/end calls on the <a href="https://github.com/NVIDIA-NeMo/RL/blob/b6aff18f982137a538bbf5d3540983e0d094a95c/nemo_rl/models/generation/vllm/vllm_worker_async.py#L3772-L3808">worker</a>, <a href="https://github.com/NVIDIA-NeMo/RL/blob/b6aff18f982137a538bbf5d3540983e0d094a95c/nemo_rl/models/generation/vllm/vllm_generation.py#L1856-L1882"><code>VllmGeneration</code></a> and the <a href="https://github.com/NVIDIA-NeMo/RL/blob/b6aff18f982137a538bbf5d3540983e0d094a95c/nemo_rl/models/generation/interfaces.py#L803-L819">interface</a>, plus <a href="https://github.com/NVIDIA-NeMo/RL/blob/b6aff18f982137a538bbf5d3540983e0d094a95c/nemo_rl/environments/checkpointing/nemo_gym.py#L64-L106"><code>GenerationCutFence</code></a>. The PR's own notes say the terminal write itself is safe; only the delete is not. So queue the delete instead.</p>
+<p><b>What the delete is.</b> Take one call, <code>chat-A</code>: 5 tokens decoded when snapshot <code>ckpt-9</code> starts, 15 when it finishes.</p>
+<ol>
+<li>The cut writes a <b>chunk row</b> to TQ with the first 5 tokens.</li>
+<li>When the call finishes, the worker writes its <b>final row</b> with all 15 tokens.</li>
+<li>The chunk row is now redundant, so the worker <b>deletes</b> it (<a href="https://github.com/NVIDIA-NeMo/RL/blob/b6aff18f982137a538bbf5d3540983e0d094a95c/nemo_rl/models/generation/vllm/vllm_worker_async.py#L1859">vllm_worker_async.py:1859</a>).</li>
+</ol>
+<p><b>Why only the delete is dangerous.</b> Say <code>chat-A</code> finishes after Gym's cut but before RL saves the TQ snapshot:</p>
+<div class="tbl"><table>
+<tr><th>When</th><th>What happens</th></tr>
+<tr><td>Gym prepare and commit</td><td>The cut writes chunk C (5 tokens). Gym's commit records "chat-A resumes from chunk C".</td></tr>
+<tr><td>chat-A finishes</td><td>The final row (15 tokens) is written, <b>and chunk C is deleted</b>.</td></tr>
+<tr><td>TQ snapshot</td><td>Chunk C is gone, but Gym's saved state still points at it. The snapshot fails its "every required row is present" check.</td></tr>
+</table></div>
+<p>The final row by itself is harmless. The snapshot check allows extra rows. On restore, Gym re-sends <code>chat-A</code> from chunk C, because it thinks the call was still running, and the restore clears the unused 15-token row. Turn mode has no chunk rows, so it never deletes anything and never needed a hold.</p>
+
+
+<p>To keep that delete out of the snapshot window, the PR closes a <a href="https://github.com/NVIDIA-NeMo/RL/blob/b6aff18f982137a538bbf5d3540983e0d094a95c/nemo_rl/models/generation/generation_cut_capture.py#L241-L285">gate</a> on every worker from the snapshot's start until the TQ save is done. Every terminal write waits, so a call that finishes inside the window cannot return its reply. The gate needs begin/end calls on the <a href="https://github.com/NVIDIA-NeMo/RL/blob/b6aff18f982137a538bbf5d3540983e0d094a95c/nemo_rl/models/generation/vllm/vllm_worker_async.py#L3772-L3808">worker</a>, <a href="https://github.com/NVIDIA-NeMo/RL/blob/b6aff18f982137a538bbf5d3540983e0d094a95c/nemo_rl/models/generation/vllm/vllm_generation.py#L1856-L1882"><code>VllmGeneration</code></a> and the <a href="https://github.com/NVIDIA-NeMo/RL/blob/b6aff18f982137a538bbf5d3540983e0d094a95c/nemo_rl/models/generation/interfaces.py#L803-L819">interface</a>, plus <a href="https://github.com/NVIDIA-NeMo/RL/blob/b6aff18f982137a538bbf5d3540983e0d094a95c/nemo_rl/environments/checkpointing/nemo_gym.py#L64-L106"><code>GenerationCutFence</code></a>. The PR's own notes say the terminal write itself is safe; only the delete is not. So let the final row go at once, as in turn mode, and put the chunk keys on a "delete later" list. The list is emptied at the start of the next snapshot.</p>
 
 <svg viewBox="0 0 940 336" role="img" aria-label="Timeline of one snapshot window. Today the gate blocks every terminal write from snapshot N begin to end, so call A's reply waits. Proposed: call A's terminal row is written right away and only its chunk-row delete is queued until snapshot N+1 begins, after N's TQ save.">
   <text class="t" x="16" y="20">One snapshot window; call A finishes decoding inside it</text>
