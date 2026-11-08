@@ -132,7 +132,19 @@ and saves the new ones as a TQ <span class="tip" tabindex="0" data-tip="A partia
 After a restart the worker reads those rows back, adds them to the end of the prompt, and lowers <code>max_tokens</code> and <code>min_tokens</code> by the same count
 (<a href="https://github.com/NVIDIA-NeMo/RL/blob/b6aff18f982137a538bbf5d3540983e0d094a95c/nemo_rl/models/generation/vllm/vllm_worker_async.py#L2225">vllm_worker_async.py:2225</a>).
 It then puts the decoded text in front of the reply (<a href="https://github.com/NVIDIA-NeMo/RL/blob/b6aff18f982137a538bbf5d3540983e0d094a95c/nemo_rl/models/generation/vllm/vllm_worker_async.py#L1538">:1538</a>).
-A call that cannot be cut — the deadline passed, the cut lands inside a multi-byte character, or it uses a setting a resumed call cannot honor, such as stop strings or a seed — falls back to the turn path.</p>
+Some calls cannot be cut. Those fall back to the turn path: after a restart the whole call runs again from its first token. That happens in three cases:</p>
+<ul class="nocut">
+<li><b>The cut ran out of time.</b> Each cut request from Gym has a time limit, <code>token_capture.control_timeout_s</code> (60 s by default, <a href="https://github.com/NVIDIA-NeMo/RL/blob/d33e36284fded7ef7bb5a0790ba3375723a4e91c/nemo_rl/algorithms/single_controller_utils/config.py#L679">config.py:679</a>). The clock starts when the worker gets the request (<a href="https://github.com/NVIDIA-NeMo/RL/blob/d33e36284fded7ef7bb5a0790ba3375723a4e91c/nemo_rl/models/generation/vllm/vllm_worker_async.py#L2503-L2505">vllm_worker_async.py:2503</a>). Gym stops waiting at that limit, so any call the worker has not reached by then is marked uncut (<a href="https://github.com/NVIDIA-NeMo/RL/blob/d33e36284fded7ef7bb5a0790ba3375723a4e91c/nemo_rl/models/generation/generation_cut_capture.py#L899-L913">generation_cut_capture.py:899</a>). This is unrelated to the "deadline snapshots" of #5056.</li>
+<li><b>The tokens so far end in the middle of a character.</b> A token is a run of bytes, not always a whole character. In UTF-8, an emoji or a Chinese character takes 2–4 bytes, and the tokenizer can split it across two tokens. If the call is cut between those two tokens, the saved tokens decode to half a character. The restored reply starts with that saved text, so it would show a broken character. The worker refuses to cut that call (<a href="https://github.com/NVIDIA-NeMo/RL/blob/d33e36284fded7ef7bb5a0790ba3375723a4e91c/nemo_rl/models/generation/generation_cut_capture.py#L771-L790">generation_cut_capture.py:771</a>). The next checkpoint usually lands on a whole character and can cut it.</li>
+<li><b>The call uses a setting a resumed call cannot reproduce</b> (<a href="https://github.com/NVIDIA-NeMo/RL/blob/d33e36284fded7ef7bb5a0790ba3375723a4e91c/nemo_rl/models/generation/vllm/vllm_worker_async.py#L200-L231">vllm_worker_async.py:200</a>).
+  <ul>
+  <li>Stop strings: the match could start before the cut and end after it.</li>
+  <li>A seed (when sampling, not greedy): a seeded call has its own random number generator. A resumed call starts it over, so it would reuse the same random draws that already picked the saved tokens.</li>
+  <li>Presence and frequency penalties: these count the tokens in the output. After the restore, the saved tokens are part of the prompt, so they would no longer count.</li>
+  <li>Multi-token bad words: a banned phrase could straddle the cut.</li>
+  </ul></li>
+</ul>
+<p>A call that is still reading its prompt has no tokens yet, so there is nothing to save. It simply runs again.</p>
 
 <h2>Where each path does the work — and where they join</h2>
 
