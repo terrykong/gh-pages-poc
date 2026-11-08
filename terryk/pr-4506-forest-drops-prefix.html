@@ -135,6 +135,14 @@ th{color:var(--dim);font-weight:600;font-size:12px}
 </ul>
 <p style="margin:6px 0">With forest training, every call carries <code>request_replay</code>, so every call goes through this decision. Either way, the decision builds a <b>new</b> admission, and that new admission never copies <code>generation_cut</code>. That is the bug below. Dotted words have a short explanation: hover or tap them.</p></div>
 
+<p><b>Example: one parent, two possible next calls.</b> Parent call P sent <code>[system S, user U1]</code> and answered <code>A1</code>. Gym saved P's <code>candidate_replay</code> summary: 3 messages, and one hash over (S, U1, A1) (<a href="https://github.com/NVIDIA-NeMo/Gym/blob/5911d628c744d0bf43fe1d9ddf3bda72d59b0f9a/nemo_gym/token_id_capture/external_capture.py#L352-L358">external_capture.py:352</a>).</p>
+<div class="tbl"><table>
+<tr><th>Next call sends</th><th>Its <code>request_replay</code></th><th>Gym: do the first 3 match P?</th><th>RL decides</th></tr>
+<tr><td><code>[S, U1, A1, tool T1]</code></td><td>4 (role, hash) pairs</td><td>yes → <code>mode="candidate"</code> with P's summary</td><td>The new part <code>[T1]</code> starts right after the answer A1, so continue from P's exact tokens.</td></tr>
+<tr><td><code>[S, U_summary, …]</code> (the agent compacted its history)</td><td>(role, hash) pairs for the new list</td><td>no → no parent is linked</td><td>Start a new chain from the rendered text.</td></tr>
+</table></div>
+<p>Gym also compares the two chat-template hashes. If they differ, it starts a new chain even when the messages match (<a href="https://github.com/NVIDIA-NeMo/Gym/blob/5911d628c744d0bf43fe1d9ddf3bda72d59b0f9a/nemo_gym/token_id_capture/external_capture.py#L146-L158">external_capture.py:146-158</a>).</p>
+
 <p>Gym attaches the saved prefix to the call's admission and then deletes its own copy
 (<a href="https://github.com/NVIDIA-NeMo/Gym/blob/5911d628c744d0bf43fe1d9ddf3bda72d59b0f9a/nemo_gym/_checkpoint/model.py#L449-L457">Gym model.py:449-457</a>, <code>restored_cuts.take</code>), so it is offered exactly once.
 With forest training, Gym links calls by source history
