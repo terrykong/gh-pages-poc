@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Rollout checkpoint sequence</title>
+<style>
+:root{
+  --bg:#0d1117; --surface:#161b22; --surface2:#1c2128; --border:#30363d;
+  --text:#e6edf3; --dim:#8b949e; --accent:#58a6ff; --green:#3fb950;
+  --orange:#d29922; --red:#f85149;
+}
+:root[data-theme="light"]{
+  --bg:#ffffff; --surface:#f6f8fa; --surface2:#eaeef2; --border:#d0d7de;
+  --text:#1f2328; --dim:#59636e; --accent:#0969da; --green:#1a7f37;
+  --orange:#9a6700; --red:#cf222e;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:28px 16px 70px}
+h1{font-size:22px;margin:0 0 8px;line-height:1.3}
+h2{font-size:18px;margin:32px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;
+  font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
+.sub{color:var(--dim);font-size:13.5px;margin:0 0 16px}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);
+  border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;
+  font:13px/1 ui-monospace,Menlo,monospace;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.18)}
+.status{border:1px solid var(--border);border-radius:10px;background:var(--surface);
+  padding:2px 16px 10px;margin:0 0 20px}
+.status dl{display:grid;grid-template-columns:max-content 1fr;gap:4px 14px;margin:12px 0 0}
+.status dt{color:var(--dim);font-size:12px;text-transform:uppercase;letter-spacing:.04em;
+  white-space:nowrap;padding-top:2px}
+.status dd{margin:0;font-size:14px}
+.verdict{font-weight:700}
+.verdict.open{color:var(--orange)}
+.warn{border-left:3px solid var(--orange);background:var(--surface);
+  padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0}
+.where{border-left:4px solid var(--accent);background:var(--surface);padding:6px 12px;margin:6px 0 10px}
+.diff{font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--surface);
+  border:1px solid var(--border);border-radius:8px;padding:12px;overflow-x:auto;white-space:pre;margin:10px 0}
+.diff .add{color:var(--green)}
+.diff .del{color:var(--red)}
+.diff .hunk{color:var(--accent)}
+.diff .skip{color:var(--dim);font-style:italic}
+table{border-collapse:collapse;width:100%;font-size:13.5px;margin:10px 0}
+th,td{border-bottom:1px solid var(--border);padding:5px 8px;text-align:left;vertical-align:top}
+th{color:var(--dim);font-weight:600;font-size:12px}
+td.n{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
+.tbl{overflow-x:auto}
+.tip{border-bottom:1px dotted var(--dim);cursor:help;position:relative;outline:none}
+.tip:hover::after,.tip:focus::after{content:attr(data-tip);position:absolute;left:0;top:1.7em;z-index:60;
+  width:max-content;max-width:min(340px,80vw);white-space:normal;background:var(--surface2);color:var(--text);
+  border:1px solid var(--border);border-radius:6px;padding:7px 10px;font:13px/1.45 -apple-system,sans-serif;
+  font-weight:400;box-shadow:0 4px 14px rgba(0,0,0,.3)}
+svg{max-width:100%;height:auto;display:block;margin:16px 0}
+svg .t{fill:var(--text);font:bold 12.5px -apple-system,sans-serif}
+svg .note{fill:var(--dim);font:11.5px -apple-system,sans-serif}
+svg .in{fill:var(--bg);font:bold 11.5px -apple-system,sans-serif}
+svg .in-d{fill:var(--text);font:11px -apple-system,sans-serif}
+svg .cut{fill:var(--orange);font:bold 11.5px -apple-system,sans-serif}
+svg .other{fill:var(--surface2);stroke:var(--border);stroke-width:1}
+svg .this{fill:var(--accent)}
+svg .src{fill:var(--accent)}
+svg .src2{fill:var(--accent);fill-opacity:.72}
+svg .src3{fill:var(--accent);fill-opacity:.5}
+svg .ut{fill:var(--green)}
+svg .fn{fill:var(--dim)}
+svg .doc{fill:var(--border)}
+svg .sep{stroke:var(--bg);stroke-width:1.5}
+svg .hatch-bar{fill:var(--orange)}
+svg .hatched{fill:url(#hatch);stroke:var(--orange);stroke-width:1.2}
+svg .zoom{stroke:var(--dim);stroke-width:1;stroke-dasharray:4 4;fill:none}
+.cref{margin:6px 0 0;font-size:13px}
+.cref a{display:inline-block;padding:4px 10px;border:1px solid var(--border);
+  border-radius:16px;background:var(--surface);font:12.5px ui-monospace,Menlo,monospace;margin:2px 4px 2px 0}
+.cref a:hover{background:var(--surface2);text-decoration:none}
+td .cref{margin:4px 0 0}
+td .cref a{font-size:11.5px;padding:2px 8px}
+nav.chain{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 6px;padding:0}
+nav.chain a,nav.chain span{display:inline-block;padding:5px 11px;border:1px solid var(--border);
+  border-radius:20px;background:var(--surface);text-decoration:none;color:var(--accent);
+  font-size:12.5px;line-height:1.3;white-space:nowrap}
+nav.chain a:hover{background:var(--surface2)}
+nav.chain span.here{background:var(--accent);color:var(--bg);border-color:var(--accent);font-weight:600}
+p.chainnote{color:var(--dim);font-size:12px;margin:0 0 18px}
+
+svg .ll{stroke:var(--border);stroke-width:1.2;stroke-dasharray:3 4}
+svg .hdr{fill:var(--surface);stroke:var(--border);stroke-width:1.3}
+svg .hdrt{fill:var(--text);font:bold 12px -apple-system,sans-serif}
+svg .hdrs{fill:var(--dim);font:10.5px -apple-system,sans-serif}
+svg .lab{font:11.5px -apple-system,sans-serif;paint-order:stroke;stroke:var(--bg);stroke-width:4px;stroke-linejoin:round}
+svg .lab.turn{fill:var(--text)}
+svg .lab.pre{fill:var(--orange);font-weight:600}
+svg .lab.new{fill:var(--accent);font-weight:600}
+svg .lab.gap{fill:var(--red);font-weight:600}
+svg a text.lk{fill:var(--accent);font:10px ui-monospace,Menlo,monospace;text-decoration:underline;paint-order:stroke;stroke:var(--bg);stroke-width:4px}
+svg .ar{stroke-width:1.5;fill:none}
+svg .ar.turn{stroke:var(--dim)}
+svg .ar.pre{stroke:var(--orange);stroke-width:2}
+svg .ar.new{stroke:var(--accent);stroke-width:2}
+svg .ar.gap{stroke:var(--red);stroke-width:2;stroke-dasharray:5 4}
+svg .ar.ret{stroke-dasharray:5 4}
+svg .mk-turn{fill:var(--dim)} svg .mk-pre{fill:var(--orange)} svg .mk-new{fill:var(--accent)} svg .mk-gap{fill:var(--red)}
+svg .sec{fill:var(--accent);font:bold 12.5px -apple-system,sans-serif;letter-spacing:.04em}
+svg .secl{stroke:var(--border);stroke-width:1}
+svg .busy{fill:var(--green);fill-opacity:.22;stroke:var(--green);stroke-width:1}
+svg .busyt{fill:var(--green);font:bold 10.5px -apple-system,sans-serif}
+svg .band{fill:var(--surface2);stroke:var(--border);stroke-width:1}
+svg .bandt{fill:var(--dim);font:italic 11.5px -apple-system,sans-serif}
+
+svg .bx{fill:var(--surface);stroke:var(--border);stroke-width:1.3}
+svg .bx.ok{stroke:var(--green);stroke-width:2}
+svg .bx.nw{stroke:var(--accent);stroke-width:2;stroke-dasharray:6 3}
+svg .bx.bad{stroke:var(--red);stroke-width:2.2}
+svg .bt{fill:var(--text);font:bold 12px -apple-system,sans-serif}
+svg .bs{fill:var(--dim);font:11px ui-monospace,Menlo,monospace}
+svg .po{fill:var(--orange);font-weight:700}
+svg .proc{fill:none;stroke:var(--dim);stroke-width:1.2;stroke-dasharray:4 4}
+svg .pt{fill:var(--dim);font:bold 11px -apple-system,sans-serif}
+svg .colh{fill:var(--text);font:bold 14px -apple-system,sans-serif}
+.warn ul{margin:6px 0}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+  document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head>
+<body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+  function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+  function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
+    b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
+      else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+  document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+<div class="wrap">
+
+<h1>What happens at a rollout checkpoint, and which steps prefix recovery adds</h1>
+<p class="sub"><a href="https://github.com/NVIDIA-NeMo/RL/pull/4506">NVIDIA-NeMo/RL #4506</a> (prefix recovery) on top of turn recovery from <a href="https://github.com/NVIDIA-NeMo/RL/pull/4500">#4500</a>. RL permalinks pin <code>d33e3628</code>; Gym permalinks pin the Gym commit both RL main and this PR use, <code>5911d628</code>.</p>
+
+<div class="status"><dl>
+<dt>Before</dt><dd>Turn recovery saves each Gym agent between model calls. A model call that is still running at the checkpoint starts over from its first token after a restore.</dd>
+<dt>This PR</dt><dd>Adds the prefix level: the same checkpoint, plus a copy of each running call's tokens so far, which a restored call continues from.</dd>
+<dt>Status</dt><dd><span class="verdict">Explainer of the PR as written.</span> Nothing here is proposed. Every step was read in the code; nothing was run.</dd>
+</dl></div>
+
+<nav class="chain">
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4506-prefix-vs-turn.html">prefix vs turn</a>
+  <span class="here">checkpoint sequence</span>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4506-how-cut-copies.html">how the cut copies tokens</a>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4506-prefix-on-dynamo.html">prefix with Dynamo</a>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4506-size-and-reuse.html">size and reuse</a>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4506-forest-drops-prefix.html">forest training drops the prefix</a>
+</nav>
+<p class="chainnote">Six pages on this PR, one question each. This one: who calls whom, in what order, at a checkpoint and at a restore.</p>
+
+<p>A rollout checkpoint is run by the single controller's snapshot task. It talks to Gym through the NemoGym Ray actor, which posts to Gym's own servers under <code>/ng-control/v1/checkpoint/…</code>. Gym saves each agent's state, and TQ (the data store that holds every finished model call's tokens) saves its own snapshot. Prefix recovery keeps all of that and adds three things, drawn in orange below: a fence on the vLLM worker, the <b>generation cut</b> (Gym asks the worker to copy each running call's tokens into TQ), and a splice on restore. The example is one call, <code>chat-A</code>: 7 prompt tokens, <code>max_tokens</code> 20, and 5 tokens decoded when checkpoint <code>ckpt-9</code> starts.</p>
+
+<h2>One save and one restore, both levels in one picture</h2>
+
+<svg viewBox="0 0 980 972" role="img" aria-label="Sequence diagram of one rollout checkpoint save and restore. Gray steps run for turn recovery; orange steps are what prefix recovery adds.">
+<defs>
+<marker id="m-turn" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="mk-turn" d="M0,0 L10,5 L0,10 z"/></marker>
+<marker id="m-pre" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="mk-pre" d="M0,0 L10,5 L0,10 z"/></marker>
+<marker id="m-new" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="mk-new" d="M0,0 L10,5 L0,10 z"/></marker>
+<marker id="m-gap" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="mk-gap" d="M0,0 L10,5 L0,10 z"/></marker>
+</defs>
+<line class="ar turn" x1="14" y1="14" x2="42" y2="14" marker-end="url(#m-turn)"/>
+<text class="lab turn" x="50" y="18">turn recovery (also runs in prefix mode)</text>
+<line class="ar pre" x1="324" y1="14" x2="352" y2="14" marker-end="url(#m-pre)"/>
+<text class="lab pre" x="360" y="18">added by prefix recovery (this PR)</text>
+<rect class="busy" x="700" y="7" width="10" height="16" rx="3"/>
+<text class="lab turn" x="718" y="19">vLLM still decoding chat-A</text>
+<line class="ll" x1="90" y1="74" x2="90" y2="964"/>
+<line class="ll" x1="270" y1="74" x2="270" y2="964"/>
+<line class="ll" x1="460" y1="74" x2="460" y2="964"/>
+<line class="ll" x1="680" y1="74" x2="680" y2="964"/>
+<line class="ll" x1="885" y1="74" x2="885" y2="964"/>
+<rect class="hdr" x="6.0" y="34" width="168" height="40" rx="6"/>
+<text class="hdrt" x="90" y="51" text-anchor="middle">Single controller</text>
+<text class="hdrs" x="90" y="66" text-anchor="middle">rollout snapshot task</text>
+<rect class="hdr" x="186.0" y="34" width="168" height="40" rx="6"/>
+<text class="hdrt" x="270" y="51" text-anchor="middle">RolloutManager</text>
+<text class="hdrs" x="270" y="66" text-anchor="middle">pump → Gym dispatch</text>
+<rect class="hdr" x="376.0" y="34" width="168" height="40" rx="6"/>
+<text class="hdrt" x="460" y="51" text-anchor="middle">Gym</text>
+<text class="hdrs" x="460" y="66" text-anchor="middle">NemoGym actor + servers</text>
+<rect class="hdr" x="596.0" y="34" width="168" height="40" rx="6"/>
+<text class="hdrt" x="680" y="51" text-anchor="middle">vLLM worker (Ray actor)</text>
+<text class="hdrs" x="680" y="66" text-anchor="middle">HTTP server + AsyncLLM</text>
+<rect class="hdr" x="801.0" y="34" width="168" height="40" rx="6"/>
+<text class="hdrt" x="885" y="51" text-anchor="middle">TQ</text>
+<text class="hdrs" x="885" y="66" text-anchor="middle">data plane store</text>
+<line class="secl" x1="10" y1="112" x2="970" y2="112"/>
+<text class="sec" x="14" y="106">SAVE  ·  checkpoint ckpt-9, chat-A has decoded 5 of its 20 tokens</text>
+<line class="ar pre" x1="94" y1="140" x2="676" y2="140" marker-end="url(#m-pre)"/>
+<text class="lab pre" x="100" y="134" text-anchor="start">① begin fence (Ray call): hold end-of-call TQ writes; decoding goes on</text>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/d33e36284fded7ef7bb5a0790ba3375723a4e91c/nemo_rl/environments/checkpointing/nemo_gym.py#L86-L92"><text class="lk" x="100" y="153" text-anchor="start">GenerationCutFence.held → vllm_generation.py:1856</text></a>
+<line class="ar turn" x1="94" y1="180" x2="266" y2="180" marker-end="url(#m-turn)"/>
+<text class="lab turn" x="100" y="174" text-anchor="start">② admission gate closes: no new rollouts are sent to Gym</text>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/d33e36284fded7ef7bb5a0790ba3375723a4e91c/nemo_rl/experience/rollout_manager.py#L1364"><text class="lk" x="100" y="193" text-anchor="start">rollout_manager.py:1364</text></a>
+<line class="ar turn" x1="94" y1="220" x2="456" y2="220" marker-end="url(#m-turn)"/>
+<text class="lab turn" x="100" y="214" text-anchor="start">③ pause rollout deadlines; POST /retire for dropped episodes</text>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/d33e36284fded7ef7bb5a0790ba3375723a4e91c/nemo_rl/environments/checkpointing/nemo_gym.py#L440-L470"><text class="lk" x="100" y="233" text-anchor="start">GymEnvironmentCheckpoint.snapshot</text></a>
+<line class="ar turn" x1="94" y1="260" x2="456" y2="260" marker-end="url(#m-turn)"/>
+<text class="lab turn" x="100" y="254" text-anchor="start">④ POST /checkpoint/prepare → model gate closes: new calls wait, replies are held</text>
+<a href="https://github.com/NVIDIA-NeMo/Gym/blob/5911d628c744d0bf43fe1d9ddf3bda72d59b0f9a/nemo_gym/_checkpoint/model.py#L461"><text class="lk" x="100" y="273" text-anchor="start">Gym coordination.prepare → PolicyGate.close</text></a>
+<line class="ar pre" x1="464" y1="300" x2="676" y2="300" marker-end="url(#m-pre)"/>
+<text class="lab pre" x="470" y="294" text-anchor="start">⑤ POST /ng-control/v1/generation-cut {chat-A, …}</text>
+<a href="https://github.com/NVIDIA-NeMo/Gym/blob/5911d628c744d0bf43fe1d9ddf3bda72d59b0f9a/nemo_gym/_checkpoint/model.py#L1018-L1040"><text class="lk" x="470" y="313" text-anchor="start">Gym generation_cut_requester (inside PolicyGate.close)</text></a>
+<path class="ar pre" d="M684,332 h22 v14 h-20" marker-end="url(#m-pre)"/>
+<text class="lab pre" x="670" y="338" text-anchor="end">⑥ copy chat-A&#x27;s 5 token ids + 5 logprobs under vLLM&#x27;s output lock</text>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/d33e36284fded7ef7bb5a0790ba3375723a4e91c/nemo_rl/models/generation/vllm/vllm_worker_async.py#L682-L752"><text class="lk" x="670" y="353" text-anchor="end">read_generation_progress</text></a>
+<line class="ar pre" x1="684" y1="380" x2="881" y2="380" marker-end="url(#m-pre)"/>
+<text class="lab pre" x="690" y="374" text-anchor="start">⑦ put chunk</text>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/d33e36284fded7ef7bb5a0790ba3375723a4e91c/nemo_rl/data_plane/tq_token_sink.py#L509"><text class="lk" x="690" y="393" text-anchor="start">stage_generation_prefix</text></a>
+<line class="ar pre ret" x1="676" y1="420" x2="464" y2="420" marker-end="url(#m-pre)"/>
+<text class="lab pre" x="470" y="414" text-anchor="start">⑧ receipt: one ack per call (a failed call regenerates later)</text>
+<line class="ar turn" x1="94" y1="460" x2="456" y2="460" marker-end="url(#m-turn)"/>
+<text class="lab turn" x="100" y="454" text-anchor="start">⑨ POST /checkpoint/commit → Gym writes its state + TQ keys (cut keys too)</text>
+<a href="https://github.com/NVIDIA-NeMo/Gym/blob/5911d628c744d0bf43fe1d9ddf3bda72d59b0f9a/nemo_gym/_checkpoint/coordination.py#L268"><text class="lk" x="100" y="473" text-anchor="start">Gym coordination.commit</text></a>
+<line class="ar turn" x1="94" y1="500" x2="881" y2="500" marker-end="url(#m-turn)"/>
+<text class="lab turn" x="100" y="494" text-anchor="start">⑩ TQ barrier: check every expected key is there, then save the TQ snapshot</text>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/d33e36284fded7ef7bb5a0790ba3375723a4e91c/nemo_rl/algorithms/rollout_checkpointing/snapshots.py#L667"><text class="lk" x="100" y="513" text-anchor="start">snapshots.py:667</text></a>
+<line class="ar turn" x1="94" y1="540" x2="456" y2="540" marker-end="url(#m-turn)"/>
+<text class="lab turn" x="100" y="534" text-anchor="start">⑪ POST /resume → gate reopens, held replies go out; deadlines + dispatch resume</text>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/d33e36284fded7ef7bb5a0790ba3375723a4e91c/nemo_rl/environments/gym_checkpoint_coordinator.py#L702"><text class="lk" x="100" y="553" text-anchor="start">gym_checkpoint_coordinator.py:702</text></a>
+<line class="ar pre" x1="94" y1="580" x2="676" y2="580" marker-end="url(#m-pre)"/>
+<text class="lab pre" x="100" y="574" text-anchor="start">⑫ end fence</text>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/d33e36284fded7ef7bb5a0790ba3375723a4e91c/nemo_rl/models/generation/vllm/vllm_worker_async.py#L3801"><text class="lk" x="100" y="593" text-anchor="start">end_token_capture_snapshot_fence_async</text></a>
+<path class="ar turn" d="M94,612 h22 v14 h-20" marker-end="url(#m-turn)"/>
+<text class="lab turn" x="124" y="618" text-anchor="start">⑬ publish the snapshot (one atomic rename)</text>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/d33e36284fded7ef7bb5a0790ba3375723a4e91c/nemo_rl/algorithms/rollout_checkpointing/snapshots.py#L558"><text class="lk" x="124" y="633" text-anchor="start">snapshots.py:558 _publish</text></a>
+<rect class="busy" x="675" y="140" width="10" height="440" rx="3"/>
+<line class="secl" x1="10" y1="676" x2="970" y2="676"/>
+<text class="sec" x="14" y="670">RESTORE  ·  after a crash; the KV cache is gone</text>
+<line class="ar turn" x1="94" y1="704" x2="881" y2="704" marker-end="url(#m-turn)"/>
+<text class="lab turn" x="100" y="698" text-anchor="start">R1 load the TQ snapshot (in prefix mode the cut chunk comes back too)</text>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/d33e36284fded7ef7bb5a0790ba3375723a4e91c/nemo_rl/algorithms/single_controller.py#L446"><text class="lk" x="100" y="717" text-anchor="start">single_controller.py:446</text></a>
+<line class="ar turn" x1="94" y1="744" x2="456" y2="744" marker-end="url(#m-turn)"/>
+<text class="lab turn" x="100" y="738" text-anchor="start">R2 POST /checkpoint/restore, then /resume (prefix: Gym loads the cut records)</text>
+<a href="https://github.com/NVIDIA-NeMo/Gym/blob/5911d628c744d0bf43fe1d9ddf3bda72d59b0f9a/nemo_gym/_checkpoint/model.py#L851"><text class="lk" x="100" y="757" text-anchor="start">Gym PolicyModelParticipant.install</text></a>
+<line class="ar turn" x1="94" y1="784" x2="456" y2="784" marker-end="url(#m-turn)"/>
+<text class="lab turn" x="100" y="778" text-anchor="start">R3 pumps restart; the agent sends chat-A again</text>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/d33e36284fded7ef7bb5a0790ba3375723a4e91c/nemo_rl/algorithms/single_controller.py#L1856"><text class="lk" x="100" y="797" text-anchor="start">redispatch_restored</text></a>
+<line class="ar turn" x1="464" y1="824" x2="676" y2="824" marker-end="url(#m-turn)"/>
+<text class="lab turn" x="470" y="818" text-anchor="start">R4 POST /v1/chat/completions chat-A: prompt 7 tokens, max_tokens 20</text>
+<a href="https://github.com/NVIDIA-NeMo/Gym/blob/5911d628c744d0bf43fe1d9ddf3bda72d59b0f9a/nemo_gym/_checkpoint/model.py#L450"><text class="lk" x="470" y="837" text-anchor="start">prefix: continue_restored_cut adds generation_cut</text></a>
+<line class="ar pre" x1="684" y1="864" x2="881" y2="864" marker-end="url(#m-pre)"/>
+<text class="lab pre" x="690" y="858" text-anchor="start">R5 get chunk</text>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/d33e36284fded7ef7bb5a0790ba3375723a4e91c/nemo_rl/models/generation/generation_cut_capture.py#L361"><text class="lk" x="690" y="877" text-anchor="start">_resolve_generation_cut</text></a>
+<path class="ar pre" d="M684,896 h22 v14 h-20" marker-end="url(#m-pre)"/>
+<text class="lab pre" x="670" y="902" text-anchor="end">R6 splice: prompt 7 + 5 = 12, max_tokens 20 − 5 = 15</text>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/d33e36284fded7ef7bb5a0790ba3375723a4e91c/nemo_rl/models/generation/vllm/vllm_worker_async.py#L2205-L2256"><text class="lk" x="670" y="917" text-anchor="end">preprocess_chat restore block</text></a>
+<line class="ar turn ret" x1="676" y1="944" x2="464" y2="944" marker-end="url(#m-turn)"/>
+<text class="lab turn" x="470" y="938" text-anchor="start">R7 reply. Turn: 20 fresh tokens. Prefix: 5 saved + up to 15 new, usage fixed</text>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/d33e36284fded7ef7bb5a0790ba3375723a4e91c/nemo_rl/models/generation/vllm/vllm_worker_async.py#L1538"><text class="lk" x="470" y="957" text-anchor="start">_restore_response_prefix · _count_restored_prefix_as_completion</text></a>
+</svg>
+
+<p><b>What prefix adds, and nothing else changes.</b></p>
+<ul>
+<li><b>A fence on the worker (① and ⑫).</b> A Ray call from RL straight to each vLLM worker actor (<a href="https://github.com/NVIDIA-NeMo/RL/blob/d33e36284fded7ef7bb5a0790ba3375723a4e91c/nemo_rl/models/generation/vllm/vllm_worker_async.py#L3772">begin_token_capture_snapshot_fence_async</a>). It holds each call's end-of-call TQ write until the save is done. Decoding is not paused.</li>
+<li><b>The cut (⑤–⑧).</b> Gym sends it, not RL. It runs inside Gym's own prepare step, when Gym's model server closes its gate (<a href="https://github.com/NVIDIA-NeMo/Gym/blob/5911d628c744d0bf43fe1d9ddf3bda72d59b0f9a/nemo_gym/_checkpoint/model.py#L531">_cut_all</a>). The worker writes one TQ chunk per running call, and its receipt goes into Gym's commit (⑨), so the TQ save at ⑩ checks for the chunk too.</li>
+<li><b>The splice on restore (R5–R7).</b> Gym re-sends the call with a <code>generation_cut</code> field. The worker fetches the chunk, adds its 5 tokens to the prompt, lowers <code>max_tokens</code> to 15, and puts the 5 saved tokens back in front of the reply.</li>
+</ul>
+<p>Prefix is strictly added on top of turn. Both levels take the same Gym checkpoint path (<a href="https://github.com/NVIDIA-NeMo/RL/blob/d33e36284fded7ef7bb5a0790ba3375723a4e91c/nemo_rl/experience/rollout_recovery.py#L222">requires_environment_checkpoint</a>), and every prefix check in the code only adds work. One small difference: in prefix mode the save is not skipped when nothing in TQ has changed, because a running call may still have new tokens (<a href="https://github.com/NVIDIA-NeMo/RL/blob/d33e36284fded7ef7bb5a0790ba3375723a4e91c/nemo_rl/algorithms/rollout_checkpointing/snapshots.py#L626">snapshots.py:626</a>). The RL restore path has no prefix check at all: it is Gym's restored cut records that make R4 carry <code>generation_cut</code>.</p>
+
+<h2>Four things that differ from the usual picture</h2>
+<ol>
+<li><b>Nothing pauses running calls or the dataloader.</b> Only two gates close: RL stops sending new rollouts to Gym (②), and Gym's model server makes new model calls wait and holds finished replies (④). vLLM keeps decoding <code>chat-A</code> the whole time (the green bar). The held replies go out at ⑪.</li>
+<li><b>RL never asks vLLM for a cut.</b> Gym does, because only Gym knows which calls are running and which backend URL each went to (<a href="https://github.com/NVIDIA-NeMo/Gym/blob/5911d628c744d0bf43fe1d9ddf3bda72d59b0f9a/nemo_gym/_checkpoint/model.py#L1018-L1040">generation_cut_requester</a>). RL's only direct line to the worker is the fence, as a Ray call.</li>
+<li><b>The order is prepare → Gym commit → TQ save → Gym resume → publish.</b> Gym resumes at ⑪, before the snapshot is published at ⑬, so new rollouts do not wait for the publish (<a href="https://github.com/NVIDIA-NeMo/RL/blob/d33e36284fded7ef7bb5a0790ba3375723a4e91c/nemo_rl/environments/gym_checkpoint_coordinator.py#L702-L712">prepared</a>).</li>
+<li><b>Nothing is swapped back after a save.</b> The cut only copied the tokens. The chunk stays in TQ; a later checkpoint adds a new chunk with only the newer tokens, and all of a call's chunks are deleted when the call ends (<a href="https://github.com/NVIDIA-NeMo/RL/blob/d33e36284fded7ef7bb5a0790ba3375723a4e91c/nemo_rl/models/generation/vllm/vllm_worker_async.py#L1859">vllm_worker_async.py:1859</a>).</li>
+</ol>
+
+<div class="warn"><b>So what.</b> Steps ①–④ and ⑨–⑬ are calls between the controller, Gym and the worker actors. They do not care how a chat call reaches vLLM, so they work the same behind Dynamo. Only the cut (⑤–⑧) and the restore splice (R4–R7) sit on the chat path. Those are the parts <a href="https://github.com/NVIDIA-NeMo/RL/pull/4979">#4979</a> has to carry; the <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4506-prefix-on-dynamo.html">prefix with Dynamo</a> page shows where they go.</div>
+
+</div>
+</body>
+</html>
