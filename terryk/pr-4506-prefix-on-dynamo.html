@@ -156,11 +156,11 @@ svg .colh{fill:var(--text);font:bold 14px -apple-system,sans-serif}
 </nav>
 <p class="chainnote">Six pages on this PR, one question each. This one: what #4506 and #4979 each need so the two work together.</p>
 
-<p>Two facts make this smaller than it looks. First, in #4979 the "Dynamo worker" is the same NeMo-RL vLLM worker Ray actor: Dynamo's Rust worker runs inside it and calls <a href="https://github.com/NVIDIA-NeMo/RL/blob/6c566031ac08ae5083dc7506c239dd09cc6d03af/nemo_rl/models/generation/dynamo/vllm/adapter.py#L308">DynamoVllmAdapter._serve_gym_call</a>, which generates through the same <code>_AsyncLLMHTTPClient</code> (<a href="https://github.com/NVIDIA-NeMo/RL/blob/6c566031ac08ae5083dc7506c239dd09cc6d03af/nemo_rl/models/generation/dynamo/vllm/adapter.py#L450-L462">adapter.py:450</a>). So the token lists the cut reads, and the TQ writer it uses, are where #4506 expects them. Second, each worker still starts its own HTTP server when Dynamo is on (<a href="https://github.com/NVIDIA-NeMo/RL/blob/6c566031ac08ae5083dc7506c239dd09cc6d03af/nemo_rl/models/generation/vllm/vllm_worker_async.py#L644-L652">vllm_worker_async.py:644</a>), so the cut route has somewhere to land. What does move is the restore splice: in #4979 the token ids are built in the frontend, before the KV router picks a worker, so a cut must be spliced there.</p>
+<p>Two facts make this smaller than it looks. First, in #4979 the "Dynamo worker" is the same NeMo-RL vLLM worker Ray actor: Dynamo's Rust worker runs inside it and calls <a href="https://github.com/NVIDIA-NeMo/RL/blob/6c566031ac08ae5083dc7506c239dd09cc6d03af/nemo_rl/models/generation/dynamo/vllm/adapter.py#L308">DynamoVllmAdapter._serve_gym_call</a>, which generates through the same <code>_AsyncLLMHTTPClient</code> (<a href="https://github.com/NVIDIA-NeMo/RL/blob/6c566031ac08ae5083dc7506c239dd09cc6d03af/nemo_rl/models/generation/dynamo/vllm/adapter.py#L450-L462">adapter.py:450</a>). So the token lists the cut reads, and the TQ writer it uses, are where #4506 expects them. Second, the frontend process holds Dynamo's runtime, which can reach every worker by instance ID. So NeMo RL code in that process can forward the cut request without knowing any worker address. What does move is the restore splice: in #4979 the token ids are built in the frontend, before the KV router picks a worker, so a cut must be spliced there.</p>
 
 <h2>Where each piece lives, without and with Dynamo</h2>
 
-<svg viewBox="0 0 980 600" role="img" aria-label="Where each prefix-recovery piece lives. Left: native vLLM worker, everything in one process. Right: Dynamo, where the cut route fails at the frontend, the splice and reply fix must move into the frontend chat engine, and the progress read and TQ write stay in the worker unchanged.">
+<svg viewBox="0 0 980 645" role="img" aria-label="Where each prefix-recovery piece lives. Left: native vLLM worker, everything in one process. Right: Dynamo, where the cut goes to a NeMo RL control route in the frontend process, which forwards it over Dynamo's request plane; the splice and reply fix must move into the frontend chat engine, and the progress read and TQ write stay in the worker unchanged.">
 <defs>
 <marker id="a-g" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="mk-turn" d="M0,0 L10,5 L0,10 z"/></marker>
 <marker id="a-o" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="mk-pre" d="M0,0 L10,5 L0,10 z"/></marker>
@@ -215,14 +215,14 @@ svg .colh{fill:var(--text);font:bold 14px -apple-system,sans-serif}
 <text class="bs" x="530" y="94">same code · base_url = the one Dynamo frontend</text>
 <line class="ar turn" x1="560" y1="102" x2="560" y2="144" marker-end="url(#a-g)"/>
 <text class="lab turn" x="568" y="128">chat call</text>
-<line class="ar gap" x1="720" y1="102" x2="720" y2="144" marker-end="url(#a-r)"/>
-<text class="lab gap" x="728" y="122">⑤ cut → 404</text>
-<path class="ar new" d="M940,102 V361 H924" marker-end="url(#a-b)"/>
-<text class="lab new" x="932" y="116" text-anchor="end">⑤′ fan-out to every</text>
-<text class="lab new" x="932" y="131" text-anchor="end">worker's own URL</text>
+<line class="ar gap" x1="700" y1="102" x2="700" y2="144" marker-end="url(#a-r)"/>
+<text class="lab gap" x="708" y="122">⑤ cut → 404</text>
+<path class="ar new" d="M940,102 V318 H906" marker-end="url(#a-b)"/>
+<text class="lab new" x="932" y="116" text-anchor="end">⑤′ cut to the</text>
+<text class="lab new" x="932" y="131" text-anchor="end">control port</text>
 
-<rect class="proc" x="505" y="146" width="410" height="150" rx="8"/>
-<text class="pt" x="517" y="164">Dynamo frontend process × K</text>
+<rect class="proc" x="505" y="146" width="410" height="194" rx="8"/>
+<text class="pt" x="517" y="164">Dynamo frontend process × K (NeMo RL's launcher)</text>
 <rect class="bx bad" x="520" y="172" width="380" height="30" rx="6"/>
 <text class="bt" x="534" y="191">Rust HTTP server: added routes must be GET</text>
 <rect class="bx nw" x="520" y="208" width="380" height="40" rx="6"/>
@@ -231,27 +231,30 @@ svg .colh{fill:var(--text);font:bold 14px -apple-system,sans-serif}
 <rect class="bx nw" x="520" y="254" width="380" height="34" rx="6"/>
 <text class="bt" x="534" y="270">RenderPool.respond</text>
 <text class="bs" x="534" y="283">reply JSON · <tspan class="po">+ R7 saved text + usage fix</tspan></text>
-<line class="ar turn" x1="640" y1="296" x2="640" y2="316" marker-end="url(#a-g)"/>
-<text class="lab turn" x="648" y="311">request plane: token ids + capture plan</text>
+<rect class="bx nw" x="520" y="294" width="384" height="40" rx="6"/>
+<text class="bt" x="534" y="311">NeMo RL control route (own port, new)</text>
+<text class="bs" x="534" y="326"><tspan class="po">⑤″ Client.direct to every worker · merge</tspan></text>
+<line class="ar turn" x1="600" y1="340" x2="600" y2="380" marker-end="url(#a-g)"/>
+<text class="lab turn" x="608" y="358">request plane (by instance id, no IPs):</text>
+<text class="lab turn" x="608" y="373">chat calls + annotated cut</text>
+<line class="ar new" x1="880" y1="334" x2="880" y2="398" marker-end="url(#a-b)"/>
 
-<rect class="proc" x="505" y="318" width="460" height="218" rx="8"/>
-<text class="pt" x="517" y="336">vLLM worker process (Ray actor) × M, same class as left</text>
-<rect class="bx ok" x="520" y="344" width="400" height="34" rx="6"/>
-<text class="bt" x="534" y="360">FastAPI server still runs on each worker</text>
-<text class="bs" x="534" y="373">⑤′ lands here: the /ng-control route already exists</text>
-<rect class="bx nw" x="520" y="384" width="430" height="40" rx="6"/>
-<text class="bt" x="534" y="401">Dynamo Worker (Rust) → DynamoVllmAdapter</text>
-<text class="bs" x="534" y="416">begin capture <tspan class="po">+ pass generation_cut (weight check)</tspan></text>
-<rect class="bx ok" x="520" y="430" width="430" height="40" rx="6"/>
-<text class="bt" x="534" y="447">same _AsyncLLMHTTPClient → AsyncLLM front end</text>
-<text class="bs" x="534" y="462"><tspan class="po">⑥ progress reads work</tspan> (adapter must report each output)</text>
-<rect class="bx ok" x="520" y="476" width="430" height="40" rx="6"/>
-<text class="bt" x="534" y="493">TQTokenSink</text>
-<text class="bs" x="534" y="508">end-of-call row · <tspan class="po">⑦ cut chunks work</tspan></text>
-<rect class="bx" x="520" y="550" width="430" height="40" rx="6"/>
-<text class="bt" x="534" y="568">vLLM EngineCore (child process, GPU)</text>
-<text class="bs" x="534" y="583">unchanged</text>
-<line class="ar turn" x1="735" y1="536" x2="735" y2="548" marker-end="url(#a-g)"/>
+<rect class="proc" x="505" y="382" width="460" height="196" rx="8"/>
+<text class="pt" x="517" y="400">vLLM worker process (Ray actor) × M, same class as left</text>
+<rect class="bx nw" x="520" y="408" width="430" height="40" rx="6"/>
+<text class="bt" x="534" y="425">Dynamo Worker (Rust) → DynamoVllmAdapter</text>
+<text class="bs" x="534" y="440"><tspan class="po">+ generation_cut handler · + pass cut to capture</tspan></text>
+<rect class="bx ok" x="520" y="454" width="430" height="40" rx="6"/>
+<text class="bt" x="534" y="471">same _AsyncLLMHTTPClient → AsyncLLM front end</text>
+<text class="bs" x="534" y="486"><tspan class="po">⑥ progress reads work</tspan> (adapter must report each output)</text>
+<rect class="bx ok" x="520" y="500" width="430" height="40" rx="6"/>
+<text class="bt" x="534" y="517">TQTokenSink</text>
+<text class="bs" x="534" y="532">end-of-call row · <tspan class="po">⑦ cut chunks work</tspan></text>
+<text class="bs" x="534" y="566">its own FastAPI server is not needed for this path</text>
+<rect class="bx" x="520" y="592" width="430" height="40" rx="6"/>
+<text class="bt" x="534" y="610">vLLM EngineCore (child process, GPU)</text>
+<text class="bs" x="534" y="625">unchanged</text>
+<line class="ar turn" x1="735" y1="578" x2="735" y2="590" marker-end="url(#a-g)"/>
 <line class="ar turn" x1="430" y1="412" x2="430" y2="474" marker-end="url(#a-g)"/>
 </svg>
 
@@ -259,7 +262,7 @@ svg .colh{fill:var(--text);font:bold 14px -apple-system,sans-serif}
 <h2>The same checkpoint behind Dynamo</h2>
 <p>The controller side does not change. The write hold (①, ⑫) is a Ray call to the same worker actors, and Gym's prepare, commit and resume do not involve the chat path. Only the cut (⑤–⑧) and the restore (R4–R7) change. The step numbers match the <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4506-checkpoint-sequence.html">checkpoint sequence</a> page, and the example is the same: <code>chat-A</code>, 7 prompt tokens, <code>max_tokens</code> 20, 5 tokens decoded at <code>ckpt-9</code>.</p>
 
-<svg viewBox="0 0 980 806" role="img" aria-label="Sequence diagram of prefix recovery with Dynamo. The coordinator steps are unchanged. The cut request cannot go through the Dynamo frontend and needs a fan-out to the workers. On restore, the splice moves into the frontend chat engine before the KV router.">
+<svg viewBox="0 0 980 886" role="img" aria-label="Sequence diagram of prefix recovery with Dynamo. The coordinator steps are unchanged. The cut request cannot go through the Dynamo frontend and needs a fan-out to the workers. On restore, the splice moves into the frontend chat engine before the KV router.">
 <defs>
 <marker id="m-turn" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="mk-turn" d="M0,0 L10,5 L0,10 z"/></marker>
 <marker id="m-pre" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="mk-pre" d="M0,0 L10,5 L0,10 z"/></marker>
@@ -272,11 +275,11 @@ svg .colh{fill:var(--text);font:bold 14px -apple-system,sans-serif}
 <text class="lab new" x="279" y="18">needs new wiring</text>
 <line class="ar gap" x1="404" y1="14" x2="432" y2="14" marker-end="url(#m-gap)"/>
 <text class="lab gap" x="440" y="18">fails today</text>
-<line class="ll" x1="80" y1="74" x2="80" y2="798"/>
-<line class="ll" x1="250" y1="74" x2="250" y2="798"/>
-<line class="ll" x1="440" y1="74" x2="440" y2="798"/>
-<line class="ll" x1="660" y1="74" x2="660" y2="798"/>
-<line class="ll" x1="880" y1="74" x2="880" y2="798"/>
+<line class="ll" x1="80" y1="74" x2="80" y2="878"/>
+<line class="ll" x1="250" y1="74" x2="250" y2="878"/>
+<line class="ll" x1="440" y1="74" x2="440" y2="878"/>
+<line class="ll" x1="660" y1="74" x2="660" y2="878"/>
+<line class="ll" x1="880" y1="74" x2="880" y2="878"/>
 <rect class="hdr" x="-4.0" y="34" width="168" height="40" rx="6"/>
 <text class="hdrt" x="80" y="51" text-anchor="middle">Single controller</text>
 <text class="hdrs" x="80" y="66" text-anchor="middle">unchanged</text>
@@ -297,44 +300,49 @@ svg .colh{fill:var(--text);font:bold 14px -apple-system,sans-serif}
 <rect class="band" x="20" y="136" width="940" height="26" rx="6"/>
 <text class="bandt" x="490.0" y="153.0" text-anchor="middle">①–④ unchanged: write hold (Ray call, same worker actors), admission gate, retire, /checkpoint/prepare</text>
 <line class="ar gap" x1="254" y1="196" x2="436" y2="196" marker-end="url(#m-gap)"/>
-<text class="lab gap" x="260" y="190" text-anchor="start">⑤ POST /ng-control/v1/generation-cut</text>
+<text class="lab gap" x="260" y="190" text-anchor="start">⑤ POST /ng-control/v1/generation-cut to the frontend&#x27;s port</text>
 <a href="https://github.com/ai-dynamo/dynamo/blob/v1.5.1/lib/bindings/python/rust/llm/frontend_routes.rs#L25-L56"><text class="lk" x="260" y="209" text-anchor="start">Dynamo 1.5.1 frontend: added routes must be GET → 404</text></a>
-<line class="ar new" x1="254" y1="240" x2="656" y2="240" marker-end="url(#m-new)"/>
-<text class="lab new" x="260" y="234" text-anchor="start">⑤′ POST the same inventory to a cut fan-out → every worker&#x27;s own HTTP route</text>
-<a href="https://github.com/NVIDIA-NeMo/Gym/blob/5911d628c744d0bf43fe1d9ddf3bda72d59b0f9a/responses_api_models/vllm_model/app.py#L375"><text class="lk" x="260" y="253" text-anchor="start">Gym generation_cut_control_url (one per base_url)</text></a>
-<path class="ar turn" d="M664,276 h22 v14 h-20" marker-end="url(#m-turn)"/>
-<text class="lab turn" x="650" y="282" text-anchor="end">⑥ the worker that holds chat-A copies 5 ids + 5 logprobs; the rest ack “not here”</text>
-<a href="https://github.com/NVIDIA-NeMo/RL/blob/d33e36284fded7ef7bb5a0790ba3375723a4e91c/nemo_rl/models/generation/generation_cut_capture.py#L639-L643"><text class="lk" x="650" y="297" text-anchor="end">no_capture_or_completed_state</text></a>
-<line class="ar turn" x1="664" y1="328" x2="876" y2="328" marker-end="url(#m-turn)"/>
-<text class="lab turn" x="670" y="322" text-anchor="start">⑦ put chunk</text>
-<line class="ar new ret" x1="656" y1="368" x2="254" y2="368" marker-end="url(#m-new)"/>
-<text class="lab new" x="260" y="362" text-anchor="start">⑧ fan-out merges the M receipts into one (keep the ack that is not “not here”)</text>
-<rect class="band" x="20" y="398" width="940" height="26" rx="6"/>
-<text class="bandt" x="490.0" y="415.0" text-anchor="middle">⑨–⑬ unchanged: Gym commit, TQ snapshot, /resume, release the hold, publish</text>
-<line class="secl" x1="10" y1="474" x2="970" y2="474"/>
-<text class="sec" x="14" y="468">RESTORE  ·  the splice has to move before the KV router</text>
-<rect class="band" x="20" y="502" width="940" height="26" rx="6"/>
-<text class="bandt" x="490.0" y="519.0" text-anchor="middle">R1–R3 unchanged: load TQ snapshot, Gym restore + resume, the agent sends chat-A again</text>
-<line class="ar turn" x1="254" y1="562" x2="436" y2="562" marker-end="url(#m-turn)"/>
-<text class="lab turn" x="260" y="556" text-anchor="start">R4 POST /v1/chat/completions chat-A + generation_cut</text>
-<a href="https://github.com/NVIDIA-NeMo/RL/blob/6c566031ac08ae5083dc7506c239dd09cc6d03af/nemo_rl/models/generation/dynamo/vllm/chat_engine.py#L216"><text class="lk" x="260" y="575" text-anchor="start">NemoRLChatEngine._serve</text></a>
-<line class="ar new" x1="444" y1="606" x2="876" y2="606" marker-end="url(#m-new)"/>
-<text class="lab new" x="450" y="600" text-anchor="start">R5 read prefix + cut chunk (read-only TQTokenSource)</text>
-<a href="https://github.com/NVIDIA-NeMo/RL/blob/6c566031ac08ae5083dc7506c239dd09cc6d03af/nemo_rl/models/generation/dynamo/vllm/chat_engine.py#L318"><text class="lk" x="450" y="619" text-anchor="start">_splice: add the cut here</text></a>
-<path class="ar new" d="M444,642 h22 v14 h-20" marker-end="url(#m-new)"/>
-<text class="lab new" x="430" y="648" text-anchor="end">R6 splice: 7 + 5 = 12 ids, max_tokens 20 → 15</text>
-<a href="https://github.com/NVIDIA-NeMo/RL/blob/d33e36284fded7ef7bb5a0790ba3375723a4e91c/nemo_rl/models/generation/vllm/vllm_worker_async.py#L2219-L2256"><text class="lk" x="430" y="663" text-anchor="end">move out of native preprocess_chat</text></a>
-<line class="ar new" x1="444" y1="694" x2="656" y2="694" marker-end="url(#m-new)"/>
-<text class="lab new" x="450" y="688" text-anchor="start">R6′ KV router → worker: 12 ids + cut info (weight check, capture)</text>
-<a href="https://github.com/NVIDIA-NeMo/RL/blob/6c566031ac08ae5083dc7506c239dd09cc6d03af/nemo_rl/models/generation/dynamo/vllm/adapter.py#L375"><text class="lk" x="450" y="707" text-anchor="start">_begin_request_capture: pass generation_cut</text></a>
-<line class="ar turn ret" x1="656" y1="738" x2="444" y2="738" marker-end="url(#m-turn)"/>
-<text class="lab turn" x="450" y="732" text-anchor="start">R7 15 new tokens</text>
-<line class="ar new ret" x1="436" y1="778" x2="254" y2="778" marker-end="url(#m-new)"/>
-<text class="lab new" x="260" y="772" text-anchor="start">R7′ reply: saved 5 + new 15, usage fixed</text>
-<a href="https://github.com/NVIDIA-NeMo/RL/blob/6c566031ac08ae5083dc7506c239dd09cc6d03af/nemo_rl/models/generation/dynamo/vllm/render_pool.py#L244"><text class="lk" x="260" y="791" text-anchor="start">RenderPool.respond: add the restore step</text></a>
+<line class="ar new" x1="254" y1="240" x2="436" y2="240" marker-end="url(#m-new)"/>
+<text class="lab new" x="260" y="234" text-anchor="start">⑤′ same POST to NeMo RL&#x27;s control port, same process</text>
+<a href="https://github.com/NVIDIA-NeMo/Gym/blob/5911d628c744d0bf43fe1d9ddf3bda72d59b0f9a/responses_api_models/vllm_model/app.py#L598-L607"><text class="lk" x="260" y="253" text-anchor="start">Gym generation_cut_control_url (one per base_url)</text></a>
+<line class="ar new" x1="444" y1="284" x2="656" y2="284" marker-end="url(#m-new)"/>
+<text class="lab new" x="450" y="278" text-anchor="start">⑤″ Client.direct to every worker: annotated cut</text>
+<a href="https://github.com/ai-dynamo/dynamo/blob/v1.5.1/lib/bindings/python/src/dynamo/_core.pyi#L290-L372"><text class="lk" x="450" y="297" text-anchor="start">request plane by instance id: no worker IPs</text></a>
+<path class="ar turn" d="M664,320 h22 v14 h-20" marker-end="url(#m-turn)"/>
+<text class="lab turn" x="650" y="326" text-anchor="end">⑥ the worker holding chat-A copies 5 ids + 5 logprobs; others answer “not here”</text>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/d33e36284fded7ef7bb5a0790ba3375723a4e91c/nemo_rl/models/generation/generation_cut_capture.py#L639-L643"><text class="lk" x="650" y="341" text-anchor="end">no_capture_or_completed_state</text></a>
+<line class="ar turn" x1="664" y1="372" x2="876" y2="372" marker-end="url(#m-turn)"/>
+<text class="lab turn" x="670" y="366" text-anchor="start">⑦ put chunk</text>
+<line class="ar new ret" x1="656" y1="412" x2="444" y2="412" marker-end="url(#m-new)"/>
+<text class="lab new" x="450" y="406" text-anchor="start">⑧ M receipts</text>
+<line class="ar new ret" x1="436" y1="448" x2="254" y2="448" marker-end="url(#m-new)"/>
+<text class="lab new" x="260" y="442" text-anchor="start">⑧′ one merged receipt</text>
+<rect class="band" x="20" y="478" width="940" height="26" rx="6"/>
+<text class="bandt" x="490.0" y="495.0" text-anchor="middle">⑨–⑬ unchanged: Gym commit, TQ snapshot, /resume, release the hold, publish</text>
+<line class="secl" x1="10" y1="554" x2="970" y2="554"/>
+<text class="sec" x="14" y="548">RESTORE  ·  the splice has to move before the KV router</text>
+<rect class="band" x="20" y="582" width="940" height="26" rx="6"/>
+<text class="bandt" x="490.0" y="599.0" text-anchor="middle">R1–R3 unchanged: load TQ snapshot, Gym restore + resume, the agent sends chat-A again</text>
+<line class="ar turn" x1="254" y1="642" x2="436" y2="642" marker-end="url(#m-turn)"/>
+<text class="lab turn" x="260" y="636" text-anchor="start">R4 POST /v1/chat/completions chat-A + generation_cut</text>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/6c566031ac08ae5083dc7506c239dd09cc6d03af/nemo_rl/models/generation/dynamo/vllm/chat_engine.py#L216"><text class="lk" x="260" y="655" text-anchor="start">NemoRLChatEngine._serve</text></a>
+<line class="ar new" x1="444" y1="686" x2="876" y2="686" marker-end="url(#m-new)"/>
+<text class="lab new" x="450" y="680" text-anchor="start">R5 read prefix + cut chunk (read-only TQTokenSource)</text>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/6c566031ac08ae5083dc7506c239dd09cc6d03af/nemo_rl/models/generation/dynamo/vllm/chat_engine.py#L318"><text class="lk" x="450" y="699" text-anchor="start">_splice: add the cut here</text></a>
+<path class="ar new" d="M444,722 h22 v14 h-20" marker-end="url(#m-new)"/>
+<text class="lab new" x="430" y="728" text-anchor="end">R6 splice: 7 + 5 = 12 ids, max_tokens 20 → 15</text>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/d33e36284fded7ef7bb5a0790ba3375723a4e91c/nemo_rl/models/generation/vllm/vllm_worker_async.py#L2219-L2256"><text class="lk" x="430" y="743" text-anchor="end">move out of native preprocess_chat</text></a>
+<line class="ar new" x1="444" y1="774" x2="656" y2="774" marker-end="url(#m-new)"/>
+<text class="lab new" x="450" y="768" text-anchor="start">R6′ KV router → worker: 12 ids + cut info (weight check, capture)</text>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/6c566031ac08ae5083dc7506c239dd09cc6d03af/nemo_rl/models/generation/dynamo/vllm/adapter.py#L375"><text class="lk" x="450" y="787" text-anchor="start">_begin_request_capture: pass generation_cut</text></a>
+<line class="ar turn ret" x1="656" y1="818" x2="444" y2="818" marker-end="url(#m-turn)"/>
+<text class="lab turn" x="450" y="812" text-anchor="start">R7 15 new tokens</text>
+<line class="ar new ret" x1="436" y1="858" x2="254" y2="858" marker-end="url(#m-new)"/>
+<text class="lab new" x="260" y="852" text-anchor="start">R7′ reply: saved 5 + new 15, usage fixed</text>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/6c566031ac08ae5083dc7506c239dd09cc6d03af/nemo_rl/models/generation/dynamo/vllm/render_pool.py#L244"><text class="lk" x="260" y="871" text-anchor="start">RenderPool.respond: add the restore step</text></a>
 </svg>
 
-<p><b>Why ⑤ fails.</b> Gym sends the cut to the base URL the call went to (<a href="https://github.com/NVIDIA-NeMo/Gym/blob/5911d628c744d0bf43fe1d9ddf3bda72d59b0f9a/nemo_gym/_checkpoint/model.py#L1018-L1040">generation_cut_requester</a>). Behind Dynamo that is the frontend, and Dynamo 1.5.1 lets Python add only GET routes with no body (<a href="https://github.com/ai-dynamo/dynamo/blob/v1.5.1/lib/bindings/python/rust/llm/frontend_routes.rs#L25-L56">frontend_routes.rs</a>). Gym already has the escape hatch: <code>generation_cut_control_url</code> gives one control URL per base URL (<a href="https://github.com/NVIDIA-NeMo/Gym/blob/5911d628c744d0bf43fe1d9ddf3bda72d59b0f9a/responses_api_models/vllm_model/app.py#L375">app.py:375</a>, <a href="https://github.com/NVIDIA-NeMo/Gym/blob/5911d628c744d0bf43fe1d9ddf3bda72d59b0f9a/responses_api_models/vllm_model/app.py#L598-L607">:598</a>). Behind Dynamo there is one base URL but M workers, and only the KV router knows which worker holds <code>chat-A</code>. So the control URL has to be a small fan-out that posts the inventory to every worker and merges the receipts. Merging is simple because a worker that never saw a call says so (<a href="https://github.com/NVIDIA-NeMo/RL/blob/d33e36284fded7ef7bb5a0790ba3375723a4e91c/nemo_rl/models/generation/generation_cut_capture.py#L639-L643">"no_capture_or_completed_state"</a>), and the merge keeps the one ack that is not that. No Gym change is needed.</p>
+<p><b>Why ⑤ fails, and the route that works.</b> Gym sends the cut to the base URL the call went to (<a href="https://github.com/NVIDIA-NeMo/Gym/blob/5911d628c744d0bf43fe1d9ddf3bda72d59b0f9a/nemo_gym/_checkpoint/model.py#L1018-L1040">generation_cut_requester</a>). Behind Dynamo that is the frontend. Dynamo 1.5.1 lets Python add only GET routes with no body to the frontend's HTTP server (<a href="https://github.com/ai-dynamo/dynamo/blob/v1.5.1/lib/bindings/python/rust/llm/frontend_routes.rs#L25-L56">frontend_routes.rs</a>). Its POST hook, <code>register_engine_route</code>, lives on each worker's own status server, so it needs worker addresses. The frontend process does create a <code>DistributedRuntime</code> (<a href="https://github.com/ai-dynamo/dynamo/blob/v1.5.1/components/src/dynamo/frontend/main.py#L394-L399">main.py</a>). With it, <code>Client.direct</code> reaches each worker instance by ID on the request plane (<a href="https://github.com/ai-dynamo/dynamo/blob/v1.5.1/lib/bindings/python/src/dynamo/_core.pyi#L290-L372">_core.pyi</a>). So NeMo RL's frontend launcher serves the cut on a small control port in the same process (⑤′). It sends the inventory to every worker as an annotated request on the existing generate endpoint, which #4905's adapter already sorts by annotation (⑤″), and merges the receipts. Gym only needs <code>generation_cut_control_url</code> pointed at that port (<a href="https://github.com/NVIDIA-NeMo/Gym/blob/5911d628c744d0bf43fe1d9ddf3bda72d59b0f9a/responses_api_models/vllm_model/app.py#L598-L607">app.py:598</a>). Nobody needs a worker address, so this still works when Dynamo and its workers run on another cluster. Once Dynamo accepts POST routes on the frontend, the control route can move onto the main port. Not verified: whether the Rust worker passes a request with no prompt tokens to <code>generate</code>. If not, the cut can carry a one-token placeholder.</p>
 
 <p><b>Turn recovery is the smaller case.</b> Every turn step is also a prefix step, and turn recovery never calls the worker during a save. It needs what #4979 already carries: the <code>ng_capture</code> admission, one TQ write per call, the commit coordinates in the reply, and a failed capture when a call is dropped (<a href="https://github.com/NVIDIA-NeMo/RL/blob/6c566031ac08ae5083dc7506c239dd09cc6d03af/nemo_rl/models/generation/dynamo/vllm/adapter.py#L375-L389">adapter.py:375</a>). So once prefix works behind Dynamo, turn works too. The reverse does not hold. Still, no Dynamo test runs either level.</p>
 
@@ -342,7 +350,7 @@ svg .colh{fill:var(--text);font:bold 14px -apple-system,sans-serif}
 <div class="tbl"><table>
 <tr><th>Piece</th><th>Native, in #4506</th><th>Behind Dynamo</th><th>Who changes it</th></tr>
 <tr><td>Write hold ① ⑫</td><td>Ray call to each worker</td><td>Same workers. Works.</td><td>Nobody</td></tr>
-<tr><td>Cut request ⑤ ⑧</td><td>Gym → worker URL</td><td>404 at the frontend</td><td>#4979: the fan-out control URL</td></tr>
+<tr><td>Cut request ⑤ ⑧</td><td>Gym → worker URL</td><td>404 on the frontend's port</td><td>#4979: a control route in the frontend launcher that forwards over the request plane, plus a cut handler in the adapter</td></tr>
 <tr><td>Progress read ⑥</td><td>Worker, under vLLM's output lock</td><td>Same client in the same actor, but the adapter never reports each output (<a href="https://github.com/NVIDIA-NeMo/RL/blob/d33e36284fded7ef7bb5a0790ba3375723a4e91c/nemo_rl/models/generation/vllm/vllm_worker_async.py#L2548">native: _observe_request_capture</a>)</td><td>#4979: one call in the adapter's generate loop</td></tr>
 <tr><td>Chunk write ⑦</td><td>Worker's TQTokenSink</td><td>Same. Works.</td><td>Nobody</td></tr>
 <tr><td>Restore splice R5–R6</td><td>Inside the native <code>preprocess_chat</code> closure (<a href="https://github.com/NVIDIA-NeMo/RL/blob/d33e36284fded7ef7bb5a0790ba3375723a4e91c/nemo_rl/models/generation/vllm/vllm_worker_async.py#L2205-L2256">L2205</a>)</td><td>Must run in <a href="https://github.com/NVIDIA-NeMo/RL/blob/6c566031ac08ae5083dc7506c239dd09cc6d03af/nemo_rl/models/generation/dynamo/vllm/chat_engine.py#L318">NemoRLChatEngine._splice</a>, before routing. The weight-version check stays on the worker.</td><td>#4506: a plain function. #4979: call it, and pass <code>generation_cut</code> to begin-capture.</td></tr>
@@ -356,10 +364,10 @@ svg .colh{fill:var(--text);font:bold 14px -apple-system,sans-serif}
 <li><a href="https://github.com/NVIDIA-NeMo/RL/blob/d33e36284fded7ef7bb5a0790ba3375723a4e91c/nemo_rl/models/generation/generation_cut_capture.py#L361">_resolve_generation_cut</a> splits in two. One half fetches the chunks and needs only a TQ reader. The other half checks the weight version and needs the worker.</li>
 </ul>
 <p>#4979 deletes that closure and moves the chat server to <a href="https://github.com/NVIDIA-NeMo/RL/blob/6c566031ac08ae5083dc7506c239dd09cc6d03af/nemo_rl/models/generation/vllm/chat_server.py#L103">chat_server.py</a>, so the second PR must move this code anyway. With plain functions, that move is a few calls instead of a copy.</p>
-<p><b>For #4979, after the rebase:</b> add the cut fan-out. Call the two functions from <code>_splice</code> and <code>respond</code>. Pass the cut to <code>_begin_request_capture</code>, and report outputs in the adapter. Then add a turn-recovery run and a prefix-recovery run behind Dynamo to the validation runs already asked for in its review comment C43. The prefix run passes only if its restored-prefix count is above zero, because a cut that silently fails falls back to the turn path and still looks green.</p>
+<p><b>For #4979, after the rebase:</b> add the control route in the frontend launcher and the cut handler in the adapter. Call the two functions from <code>_splice</code> and <code>respond</code>. Pass the cut to <code>_begin_request_capture</code>, and report outputs in the adapter. Then add a turn-recovery run and a prefix-recovery run behind Dynamo to the validation runs already asked for in its review comment C43. The prefix run passes only if its restored-prefix count is above zero, because a cut that silently fails falls back to the turn path and still looks green.</p>
 <p class="cref">Draft review comments (links work once posted):
 <a href="https://github.com/NVIDIA-NeMo/RL/pull/4506#discussion_r4505388312">#4506 C40 — vllm_worker_async.py:2219</a>
-<a href="https://github.com/NVIDIA-NeMo/RL/pull/4979#discussion_r4505389134">#4979 C47 — nemo_gym.py:3044 (fan-out)</a>
+<a href="https://github.com/NVIDIA-NeMo/RL/pull/4979#discussion_r4505389134">#4979 C47 — nemo_gym.py:3044 (cut route)</a>
 <a href="https://github.com/NVIDIA-NeMo/RL/pull/4979#discussion_r4505389174">#4979 C48 — chat_engine.py:318 (splice)</a>
 <a href="https://github.com/NVIDIA-NeMo/RL/pull/4979#discussion_r4505389220">#4979 C49 — adapter.py:375</a>
 <a href="https://github.com/NVIDIA-NeMo/RL/pull/4979#discussion_r4505389279">#4979 C50 — render_pool.py:244 (reply)</a>
@@ -367,11 +375,11 @@ svg .colh{fill:var(--text);font:bold 14px -apple-system,sans-serif}
 
 <div class="warn"><b>So what.</b> Nothing in #4506's controller or Gym steps has to change for Dynamo. The work is on the chat path:
 <ul>
-<li>a fan-out so the cut request reaches the workers;</li>
+<li>a control route in the frontend process that forwards the cut to every worker over Dynamo's request plane;</li>
 <li>the splice and reply fix as plain functions, so the frontend can call them;</li>
 <li>two missing calls in the adapter.</li>
 </ul>
-Asking #4506 for the plain functions now is the cheap moment. After it lands, #4979 would have to pull that code apart from inside a closure it deletes. Not verified: where the fan-out should run (the driver, or a port in the frontend launcher process), and whether the adapter's call fills in the request link the progress read needs.</div>
+Asking #4506 for the plain functions now is the cheap moment. After it lands, #4979 would have to pull that code apart from inside a closure it deletes. Not verified: whether the Rust worker passes a request with no prompt tokens, and whether the adapter's call fills in the request link the progress read needs.</div>
 
 </div>
 </body>
