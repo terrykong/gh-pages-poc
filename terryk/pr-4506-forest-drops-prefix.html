@@ -106,7 +106,7 @@ th{color:var(--dim);font-weight:600;font-size:12px}
   <dt>This PR</dt>
   <dd>Adds <code>target_level: prefix</code>: the tokens a running call has decoded are saved, and the restarted call continues from them. With <code>token_capture.forest_training: true</code>, the worker drops that saved prefix before using it.</dd>
   <dt>Status</dt>
-  <dd><span class="verdict open">Open — not fixed in this PR.</span> Nothing breaks loudly: every restored call quietly decodes again from scratch. Tracked in review comment C26.</dd>
+  <dd><span class="verdict open">Open — not fixed in this PR.</span> Nothing breaks loudly: every restored call quietly decodes again from scratch. Tracked in review comment C26, which asks to fix it in this PR.</dd>
 </dl>
 </div>
 
@@ -222,33 +222,33 @@ The worker sends any such admission through <code>decide_capture_input</code>
 <h2>What would fix it — proposed, not in the PR</h2>
 
 <p>Nothing below is implemented.</p>
-<p class="where"><b>Where the fix lands: RL only, one function.</b>
-<a href="https://github.com/NVIDIA-NeMo/RL/blob/b6aff18f982137a538bbf5d3540983e0d094a95c/nemo_rl/algorithms/single_controller_utils/config.py#L1799-L1804"><code>validate_single_controller_config</code></a> in <code>config.py</code> refuses the combination at setup, next to the existing <code>top_logprobs</code> refusal. <b>No Gym change:</b> Gym is right to hand the cut to every admission; the worker is the one that drops it.</p>
+<p class="where"><b>Where the fix lands: RL only, about 4 lines in one function.</b>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/d33e36284fded7ef7bb5a0790ba3375723a4e91c/nemo_rl/models/generation/capture_context.py#L43-L91"><code>decide_capture_input</code></a> in <code>capture_context.py</code> keeps the cut on both admissions it builds. A new chain that carries a cut is served, so the worker's splice sees it. <b>No Gym change:</b> Gym already attaches the cut to every admission; RL is what drops it.</p>
 
-<pre class="diff"><span class="hunk">@@ config.py L1799-L1804 · validate_single_controller_config</span>
-     if recovery_config.generation_prefix_cuts_enabled and top_logprobs &gt; 0:
-         # Sampler top-k is staged from a call's final response only, so a
-         # restored generation prefix would have no candidates for its tokens.
-         raise ValueError(
-             "rollout_recovery.target_level='prefix' does not support "
-             "policy.generation.top_logprobs &gt; 0 (loss_fn.score_centering) yet"
-         )
-<span class="add">+    if (
-+        recovery_config.generation_prefix_cuts_enabled
-+        and token_capture_config.forest_training
-+    ):
-+        # Forest admissions go through decide_capture_input, which drops the
-+        # restored cut, so every restored call would silently regenerate.
-+        raise ValueError(
-+            "rollout_recovery.target_level='prefix' does not support "
-+            "token_capture.forest_training=true yet"
-+        )</span></pre>
+<pre class="diff"><span class="hunk">@@ capture_context.py L44-L48 · decide_capture_input (new chain)</span>
+     root = CaptureAdmission(
+         capture_key=admission.capture_key,
+         model_call_id=admission.model_call_id,
+         mode="text",
+<span class="add">+        generation_cut=admission.generation_cut,
+</span>     )
+<span class="add">+    # A restored cut must reach the worker's splice; a plain new chain still renders as text.
++    root_serving = root if root.generation_cut is not None else None
+</span><span class="hunk">@@ capture_context.py L54, L61, L80 · each new-chain return</span>
+<span class="del">-        return CaptureInputDecision(root, None, True)
+</span><span class="add">+        return CaptureInputDecision(root, root_serving, True)
+</span><span class="hunk">@@ capture_context.py L81-L90 · continue from the parent</span>
+     serving = CaptureAdmission(
+         ...
+         required_prefix_token_ids=admission.required_prefix_token_ids,
+<span class="add">+        generation_cut=admission.generation_cut,
+</span>     )</pre>
 
-<p>With this, a run that sets both fails at setup with a clear message, before any GPU work. The longer-term fix is to carry <code>generation_cut</code> through <code>decide_capture_input</code> so forest runs can use prefix recovery too; the setup refusal is the small, safe step for this PR and can be lifted when that lands.</p>
-<p class="cref"><a href="https://github.com/NVIDIA-NeMo/RL/pull/4506#discussion_r4505387623">C26 review comment — config.py:1805</a></p>
+<p><b>Why this is safe.</b> Before splicing, the worker rebuilds the prefix record from the admission and compares its digest with the cut's (<a href="https://github.com/NVIDIA-NeMo/RL/blob/d33e36284fded7ef7bb5a0790ba3375723a4e91c/nemo_rl/models/generation/generation_cut_capture.py#L475-L487">generation_cut_capture.py:475-487</a>). The digest covers the mode, the parent, the earlier length and the whole token prefix. A restored call sends the same messages, so it gets the same decision as the original call, and the digest matches. If it ever differed, the call would simply regenerate and clear its rows, as any unusable cut does. Test with one unit case per branch, plus one run of the prefix-recovery test with <code>++token_capture.forest_training=true</code>.</p>
+<p class="cref"><a href="https://github.com/NVIDIA-NeMo/RL/pull/4506#discussion_r4505634874">C26 review comment — vllm_worker_async.py:2203</a></p>
 
 <div class="warn">
-<strong>So what.</strong> Prefix mode plus forest training is accepted at setup today and quietly behaves like turn mode, with extra snapshot cost and leftover rows in TQ. One setup check turns that into a clear error until the worker can keep the cut.
+<strong>So what.</strong> Prefix mode plus forest training is accepted at setup today and quietly behaves like turn mode, with extra snapshot cost and leftover rows in TQ. Keeping the cut through one decision function fixes it in this PR, with no Gym bump.
 </div>
 
 </div>
