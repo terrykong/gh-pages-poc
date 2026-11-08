@@ -257,7 +257,7 @@ svg .colh{fill:var(--text);font:bold 14px -apple-system,sans-serif}
 
 
 <h2>The same checkpoint behind Dynamo</h2>
-<p>The controller side does not change. The fence is a Ray call to the same worker actors, and Gym's prepare, commit and resume do not involve the chat path. Only the cut (⑤–⑧) and the restore (R4–R7) change. The step numbers match the <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4506-checkpoint-sequence.html">checkpoint sequence</a> page, and the example is the same: <code>chat-A</code>, 7 prompt tokens, <code>max_tokens</code> 20, 5 tokens decoded at <code>ckpt-9</code>.</p>
+<p>The controller side does not change. The write hold (①, ⑫) is a Ray call to the same worker actors, and Gym's prepare, commit and resume do not involve the chat path. Only the cut (⑤–⑧) and the restore (R4–R7) change. The step numbers match the <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4506-checkpoint-sequence.html">checkpoint sequence</a> page, and the example is the same: <code>chat-A</code>, 7 prompt tokens, <code>max_tokens</code> 20, 5 tokens decoded at <code>ckpt-9</code>.</p>
 
 <svg viewBox="0 0 980 806" role="img" aria-label="Sequence diagram of prefix recovery with Dynamo. The coordinator steps are unchanged. The cut request cannot go through the Dynamo frontend and needs a fan-out to the workers. On restore, the splice moves into the frontend chat engine before the KV router.">
 <defs>
@@ -295,7 +295,7 @@ svg .colh{fill:var(--text);font:bold 14px -apple-system,sans-serif}
 <line class="secl" x1="10" y1="112" x2="970" y2="112"/>
 <text class="sec" x="14" y="106">SAVE  ·  same order as without Dynamo; only the cut&#x27;s route changes</text>
 <rect class="band" x="20" y="136" width="940" height="26" rx="6"/>
-<text class="bandt" x="490.0" y="153.0" text-anchor="middle">①–④ unchanged: fence (Ray call, same worker actors), admission gate, retire, /checkpoint/prepare</text>
+<text class="bandt" x="490.0" y="153.0" text-anchor="middle">①–④ unchanged: write hold (Ray call, same worker actors), admission gate, retire, /checkpoint/prepare</text>
 <line class="ar gap" x1="254" y1="196" x2="436" y2="196" marker-end="url(#m-gap)"/>
 <text class="lab gap" x="260" y="190" text-anchor="start">⑤ POST /ng-control/v1/generation-cut</text>
 <a href="https://github.com/ai-dynamo/dynamo/blob/v1.5.1/lib/bindings/python/rust/llm/frontend_routes.rs#L25-L56"><text class="lk" x="260" y="209" text-anchor="start">Dynamo 1.5.1 frontend: added routes must be GET → 404</text></a>
@@ -310,7 +310,7 @@ svg .colh{fill:var(--text);font:bold 14px -apple-system,sans-serif}
 <line class="ar new ret" x1="656" y1="368" x2="254" y2="368" marker-end="url(#m-new)"/>
 <text class="lab new" x="260" y="362" text-anchor="start">⑧ fan-out merges the M receipts into one (keep the ack that is not “not here”)</text>
 <rect class="band" x="20" y="398" width="940" height="26" rx="6"/>
-<text class="bandt" x="490.0" y="415.0" text-anchor="middle">⑨–⑬ unchanged: Gym commit, TQ snapshot, /resume, end fence, publish</text>
+<text class="bandt" x="490.0" y="415.0" text-anchor="middle">⑨–⑬ unchanged: Gym commit, TQ snapshot, /resume, release the hold, publish</text>
 <line class="secl" x1="10" y1="474" x2="970" y2="474"/>
 <text class="sec" x="14" y="468">RESTORE  ·  the splice has to move before the KV router</text>
 <rect class="band" x="20" y="502" width="940" height="26" rx="6"/>
@@ -341,7 +341,7 @@ svg .colh{fill:var(--text);font:bold 14px -apple-system,sans-serif}
 <h2>What to ask each PR</h2>
 <div class="tbl"><table>
 <tr><th>Piece</th><th>Native, in #4506</th><th>Behind Dynamo</th><th>Who changes it</th></tr>
-<tr><td>Fence ① ⑫</td><td>Ray call to each worker</td><td>Same workers. Works.</td><td>Nobody</td></tr>
+<tr><td>Write hold ① ⑫</td><td>Ray call to each worker</td><td>Same workers. Works.</td><td>Nobody</td></tr>
 <tr><td>Cut request ⑤ ⑧</td><td>Gym → worker URL</td><td>404 at the frontend</td><td>#4979: the fan-out control URL</td></tr>
 <tr><td>Progress read ⑥</td><td>Worker, under vLLM's output lock</td><td>Same client in the same actor, but the adapter never reports each output (<a href="https://github.com/NVIDIA-NeMo/RL/blob/d33e36284fded7ef7bb5a0790ba3375723a4e91c/nemo_rl/models/generation/vllm/vllm_worker_async.py#L2548">native: _observe_request_capture</a>)</td><td>#4979: one call in the adapter's generate loop</td></tr>
 <tr><td>Chunk write ⑦</td><td>Worker's TQTokenSink</td><td>Same. Works.</td><td>Nobody</td></tr>

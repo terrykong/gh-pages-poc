@@ -196,7 +196,7 @@ svg .colh{fill:var(--text);font:bold 14px -apple-system,sans-serif}
 <line class="secl" x1="10" y1="112" x2="970" y2="112"/>
 <text class="sec" x="14" y="106">SAVE  ·  checkpoint ckpt-9, chat-A has decoded 5 of its 20 tokens</text>
 <line class="ar pre" x1="94" y1="140" x2="676" y2="140" marker-end="url(#m-pre)"/>
-<text class="lab pre" x="100" y="134" text-anchor="start">① begin fence (Ray call): hold end-of-call TQ writes; decoding goes on</text>
+<text class="lab pre" x="100" y="134" text-anchor="start">① hold end-of-call data-plane writes (Ray call). No cut yet; decoding goes on</text>
 <a href="https://github.com/NVIDIA-NeMo/RL/blob/d33e36284fded7ef7bb5a0790ba3375723a4e91c/nemo_rl/environments/checkpointing/nemo_gym.py#L86-L92"><text class="lk" x="100" y="153" text-anchor="start">GenerationCutFence.held → vllm_generation.py:1856</text></a>
 <line class="ar turn" x1="94" y1="180" x2="266" y2="180" marker-end="url(#m-turn)"/>
 <text class="lab turn" x="100" y="174" text-anchor="start">② admission gate closes: no new rollouts are sent to Gym</text>
@@ -228,7 +228,7 @@ svg .colh{fill:var(--text);font:bold 14px -apple-system,sans-serif}
 <text class="lab turn" x="100" y="534" text-anchor="start">⑪ POST /resume → gate reopens, held replies go out; deadlines + dispatch resume</text>
 <a href="https://github.com/NVIDIA-NeMo/RL/blob/d33e36284fded7ef7bb5a0790ba3375723a4e91c/nemo_rl/environments/gym_checkpoint_coordinator.py#L702"><text class="lk" x="100" y="553" text-anchor="start">gym_checkpoint_coordinator.py:702</text></a>
 <line class="ar pre" x1="94" y1="580" x2="676" y2="580" marker-end="url(#m-pre)"/>
-<text class="lab pre" x="100" y="574" text-anchor="start">⑫ end fence</text>
+<text class="lab pre" x="100" y="574" text-anchor="start">⑫ release the held end-of-call writes</text>
 <a href="https://github.com/NVIDIA-NeMo/RL/blob/d33e36284fded7ef7bb5a0790ba3375723a4e91c/nemo_rl/models/generation/vllm/vllm_worker_async.py#L3801"><text class="lk" x="100" y="593" text-anchor="start">end_token_capture_snapshot_fence_async</text></a>
 <path class="ar turn" d="M94,612 h22 v14 h-20" marker-end="url(#m-turn)"/>
 <text class="lab turn" x="124" y="618" text-anchor="start">⑬ publish the snapshot (one atomic rename)</text>
@@ -261,7 +261,7 @@ svg .colh{fill:var(--text);font:bold 14px -apple-system,sans-serif}
 
 <p><b>What prefix adds, and nothing else changes.</b></p>
 <ul>
-<li><b>A fence on the worker (① and ⑫).</b> A Ray call from RL straight to each vLLM worker actor (<a href="https://github.com/NVIDIA-NeMo/RL/blob/d33e36284fded7ef7bb5a0790ba3375723a4e91c/nemo_rl/models/generation/vllm/vllm_worker_async.py#L3772">begin_token_capture_snapshot_fence_async</a>). It holds each call's end-of-call TQ write until the save is done. Decoding is not paused.</li>
+<li><b>A hold on end-of-call writes (① and ⑫).</b> A Ray call from RL straight to each vLLM worker actor (<a href="https://github.com/NVIDIA-NeMo/RL/blob/d33e36284fded7ef7bb5a0790ba3375723a4e91c/nemo_rl/models/generation/vllm/vllm_worker_async.py#L3772">begin_token_capture_snapshot_fence_async</a>). It does not pause decoding and it is not the cut. It only holds each call's end-of-call data-plane write until the TQ snapshot is saved. That write also deletes the call's chunk rows, and a snapshot that names those rows must not lose them. The code calls it a "fence"; the draft review asks to rename it (C45).</li>
 <li><b>The cut (⑤–⑧).</b> Gym sends it, not RL. It runs inside Gym's own prepare step, when Gym's model server closes its gate (<a href="https://github.com/NVIDIA-NeMo/Gym/blob/5911d628c744d0bf43fe1d9ddf3bda72d59b0f9a/nemo_gym/_checkpoint/model.py#L531">_cut_all</a>). The worker writes one TQ chunk per running call, and its receipt goes into Gym's commit (⑨), so the TQ save at ⑩ checks for the chunk too.</li>
 <li><b>The splice on restore (R5–R7).</b> Gym re-sends the call with a <code>generation_cut</code> field. The worker fetches the chunk, adds its 5 tokens to the prompt, lowers <code>max_tokens</code> to 15, and puts the 5 saved tokens back in front of the reply.</li>
 </ul>
@@ -270,7 +270,7 @@ svg .colh{fill:var(--text);font:bold 14px -apple-system,sans-serif}
 <h2>Four things that differ from the usual picture</h2>
 <ol>
 <li><b>Nothing pauses running calls or the dataloader.</b> Only two gates close: RL stops sending new rollouts to Gym (②), and Gym's model server makes new model calls wait and holds finished replies (④). vLLM keeps decoding <code>chat-A</code> the whole time (the green bar). The held replies go out at ⑪.</li>
-<li><b>RL never asks vLLM for a cut.</b> Gym does, because only Gym knows which calls are running and which backend URL each went to (<a href="https://github.com/NVIDIA-NeMo/Gym/blob/5911d628c744d0bf43fe1d9ddf3bda72d59b0f9a/nemo_gym/_checkpoint/model.py#L1018-L1040">generation_cut_requester</a>). RL's only direct line to the worker is the fence, as a Ray call.</li>
+<li><b>RL never asks vLLM for a cut.</b> Gym does, because only Gym knows which calls are running and which backend URL each went to (<a href="https://github.com/NVIDIA-NeMo/Gym/blob/5911d628c744d0bf43fe1d9ddf3bda72d59b0f9a/nemo_gym/_checkpoint/model.py#L1018-L1040">generation_cut_requester</a>). RL's only direct line to the worker is the write hold (① and ⑫), as a Ray call.</li>
 <li><b>The order is prepare → Gym commit → TQ save → Gym resume → publish.</b> Gym resumes at ⑪, before the snapshot is published at ⑬, so new rollouts do not wait for the publish (<a href="https://github.com/NVIDIA-NeMo/RL/blob/d33e36284fded7ef7bb5a0790ba3375723a4e91c/nemo_rl/environments/gym_checkpoint_coordinator.py#L702-L712">prepared</a>).</li>
 <li><b>Nothing is swapped back after a save.</b> The cut only copied the tokens. The chunk stays in TQ; a later checkpoint adds a new chunk with only the newer tokens, and all of a call's chunks are deleted when the call ends (<a href="https://github.com/NVIDIA-NeMo/RL/blob/d33e36284fded7ef7bb5a0790ba3375723a4e91c/nemo_rl/models/generation/vllm/vllm_worker_async.py#L1859">vllm_worker_async.py:1859</a>).</li>
 </ol>
