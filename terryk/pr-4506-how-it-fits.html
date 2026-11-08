@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Prefix recovery: how it fits</title>
+<style>
+:root{
+  --bg:#0d1117; --surface:#161b22; --surface2:#1c2128; --border:#30363d;
+  --text:#e6edf3; --dim:#8b949e; --accent:#58a6ff; --green:#3fb950;
+  --orange:#d29922; --red:#f85149;
+}
+:root[data-theme="light"]{
+  --bg:#ffffff; --surface:#f6f8fa; --surface2:#eaeef2; --border:#d0d7de;
+  --text:#1f2328; --dim:#59636e; --accent:#0969da; --green:#1a7f37;
+  --orange:#9a6700; --red:#cf222e;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:28px 16px 70px}
+h1{font-size:22px;margin:0 0 8px;line-height:1.3}
+h2{font-size:18px;margin:32px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;
+  font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
+.sub{color:var(--dim);font-size:13.5px;margin:0 0 16px}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);
+  border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;
+  font:13px/1 ui-monospace,Menlo,monospace;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.18)}
+.status{border:1px solid var(--border);border-radius:10px;background:var(--surface);
+  padding:2px 16px 10px;margin:0 0 20px}
+.status dl{display:grid;grid-template-columns:max-content 1fr;gap:4px 14px;margin:12px 0 0}
+.status dt{color:var(--dim);font-size:12px;text-transform:uppercase;letter-spacing:.04em;
+  white-space:nowrap;padding-top:2px}
+.status dd{margin:0;font-size:14px}
+.verdict{font-weight:700}
+.verdict.open{color:var(--orange)}
+.warn{border-left:3px solid var(--orange);background:var(--surface);
+  padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0}
+.where{border-left:4px solid var(--accent);background:var(--surface);padding:6px 12px;margin:6px 0 10px}
+.diff{font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--surface);
+  border:1px solid var(--border);border-radius:8px;padding:12px;overflow-x:auto;white-space:pre;margin:10px 0}
+.diff .add{color:var(--green)}
+.diff .del{color:var(--red)}
+.diff .hunk{color:var(--accent)}
+.diff .skip{color:var(--dim);font-style:italic}
+table{border-collapse:collapse;width:100%;font-size:13.5px;margin:10px 0}
+th,td{border-bottom:1px solid var(--border);padding:5px 8px;text-align:left;vertical-align:top}
+th{color:var(--dim);font-weight:600;font-size:12px}
+td.n{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
+.tbl{overflow-x:auto}
+.tip{border-bottom:1px dotted var(--dim);cursor:help;position:relative;outline:none}
+.tip:hover::after,.tip:focus::after{content:attr(data-tip);position:absolute;left:0;top:1.7em;z-index:60;
+  width:max-content;max-width:min(340px,80vw);white-space:normal;background:var(--surface2);color:var(--text);
+  border:1px solid var(--border);border-radius:6px;padding:7px 10px;font:13px/1.45 -apple-system,sans-serif;
+  font-weight:400;box-shadow:0 4px 14px rgba(0,0,0,.3)}
+svg{max-width:100%;height:auto;display:block;margin:16px 0}
+svg .t{fill:var(--text);font:bold 12.5px -apple-system,sans-serif}
+svg .note{fill:var(--dim);font:11.5px -apple-system,sans-serif}
+svg .in{fill:var(--bg);font:bold 11.5px -apple-system,sans-serif}
+svg .in-d{fill:var(--text);font:11px -apple-system,sans-serif}
+svg .cut{fill:var(--orange);font:bold 11.5px -apple-system,sans-serif}
+svg .other{fill:var(--surface2);stroke:var(--border);stroke-width:1}
+svg .this{fill:var(--accent)}
+svg .src{fill:var(--accent)}
+svg .src2{fill:var(--accent);fill-opacity:.72}
+svg .src3{fill:var(--accent);fill-opacity:.5}
+svg .ut{fill:var(--green)}
+svg .fn{fill:var(--dim)}
+svg .doc{fill:var(--border)}
+svg .sep{stroke:var(--bg);stroke-width:1.5}
+svg .hatch-bar{fill:var(--orange)}
+svg .hatched{fill:url(#hatch);stroke:var(--orange);stroke-width:1.2}
+svg .zoom{stroke:var(--dim);stroke-width:1;stroke-dasharray:4 4;fill:none}
+.cref{margin:6px 0 0;font-size:13px}
+.cref a{display:inline-block;padding:4px 10px;border:1px solid var(--border);
+  border-radius:16px;background:var(--surface);font:12.5px ui-monospace,Menlo,monospace;margin:2px 4px 2px 0}
+.cref a:hover{background:var(--surface2);text-decoration:none}
+td .cref{margin:4px 0 0}
+td .cref a{font-size:11.5px;padding:2px 8px}
+nav.chain{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 6px;padding:0}
+nav.chain a,nav.chain span{display:inline-block;padding:5px 11px;border:1px solid var(--border);
+  border-radius:20px;background:var(--surface);text-decoration:none;color:var(--accent);
+  font-size:12.5px;line-height:1.3;white-space:nowrap}
+nav.chain a:hover{background:var(--surface2)}
+nav.chain span.here{background:var(--accent);color:var(--bg);border-color:var(--accent);font-weight:600}
+p.chainnote{color:var(--dim);font-size:12px;margin:0 0 18px}
+
+svg .ll{stroke:var(--border);stroke-width:1.2;stroke-dasharray:3 4}
+svg .hdr{fill:var(--surface);stroke:var(--border);stroke-width:1.3}
+svg .hdrt{fill:var(--text);font:bold 12px -apple-system,sans-serif}
+svg .hdrs{fill:var(--dim);font:10.5px -apple-system,sans-serif}
+svg .lab{font:11.5px -apple-system,sans-serif;paint-order:stroke;stroke:var(--bg);stroke-width:4px;stroke-linejoin:round}
+svg .lab.turn{fill:var(--text)}
+svg .lab.pre{fill:var(--orange);font-weight:600}
+svg .lab.new{fill:var(--accent);font-weight:600}
+svg .lab.gap{fill:var(--red);font-weight:600}
+svg a text.lk{fill:var(--accent);font:10px ui-monospace,Menlo,monospace;text-decoration:underline;paint-order:stroke;stroke:var(--bg);stroke-width:4px}
+svg .ar{stroke-width:1.5;fill:none}
+svg .ar.turn{stroke:var(--dim)}
+svg .ar.pre{stroke:var(--orange);stroke-width:2}
+svg .ar.new{stroke:var(--accent);stroke-width:2}
+svg .ar.gap{stroke:var(--red);stroke-width:2;stroke-dasharray:5 4}
+svg .ar.ret{stroke-dasharray:5 4}
+svg .mk-turn{fill:var(--dim)} svg .mk-pre{fill:var(--orange)} svg .mk-new{fill:var(--accent)} svg .mk-gap{fill:var(--red)}
+svg .sec{fill:var(--accent);font:bold 12.5px -apple-system,sans-serif;letter-spacing:.04em}
+svg .secl{stroke:var(--border);stroke-width:1}
+svg .busy{fill:var(--green);fill-opacity:.22;stroke:var(--green);stroke-width:1}
+svg .busyt{fill:var(--green);font:bold 10.5px -apple-system,sans-serif}
+svg .band{fill:var(--surface2);stroke:var(--border);stroke-width:1}
+svg .bandt{fill:var(--dim);font:italic 11.5px -apple-system,sans-serif}
+
+svg .bx{fill:var(--surface);stroke:var(--border);stroke-width:1.3}
+svg .bx.ok{stroke:var(--green);stroke-width:2}
+svg .bx.nw{stroke:var(--accent);stroke-width:2;stroke-dasharray:6 3}
+svg .bx.bad{stroke:var(--red);stroke-width:2.2}
+svg .bt{fill:var(--text);font:bold 12px -apple-system,sans-serif}
+svg .bs{fill:var(--dim);font:11px ui-monospace,Menlo,monospace}
+svg .po{fill:var(--orange);font-weight:700}
+svg .proc{fill:none;stroke:var(--dim);stroke-width:1.2;stroke-dasharray:4 4}
+svg .pt{fill:var(--dim);font:bold 11px -apple-system,sans-serif}
+svg .colh{fill:var(--text);font:bold 14px -apple-system,sans-serif}
+.warn ul{margin:6px 0}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+  document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head>
+<body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+  function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+  function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
+    b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
+      else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+  document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+<div class="wrap">
+
+<h1>How prefix recovery could sit beside the vLLM worker instead of inside it</h1>
+<p class="sub"><a href="https://github.com/NVIDIA-NeMo/RL/pull/4506">NVIDIA-NeMo/RL #4506</a> at <code>d33e3628</code>. The illustrative draft is <a href="https://github.com/terrykong/RL/pull/27">terrykong/RL#27</a> (commit <code>9242495e</code>), built on the review mirror. It follows the shape <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-5011-how-it-fits.html">#5011 gave the single controller</a>.</p>
+
+<div class="status"><dl>
+<dt>Before</dt><dd>Prefix recovery lives inside the worker. <code>VllmAsyncGenerationWorkerImpl</code> inherits a 957-line mixin, gains 1,211 lines and 16 prefix-only fields, and checks "are cuts on?" in 5 places. The <code>OutputProcessor</code> wrap sits inside the HTTP client.</dd>
+<dt>Proposed</dt><dd>The worker builds one object, <code>PrefixRecovery</code> or a do-nothing <code>NoPrefixRecovery</code>, and calls it at fixed points. Only the progress reader knows about vLLM.</dd>
+<dt>Status</dt><dd><span class="verdict open">Proposed, not implemented in #4506.</span> The draft compiles but was not run; four test files need rewriting. Asked in review comment C49.</dd>
+</dl></div>
+
+<nav class="chain">
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4506-prefix-vs-turn.html">prefix vs turn</a>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4506-checkpoint-sequence.html">checkpoint sequence</a>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4506-how-cut-copies.html">how the cut copies tokens</a>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4506-prefix-on-dynamo.html">prefix with Dynamo</a>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4506-size-and-reuse.html">size and reuse</a>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4506-forest-drops-prefix.html">forest training drops the prefix</a>
+  <span class="here">how it fits (proposed)</span>
+</nav>
+<p class="chainnote">Seven pages on this PR, one question each. This one: where the prefix-recovery code should live.</p>
+
+<p>Read the figure top to bottom. The top box is the worker and the hooks where it calls in. Each arrow is a call, labelled with the method. The middle row is what the worker builds once in <code>setup_token_capture</code>. The bottom row is the inputs that object is given, bundled as <code>PrefixRecoveryParts</code>. Only the bottom-right box knows about vLLM, so SGLang or Megatron would add one reader, and the Dynamo adapter reuses the same worker objects.</p>
+
+<h2>One object, built once, called from fixed points</h2>
+
+<svg viewBox="0 0 980 600" role="img" aria-label="The worker builds PrefixRecovery or NoPrefixRecovery once and calls it from two paths: the request path and the checkpoint path. PrefixRecovery is given PrefixRecoveryParts: capture core, token sink, staging source, call registry, tokenizer, weight version, and a ProgressReader. Only VllmProgressReader knows about vLLM.">
+<defs>
+<marker id="f7a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="mk-new" d="M0,0 L10,5 L0,10 z"/></marker>
+<marker id="f7g" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="mk-turn" d="M0,0 L10,5 L0,10 z"/></marker>
+</defs>
+<rect class="bx nw" x="14" y="8" width="22" height="13" rx="3"/><text class="lab turn" x="42" y="19">new object or module</text>
+<rect class="bx ok" x="200" y="8" width="22" height="13" rx="3"/><text class="lab turn" x="228" y="19">existing, unchanged</text>
+<rect class="bx" x="380" y="8" width="22" height="13" rx="3" style="stroke-dasharray:4 3"/><text class="lab turn" x="408" y="19">later backends (not in the draft)</text>
+<line class="ar new" x1="640" y1="14" x2="672" y2="14" marker-end="url(#f7a)"/><text class="lab new" x="680" y="19">call, labelled with the method</text>
+
+<!-- worker -->
+<rect class="bx ok" x="40" y="40" width="900" height="112" rx="8"/>
+<text class="bt" x="56" y="60">VllmAsyncGenerationWorkerImpl (vllm_worker_async.py, 3,136 lines)</text>
+<text class="bs" x="56" y="78">setup_token_capture: self._prefix_recovery = PrefixRecovery(parts) if cuts are on, else NoPrefixRecovery()</text>
+<rect class="bx" x="56" y="88" width="560" height="52" rx="6"/>
+<text class="bt" x="68" y="104">request path (every chat call)</text>
+<text class="bs" x="68" y="120">on_begin · on_sampling_params · resolve_restore · observe</text>
+<text class="bs" x="68" y="134">restore_reply_text · final_write · on_terminal</text>
+<rect class="bx" x="630" y="88" width="296" height="52" rx="6"/>
+<text class="bt" x="642" y="104">checkpoint path (Ray + HTTP)</text>
+<text class="bs" x="642" y="120">hold_final_writes · release_final_writes</text>
+<text class="bs" x="642" y="134">run_cut (via generation_cut_route) · counts</text>
+
+<line class="ar new" x1="330" y1="152" x2="330" y2="196" marker-end="url(#f7a)"/>
+<line class="ar new" x1="780" y1="152" x2="560" y2="196" marker-end="url(#f7a)"/>
+<line class="ar new" x1="120" y1="152" x2="120" y2="196" marker-end="url(#f7a)"/>
+<text class="lab new" x="128" y="180">plan_restore · wrap_parser · reply usage</text>
+
+<!-- middle row -->
+<rect class="bx nw" x="40" y="198" width="230" height="96" rx="8"/>
+<text class="bt" x="54" y="218">restore.py (no state)</text>
+<text class="bs" x="54" y="236">plan_restore</text>
+<text class="bs" x="54" y="251">restore_reply_usage</text>
+<text class="bs" x="54" y="266">wrap_parser_for_restore</text>
+<text class="bs" x="54" y="281">blockers · limits · detokenize</text>
+
+<rect class="bx nw" x="290" y="198" width="430" height="96" rx="8"/>
+<text class="bt" x="304" y="218">PrefixRecovery (prefix_recovery/recovery.py)</text>
+<text class="bs" x="304" y="236">owns: per-call state, completed-call retention,</text>
+<text class="bs" x="304" y="251">receipts, end-of-call write gate, executors, counters</text>
+<text class="bs" x="304" y="266">the old GenerationCutCaptureMixin, as an object</text>
+<text class="bs" x="304" y="281">state.py: CaptureRegistry + per-call state (C51)</text>
+
+<rect class="bx nw" x="740" y="198" width="200" height="96" rx="8"/>
+<text class="bt" x="754" y="218">NoPrefixRecovery</text>
+<text class="bs" x="754" y="236">same methods,</text>
+<text class="bs" x="754" y="251">do nothing</text>
+<text class="bs" x="754" y="266">replaces 5 "cuts on?"</text>
+<text class="bs" x="754" y="281">checks in the worker</text>
+
+<line class="ar turn" x1="505" y1="294" x2="505" y2="340" marker-end="url(#f7g)"/>
+<text class="lab turn" x="513" y="322">built from PrefixRecoveryParts (parts.py)</text>
+
+<!-- parts row -->
+<rect class="proc" x="40" y="342" width="900" height="132" rx="8"/>
+<text class="pt" x="54" y="360">PrefixRecoveryParts: what the worker hands in, once</text>
+<rect class="bx ok" x="54" y="370" width="150" height="40" rx="6"/><text class="bt" x="66" y="388">capture core</text><text class="bs" x="66" y="402">Gym install_capture</text>
+<rect class="bx ok" x="214" y="370" width="150" height="40" rx="6"/><text class="bt" x="226" y="388">TQTokenSink</text><text class="bs" x="226" y="402">stage · clear</text>
+<rect class="bx ok" x="374" y="370" width="150" height="40" rx="6"/><text class="bt" x="386" y="388">TQTokenSource</text><text class="bs" x="386" y="402">fetch chunks</text>
+<rect class="bx nw" x="534" y="370" width="150" height="40" rx="6"/><text class="bt" x="546" y="388">CaptureRegistry</text><text class="bs" x="546" y="402">shared with capture</text>
+<rect class="bx ok" x="694" y="370" width="232" height="40" rx="6"/><text class="bt" x="706" y="388">tokenizer · weight_version()</text><text class="bs" x="706" y="402">control token · timeout</text>
+<rect class="bx nw" x="54" y="420" width="872" height="44" rx="6"/>
+<text class="bt" x="66" y="438">ProgressReader (prefix_recovery/progress.py): read(calls, timeout) → token ids, logprobs, finish</text>
+<text class="bs" x="66" y="454">the only backend-specific seam</text>
+
+<line class="ar turn" x1="200" y1="464" x2="200" y2="500" marker-end="url(#f7g)"/>
+<line class="ar turn" x1="560" y1="464" x2="560" y2="500" marker-end="url(#f7g)"/>
+<line class="ar turn" x1="820" y1="464" x2="820" y2="500" marker-end="url(#f7g)"/>
+<rect class="bx nw" x="54" y="502" width="300" height="56" rx="6"/>
+<text class="bt" x="66" y="520">VllmProgressReader</text>
+<text class="bs" x="66" y="536">vllm/progress_reader.py: OutputProcessor</text>
+<text class="bs" x="66" y="550">wrap and lock, moved off the HTTP client</text>
+<rect class="bx" x="384" y="502" width="300" height="56" rx="6" style="stroke-dasharray:4 3"/>
+<text class="bt" x="396" y="520">SGLang / Megatron reader</text>
+<text class="bs" x="396" y="536">one class each, same protocol;</text>
+<text class="bs" x="396" y="550">the rest of PrefixRecovery is reused</text>
+<rect class="bx" x="714" y="502" width="212" height="56" rx="6" style="stroke-dasharray:4 3"/>
+<text class="bt" x="726" y="520">Dynamo (#4979)</text>
+<text class="bs" x="726" y="536">same worker, same objects;</text>
+<text class="bs" x="726" y="550">frontend calls restore.py</text>
+<text class="note" x="40" y="590">The cut route and the write-hold Ray calls reach PrefixRecovery only through the worker's checkpoint-path methods. Nothing below calls back up into the worker.</text>
+</svg>
+
+
+<h2>What this changes, and which comments it covers</h2>
+<div class="tbl"><table>
+<tr><th></th><th>#4506 today</th><th>Draft (#27)</th></tr>
+<tr><td><code>vllm_worker_async.py</code></td><td>3,918 lines (+1,211)</td><td>3,136 lines (+432 over the base, mostly restore wiring and the shared terminal path)</td></tr>
+<tr><td>Prefix fields on the worker</td><td>16, plus 3 executors</td><td>1: <code>_prefix_recovery</code></td></tr>
+<tr><td>"Are cuts on?" checks</td><td>5</td><td>0: <code>NoPrefixRecovery</code> does nothing</td></tr>
+<tr><td>How the cut code is attached</td><td>mixin, inherited into the worker class</td><td>an object the worker owns (composition)</td></tr>
+<tr><td>vLLM-specific code</td><td>spread across the worker and its HTTP client</td><td><code>vllm/progress_reader.py</code> and <code>vllm/generation_cut_route.py</code></td></tr>
+</table></div>
+<p>It folds four staged comments into one change:</p>
+<ul>
+<li><b>C33</b>, a standalone object instead of the mixin, is now this design.</li>
+<li><b>C35</b>, move the <code>OutputProcessor</code> wrap out of the client, is now <code>VllmProgressReader</code>.</li>
+<li><b>C40</b>, plain restore functions the Dynamo frontend can call, is now <code>restore.py</code>: <code>plan_restore</code>, <code>restore_reply_usage</code> and <code>wrap_parser_for_restore</code>.</li>
+<li><b>C51</b>, unforgettable per-call locks, now applies to <code>state.py</code>, which only <code>PrefixRecovery</code> touches.</li>
+</ul>
+<p>The draft moves code as it is, so <b>C52</b> (positional <code>args[4]</code> and <code>args[5]</code>) still applies to <code>wrap_parser_for_restore</code> and the usage step. One behavior detail: with cuts off, <code>NoPrefixRecovery</code> drops a cut Gym should never send. A real version should keep today's behavior or refuse it loudly.</p>
+<p class="cref"><a href="https://github.com/NVIDIA-NeMo/RL/pull/4506#discussion_r4505754429">C49 review comment — vllm_worker_async.py:807</a> <a href="https://github.com/terrykong/RL/pull/27">illustrative draft PR</a></p>
+
+<div class="warn"><b>So what.</b> The worker goes back to serving vLLM, and prefix recovery becomes one object with a short list of entry points. The next backend writes one progress reader instead of copying a mixin, and Dynamo's frontend calls the same restore functions as the native server. It is mostly a move, so it adds no lines to the stack. The draft shows that it fits; the author still owns making it run.</div>
+
+</div>
+</body>
+</html>
