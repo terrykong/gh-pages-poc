@@ -78,6 +78,10 @@ nav.chain a,nav.chain span{display:inline-block;padding:5px 11px;border:1px soli
 nav.chain a:hover{background:var(--surface2)}
 nav.chain span.here{background:var(--accent);color:var(--bg);border-color:var(--accent);font-weight:600}
 p.chainnote{color:var(--dim);font-size:12px;margin:0 0 18px}
+table{border-collapse:collapse;width:100%;font-size:13.5px;margin:8px 0}
+th,td{border-bottom:1px solid var(--border);padding:5px 8px;text-align:left;vertical-align:top}
+th{color:var(--dim);font-weight:600;font-size:12px}
+.tbl{overflow-x:auto}
 </style>
 <script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
   document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
@@ -116,7 +120,20 @@ p.chainnote{color:var(--dim);font-size:12px;margin:0 0 18px}
 </nav>
 <p class="chainnote">Six pages on this PR, one question each — this one: why a restored prefix is lost when forest training is on.</p>
 
-<div class="bg"><b>Background.</b> When a vLLM worker gets a model call from Gym, Gym also sends an <span class="tip" tabindex="0" data-tip="CaptureAdmission: Gym's note that tells the worker how to record this call's tokens (which conversation it belongs to, which earlier call it continues, and any saved prefix to resume).">admission</span> for that call. After a restore, Gym puts the saved prefix into the admission as its <code>generation_cut</code>. <span class="tip" tabindex="0" data-tip="token_capture.forest_training: a training mode that keeps every branch of a conversation tree. It makes Gym find a call's parent by its source history, so each admission carries a request_replay record.">Forest training</span> changes how Gym links a call to the call before it, and that adds a <code>request_replay</code> record to every admission. Dotted words have a short explanation: hover or tap them.</div>
+<div class="bg"><b>Background: how Gym links one model call to the next.</b>
+<p style="margin:6px 0">Token capture records the exact tokens of every model call, so training sees what the model really produced. To reuse those tokens, Gym links each call to the call before it in the same rollout. Each call reaches the vLLM worker with an <b>admission</b>: Gym's note saying which rollout the call belongs to, which earlier call it continues, and, after a restore, the saved prefix to resume (<code>generation_cut</code>). The setting <code>parent_resolution</code> picks how Gym finds that earlier call (<a href="https://github.com/NVIDIA-NeMo/RL/blob/d33e36284fded7ef7bb5a0790ba3375723a4e91c/nemo_rl/environments/nemo_gym.py#L1174-L1176">nemo_gym.py:1174</a>):</p>
+<div class="tbl"><table>
+<tr><th></th><th>Default (<code>fingerprint</code>)</th><th>Forest training (<code>source_history</code>)</th></tr>
+<tr><td>Turned on by</td><td>always, unless forest training is on</td><td><code>token_capture.forest_training: true</code> (<a href="https://github.com/NVIDIA-NeMo/RL/blob/d33e36284fded7ef7bb5a0790ba3375723a4e91c/nemo_rl/algorithms/single_controller_utils/config.py#L693-L696">config.py:693</a>)</td></tr>
+<tr><td>Made for</td><td>a chat that only grows: each prompt is the last prompt, plus the last answer, plus a new message</td><td>agents that edit their own history: they summarize old turns, start sub-agents, or retry. One rollout's calls form a tree instead of one chain, and training keeps the chosen branches.</td></tr>
+<tr><td>What Gym sends</td><td><code>mode="token_in"</code> with the earlier tokens. The worker always continues from them.</td><td><code>mode="candidate"</code> ("this call <i>may</i> continue that one"), plus two fingerprints. RL decides.</td></tr>
+</table></div>
+<p style="margin:6px 0"><b><code>request_replay</code> is that first fingerprint.</b> It has nothing to do with router replay, and it is not the message text. It holds one (role, hash) pair per message of this request, as the agent sent it, plus a hash of the chat-template options (<a href="https://github.com/NVIDIA-NeMo/Gym/blob/5911d628c744d0bf43fe1d9ddf3bda72d59b0f9a/nemo_gym/token_id_capture/staging/records.py#L177-L205">Gym records.py:177-205</a>). The second fingerprint, <code>candidate_replay</code>, holds the message count and one hash for the earlier call's messages. RL's <code>decide_capture_input</code> compares the two (<a href="https://github.com/NVIDIA-NeMo/RL/blob/d33e36284fded7ef7bb5a0790ba3375723a4e91c/nemo_rl/models/generation/capture_context.py#L43-L89">capture_context.py:43-89</a>):</p>
+<ul style="margin:4px 0">
+<li>If the new request is the earlier call's messages, plus new messages that start right after the model's answer, RL continues from the earlier tokens.</li>
+<li>Otherwise RL starts a new chain from the rendered text.</li>
+</ul>
+<p style="margin:6px 0">With forest training, every call carries <code>request_replay</code>, so every call goes through this decision. Either way, the decision builds a <b>new</b> admission, and that new admission never copies <code>generation_cut</code>. That is the bug below. Dotted words have a short explanation: hover or tap them.</p></div>
 
 <p>Gym attaches the saved prefix to the call's admission and then deletes its own copy
 (<a href="https://github.com/NVIDIA-NeMo/Gym/blob/5911d628c744d0bf43fe1d9ddf3bda72d59b0f9a/nemo_gym/_checkpoint/model.py#L449-L457">Gym model.py:449-457</a>, <code>restored_cuts.take</code>), so it is offered exactly once.
@@ -134,11 +151,11 @@ The worker sends any such admission through <code>decide_capture_input</code>
   <rect class="sw-bad" x="740" y="11" width="13" height="12" rx="2"/><text class="note" x="759" y="21">prefix lost</text>
 
   <!-- normal lane -->
-  <text class="lane" x="16" y="52">Normal admission (no request_replay)</text>
+  <text class="lane" x="16" y="52">Default linking: admission has no request_replay</text>
   <rect class="box" x="16" y="60" width="210" height="80" rx="7"/>
   <text class="t" x="26" y="78">1 · Gym admission</text>
   <text class="d" x="26" y="96">mode token_in</text>
-  <text class="d" x="26" y="112">request_replay None</text>
+  <text class="d" x="26" y="112">request_replay: None</text>
   <text class="d" x="26" y="128">generation_cut: 5 ids</text>
   <rect class="box-good" x="246" y="60" width="210" height="80" rx="7"/>
   <text class="t" x="256" y="78">2 · worker</text>
@@ -164,8 +181,8 @@ The worker sends any such admission through <code>decide_capture_input</code>
   <text class="lane-bad" x="16" y="196">Forest admission (forest_training: true)</text>
   <rect class="box" x="16" y="204" width="210" height="80" rx="7"/>
   <text class="t" x="26" y="222">1 · Gym admission</text>
-  <text class="d" x="26" y="240">request_replay set</text>
-  <text class="d" x="26" y="256">(source_history)</text>
+  <text class="d" x="26" y="240">request_replay: set</text>
+  <text class="d" x="26" y="256">(forest training)</text>
   <text class="d" x="26" y="272">generation_cut: 5 ids</text>
   <rect class="box-bad" x="246" y="204" width="210" height="80" rx="7"/>
   <text class="t" x="256" y="222">2 · worker</text>
