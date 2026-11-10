@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>NVIDIA-NeMo/RL #4507 (round 2) — where the 1,606 lines go, and about 300 that can go</title>
+<title>NVIDIA-NeMo/RL #4507 (round 2) — where the 2,242 lines go, and about 400 that can go</title>
 <style>
 :root{
   --bg:#0d1117; --surface:#161b22; --surface2:#1c2128; --border:#30363d;
@@ -44,13 +44,13 @@ svg{max-width:100%;height:auto;display:block;margin:16px 0}
 svg .lbl{fill:var(--text);font:12px ui-monospace,Menlo,monospace}
 svg .num{fill:var(--dim);font:11px ui-monospace,Menlo,monospace}
 svg .keep{fill:var(--surface2);stroke:var(--border)}
+svg .mv{fill:var(--accent);opacity:.3}
 svg .cut{fill:var(--orange);opacity:.85}
 svg .add{fill:var(--green);opacity:.8}
 svg .ct{fill:var(--orange);font:bold 11px -apple-system,sans-serif}
 svg .gt{fill:var(--green);font:bold 11px -apple-system,sans-serif}
 svg .note{fill:var(--dim);font:11px -apple-system,sans-serif}
 svg .sep{stroke:var(--border);stroke-dasharray:4 4}
-svg .hdr{fill:var(--accent);font:bold 12px -apple-system,sans-serif}
 svg a text{text-decoration:underline;fill:var(--accent)}
 .diff{font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--surface);
   border:1px solid var(--border);border-radius:8px;padding:12px;overflow-x:auto;white-space:pre;margin:10px 0}
@@ -85,18 +85,18 @@ p.chainnote{color:var(--dim);font-size:12px;margin:0 0 18px}
   document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
 <div class="wrap">
 
-<h1>Where #4507's 1,606 test lines go, and the ~300 that can go without weakening the restore check</h1>
+<h1>Where #4507's 2,242 test lines go, and the ~400 that can go without weakening the restore check</h1>
 <p class="sub"><a href="https://github.com/NVIDIA-NeMo/RL/pull/4507">NVIDIA-NeMo/RL #4507</a>, part 6 of 11 in the partial-checkpointing stack.
-All permalinks pin the PR head <code>f6d6aa5</code>.</p>
+All permalinks pin the PR head <code>7f7a7a5</code>.</p>
 
 <div class="status">
 <dl>
   <dt>Before</dt>
-  <dd>Round 1 found about half of the then 2,098 lines repeated existing code. The author fixed 14 of 15 comments and the PR shrank to 1,606.</dd>
+  <dd>Round 1 found about half of the then 2,098 lines repeated existing code. The author fixed 14 of 15 comments and the PR shrank to 1,606. Then #4506 moved its 615-line functional test here unchanged (<code>f09626d4c6</code>), and 3 new commits added about 140 lines, so the PR is now 2,242.</dd>
   <dt>This PR</dt>
   <dd>Test only. It runs the same workload three times on Qwen3-1.7B (uninterrupted, killed mid-generation, restored) and checks that the restored run trains on the same rows.</dd>
   <dt>Status</dt>
-  <dd><span class="verdict open">Proposed, not in the PR.</span> The cuts below are review asks (C17–C22). None lets a broken restore pass. The functional test itself has never run in CI.</dd>
+  <dd><span class="verdict open">Proposed, not in the PR.</span> The cuts below are review asks (C17–C22, C24). None lets a broken restore pass. The functional test itself has never run in CI.</dd>
 </dl>
 </div>
 
@@ -108,66 +108,75 @@ All permalinks pin the PR head <code>f6d6aa5</code>.</p>
 <p class="chainnote">Three pages on this PR. This one: how much of the current head the test needs.</p>
 
 <p>The test reads the rows each run trained on from the trainer's own dump
-(<a href="https://github.com/NVIDIA-NeMo/RL/blob/f6d6aa566ebdb3a75a22ae42e2e5abb37537e40e/tests/functional/_gym_prefix_recovery_parity.py#L93-L135"><code>load_training_records</code></a>),
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/7f7a7a502976befab684f179a6207672c8e4fa88/tests/functional/_gym_prefix_recovery_parity.py#L93-L135"><code>load_training_records</code></a>),
 then checks each restored call: it finished once, it starts its row's last call, and its first tokens hash to what the restore logged
-(<a href="https://github.com/NVIDIA-NeMo/RL/blob/f6d6aa566ebdb3a75a22ae42e2e5abb37537e40e/tests/functional/_gym_prefix_recovery_parity.py#L285-L366"><code>_assert_prefix_boundary</code></a>).
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/7f7a7a502976befab684f179a6207672c8e4fa88/tests/functional/_gym_prefix_recovery_parity.py#L285-L366"><code>_assert_prefix_boundary</code></a>).
 Every other row must match the uninterrupted run exactly. Those checks are worth keeping.
 The extra lines are checks that cannot fail, the same lookups built several times, and unit tests that repeat each other.</p>
 
 <h2>Lines added per file, and what each review comment removes</h2>
 
-<svg viewBox="0 0 900 360" role="img" aria-label="Bar per file: gray is lines kept, orange is lines a review comment removes, green is lines the C16 fix adds or moved lines.">
+<svg viewBox="0 0 900 400" role="img" aria-label="Bar per file: blue is lines moved here unchanged from #4506, gray is other kept lines, orange is lines a review comment removes, green is lines a comment adds.">
   <rect x="300" y="8" width="12" height="12" class="keep"/><text class="note" x="317" y="18">kept</text>
-  <rect x="370" y="8" width="12" height="12" class="cut"/><text class="note" x="387" y="18">removed by a comment (about)</text>
-  <rect x="580" y="8" width="12" height="12" class="add"/><text class="note" x="597" y="18">added (C16 fix, moved jq)</text>
+  <rect x="360" y="8" width="12" height="12" class="mv"/><text class="note" x="377" y="18">moved from #4506, unchanged</text>
+  <rect x="545" y="8" width="12" height="12" class="cut"/><text class="note" x="562" y="18">removed by a comment (about)</text>
+  <rect x="735" y="8" width="12" height="12" class="add"/><text class="note" x="752" y="18">added</text>
   <text class="note" x="300" y="36">scale: 70 px = 100 lines</text>
 
-  <a href="https://github.com/NVIDIA-NeMo/RL/blob/f6d6aa566ebdb3a75a22ae42e2e5abb37537e40e/tests/unit/environments/test_gym_prefix_recovery_parity.py"><text class="lbl" x="12" y="62">unit test (new)</text></a>
-  <rect class="keep" x="300" y="50" width="358" height="16"/><rect class="cut" x="658" y="50" width="77" height="16"/><rect class="add" x="735" y="50" width="14" height="16"/>
-  <text class="num" x="756" y="62">621</text><text class="ct" x="785" y="62">−110</text><text class="gt" x="818" y="62">+20</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/7f7a7a502976befab684f179a6207672c8e4fa88/tests/unit/environments/test_gym_prefix_recovery_parity.py"><text class="lbl" x="12" y="62">unit test</text></a>
+  <rect class="keep" x="300" y="50" width="330" height="16"/><rect class="cut" x="630" y="50" width="115" height="16"/>
+  <text class="num" x="752" y="62">635</text><text class="ct" x="782" y="62">−164</text>
 
-  <a href="https://github.com/NVIDIA-NeMo/RL/blob/f6d6aa566ebdb3a75a22ae42e2e5abb37537e40e/tests/functional/_gym_prefix_recovery_parity.py"><text class="lbl" x="12" y="86">_gym_prefix_recovery_parity.py</text></a>
-  <rect class="keep" x="300" y="74" width="316" height="16"/><rect class="cut" x="616" y="74" width="105" height="16"/><rect class="add" x="721" y="74" width="7" height="16"/>
-  <text class="num" x="735" y="86">601</text><text class="ct" x="764" y="86">−150</text><text class="gt" x="797" y="86">+10</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/7f7a7a502976befab684f179a6207672c8e4fa88/tests/functional/_gym_prefix_recovery_parity.py"><text class="lbl" x="12" y="86">_gym_prefix_recovery_parity.py</text></a>
+  <rect class="keep" x="300" y="74" width="291" height="16"/><rect class="cut" x="591" y="74" width="144" height="16"/><rect class="add" x="735" y="74" width="2" height="16"/>
+  <text class="num" x="744" y="86">622</text><text class="ct" x="774" y="86">−206</text><text class="gt" x="809" y="86">+3 C16</text>
 
-  <a href="https://github.com/NVIDIA-NeMo/RL/blob/f6d6aa566ebdb3a75a22ae42e2e5abb37537e40e/tests/functional/_gym_prefix_recovery_snapshot.py#L83-L214"><text class="lbl" x="12" y="110">_gym_prefix_recovery_snapshot.py</text></a>
-  <rect class="keep" x="300" y="98" width="86" height="16"/><rect class="cut" x="386" y="98" width="9" height="16"/>
-  <text class="num" x="402" y="110">136</text><text class="ct" x="431" y="110">−13 C21</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/7f7a7a502976befab684f179a6207672c8e4fa88/tests/functional/_gym_prefix_recovery_snapshot.py#L83-L214"><text class="lbl" x="12" y="110">_gym_prefix_recovery_snapshot.py</text></a>
+  <rect class="mv" x="300" y="98" width="209" height="16"/><rect class="keep" x="509" y="98" width="50" height="16"/><rect class="cut" x="559" y="98" width="9" height="16"/>
+  <text class="num" x="575" y="110">384</text><text class="ct" x="604" y="110">−13 C21</text>
 
-  <a href="https://github.com/NVIDIA-NeMo/RL/blob/f6d6aa566ebdb3a75a22ae42e2e5abb37537e40e/tests/functional/grpo_async_gym_single_controller_prefix_recovery.sh"><text class="lbl" x="12" y="134">prefix_recovery.sh</text></a>
-  <rect class="keep" x="300" y="122" width="83" height="16"/><rect class="cut" x="383" y="122" width="2" height="16"/><rect class="add" x="385" y="122" width="8" height="16"/>
-  <text class="num" x="400" y="134">121</text><text class="ct" x="429" y="134">−2</text><text class="gt" x="450" y="134">+11 jq moved in (C20)</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/7f7a7a502976befab684f179a6207672c8e4fa88/tests/functional/grpo_async_gym_single_controller_prefix_recovery.sh"><text class="lbl" x="12" y="134">prefix_recovery.sh</text></a>
+  <rect class="mv" x="300" y="122" width="141" height="16"/><rect class="keep" x="441" y="122" width="70" height="16"/><rect class="cut" x="511" y="122" width="2" height="16"/><rect class="add" x="513" y="122" width="8" height="16"/>
+  <text class="num" x="528" y="134">304</text><text class="ct" x="557" y="134">−2</text><text class="gt" x="578" y="134">+11 jq moved in (C20)</text>
 
   <text class="lbl" x="12" y="158">turn_recovery_hook.py</text>
-  <rect class="keep" x="300" y="146" width="40" height="16"/>
-  <text class="num" x="347" y="158">57</text>
+  <rect class="mv" x="300" y="146" width="15" height="16"/><rect class="keep" x="315" y="146" width="61" height="16"/>
+  <text class="num" x="383" y="158">108</text>
 
-  <a href="https://github.com/NVIDIA-NeMo/RL/blob/f6d6aa566ebdb3a75a22ae42e2e5abb37537e40e/tests/functional/_workplace_calendar_rows.jq"><text class="lbl" x="12" y="182">_workplace_calendar_rows.jq</text></a>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/7f7a7a502976befab684f179a6207672c8e4fa88/tests/functional/_workplace_calendar_rows.jq"><text class="lbl" x="12" y="182">_workplace_calendar_rows.jq</text></a>
   <rect class="cut" x="300" y="170" width="24" height="16"/>
   <text class="num" x="331" y="182">34</text><text class="ct" x="354" y="182">−34 C20 (one caller)</text>
 
   <text class="lbl" x="12" y="206">snapshot_helpers.py + L1 list</text>
-  <rect class="keep" x="300" y="194" width="25" height="16"/>
-  <text class="num" x="332" y="206">36</text>
+  <rect class="mv" x="300" y="194" width="71" height="16"/><rect class="keep" x="371" y="194" width="25" height="16"/>
+  <text class="num" x="403" y="206">137</text>
 
-  <line class="sep" x1="12" y1="226" x2="888" y2="226"/>
-  <text class="note" x="12" y="246">unit test −110 (C22): 4 repeat another test, 2 restate a few lines, 2 test code C17/C18 remove; plain imports save 14.</text>
-  <text class="note" x="12" y="264">parity script −150: C19 one row index + one cut check (−100), C18 advantages compare (−45), C17 a check that cannot fail (−5).</text>
-  <text class="note" x="12" y="282">+30 green: the C16 near-tie check (≈10) and its two unit tests (≈20) — a correctness fix, not a size cut.</text>
-  <text class="note" x="12" y="306">Total: about −300 lines, +40 back for C16 and the moved jq → about 1,300 instead of 1,606.</text>
-  <text class="note" x="12" y="324">No product function replaces the rest: nemo_rl has no reader for the trainer dump, and the restore lines exist only in logs.</text>
+  <text class="lbl" x="12" y="230">turn_recovery.sh</text>
+  <rect class="keep" x="300" y="218" width="13" height="16"/>
+  <text class="num" x="320" y="230">+18 / −70: now imports the shared readers</text>
+
+  <line class="sep" x1="12" y1="250" x2="888" y2="250"/>
+  <text class="note" x="12" y="272">unit test −164: C24 drops the logprob-gate tests (−64); C22 drops repeats, tests for removed code and two import blocks (−100).</text>
+  <text class="note" x="12" y="290">parity script −206: C19 one row index + one cut check (−100), C24 logprob gate (−56), C18 advantages compare (−45), C17 (−5).</text>
+  <text class="note" x="12" y="308">+3 green on parity: C16's comment naming what a set-aside row does not check.</text>
+  <text class="note" x="12" y="326">Blue: 615 lines #4506 moved here unchanged. They count toward this PR's size, but none of them is new since round 2.</text>
+  <text class="note" x="12" y="350">Total: about −420 lines, +14 back (C16 note, moved jq) → about 1,840 instead of 2,242.</text>
+  <text class="note" x="12" y="368">No product function replaces the rest: nemo_rl has no reader for the trainer dump, and the restore lines exist only in logs.</text>
 </svg>
 
-<h2>Two checks that can never fail (C17, C18)</h2>
+<h2>Three checks that can never fail (C17, C18, C24)</h2>
 <p class="where"><b>Where the fix lands: RL only, test files only.</b>
-<a href="https://github.com/NVIDIA-NeMo/RL/blob/f6d6aa566ebdb3a75a22ae42e2e5abb37537e40e/tests/functional/_gym_prefix_recovery_parity.py#L332-L336"><code>_gym_prefix_recovery_parity.py</code></a> and the matching unit tests.
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/7f7a7a502976befab684f179a6207672c8e4fa88/tests/functional/_gym_prefix_recovery_parity.py#L332-L336"><code>_gym_prefix_recovery_parity.py</code></a> and the matching unit tests.
 <b>No product change.</b></p>
 <p><b>prefix + tail = total.</b> The vLLM worker computes the logged total as exactly that sum
-(<a href="https://github.com/NVIDIA-NeMo/RL/blob/f6d6aa566ebdb3a75a22ae42e2e5abb37537e40e/nemo_rl/models/generation/vllm/vllm_worker_async.py#L1914-L1931">vllm_worker_async.py:1914-1931</a>).
-The author removed this check in round 1, and the last commit brought it back.
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/7f7a7a502976befab684f179a6207672c8e4fa88/nemo_rl/models/generation/vllm/vllm_worker_async.py#L1269-L1286">vllm_worker_async.py:1269-1286</a>).
+The author removed this check in round 1, and <code>f5b932f20b</code> brought it back.
 <b>Advantages within tolerance.</b> GRPO computes each row's advantage from its prompt group's rewards and masks
-(<a href="https://github.com/NVIDIA-NeMo/RL/blob/f6d6aa566ebdb3a75a22ae42e2e5abb37537e40e/nemo_rl/algorithms/advantage_estimator.py#L106-L145">advantage_estimator.py:106-145</a>),
-and the test already compares rewards, masks and group membership exactly. With <code>top_p=1e-6</code> every advantage here is 0 anyway.</p>
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/7f7a7a502976befab684f179a6207672c8e4fa88/nemo_rl/algorithms/advantage_estimator.py#L106-L145">advantage_estimator.py:106-145</a>),
+and the test already compares rewards, masks and group membership exactly. With <code>top_p=1e-6</code> every advantage here is 0 anyway.
+<b>Generation logprobs ≥ 98% bit-identical.</b> Since <code>e0660fdc8a</code> the test must run with <code>processed_logprobs</code>
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/7f7a7a502976befab684f179a6207672c8e4fa88/nemo_rl/models/generation/__init__.py#L214-L229">generation/__init__.py:214-229</a>),
+so after the <code>top_p=1e-6</code> filter every sampled token's logprob is 0 in both runs. The gate always sees 100%.</p>
 <pre class="diff"><span class="hunk">@@ _gym_prefix_recovery_parity.py L330-L336 · _assert_prefix_boundary</span>
          if tail_tokens &lt;= 0:
              raise AssertionError("restored generation produced no suffix tokens")
@@ -181,37 +190,45 @@ and the test already compares rewards, masks and group membership exactly. With 
 -def _assert_nested_close(baseline, recovery, *, path, rtol, atol): ...   # 30 lines
 -        for field in _APPROXIMATE_FIELDS:
 -            _assert_nested_close(left.get(field), right.get(field), ...)
-</span>         # plus the rtol/atol parameters and flags (L205-206, L561-562, L595-596)</pre>
+</span>         # plus the rtol/atol parameters and flags (L205-206, L579-580, L616-617)
+<span class="hunk">@@ _gym_prefix_recovery_parity.py L494-L536, L583-L588, L611-L615 · logprob gate</span>
+<span class="del">-def _assert_generation_logprob_agreement(baseline, recovery, *, min_bit_identical, max_abs_diff): ...   # 41 lines
+-    _assert_generation_logprob_agreement(baseline_records, recovery_records, ...)
+-    parser.add_argument("--logprob-min-bit-identical", type=float, default=0.98)
+-    parser.add_argument("--logprob-max-abs-diff", type=float, default=0.5)
+</span>         # plus _logprob_records and its three unit tests (unit test L526-589)</pre>
 <p style="font-size:13.5px">What still catches a dropped or extra token: counting back from the row's end lands the restored call at the wrong place, and its hash no longer matches
-(<a href="https://github.com/NVIDIA-NeMo/RL/blob/f6d6aa566ebdb3a75a22ae42e2e5abb37537e40e/tests/functional/_gym_prefix_recovery_parity.py#L352-L364">parity.py:352-364</a>). That stays.</p>
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/7f7a7a502976befab684f179a6207672c8e4fa88/tests/functional/_gym_prefix_recovery_parity.py#L352-L364">parity.py:352-364</a>). That stays.</p>
 <p class="cref"><a href="https://github.com/NVIDIA-NeMo/RL/pull/4507#discussion_r4477670164">C17 — parity.py:332</a>
-<a href="https://github.com/NVIDIA-NeMo/RL/pull/4507#discussion_r4477670176">C18 — parity.py:36</a></p>
+<a href="https://github.com/NVIDIA-NeMo/RL/pull/4507#discussion_r4477670176">C18 — parity.py:36</a>
+<a href="https://github.com/NVIDIA-NeMo/RL/pull/4507#discussion_r4519604424">C24 — parity.py:494</a></p>
 
 <h2>One row index and one cut check (C19)</h2>
 <p>The rows are re-indexed 7 times
-(<a href="https://github.com/NVIDIA-NeMo/RL/blob/f6d6aa566ebdb3a75a22ae42e2e5abb37537e40e/tests/functional/_gym_prefix_recovery_parity.py#L138-L163"><code>_rows_by_identity</code></a>),
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/7f7a7a502976befab684f179a6207672c8e4fa88/tests/functional/_gym_prefix_recovery_parity.py#L138-L163"><code>_rows_by_identity</code></a>),
 and the two functions that check each cut build their own row maps and look up the restored hash twice. Merging them into one ~45-line function keeps every check:</p>
 <table>
 <tr><th>Check</th><th>Today</th><th>After</th></tr>
 <tr><td>each prefix restored once and finished once</td><td>two list scans</td><td>one <code>_once()</code> lookup each</td></tr>
-<tr><td>restored call sits at the row's end, after an untrained token</td><td><a href="https://github.com/NVIDIA-NeMo/RL/blob/f6d6aa566ebdb3a75a22ae42e2e5abb37537e40e/tests/functional/_gym_prefix_recovery_parity.py#L352-L359">L352-359</a></td><td>same lines</td></tr>
-<tr><td>its first tokens hash to the restore log</td><td><a href="https://github.com/NVIDIA-NeMo/RL/blob/f6d6aa566ebdb3a75a22ae42e2e5abb37537e40e/tests/functional/_gym_prefix_recovery_parity.py#L360-L364">L360-364</a></td><td>same</td></tr>
-<tr><td>a set-aside row matches before its last call</td><td><a href="https://github.com/NVIDIA-NeMo/RL/blob/f6d6aa566ebdb3a75a22ae42e2e5abb37537e40e/tests/functional/_gym_prefix_recovery_parity.py#L444-L450">L444-450</a></td><td>same, plus the C16 near-tie check</td></tr>
-<tr><td>not every cut is set aside</td><td><a href="https://github.com/NVIDIA-NeMo/RL/blob/f6d6aa566ebdb3a75a22ae42e2e5abb37537e40e/tests/functional/_gym_prefix_recovery_parity.py#L452-L456">L452-456</a></td><td>same</td></tr>
+<tr><td>restored call sits at the row's end, after an untrained token</td><td><a href="https://github.com/NVIDIA-NeMo/RL/blob/7f7a7a502976befab684f179a6207672c8e4fa88/tests/functional/_gym_prefix_recovery_parity.py#L352-L359">L352-359</a></td><td>same lines</td></tr>
+<tr><td>its first tokens hash to the restore log</td><td><a href="https://github.com/NVIDIA-NeMo/RL/blob/7f7a7a502976befab684f179a6207672c8e4fa88/tests/functional/_gym_prefix_recovery_parity.py#L360-L364">L360-364</a></td><td>same</td></tr>
+<tr><td>a set-aside row matches before its last call</td><td><a href="https://github.com/NVIDIA-NeMo/RL/blob/7f7a7a502976befab684f179a6207672c8e4fa88/tests/functional/_gym_prefix_recovery_parity.py#L456-L462">L456-462</a></td><td>same, plus C16's note on what it cannot check</td></tr>
+<tr><td>not every cut is set aside</td><td><a href="https://github.com/NVIDIA-NeMo/RL/blob/7f7a7a502976befab684f179a6207672c8e4fa88/tests/functional/_gym_prefix_recovery_parity.py#L464-L468">L464-468</a></td><td>same</td></tr>
 </table>
 <p class="cref"><a href="https://github.com/NVIDIA-NeMo/RL/pull/4507#discussion_r4477670183">C19 — parity.py:138</a></p>
 
 <div class="hl"><b>So what.</b> The test is worth having: it is the only end-to-end proof that #4506's prefix restore trains the same tokens as an uninterrupted run.
-But it can be about 300 lines smaller with the same checks, and one check needs to get stronger:
-a set-aside row should need evidence of a real near-tie (C16), or a wrong captured prefix passes for every cut but one.
-Before merge it also needs its first CI run.
-<p class="cref"><a href="https://github.com/NVIDIA-NeMo/RL/pull/4507#discussion_r4477670119">C16 — parity.py:451</a>
+But it can be about 400 lines smaller with the same checks. One gap cannot be closed with the data the test has:
+a set-aside row could hide a wrong captured prefix on every cut but one, and processed logprobs leave no way to tell that from a bf16 near-tie (C16).
+The ask is to write that gap down. Before merge the test also needs its first CI run.
+<p class="cref"><a href="https://github.com/NVIDIA-NeMo/RL/pull/4507#discussion_r4477670119">C16 — parity.py:463</a>
 <a href="https://github.com/NVIDIA-NeMo/RL/pull/4507#discussion_r4477670164">C17 — parity.py:332</a>
 <a href="https://github.com/NVIDIA-NeMo/RL/pull/4507#discussion_r4477670176">C18 — parity.py:36</a>
 <a href="https://github.com/NVIDIA-NeMo/RL/pull/4507#discussion_r4477670183">C19 — parity.py:138</a>
 <a href="https://github.com/NVIDIA-NeMo/RL/pull/4507#discussion_r4477670196">C20 — calendar_rows.jq:12</a>
 <a href="https://github.com/NVIDIA-NeMo/RL/pull/4507#discussion_r4477670203">C21 — snapshot.py:83</a>
-<a href="https://github.com/NVIDIA-NeMo/RL/pull/4507#discussion_r4477670212">C22 — unit test:25</a></p></div>
+<a href="https://github.com/NVIDIA-NeMo/RL/pull/4507#discussion_r4477670212">C22 — unit test:25</a>
+<a href="https://github.com/NVIDIA-NeMo/RL/pull/4507#discussion_r4519604424">C24 — parity.py:494</a></p></div>
 
 </div>
 </body>
