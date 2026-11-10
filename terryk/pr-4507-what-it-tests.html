@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NVIDIA-NeMo/RL #4507 — what the prefix-recovery test proves</title>
+<style>
+:root{
+  --bg:#0d1117; --surface:#161b22; --surface2:#1c2128; --border:#30363d;
+  --text:#e6edf3; --dim:#8b949e; --accent:#58a6ff; --green:#3fb950;
+  --orange:#d29922; --red:#f85149;
+}
+:root[data-theme="light"]{
+  --bg:#ffffff; --surface:#f6f8fa; --surface2:#eaeef2; --border:#d0d7de;
+  --text:#1f2328; --dim:#59636e; --accent:#0969da; --green:#1a7f37;
+  --orange:#9a6700; --red:#cf222e;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:28px 16px 70px}
+h1{font-size:22px;margin:0 0 8px;line-height:1.3}
+h2{font-size:18px;margin:32px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;
+  font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
+.sub{color:var(--dim);font-size:13.5px;margin:0 0 16px}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);
+  border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;
+  font:13px/1 ui-monospace,Menlo,monospace;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.18)}
+.status{border:1px solid var(--border);border-radius:10px;background:var(--surface);
+  padding:2px 16px 10px;margin:0 0 20px}
+.status dl{display:grid;grid-template-columns:max-content 1fr;gap:4px 14px;margin:12px 0 0}
+.status dt{color:var(--dim);font-size:12px;text-transform:uppercase;letter-spacing:.04em;
+  white-space:nowrap;padding-top:2px}
+.status dd{margin:0;font-size:14px}
+.verdict{font-weight:700}
+.verdict.open{color:var(--orange)}
+.bg{border:1px dashed var(--border);border-radius:8px;padding:10px 14px;margin:0 0 16px;font-size:14px;color:var(--text)}
+.hl{border-left:3px solid var(--accent);background:var(--surface);
+  padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0}
+svg{max-width:100%;height:auto;display:block;margin:16px 0}
+svg .lbl{fill:var(--text);font:bold 13px -apple-system,sans-serif}
+svg .sm{fill:var(--dim);font:11px -apple-system,sans-serif}
+svg .hdr{fill:var(--dim);font:bold 11px -apple-system,sans-serif;letter-spacing:.03em}
+svg .mono{fill:var(--text);font:11px ui-monospace,Menlo,monospace}
+svg .boxt{fill:var(--text);font:11.5px -apple-system,sans-serif}
+svg .gen{fill:var(--green);fill-opacity:.22;stroke:var(--green)}
+svg .snap{fill:var(--accent);fill-opacity:.22;stroke:var(--accent)}
+svg .never{fill:none;stroke:var(--dim);stroke-dasharray:4 3}
+svg .cmp{fill:var(--surface);stroke:var(--orange)}
+svg .kill{stroke:var(--red);stroke-width:3}
+svg .killt{fill:var(--red);font:bold 11px -apple-system,sans-serif}
+svg .arrow{stroke:var(--orange);stroke-width:1.5;fill:none}
+svg a text{text-decoration:underline;fill:var(--accent)}
+table{border-collapse:collapse;width:100%;font-size:13.5px;margin:10px 0}
+td,th{border:1px solid var(--border);padding:5px 9px;text-align:left;vertical-align:top}
+th{background:var(--surface);font-weight:600}
+.cref{margin:6px 0 0;font-size:13px}
+.cref a{display:inline-block;padding:4px 10px;border:1px solid var(--border);
+  border-radius:16px;background:var(--surface);font:12.5px ui-monospace,Menlo,monospace;margin:2px 4px 2px 0}
+.cref a:hover{background:var(--surface2);text-decoration:none}
+.tip{border-bottom:1px dotted var(--dim);cursor:help;position:relative;outline:none}
+.tip:hover::after,.tip:focus::after{content:attr(data-tip);position:absolute;left:0;top:1.7em;z-index:60;
+  width:max-content;max-width:min(340px,80vw);white-space:normal;background:var(--surface2);color:var(--text);
+  border:1px solid var(--border);border-radius:6px;padding:7px 10px;font:13px/1.45 -apple-system,sans-serif;
+  font-weight:400;box-shadow:0 4px 14px rgba(0,0,0,.3)}
+nav.chain{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 6px;padding:0}
+nav.chain a,nav.chain span{display:inline-block;padding:5px 11px;border:1px solid var(--border);
+  border-radius:20px;background:var(--surface);text-decoration:none;color:var(--accent);
+  font-size:12.5px;line-height:1.3;white-space:nowrap}
+nav.chain a:hover{background:var(--surface2)}
+nav.chain span.here{background:var(--accent);color:var(--bg);border-color:var(--accent);font-weight:600}
+p.chainnote{color:var(--dim);font-size:12px;margin:0 0 18px}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+  document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head>
+<body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+  function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+  function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
+    b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
+      else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+  document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+<div class="wrap">
+
+<h1>What #4507's test proves: a run killed in the middle of a reply, then restored from the tokens it already had, trains on exactly the same data as a run that was never killed</h1>
+<p class="sub"><a href="https://github.com/NVIDIA-NeMo/RL/pull/4507">NVIDIA-NeMo/RL #4507</a>, part 6 of 11 in the partial-checkpointing stack. It tests the feature added by
+<a href="https://github.com/NVIDIA-NeMo/RL/pull/4506">#4506</a>. All permalinks pin the PR head <code>7f7a7a5</code>.</p>
+
+<div class="status">
+<dl>
+  <dt>Before</dt>
+  <dd>The turn-recovery test covered a crash <i>between</i> two model calls. Nothing tested a crash in the middle of a reply, and no test compared a restored run with a run that never crashed.</dd>
+  <dt>This PR</dt>
+  <dd>Adds that test for #4506's prefix recovery. Test code only; no product code changes.</dd>
+  <dt>Status</dt>
+  <dd><span class="verdict open">Not merged; review open.</span> It passes on the author's machine (470 s). It has never run in CI.</dd>
+</dl>
+</div>
+
+<nav class="chain">
+  <span class="here">1 · what the test proves</span>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4507-v2-what-can-shrink.html">2 · what can shrink</a>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4507-size-and-reuse.html">3 · size and reuse (round 1)</a>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4507-excused-rows.html">4 · rows it excused (round 1, fixed)</a>
+</nav>
+<p class="chainnote">Four pages on this PR. Start here. Page 2 is the current review; pages 3 and 4 are the first review, on an older head.</p>
+
+<div class="bg"><b>Background.</b> During GRPO training, NeMo RL runs an agent in
+<span class="tip" tabindex="0" data-tip="NeMo Gym: a separate service that runs agent episodes. Here it runs the Workplace agent, which calls calendar tools.">Gym</span>, and vLLM writes the model's replies.
+Every finished episode becomes a training row. A
+<span class="tip" tabindex="0" data-tip="A periodic save of all episodes still in progress, so a crashed run can resume them instead of starting them over.">rollout snapshot</span>
+saves the episodes still in progress. #4506 adds <b>prefix recovery</b>: if a snapshot lands while vLLM is in the middle of a reply,
+it keeps the tokens written so far (the <i>prefix</i>). After a crash, the restored run continues from those tokens and only writes the rest (the <i>tail</i>).
+Dotted words have a short explanation: hover or tap them.</div>
+
+<p>The test launches the same small job three times (Qwen3-1.7B, 4 prompts × 2 tries, 1 training step):
+once without a crash, once killed mid-reply, and once restored from that kill
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/7f7a7a502976befab684f179a6207672c8e4fa88/tests/functional/grpo_async_gym_single_controller_prefix_recovery.sh#L191-L270">the script's three runs</a>).
+Each prompt asks the agent to create one calendar event, then list the numbers 1 to N in its closing reply. That reply is long, so the kill lands inside it.
+Sampling uses <code>top_p=1e-6</code>, which makes generation almost greedy, so two runs pick the same tokens and can be compared token by token.
+Each run saves the exact rows the trainer trained on, and the test compares the restored run's rows with the reference rows.</p>
+
+<h2>Three runs of one job, and the one comparison that matters</h2>
+
+<svg viewBox="0 0 900 430" role="img" aria-label="Three lanes. Reference: both model calls and training run normally. Phase 1: killed partway through the closing reply after a snapshot saved its first tokens. Phase 2: restores those tokens, writes only the rest, and trains. The trained rows of Reference and Phase 2 are compared.">
+  <text class="hdr" x="130" y="20">MODEL CALL 1</text>
+  <text class="hdr" x="290" y="20">TOOL RUNS</text>
+  <text class="hdr" x="410" y="20">MODEL CALL 2: THE CLOSING REPLY (N = 250)</text>
+  <text class="hdr" x="735" y="20">TRAINER</text>
+  <rect x="130" y="34" width="12" height="12" class="snap"/><text class="sm" x="147" y="44">saved in a snapshot, restored later</text>
+  <rect x="375" y="34" width="12" height="12" class="gen"/><text class="sm" x="392" y="44">written in this run</text>
+  <line x1="535" y1="33" x2="535" y2="47" class="kill"/><text class="sm" x="544" y="44">process killed</text>
+  <rect x="650" y="34" width="12" height="12" class="never"/><text class="sm" x="667" y="44">never happened</text>
+
+  <!-- Reference -->
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/7f7a7a502976befab684f179a6207672c8e4fa88/tests/functional/grpo_async_gym_single_controller_prefix_recovery.sh#L191-L204"><text x="12" y="82" style="font:bold 13px -apple-system,sans-serif">Reference</text></a>
+  <text class="sm" x="12" y="98">no crash</text>
+  <rect x="130" y="64" width="150" height="40" rx="5" class="gen"/><text class="mono" x="138" y="88">calendar_create_event</text>
+  <rect x="290" y="64" width="110" height="40" rx="5" class="gen"/><text class="boxt" x="298" y="88">event written</text>
+  <rect x="410" y="64" width="310" height="40" rx="5" class="gen"/><text class="mono" x="418" y="88">"1\n2\n3\n…\n250"   all written here</text>
+  <rect x="735" y="64" width="150" height="40" rx="5" class="gen"/><text class="mono" x="741" y="81">train_data_step1</text><text class="sm" x="741" y="97">rows it trained on</text>
+
+  <!-- Phase 1 -->
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/7f7a7a502976befab684f179a6207672c8e4fa88/tests/functional/grpo_async_gym_single_controller_prefix_recovery.sh#L206-L229"><text x="12" y="170" style="font:bold 13px -apple-system,sans-serif">Phase 1</text></a>
+  <text class="sm" x="12" y="186">killed mid-reply</text>
+  <rect x="130" y="152" width="150" height="40" rx="5" class="gen"/><text class="mono" x="138" y="176">calendar_create_event</text>
+  <rect x="290" y="152" width="110" height="40" rx="5" class="gen"/><text class="boxt" x="298" y="176">event written</text>
+  <rect x="410" y="152" width="130" height="40" rx="5" class="snap"/><text class="mono" x="418" y="169">"1\n2\n…</text><text class="sm" x="418" y="185">139–156 tokens</text>
+  <line x1="545" y1="146" x2="545" y2="198" class="kill"/><text class="killt" x="551" y="142">kill -9</text>
+  <rect x="552" y="152" width="168" height="40" rx="5" class="never"/><text class="sm" x="560" y="176">rest never written</text>
+  <rect x="735" y="152" width="150" height="40" rx="5" class="never"/><text class="sm" x="743" y="176">never trained</text>
+
+  <!-- Phase 2 -->
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/7f7a7a502976befab684f179a6207672c8e4fa88/tests/functional/grpo_async_gym_single_controller_prefix_recovery.sh#L255-L270"><text x="12" y="258" style="font:bold 13px -apple-system,sans-serif">Phase 2</text></a>
+  <text class="sm" x="12" y="274">restore, finish</text>
+  <rect x="130" y="240" width="150" height="40" rx="5" class="snap"/><text class="sm" x="138" y="264">from the snapshot</text>
+  <rect x="290" y="240" width="110" height="40" rx="5" class="snap"/><text class="sm" x="298" y="264">from the snapshot</text>
+  <rect x="410" y="240" width="130" height="40" rx="5" class="snap"/><text class="mono" x="418" y="257">"1\n2\n…</text><text class="sm" x="418" y="273">restored as is</text>
+  <rect x="545" y="240" width="175" height="40" rx="5" class="gen"/><text class="mono" x="553" y="257">…\n250"</text><text class="sm" x="553" y="273">only the tail is written</text>
+  <rect x="735" y="240" width="150" height="40" rx="5" class="gen"/><text class="mono" x="741" y="257">train_data_step1</text><text class="sm" x="741" y="273">rows it trained on</text>
+
+  <!-- comparison -->
+  <path d="M885,84 H894 V352 H880" class="arrow"/><path d="M880,348 l-6,4 l6,4" class="arrow"/>
+  <path d="M810,280 V318" class="arrow"/><path d="M806,312 l4,6 l4,-6" class="arrow"/>
+  <rect x="410" y="320" width="470" height="56" rx="6" class="cmp"/>
+  <text class="boxt" x="420" y="341" style="font-weight:700">Compare row by row: all 8 rows (4 prompts × 2 tries)</text>
+  <text class="sm" x="420" y="360">token ids, masks, reward and sample mask must be identical</text>
+
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/7f7a7a502976befab684f179a6207672c8e4fa88/tests/functional/_gym_prefix_recovery_snapshot.py#L83-L120"><text class="sm" x="12" y="330">which snapshot: one that cut a reply in all 4 prompts</text></a>
+  <text class="sm" x="12" y="346">(phase 1 snapshots every 0.05 s until one qualifies)</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/7f7a7a502976befab684f179a6207672c8e4fa88/tests/functional/grpo_async_gym_single_controller_prefix_recovery.sh#L109-L126"><text class="sm" x="12" y="368">kill: the whole process group, then wait for Ray to stop</text></a>
+
+  <text class="sm" x="12" y="402">Every run gets the same 4 prompts: list 1 to N for N = 150, 250, 350, 450, with 2 tries each. Shown: the N = 250 prompt.</text>
+  <text class="sm" x="12" y="420">139–156 tokens: the 8 saved prefixes in the author's run on this head. All 8 rows then matched the reference.</text>
+</svg>
+
+<h2>What the test checks after the restore</h2>
+<table>
+<tr><th>Check</th><th>Why it matters</th><th>Code</th></tr>
+<tr><td>The snapshot it restores from cut a reply in all 4 prompts, and the save reports no failed or skipped cuts</td><td>Otherwise a reply could quietly start over and still pass</td><td><a href="https://github.com/NVIDIA-NeMo/RL/blob/7f7a7a502976befab684f179a6207672c8e4fa88/tests/functional/_gym_prefix_recovery_snapshot.py#L83-L120">snapshot.py L83-120</a></td></tr>
+<tr><td>Each restored episode goes back to the same Gym instance, as its next attempt</td><td>Gym holds the calendar the episode already wrote to</td><td><a href="https://github.com/NVIDIA-NeMo/RL/blob/7f7a7a502976befab684f179a6207672c8e4fa88/tests/functional/_gym_prefix_recovery_snapshot.py#L261-L331">snapshot.py L261-331</a></td></tr>
+<tr><td>Each reply is restored once and finished once, writes at least one new token, and its first tokens hash to what the restore logged</td><td>Shows phase 2 really continued from the saved tokens</td><td><a href="https://github.com/NVIDIA-NeMo/RL/blob/7f7a7a502976befab684f179a6207672c8e4fa88/tests/functional/_gym_prefix_recovery_parity.py#L285-L366">parity.py L285-366</a></td></tr>
+<tr><td>Every trained row matches the reference: token ids, masks, input length, reward, sample mask</td><td>The main claim: a crash changes nothing the trainer sees</td><td><a href="https://github.com/NVIDIA-NeMo/RL/blob/7f7a7a502976befab684f179a6207672c8e4fa88/tests/functional/_gym_prefix_recovery_parity.py#L198-L282">parity.py L198-282</a></td></tr>
+<tr><td>The saved prefix data is still there at phase 2's first training step, and the next snapshot deletes it</td><td>The data neither disappears early nor piles up</td><td><a href="https://github.com/NVIDIA-NeMo/RL/blob/7f7a7a502976befab684f179a6207672c8e4fa88/tests/functional/_gym_prefix_recovery_parity.py#L369-L401">parity.py L369-401</a></td></tr>
+</table>
+<p style="font-size:13.5px"><b>One exception.</b> vLLM's math is not exactly the same from run to run, so phase 1 can pick a different token at a near-tie before the kill. Phase 2 must then continue phase 1's tokens, not the reference's.
+Such a row is <span class="tip" tabindex="0" data-tip="Compared only on reward and sample mask, not token by token. The test requires that not every restored row is set aside.">set aside</span>.
+Review comment C16 covers what that exception still lets through. <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4507-excused-rows.html">Page 4</a> shows the looser first version, which the author has since narrowed.</p>
+
+<h2>How it differs from the existing turn-recovery test</h2>
+<table>
+<tr><th></th><th><a href="https://github.com/NVIDIA-NeMo/RL/blob/7f7a7a502976befab684f179a6207672c8e4fa88/tests/functional/grpo_async_gym_single_controller_turn_recovery.sh">turn-recovery test</a> (already on the base)</th><th><a href="https://github.com/NVIDIA-NeMo/RL/blob/7f7a7a502976befab684f179a6207672c8e4fa88/tests/functional/grpo_async_gym_single_controller_prefix_recovery.sh">prefix-recovery test</a> (this PR)</th></tr>
+<tr><td>Where the crash lands</td><td>Between model calls: a test proxy holds the call after the tool result</td><td>Inside a reply: snapshots every 0.05 s until one cuts a reply in all 4 prompts</td></tr>
+<tr><td>What the restore reuses</td><td>Finished turns; the held call starts over</td><td>Finished turns <b>and</b> the tokens of the reply that was cut</td></tr>
+<tr><td>Run with no crash to compare against</td><td>None. It checks Gym identity and metrics.</td><td>Yes. Every trained row must match it.</td></tr>
+<tr><td>Runs, training steps</td><td>2 runs, 3 steps</td><td>3 runs, 1 step (phase 2 trains 2)</td></tr>
+<tr><td>Time on the author's machine</td><td>260 s</td><td>470 s</td></tr>
+</table>
+<p style="font-size:13.5px">Both tests use the same test hook, the same policy-call proxy and the same snapshot readers
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/7f7a7a502976befab684f179a6207672c8e4fa88/tests/functional/_single_controller_turn_recovery_hook.py">_single_controller_turn_recovery_hook.py</a>,
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/7f7a7a502976befab684f179a6207672c8e4fa88/tests/functional/_gym_recovery_snapshot_helpers.py">_gym_recovery_snapshot_helpers.py</a>).</p>
+
+<div class="hl"><b>So what.</b> If this test passes, a crash in the middle of a reply costs only the tail of that reply, and the trainer sees exactly the rows a crash-free run would give it.
+It does not test learning: with <code>top_p=1e-6</code> the policy-gradient term is 0. Before merge it still needs its first CI run.
+A set-aside row could also hide a wrong saved prefix (C16). Page 2 covers how much of its code the test needs.
+<p class="cref"><a href="https://github.com/NVIDIA-NeMo/RL/pull/4507#discussion_r4477670119">C16 — parity.py:463</a></p></div>
+
+</div>
+</body>
+</html>
