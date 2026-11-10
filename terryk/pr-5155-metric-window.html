@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NVIDIA-NeMo/RL #5155 — why single-controller vLLM step metrics read zero</title>
+<style>
+:root{--bg:#0d1117;--surface:#161b22;--surface2:#1c2128;--border:#30363d;--text:#e6edf3;--dim:#8b949e;
+  --accent:#58a6ff;--green:#3fb950;--red:#f85149;--orange:#d29922}
+:root[data-theme="light"]{--bg:#ffffff;--surface:#f6f8fa;--surface2:#eaeef2;--border:#d0d7de;--text:#1f2328;
+  --dim:#59636e;--accent:#0969da;--green:#1a7f37;--red:#cf222e;--orange:#9a6700}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:28px 16px 70px}
+h1{font-size:22px;margin:0 0 8px;line-height:1.3}
+h2{font-size:18px;margin:30px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
+.sub{color:var(--dim);font-size:13.5px;margin:0 0 16px}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);
+  border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;
+  font:13px/1 ui-monospace,monospace;cursor:pointer}
+.status{border:1px solid var(--border);border-radius:10px;background:var(--surface);padding:2px 16px 10px;margin:0 0 20px}
+.status dl{display:grid;grid-template-columns:max-content 1fr;gap:4px 14px;margin:12px 0 0}
+.status dt{color:var(--dim);font-size:12px;text-transform:uppercase;letter-spacing:.04em;white-space:nowrap;padding-top:2px}
+.status dd{margin:0;font-size:14px}
+.verdict{font-weight:700}
+.verdict.good{color:var(--green)}
+.bg{border:1px dashed var(--border);border-radius:8px;padding:8px 14px;margin:0 0 16px;font-size:14px;color:var(--dim)}
+.tip{border-bottom:1px dotted var(--dim);cursor:help;position:relative;outline:none}
+.tip:hover::after,.tip:focus::after{content:attr(data-tip);position:absolute;left:0;top:1.7em;z-index:60;
+  width:max-content;max-width:min(340px,80vw);white-space:normal;background:var(--surface2);color:var(--text);
+  border:1px solid var(--border);border-radius:6px;padding:7px 10px;font:13px/1.45 -apple-system,sans-serif;
+  font-weight:400;box-shadow:0 4px 14px rgba(0,0,0,.3)}
+.where{border-left:4px solid var(--accent);background:var(--surface);padding:6px 12px;margin:6px 0 10px}
+.diff{font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--surface);
+  border:1px solid var(--border);border-radius:8px;padding:12px;overflow-x:auto;white-space:pre;margin:10px 0}
+.diff .add{color:var(--green)}
+.diff .del{color:var(--red)}
+.diff .hunk{color:var(--accent)}
+.hl{border-left:3px solid var(--green);background:var(--surface);padding:12px 16px;margin:18px 0;border-radius:0 8px 8px 0}
+svg{max-width:100%;height:auto;display:block;margin:14px 0}
+svg .t{fill:var(--text);font:12.5px -apple-system,sans-serif}
+svg .tb{fill:var(--text);font:bold 13px -apple-system,sans-serif}
+svg .m{fill:var(--text);font:12px ui-monospace,Menlo,monospace}
+svg .d{fill:var(--dim);font:11.5px -apple-system,sans-serif}
+svg .gen{fill:var(--accent);opacity:.35;stroke:var(--accent)}
+svg .trn{fill:var(--dim);opacity:.3;stroke:var(--dim)}
+svg .ok{stroke:var(--green);stroke-width:3;fill:none}
+svg .bad{stroke:var(--red);stroke-width:3;fill:none}
+svg .okt{fill:var(--green);font:bold 12.5px ui-monospace,Menlo,monospace}
+svg .badt{fill:var(--red);font:bold 12.5px ui-monospace,Menlo,monospace}
+svg .tick{stroke:var(--orange);stroke-width:2.4}
+svg .read{stroke:var(--text);stroke-width:1.6;stroke-dasharray:4 3}
+svg .axis{stroke:var(--border);stroke-width:1}
+svg a text{text-decoration:underline;fill:var(--accent);font:11.5px ui-monospace,Menlo,monospace}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+  document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head>
+<body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+  function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+  function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
+    b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
+      else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+  document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+<div class="wrap">
+
+<h1>Why the single controller logged zero vLLM tokens per step, and how back-to-back windows fix it</h1>
+<p class="sub"><a href="https://github.com/NVIDIA-NeMo/RL/pull/5155">NVIDIA-NeMo/RL #5155</a>
+· the nightly check that caught it is in <a href="https://github.com/NVIDIA-NeMo/RL/pull/5074">#5074</a>
+· permalinks pin head <code>9990d4b</code> (removed code: base <code>fc009e6</code>)</p>
+
+<div class="status"><dl>
+  <dt>Before</dt>
+  <dd>On the single-controller path, <code>vllm/generation_tokens</code> and the other <code>vllm/*</code> step metrics came out near 0 whenever training waited for a full batch.</dd>
+  <dt>This PR</dt>
+  <dd>Takes one starting reading before any generation, then uses each step's end reading as the next step's start.</dd>
+  <dt>Status</dt>
+  <dd><span class="verdict good">Fixed by this PR.</span> The older training loops (<code>grpo.py</code>, <code>ppo.py</code>, <code>grpo_sync.py</code>) are unchanged.</dd>
+</dl></div>
+
+<p class="bg">Background. vLLM keeps running totals (counters) such as "tokens generated since the engine started".
+To get one step's number, NeMo-RL reads the counters twice and logs the difference:
+<code>snapshot_step_metrics()</code> takes the start reading, <code>get_step_metrics()</code> the end reading.
+The <span class="tip" tabindex="0" data-tip="The v2 training loop: one Ray actor runs a rollout pump (makes samples with vLLM) and a train pump (trains on them) side by side, joined by a replay buffer.">single controller</span>
+runs generation and training as two separate loops. Dotted words: hover or tap.</p>
+
+<p>The old code took the start reading inside the train pump, when it handed the step's first group to training
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/fc009e635e0d25ed71afaa2927fc56694cf21e30/nemo_rl/algorithms/single_controller.py#L2805-L2811">old <code>_train_pump</code></a>).
+When the controller waits for the whole batch before training, every token for that step is already generated by then.
+So the start and end readings matched, and the step logged about 0.
+The fix moves the start reading to before the loops start, and keeps each end reading as the next start, so the windows touch end to end.</p>
+
+<h2>Two steps, two ways of drawing the window</h2>
+
+<svg viewBox="0 0 900 360" role="img" aria-label="Timeline of two training steps. Old windows cover only training time and measure 0 tokens. New windows run back to back and measure 300 then 500 tokens.">
+  <text class="d" x="16" y="20">Counter = vLLM's running total of generated tokens. Batch 1 makes 300 tokens, batch 2 makes 500.</text>
+
+  <!-- time axis -->
+  <line class="axis" x1="150" y1="44" x2="880" y2="44"/>
+  <text class="d" x="150" y="38">loops start</text>
+  <text class="m" x="236" y="38">0</text>
+  <text class="m" x="455" y="38">300</text>
+  <text class="m" x="765" y="38">800</text>
+
+  <!-- BEFORE lane -->
+  <text class="tb" x="16" y="92">Before</text>
+  <text class="d" x="16" y="110">2 start readings</text>
+  <rect class="gen" x="160" y="74" width="170" height="26" rx="4"/><text class="t" x="170" y="92">generate batch 1</text>
+  <rect class="trn" x="330" y="74" width="140" height="26" rx="4"/><text class="t" x="340" y="92">train step 1</text>
+  <rect class="gen" x="470" y="74" width="170" height="26" rx="4"/><text class="t" x="480" y="92">generate batch 2</text>
+  <rect class="trn" x="640" y="74" width="140" height="26" rx="4"/><text class="t" x="650" y="92">train step 2</text>
+  <line class="tick" x1="330" y1="66" x2="330" y2="128"/>
+  <line class="tick" x1="640" y1="66" x2="640" y2="128"/>
+  <line class="read" x1="470" y1="66" x2="470" y2="128"/>
+  <line class="read" x1="780" y1="66" x2="780" y2="128"/>
+  <path class="bad" d="M332 118 v6 h136 v-6"/>
+  <path class="bad" d="M642 118 v6 h136 v-6"/>
+  <text class="badt" x="336" y="144">300→300 = 0</text>
+  <text class="badt" x="646" y="144">800→800 = 0</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/fc009e635e0d25ed71afaa2927fc56694cf21e30/nemo_rl/algorithms/single_controller.py#L2805-L2811"><text x="150" y="164">start read: old _train_pump L2805</text></a>
+
+  <!-- AFTER lane -->
+  <text class="tb" x="16" y="212">After</text>
+  <text class="d" x="16" y="230">1 start reading</text>
+  <rect class="gen" x="160" y="194" width="170" height="26" rx="4"/><text class="t" x="170" y="212">generate batch 1</text>
+  <rect class="trn" x="330" y="194" width="140" height="26" rx="4"/><text class="t" x="340" y="212">train step 1</text>
+  <rect class="gen" x="470" y="194" width="170" height="26" rx="4"/><text class="t" x="480" y="212">generate batch 2</text>
+  <rect class="trn" x="640" y="194" width="140" height="26" rx="4"/><text class="t" x="650" y="212">train step 2</text>
+  <line class="tick" x1="152" y1="186" x2="152" y2="248"/>
+  <line class="read" x1="470" y1="186" x2="470" y2="248"/>
+  <line class="read" x1="780" y1="186" x2="780" y2="248"/>
+  <path class="ok" d="M154 238 v6 h314 v-6"/>
+  <path class="ok" d="M472 238 v6 h306 v-6"/>
+  <text class="okt" x="250" y="264">0→300 = 300</text>
+  <text class="okt" x="560" y="264">300→800 = 500</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/9990d4bb74c90a864e16f4324a4ef1a06172fa8d/nemo_rl/algorithms/single_controller.py#L875-L879"><text x="150" y="284">start read: _run_pumps L875</text></a>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/9990d4bb74c90a864e16f4324a4ef1a06172fa8d/nemo_rl/algorithms/single_controller.py#L3353-L3360"><text x="470" y="284">end read keeps its value: L3355</text></a>
+
+  <!-- legend -->
+  <line class="tick" x1="16" y1="318" x2="16" y2="334"/><text class="d" x="24" y="330">start reading</text>
+  <line class="read" x1="130" y1="318" x2="130" y2="334"/><text class="d" x="138" y="330">end reading (step end)</text>
+  <path class="ok" d="M290 324 h26"/><text class="d" x="322" y="330">window sees the tokens</text>
+  <path class="bad" d="M470 324 h26"/><text class="d" x="502" y="330">window misses them</text>
+  <rect class="gen" x="640" y="318" width="18" height="12" rx="2"/><text class="d" x="664" y="330">generation</text>
+  <rect class="trn" x="740" y="318" width="18" height="12" rx="2"/><text class="d" x="764" y="330">training</text>
+  <text class="d" x="16" y="352">Before: 0 + 0 = 0 logged out of 800. After: 300 + 500 = 800, the run total.</text>
+</svg>
+
+<h2>The fix — RL only, three source files</h2>
+<p class="where"><b>Where the fix lands: RL only.</b>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/9990d4bb74c90a864e16f4324a4ef1a06172fa8d/nemo_rl/algorithms/single_controller.py#L875-L879"><code>single_controller.py</code></a> moves the start reading and asks to keep the end reading;
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/9990d4bb74c90a864e16f4324a4ef1a06172fa8d/nemo_rl/models/generation/vllm/vllm_generation.py#L868-L893"><code>vllm_generation.py</code></a> implements <code>keep_snapshot</code>;
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/9990d4bb74c90a864e16f4324a4ef1a06172fa8d/nemo_rl/models/generation/interfaces.py#L867-L877"><code>interfaces.py</code></a> adds the keyword to the default, so SGLang, Megatron and Dynamo accept it and still return <code>{}</code>.</p>
+
+<pre class="diff"><span class="hunk">@@ single_controller.py L872-L882 (head) · _run_pumps</span>
+         if await self._rollout_restorer.restore():
+             self._rollout_recovery_enabled = True
+<span class="add">+        # Capture the baseline before either pump can dispatch generation.
++        try:
++            await asyncio.to_thread(self._gen.snapshot_step_metrics)
++        except RayActorError as error:
++            log.warning("Skipping generation snapshot metrics: %s", error)
+</span>         rollout_task = asyncio.create_task(self._rollout_pump())
+<span class="hunk">@@ single_controller.py L2805-L2811 (base) · _train_pump — per-step start reading removed</span>
+<span class="del">-                    if groups_dispatched == 0:
+-                        try:
+-                            await asyncio.to_thread(self._gen.snapshot_step_metrics)
+</span><span class="hunk">@@ single_controller.py L3353-L3358 (head) · _train_pump, step end</span>
+<span class="del">-                        await asyncio.to_thread(self._gen.get_step_metrics)
+</span><span class="add">+                        await asyncio.to_thread(
++                            self._gen.get_step_metrics, keep_snapshot=True
++                        )
+</span><span class="hunk">@@ vllm_generation.py L884-L893 (head) · get_step_metrics</span>
+             counters_end = self._get_raw_spec_counters()
+<span class="add">+            # no start reading yet: this read becomes the start, report nothing
++            if counters_start is None:
++                self._step_metrics_snapshot = counters_end
++                return {}
+</span>             step_metrics = compute_spec_decode_metrics(counters_start, counters_end)
+             ...
+<span class="add">+            # this window's end is the next window's start
++            if keep_snapshot:
++                self._step_metrics_snapshot = counters_end
+</span></pre>
+
+<p>In order: the controller reads the counters once before either loop can start generating (the restore step above it only reloads saved state).
+Each step end reads again, logs the difference, and keeps that reading as the next start.
+If a read fails, the start reading is cleared
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/9990d4bb74c90a864e16f4324a4ef1a06172fa8d/nemo_rl/models/generation/vllm/vllm_generation.py#L876-L879">L876-L879</a>);
+the next read only sets a new start and returns <code>{}</code>
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/9990d4bb74c90a864e16f4324a4ef1a06172fa8d/nemo_rl/models/generation/vllm/vllm_generation.py#L885-L887">L885-L887</a>).
+So one step shows no <code>vllm/*</code> numbers, instead of a number that spans the gap.</p>
+
+<div class="hl">Single-controller runs now log real per-step vLLM token, length and request counts, and summing them across steps gives the run total.
+The windows run back to back from one step end to the next, so with async rollouts a step's numbers include generation for batches trained later — the same as before this PR, but without the gap.
+The review found no problems. The new tests pass locally and fail if any line of the fix is reverted.</div>
+
+</div>
+</body>
+</html>
