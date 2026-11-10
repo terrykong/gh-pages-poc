@@ -1,0 +1,350 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NVIDIA-NeMo/RL #4507 — C19 before and after</title>
+<style>
+:root{
+  --bg:#0d1117; --surface:#161b22; --surface2:#1c2128; --border:#30363d;
+  --text:#e6edf3; --dim:#8b949e; --accent:#58a6ff; --green:#3fb950;
+  --orange:#d29922; --red:#f85149;
+}
+:root[data-theme="light"]{
+  --bg:#ffffff; --surface:#f6f8fa; --surface2:#eaeef2; --border:#d0d7de;
+  --text:#1f2328; --dim:#59636e; --accent:#0969da; --green:#1a7f37;
+  --orange:#9a6700; --red:#cf222e;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:28px 16px 70px}
+h1{font-size:22px;margin:0 0 8px;line-height:1.3}
+h2{font-size:18px;margin:32px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;
+  font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
+.sub{color:var(--dim);font-size:13.5px;margin:0 0 16px}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);
+  border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;
+  font:13px/1 ui-monospace,Menlo,monospace;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.18)}
+.status{border:1px solid var(--border);border-radius:10px;background:var(--surface);
+  padding:2px 16px 10px;margin:0 0 20px}
+.status dl{display:grid;grid-template-columns:max-content 1fr;gap:4px 14px;margin:12px 0 0}
+.status dt{color:var(--dim);font-size:12px;text-transform:uppercase;letter-spacing:.04em;
+  white-space:nowrap;padding-top:2px}
+.status dd{margin:0;font-size:14px}
+.verdict{font-weight:700}
+.verdict.open{color:var(--orange)}
+.hl{border-left:3px solid var(--accent);background:var(--surface);
+  padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0}
+svg{max-width:100%;height:auto;display:block;margin:16px 0}
+svg .hdr{fill:var(--text);font:bold 12.5px -apple-system,sans-serif}
+svg .chk{fill:var(--text);font:12px -apple-system,sans-serif}
+svg .loc{fill:var(--dim);font:11px ui-monospace,Menlo,monospace}
+svg .note{fill:var(--dim);font:11px -apple-system,sans-serif}
+svg .same{fill:var(--green);fill-opacity:.12}
+svg .merged{fill:var(--accent);fill-opacity:.16}
+svg .gone{fill:var(--dim);fill-opacity:.12}
+svg .dropped{fill:var(--orange);fill-opacity:.18}
+svg .sw{stroke:var(--border)}
+svg .arr{stroke:var(--dim);stroke-width:1.2}
+svg a text{text-decoration:underline;fill:var(--accent)}
+.diff{font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--surface);
+  border:1px solid var(--border);border-radius:8px;padding:12px;overflow-x:auto;white-space:pre;margin:10px 0}
+.diff .add{color:var(--green)}
+.diff .del{color:var(--red)}
+.diff .hunk{color:var(--accent)}
+details{margin:8px 0}
+summary{cursor:pointer;color:var(--accent);font-size:14px}
+table{border-collapse:collapse;width:100%;font-size:13.5px;margin:10px 0}
+td,th{border:1px solid var(--border);padding:5px 9px;text-align:left;vertical-align:top}
+th{background:var(--surface);font-weight:600}
+.cref{margin:6px 0 0;font-size:13px}
+.cref a{display:inline-block;padding:4px 10px;border:1px solid var(--border);
+  border-radius:16px;background:var(--surface);font:12.5px ui-monospace,Menlo,monospace;margin:2px 4px 2px 0}
+.cref a:hover{background:var(--surface2);text-decoration:none}
+nav.chain{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 6px;padding:0}
+nav.chain a,nav.chain span{display:inline-block;padding:5px 11px;border:1px solid var(--border);
+  border-radius:20px;background:var(--surface);text-decoration:none;color:var(--accent);
+  font-size:12.5px;line-height:1.3;white-space:nowrap}
+nav.chain a:hover{background:var(--surface2)}
+nav.chain span.here{background:var(--accent);color:var(--bg);border-color:var(--accent);font-weight:600}
+p.chainnote{color:var(--dim);font-size:12px;margin:0 0 18px}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+  document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head>
+<body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+  function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+  function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
+    b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
+      else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+  document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+<div class="wrap">
+
+<h1>C19, before and after: merging the two cut checks keeps every check and every result, and saves about 40 lines</h1>
+<p class="sub"><a href="https://github.com/NVIDIA-NeMo/RL/pull/4507">NVIDIA-NeMo/RL #4507</a>, review comment C19. "Before" links pin the PR head <code>7f7a7a5</code>; "after" is a tested copy, not in the PR.</p>
+
+<div class="status">
+<dl>
+  <dt>Before</dt>
+  <dd>Two functions check each restored call. The second one calls the first, then rebuilds the same lookups, and the trained rows are re-indexed 7 times across the file.</dd>
+  <dt>Proposed</dt>
+  <dd>Build the row index once, and do every per-cut check in one function, <code>_check_cuts</code>.</dd>
+  <dt>Status</dt>
+  <dd><span class="verdict open">Proposed, not in the PR.</span> Written and tested on a copy: 27 of 27 unit tests pass before and after, and 300 random cases with deliberate breakage give the same pass/fail and the same error message. It saves 40 lines in the test script, 33 counting the unit-test edits. The review comment first said ~100; that was wrong.</dd>
+</dl>
+</div>
+
+<nav class="chain">
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4507-what-it-tests.html">1 · what the test proves</a>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4507-v2-what-can-shrink.html">2 · what can shrink</a>
+  <span class="here">3 · C19 before and after</span>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4507-size-and-reuse.html">4 · size and reuse (round 1)</a>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-4507-excused-rows.html">5 · rows it excused (round 1, fixed)</a>
+</nav>
+<p class="chainnote">Five pages on this PR. Page 1 explains what the test proves. This one: what C19 changes in the code, and how we know it still checks the same things.</p>
+
+<p>After phase 2, the test checks every restored call: it finished exactly once, it wrote at least one new token, its row ends where the logged token count says, and the row's closing reply starts with the restored prefix.
+Today <a href="https://github.com/NVIDIA-NeMo/RL/blob/7f7a7a502976befab684f179a6207672c8e4fa88/tests/functional/_gym_prefix_recovery_parity.py#L285-L366"><code>_assert_prefix_boundary</code></a> does that.
+Then <a href="https://github.com/NVIDIA-NeMo/RL/blob/7f7a7a502976befab684f179a6207672c8e4fa88/tests/functional/_gym_prefix_recovery_parity.py#L412-L469"><code>_rows_diverged_before_cut</code></a> calls it, builds its own row lookups again, looks up each restored hash a second time, and decides which rows to set aside.
+C19 puts both into one loop over the cuts. The checks themselves are most of the code, so merging removes only the repeated setup.</p>
+
+<h2>Every check, before and after</h2>
+
+<svg viewBox="0 0 900 434" role="img" aria-label="Table of 14 checks. Most move unchanged into _check_cuts; repeated lookups are built once; one check about mixed train steps is dropped.">
+  <rect x="12" y="8" width="12" height="12" class="same"/><text class="note" x="29" y="18">same check, moved</text>
+  <rect x="150" y="8" width="12" height="12" class="merged"/><text class="note" x="167" y="18">built several times → built once</text>
+  <rect x="355" y="8" width="12" height="12" class="gone"/><text class="note" x="372" y="18">repeated work, removed</text>
+  <rect x="525" y="8" width="12" height="12" class="dropped"/><text class="note" x="542" y="18">check dropped (cannot fail)</text>
+
+  <text class="hdr" x="12" y="48">What is checked or built</text>
+  <text class="hdr" x="300" y="48">Before (head lines)</text>
+  <text class="hdr" x="560" y="48">After (in the tested copy)</text>
+  <line class="sw" x1="12" y1="56" x2="888" y2="56"/>
+  <rect x="12" y="62" width="876" height="24" rx="3" class="merged"/>
+  <text class="chk" x="20" y="78">Row index: no row twice, no split group</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/7f7a7a502976befab684f179a6207672c8e4fa88/tests/functional/_gym_prefix_recovery_parity.py#L138-L163"><text class="loc" x="300" y="78">7×: L215, L216, L431 … L507</text></a>
+  <line class="arr" x1="536" y1="74" x2="550" y2="74"/><path class="arr" d="M546,71 l4,3 l-4,3" fill="none"/>
+  <text class="loc" x="560" y="78">2×, both in compare (L509-510)</text>
+  <rect x="12" y="90" width="876" height="24" rx="3" class="merged"/>
+  <text class="chk" x="20" y="106">Row lookup for the cut checks</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/7f7a7a502976befab684f179a6207672c8e4fa88/tests/functional/_gym_prefix_recovery_parity.py#L304-L308"><text class="loc" x="300" y="106">2×: L304-308, L430-436</text></a>
+  <line class="arr" x1="536" y1="102" x2="550" y2="102"/><path class="arr" d="M546,99 l4,3 l-4,3" fill="none"/>
+  <text class="loc" x="560" y="106">1× (L362-365)</text>
+  <rect x="12" y="118" width="876" height="24" rx="3" class="merged"/>
+  <text class="chk" x="20" y="134">Each cut&#x27;s completion line, exactly once</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/7f7a7a502976befab684f179a6207672c8e4fa88/tests/functional/_gym_prefix_recovery_parity.py#L309-L327"><text class="loc" x="300" y="134">L309-327, list scan per cut</text></a>
+  <line class="arr" x1="536" y1="130" x2="550" y2="130"/><path class="arr" d="M546,127 l4,3 l-4,3" fill="none"/>
+  <text class="loc" x="560" y="134">log read once (L354-357), check L371-376</text>
+  <rect x="12" y="146" width="876" height="24" rx="3" class="merged"/>
+  <text class="chk" x="20" y="162">Each cut&#x27;s restore line, exactly once</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/7f7a7a502976befab684f179a6207672c8e4fa88/tests/functional/_gym_prefix_recovery_parity.py#L337-L347"><text class="loc" x="300" y="162">2×: L337-347, L444-449</text></a>
+  <line class="arr" x1="536" y1="158" x2="550" y2="158"/><path class="arr" d="M546,155 l4,3 l-4,3" fill="none"/>
+  <text class="loc" x="560" y="162">log read once (L358-361), check L386-391</text>
+  <rect x="12" y="174" width="876" height="24" rx="3" class="same"/>
+  <text class="chk" x="20" y="190">At least one new token (tail &gt; 0)</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/7f7a7a502976befab684f179a6207672c8e4fa88/tests/functional/_gym_prefix_recovery_parity.py#L330-L331"><text class="loc" x="300" y="190">L330-331</text></a>
+  <line class="arr" x1="536" y1="186" x2="550" y2="186"/><path class="arr" d="M546,183 l4,3 l-4,3" fill="none"/>
+  <text class="loc" x="560" y="190">L379-380</text>
+  <rect x="12" y="202" width="876" height="24" rx="3" class="same"/>
+  <text class="chk" x="20" y="218">prefix + tail = logged total</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/7f7a7a502976befab684f179a6207672c8e4fa88/tests/functional/_gym_prefix_recovery_parity.py#L332-L336"><text class="loc" x="300" y="218">L332-336</text></a>
+  <line class="arr" x1="536" y1="214" x2="550" y2="214"/><path class="arr" d="M546,211 l4,3 l-4,3" fill="none"/>
+  <text class="loc" x="560" y="218">L381-386</text>
+  <rect x="12" y="230" width="876" height="24" rx="3" class="same"/>
+  <text class="chk" x="20" y="246">The cut has a trained row</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/7f7a7a502976befab684f179a6207672c8e4fa88/tests/functional/_gym_prefix_recovery_parity.py#L348-L351"><text class="loc" x="300" y="246">L348-351</text></a>
+  <line class="arr" x1="536" y1="242" x2="550" y2="242"/><path class="arr" d="M546,239 l4,3 l-4,3" fill="none"/>
+  <text class="loc" x="560" y="246">L393-396</text>
+  <rect x="12" y="258" width="876" height="24" rx="3" class="same"/>
+  <text class="chk" x="20" y="274">Row ends with the logged token count</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/7f7a7a502976befab684f179a6207672c8e4fa88/tests/functional/_gym_prefix_recovery_parity.py#L352-L359"><text class="loc" x="300" y="274">L352-359</text></a>
+  <line class="arr" x1="536" y1="270" x2="550" y2="270"/><path class="arr" d="M546,267 l4,3 l-4,3" fill="none"/>
+  <text class="loc" x="560" y="274">L397-405</text>
+  <rect x="12" y="286" width="876" height="24" rx="3" class="same"/>
+  <text class="chk" x="20" y="302">Reply starts with the restored prefix</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/7f7a7a502976befab684f179a6207672c8e4fa88/tests/functional/_gym_prefix_recovery_parity.py#L360-L364"><text class="loc" x="300" y="302">L360-364</text></a>
+  <line class="arr" x1="536" y1="298" x2="550" y2="298"/><path class="arr" d="M546,295 l4,3 l-4,3" fill="none"/>
+  <text class="loc" x="560" y="302">L406-410</text>
+  <rect x="12" y="314" width="876" height="24" rx="3" class="same"/>
+  <text class="chk" x="20" y="330">Skip rows that match the reference</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/7f7a7a502976befab684f179a6207672c8e4fa88/tests/functional/_gym_prefix_recovery_parity.py#L450-L455"><text class="loc" x="300" y="330">L450-455</text></a>
+  <line class="arr" x1="536" y1="326" x2="550" y2="326"/><path class="arr" d="M546,323 l4,3 l-4,3" fill="none"/>
+  <text class="loc" x="560" y="330">L412-417</text>
+  <rect x="12" y="342" width="876" height="24" rx="3" class="same"/>
+  <text class="chk" x="20" y="358">Set-aside row: matches before the reply</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/7f7a7a502976befab684f179a6207672c8e4fa88/tests/functional/_gym_prefix_recovery_parity.py#L456-L462"><text class="loc" x="300" y="358">L456-462</text></a>
+  <line class="arr" x1="536" y1="354" x2="550" y2="354"/><path class="arr" d="M546,351 l4,3 l-4,3" fill="none"/>
+  <text class="loc" x="560" y="358">L418-424</text>
+  <rect x="12" y="370" width="876" height="24" rx="3" class="same"/>
+  <text class="chk" x="20" y="386">Not every cut is set aside</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/7f7a7a502976befab684f179a6207672c8e4fa88/tests/functional/_gym_prefix_recovery_parity.py#L464-L468"><text class="loc" x="300" y="386">L464-468</text></a>
+  <line class="arr" x1="536" y1="382" x2="550" y2="382"/><path class="arr" d="M546,379 l4,3 l-4,3" fill="none"/>
+  <text class="loc" x="560" y="386">L426-430</text>
+  <rect x="12" y="398" width="876" height="24" rx="3" class="dropped"/>
+  <text class="chk" x="20" y="414">No dump file mixes two training steps</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/7f7a7a502976befab684f179a6207672c8e4fa88/tests/functional/_gym_prefix_recovery_parity.py#L122-L125"><text class="loc" x="300" y="414">L122-125</text></a>
+  <line class="arr" x1="536" y1="410" x2="550" y2="410"/><path class="arr" d="M546,407 l4,3 l-4,3" fill="none"/>
+  <text class="loc" x="560" y="414">dropped: one step per file</text>
+</svg>
+
+<p style="font-size:13.5px">"After" line numbers are in the tested copy, which is not in the PR; the code itself is below.
+The dropped check made sure no dump file mixes two training steps. <code>JsonDebugWriter</code> names each file after its step and writes that step on every row, so a file cannot hold two.</p>
+
+<h2>The change in the code</h2>
+<p>Two moves. First, <code>compare</code> builds the row index once, after it keeps only the reference's steps, and hands it to every check.
+<code>load_training_records</code> cannot return it, because the cleanup check still needs each step's records.</p>
+<pre class="diff"><span class="hunk">@@ _gym_prefix_recovery_parity.py · compare()</span>
+         if record["train_step"] &lt;= args.steps
+     ]
+<span class="add">+    baseline = _rows_by_identity(baseline_records)
++    recovery = _rows_by_identity(recovery_records)</span>
+     selection = read_json(args.selection)
+     …
+<span class="del">-    reward_signal = _assert_reward_signal(baseline_records)</span>
+<span class="add">+    reward_signal = _assert_reward_signal(baseline)</span>
+     …
+<span class="del">-    diverged = _rows_diverged_before_cut(
+-        selection, recovery_log, baseline_records, recovery_records
+-    )</span>
+<span class="add">+    _, diverged = _check_cuts(selection, recovery_log, baseline, recovery)</span>
+     …
+     _compare_training_rows(
+<span class="del">-        baseline_records,
+-        recovery_records,</span>
+<span class="add">+        baseline,
++        recovery,</span></pre>
+<p>Second, the two cut functions (82 + 58 lines) become one 108-line <code>_check_cuts</code>. It reads the log once into two lookups, completion lines and restore lines, each keyed by call and prefix length. Then it runs today's checks for each cut, in today's order, with today's error messages.
+Like today, it counts duplicate log lines only for calls that were cut. (The sketch in the first version of C19 counted them for every call, which would have quietly made the test stricter.)</p>
+<details><summary>Show the full tested <code>_check_cuts</code></summary>
+<pre class="diff">def _check_cuts(
+    selection: Mapping[str, Any],
+    recovery_log: str,
+    baseline: Mapping[tuple[int, int, int], Mapping[str, Any]],
+    recovery: Mapping[tuple[int, int, int], Mapping[str, Any]],
+) -&gt; tuple[dict[tuple[str, int], int], frozenset[tuple[int, int, int]]]:
+    """Check each restored call's trained row, and find rows phase 1 diverged.
+
+    Each restored call must complete once and train on its restored prefix. A
+    restored call closes its row, so the ``total_generation_tokens`` it logs on
+    completion end the row: counting back finds where the call starts. That
+    holds even when the trainer masked positions inside the call (top-k/top-p
+    ``-inf`` logprobs drop out of ``token_mask``), which a search for the last
+    unmasked segment would mistake for the call's start. A dropped or
+    duplicated token moves that start, so the restored prefix no longer sits
+    there.
+
+    vLLM sampling is not batch-invariant, so phase 1 can take the other side of
+    a near-tie before the cut. Recovery must then continue phase 1's tokens, and
+    the reference no longer predicts that row. A row is set aside only when the
+    reference's call opens differently at the same position. Everything before
+    the closing call must still match, and at least one restored row must match
+    the reference outright, so a capture that recorded the wrong tokens for
+    every cut cannot pass.
+
+    Returns:
+        Each cut's ``(group_id, generation_index)`` mapped to the index in its
+        trained row where the restored call's generated tokens begin, and the
+        identities of the rows set aside.
+    """
+    completed: dict[tuple[str, int], list[dict[str, str]]] = {}
+    for match in _COMPLETED_PREFIX_LINE.finditer(recovery_log):
+        key = (match["source_model_call_id"], int(match["prefix_tokens"]))
+        completed.setdefault(key, []).append(match.groupdict())
+    hashes: dict[tuple[str, int], list[str]] = {}
+    for line in restored_prefixes(recovery_log):
+        key = (line["source_model_call_id"], line["prefix_tokens"])
+        hashes.setdefault(key, []).append(line["prefix_ids_sha256"])
+    by_call = {
+        (row["group_id"], int(row["generation_index"])): identity
+        for identity, row in recovery.items()
+    }
+    starts: dict[tuple[str, int], int] = {}
+    diverged: set[tuple[int, int, int]] = set()
+    for cut in selection["cuts"]:
+        source = cut["model_call_id"]
+        prefix_tokens = int(cut["prefix_token_count"])
+        matches = completed.get((source, prefix_tokens), [])
+        if len(matches) != 1:
+            raise AssertionError(
+                "restored prefix did not complete exactly once: "
+                f"source={source!r}, matches={matches!r}"
+            )
+        tail_tokens = int(matches[0]["tail_tokens"])
+        total_tokens = int(matches[0]["total_tokens"])
+        if tail_tokens &lt;= 0:
+            raise AssertionError("restored generation produced no suffix tokens")
+        if prefix_tokens + tail_tokens != total_tokens:
+            raise AssertionError(
+                "restored generation token accounting has a gap or overlap: "
+                f"prefix={prefix_tokens}, tail={tail_tokens}, total={total_tokens}"
+            )
+        cut_hashes = hashes.get((source, prefix_tokens), [])
+        if len(cut_hashes) != 1:
+            raise AssertionError(
+                f"restored prefix {source!r} was logged {len(cut_hashes)} times, "
+                "expected once"
+            )
+        restored_hash = cut_hashes[0]
+        key = (cut["group_id"], int(cut["generation_index"]))
+        identity = by_call.get(key)
+        if identity is None:
+            raise AssertionError(f"restored call {source!r} has no trained row")
+        right = recovery[identity]
+        start = len(right["token_ids"]) - total_tokens
+        # The token before a call's generated tokens is its own prompt, never
+        # trained; landing on a trained token means the row's length is off.
+        if start &lt; 1 or right["token_loss_mask"][start - 1]:
+            raise AssertionError(
+                f"trained row for {source!r} does not end with its "
+                f"{total_tokens} generated tokens: row has {len(right['token_ids'])}"
+            )
+        if _closing_prefix_sha256(right, start, prefix_tokens) != restored_hash:
+            raise AssertionError(
+                f"row for {source!r} does not start its closing call with its "
+                f"{prefix_tokens} restored prefix tokens"
+            )
+        starts[key] = start
+        left = baseline.get(identity)
+        if (
+            left is None
+            or _closing_prefix_sha256(left, start, prefix_tokens) == restored_hash
+        ):
+            continue
+        if (
+            left["token_ids"][:start] != right["token_ids"][:start]
+            or left["token_loss_mask"][:start] != right["token_loss_mask"][:start]
+        ):
+            raise AssertionError(
+                f"row {identity!r} differs before its restored closing call"
+            )
+        diverged.add(identity)
+    if diverged and len(diverged) == len(selection["cuts"]):
+        raise AssertionError(
+            "every restored prefix differed from the reference, so no restored "
+            "row checks the regenerated tail"
+        )
+    return starts, frozenset(diverged)</pre>
+</details>
+
+<h2>How we know it still checks the same things</h2>
+<table>
+<tr><th>Check</th><th>Result</th></tr>
+<tr><td>The PR's 27 unit tests</td><td>27/27 pass before and after. Only call sites changed (they now pass the index or call <code>_check_cuts</code>); no assertion and no expected message was weakened.</td></tr>
+<tr><td>300 random cases, each run as-is and with each kind of breakage: a dropped token, a duplicated token, a wrong prefix hash, a missing or repeated completion line, a repeated restore line, every cut set aside, a change before the cut on a set-aside row</td><td>Before and after give the same pass/fail and the same error message in every case, both for the cut checks alone and for the full <code>compare</code> run on dumped files.</td></tr>
+<tr><td>ruff (repo config)</td><td>Clean.</td></tr>
+</table>
+<p style="font-size:13.5px"><b>What does change.</b> With several faults at once, a different one can be reported first, because there is now one loop instead of two. An empty dump file now raises <code>IndexError</code> instead of an <code>AssertionError</code>, but the trainer never writes one.
+<b>Found along the way, in both versions:</b> a few duplicated-token cases (1–4 in 300) pass, when the duplicated token sits where the count-back cannot see the shift. That is in today's code, not caused by C19.</p>
+
+<div class="hl"><b>So what.</b> C19 is a correct, modest cleanup: one place to read the per-cut checks, the row index built once, and 33 fewer lines for the PR. It is not the ~100-line cut the first version of the comment claimed.
+<p class="cref"><a href="https://github.com/NVIDIA-NeMo/RL/pull/4507#discussion_r4477670183">C19 — parity.py:138</a></p></div>
+
+</div>
+</body>
+</html>
