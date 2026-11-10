@@ -44,6 +44,10 @@ p.chainnote{color:var(--dim);font-size:12px;margin:0 0 18px}
 table{border-collapse:collapse;width:100%;font-size:14px;margin:10px 0}
 th,td{border:1px solid var(--border);padding:6px 10px;text-align:left;vertical-align:top}
 th{background:var(--surface);font-weight:600}
+.cref{margin:6px 0 0;font-size:13px}
+.cref a{display:inline-block;padding:4px 10px;border:1px solid var(--border);
+  border-radius:16px;background:var(--surface);font:12.5px ui-monospace,Menlo,monospace}
+.cref a:hover{background:var(--surface2);text-decoration:none}
 .hl{border-left:3px solid var(--green);background:var(--surface);padding:12px 16px;margin:18px 0;border-radius:0 8px 8px 0}
 svg{max-width:100%;height:auto;display:block;margin:14px 0}
 svg .t{fill:var(--text);font:12.5px -apple-system,sans-serif}
@@ -185,6 +189,7 @@ svg a text{text-decoration:underline;fill:var(--accent);font:11px ui-monospace,M
 <tr><td>Running-call progress at refit, data-plane counters</td><td>read from the actor</td><td>read from each child with <code>progress</code> / <code>snapshot</code>, then joined (<a href="https://github.com/NVIDIA-NeMo/RL/blob/908f05faf3457ae34b97137ea41b9d6f284509f9/nemo_rl/models/generation/vllm/vllm_worker_async.py#L815-L860">L815-L860</a>)</td></tr>
 <tr><td>Per-process setup (video loader, output-loop patch, telemetry)</td><td>done by the worker's constructor</td><td>repeated by hand in the child (<a href="https://github.com/NVIDIA-NeMo/RL/blob/908f05faf3457ae34b97137ea41b9d6f284509f9/nemo_rl/models/generation/vllm/multi_api.py#L290-L331">multi_api.py L290-L331</a>)</td></tr>
 </table>
+<p class="cref">🟡 <a href="https://github.com/NVIDIA-NeMo/RL/pull/5074#discussion_r4529166052">review comment C18 — multi_api.py:290, the hand-built child</a></p>
 
 <h2>Why keep both</h2>
 <p><b>count = 1</b> adds no processes and no pipes, and works with every option. <b>count &gt; 1</b> is for runs where the CPU work in the frontend is the limit: many parallel Gym requests, long chat templates, big prompts to tokenize. It costs CPU and host memory per frontend. It needs <code>async_engine</code> and <code>expose_http_server</code>, vLLM's own data parallelism of 1, a refit that is not sparse, and fleet health off (<a href="https://github.com/NVIDIA-NeMo/RL/blob/908f05faf3457ae34b97137ea41b9d6f284509f9/nemo_rl/models/generation/vllm/config.py#L346-L360">config checks</a>, <a href="https://github.com/NVIDIA-NeMo/RL/blob/908f05faf3457ae34b97137ea41b9d6f284509f9/docs/design-docs/nemo-gym-integration.md#L73-L100">docs</a>). The new nightly recipe runs 8 frontends per engine on 4 generation GPUs with TP = 2, so 2 engines and 16 frontends.</p>
