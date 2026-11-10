@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NVIDIA-NeMo/RL #5074 — a failed read-only query stops the shared vLLM engine</title>
+<style>
+:root{--bg:#0d1117;--surface:#161b22;--surface2:#1c2128;--border:#30363d;--text:#e6edf3;--dim:#8b949e;
+  --accent:#58a6ff;--green:#3fb950;--red:#f85149;--orange:#d29922}
+:root[data-theme="light"]{--bg:#ffffff;--surface:#f6f8fa;--surface2:#eaeef2;--border:#d0d7de;--text:#1f2328;
+  --dim:#59636e;--accent:#0969da;--green:#1a7f37;--red:#cf222e;--orange:#9a6700}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:28px 16px 70px}
+h1{font-size:22px;margin:0 0 8px;line-height:1.3}
+h2{font-size:18px;margin:30px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
+.sub{color:var(--dim);font-size:13.5px;margin:0 0 16px}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);
+  border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;
+  font:13px/1 ui-monospace,monospace;cursor:pointer}
+.status{border:1px solid var(--border);border-radius:10px;background:var(--surface);padding:2px 16px 10px;margin:0 0 20px}
+.status dl{display:grid;grid-template-columns:max-content 1fr;gap:4px 14px;margin:12px 0 0}
+.status dt{color:var(--dim);font-size:12px;text-transform:uppercase;letter-spacing:.04em;white-space:nowrap;padding-top:2px}
+.status dd{margin:0;font-size:14px}
+.verdict{font-weight:700}
+.verdict.open{color:var(--red)}
+nav.chain{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 6px;padding:0}
+nav.chain a,nav.chain span{display:inline-block;padding:5px 11px;border:1px solid var(--border);
+  border-radius:20px;background:var(--surface);text-decoration:none;color:var(--accent);
+  font-size:12.5px;line-height:1.3;white-space:nowrap}
+nav.chain a:hover{background:var(--surface2)}
+nav.chain span.here{background:var(--accent);color:var(--bg);border-color:var(--accent);font-weight:600}
+p.chainnote{color:var(--dim);font-size:12px;margin:0 0 18px}
+.bg{border:1px dashed var(--border);border-radius:8px;padding:8px 14px;margin:0 0 16px;font-size:14px;color:var(--dim)}
+.tip{border-bottom:1px dotted var(--dim);cursor:help;position:relative;outline:none}
+.tip:hover::after,.tip:focus::after{content:attr(data-tip);position:absolute;left:0;top:1.7em;z-index:60;
+  width:max-content;max-width:min(340px,80vw);white-space:normal;background:var(--surface2);color:var(--text);
+  border:1px solid var(--border);border-radius:6px;padding:7px 10px;font:13px/1.45 -apple-system,sans-serif;
+  font-weight:400;box-shadow:0 4px 14px rgba(0,0,0,.3)}
+.where{border-left:4px solid var(--accent);background:var(--surface);padding:6px 12px;margin:6px 0 10px}
+.diff{font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--surface);
+  border:1px solid var(--border);border-radius:8px;padding:12px;overflow-x:auto;white-space:pre;margin:10px 0}
+.diff .add{color:var(--green)}
+.diff .del{color:var(--red)}
+.diff .hunk{color:var(--accent)}
+.warn{border-left:3px solid var(--red);background:var(--surface);padding:12px 16px;margin:18px 0;border-radius:0 8px 8px 0}
+.cref{margin:6px 0 0;font-size:13px}
+.cref a{display:inline-block;padding:4px 10px;border:1px solid var(--border);
+  border-radius:16px;background:var(--surface);font:12.5px ui-monospace,Menlo,monospace}
+.cref a:hover{background:var(--surface2);text-decoration:none}
+svg{max-width:100%;height:auto;display:block;margin:14px 0}
+svg .t{fill:var(--text);font:12.5px -apple-system,sans-serif}
+svg .tb{fill:var(--text);font:bold 13px -apple-system,sans-serif}
+svg .m{fill:var(--text);font:11px ui-monospace,Menlo,monospace}
+svg .d{fill:var(--dim);font:11.5px -apple-system,sans-serif}
+svg .lane{stroke:var(--border);stroke-width:1.2;stroke-dasharray:4 4}
+svg .hdr{fill:var(--surface);stroke:var(--border);stroke-width:1.2}
+svg .arr{stroke:var(--text);stroke-width:1.5;fill:none}
+svg .bad{stroke:var(--red);stroke-width:2;fill:none}
+svg .okline{stroke:var(--green);stroke-width:2;fill:none}
+svg .badt{fill:var(--red);font:bold 12px -apple-system,sans-serif}
+svg .okt{fill:var(--green);font:bold 12px -apple-system,sans-serif}
+svg .badbox{fill:var(--surface);stroke:var(--red);stroke-width:2}
+svg .num{fill:var(--accent);font:bold 12px -apple-system,sans-serif}
+svg a text{text-decoration:underline;fill:var(--accent);font:11px ui-monospace,Menlo,monospace}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+  document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head>
+<body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+  function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+  function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
+    b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
+      else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+  document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+<div class="wrap">
+
+<h1>Why one dead frontend leaves the vLLM worker hanging after a metrics read</h1>
+<p class="sub"><a href="https://github.com/NVIDIA-NeMo/RL/pull/5074">NVIDIA-NeMo/RL #5074</a> · all links pinned to head <code>908f05fa</code> · vLLM 0.29.0 (<code>98dff2a8</code>)</p>
+
+<div class="status"><dl>
+  <dt>Before</dt><dd>There was one frontend per engine, so there was no pool and no control pipe. A failed metrics read only lost a metric.</dd>
+  <dt>This PR</dt><dd>When any pool command fails, <code>command()</code> stops every child frontend <i>and</i> shuts down the shared engine. That includes the read-only <code>progress</code> and <code>snapshot</code> queries.</dd>
+  <dt>Status</dt><dd><span class="verdict open">Open, not fixed in this PR.</span> Raised as review comment C15 (pending until the review is published).</dd>
+</dl></div>
+
+<nav class="chain">
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-5074-many-frontends.html">one vs. many frontends</a>
+  <span class="here">a failed query stops the engine</span>
+</nav>
+<p class="chainnote">Two pages on this PR, one question each. This one covers what happens when one frontend command fails.</p>
+
+<div class="bg"><b>Background.</b> With <code>http_api_server_count: 3</code>, a vLLM worker has frontend 0 (inside the Ray actor) and 2 child processes, NRL-HTTP-1 and NRL-HTTP-2. All three share one engine core process. Frontend 0 talks to the children over a pipe with 6 commands; two of them only read state: <code>progress</code> (how far each running call got, read at every refit) and <code>snapshot</code> (data-plane counters, read every step). The <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-5074-many-frontends.html">first page</a> shows the layout.</div>
+
+<p>Both reads are written as best-effort by their callers. The refit code catches any error and warns that <a href="https://github.com/NVIDIA-NeMo/RL/blob/908f05faf3457ae34b97137ea41b9d6f284509f9/nemo_rl/algorithms/single_controller.py#L4899-L4915">"batch age is not worth a failed refit"</a>. The snapshot loop says <a href="https://github.com/NVIDIA-NeMo/RL/blob/908f05faf3457ae34b97137ea41b9d6f284509f9/nemo_rl/models/policy/tq_policy.py#L326-L330">"metrics must never fail a step"</a>. But inside the worker, <a href="https://github.com/NVIDIA-NeMo/RL/blob/908f05faf3457ae34b97137ea41b9d6f284509f9/nemo_rl/models/generation/vllm/multi_api.py#L185-L203"><code>command()</code></a> handles any failure by stopping the children and calling <code>close_engines()</code>, which shuts down the engine core. Frontend 0 never learns of it: its vLLM client was built pointing at an engine it did not start, so <a href="https://github.com/vllm-project/vllm/blob/98dff2a81d747d1dba01a47f939f48c3526d4206/vllm/v1/engine/core_client.py#L711-L716">no monitor watches the engine</a>, and an engine stopped by SIGTERM exits <a href="https://github.com/vllm-project/vllm/blob/98dff2a81d747d1dba01a47f939f48c3526d4206/vllm/v1/engine/core.py#L1362-L1377">without sending the "engine dead" message</a>.</p>
+
+<svg viewBox="0 0 960 520" role="img" aria-label="Sequence: dead child, progress query, engine closed, worker hangs">
+  <!-- lane headers -->
+  <rect class="hdr" x="20" y="10" width="190" height="40" rx="6"/><text class="tb" x="34" y="35">training controller</text>
+  <rect class="hdr" x="260" y="10" width="200" height="40" rx="6"/><text class="tb" x="274" y="35">frontend 0 + pool</text>
+  <rect class="hdr" x="510" y="10" width="190" height="40" rx="6"/><text class="tb" x="524" y="35">NRL-HTTP-2</text>
+  <rect class="hdr" x="750" y="10" width="190" height="40" rx="6"/><text class="tb" x="764" y="35">engine core</text>
+  <line class="lane" x1="115" y1="50" x2="115" y2="430"/>
+  <line class="lane" x1="360" y1="50" x2="360" y2="430"/>
+  <line class="lane" x1="605" y1="50" x2="605" y2="140"/>
+  <line class="lane" x1="845" y1="50" x2="845" y2="215"/>
+
+  <!-- 1 child dies -->
+  <text class="num" x="20" y="85">1</text>
+  <path class="bad" d="M595 78 L615 98 M615 78 L595 98"/>
+  <text class="badt" x="625" y="86">process exits</text>
+  <text class="m" x="625" y="102">is_alive() → False</text>
+
+  <!-- 2 progress read -->
+  <text class="num" x="20" y="135">2</text>
+  <path class="arr" d="M115 130 H352"/><path class="arr" d="M346 125 L354 130 L346 135"/>
+  <text class="m" x="125" y="124">captured_call_progress()</text>
+  <text class="m" x="372" y="134">pool.command("progress")</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/908f05faf3457ae34b97137ea41b9d6f284509f9/nemo_rl/models/generation/vllm/multi_api.py#L190-L191"><text x="372" y="150">multi_api.py L190: raise RuntimeError</text></a>
+
+  <!-- 3 teardown -->
+  <text class="num" x="20" y="195">3</text>
+  <rect class="badbox" x="268" y="168" width="184" height="58" rx="6"/>
+  <text class="badt" x="278" y="186">except: stop_children()</text>
+  <text class="badt" x="278" y="203">close_engines()</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/908f05faf3457ae34b97137ea41b9d6f284509f9/nemo_rl/models/generation/vllm/multi_api.py#L200-L203"><text x="278" y="219">multi_api.py L200-L203</text></a>
+  <path class="bad" d="M452 197 H837"/><path class="bad" d="M831 192 L839 197 L831 202"/>
+  <text class="m" x="470" y="190">SIGTERM → engine exits, no "dead" message</text>
+  <path class="bad" d="M835 205 L855 225 M855 205 L835 225"/>
+
+  <!-- 4 caller warns -->
+  <text class="num" x="20" y="262">4</text>
+  <path class="arr" d="M360 255 H123"/><path class="arr" d="M129 250 L121 255 L129 260"/>
+  <text class="m" x="150" y="249">error</text>
+  <text class="d" x="30" y="280">warns "could not read running calls'</text>
+  <text class="d" x="30" y="295">token counts at a refit", keeps going</text>
+  <text class="m" x="372" y="262">pool.children = []</text>
+  <text class="m" x="372" y="278">self.llm still points at the engine</text>
+
+  <!-- 5 resume hangs -->
+  <text class="num" x="20" y="330">5</text>
+  <path class="arr" d="M115 325 H352"/><path class="arr" d="M346 320 L354 325 L346 330"/>
+  <text class="m" x="125" y="319">resume after refit</text>
+  <path class="bad" d="M360 325 H700" stroke-dasharray="4 4"/>
+  <text class="badt" x="372" y="345">request sent, no reply ever comes</text>
+  <text class="d" x="372" y="362">same for every Gym HTTP request; /health still says ok</text>
+
+  <!-- 6 later commands -->
+  <text class="num" x="20" y="400">6</text>
+  <path class="arr" d="M115 395 H352"/><path class="arr" d="M346 390 L354 395 L346 400"/>
+  <text class="m" x="125" y="389">set_rollout_weight_version(7)</text>
+  <text class="m" x="372" y="399">command("version") → []</text>
+  <text class="badt" x="372" y="416">"succeeds": no children left to update</text>
+
+  <!-- legend -->
+  <path class="bad" d="M20 470 H50"/><text class="t" x="58" y="474">the failure path</text>
+  <path class="arr" d="M200 470 H230"/><text class="t" x="238" y="474">normal call</text>
+  <text class="d" x="20" y="500">Example: 3 frontends, child 2 has exited. Step 1 can also be a child that errors, or one that misses the 600 s reply limit.</text>
+</svg>
+
+<h2>What would fix it — proposed in review comment C15, not in the PR</h2>
+<p class="where"><b>Where the fix lands: RL only, one file.</b> <a href="https://github.com/NVIDIA-NeMo/RL/blob/908f05faf3457ae34b97137ea41b9d6f284509f9/nemo_rl/models/generation/vllm/multi_api.py#L39-L47"><code>multi_api.py</code> <code>__init__</code></a> and <a href="https://github.com/NVIDIA-NeMo/RL/blob/908f05faf3457ae34b97137ea41b9d6f284509f9/nemo_rl/models/generation/vllm/multi_api.py#L175-L203"><code>command()</code></a>. No vLLM change is needed. The worker's <a href="https://github.com/NVIDIA-NeMo/RL/blob/908f05faf3457ae34b97137ea41b9d6f284509f9/nemo_rl/models/generation/vllm/vllm_worker_async.py#L2685-L2687"><code>shutdown()</code></a> already closes the engine.</p>
+<p>Nothing below is implemented or run. When a command fails, stop only the children, remember that the pool failed, and make every later command raise. That way the caller still gets its error, the engine stays up for frontend 0, and nothing quietly returns <code>[]</code>.</p>
+<pre class="diff"><span class="hunk">@@ multi_api.py L39-L47 · MultiAPIServerPool.__init__</span>
+         self.coordinator: Any = None
+         self._command_lock = asyncio.Lock()
+<span class="add">+        # Set when a command fails; later commands raise instead of returning [].
++        self._failed = False</span>
+<span class="hunk">@@ multi_api.py L175-L203 · MultiAPIServerPool.command</span>
+     async def command(self, name: str, *args: Any) -> list[Any]:
+<span class="add">+        if self._failed:
++            raise RuntimeError("HTTP API pool already failed; restart the worker")</span>
+         async with self._command_lock:
+             try:
+                 ...
+                 return list(replies)
+<span class="del">-            except BaseException:
+-                self.stop_children()
+-                self.close_engines()
+-                raise
+</span><span class="add">+            except Exception:
++                # Stop the frontends only. Frontend 0 still holds a client on this
++                # engine and gets no signal if it dies; shutdown() closes it.
++                self.stop_children()
++                self._failed = True
++                raise</span></pre>
+<p>Line by line: the flag starts as <code>False</code>. Any command after a failure raises right away, so a later <code>version</code> or <code>snapshot</code> cannot report success with no children. On failure the children stop and the error goes up to the caller, which already handles it. Catching <code>Exception</code> instead of <code>BaseException</code> also means a cancelled call does not tear anything down. Catching the error in <code>captured_call_progress</code> would not help: the engine is already closed inside <code>command()</code> before the caller sees the error.</p>
+
+<div class="warn"><b>So what.</b> With more than one frontend, a single dead child process turns the next metrics read into a worker that hangs, with no error and a healthy-looking <code>/health</code>. Fleet health, which might notice, is rejected for this setup in the same PR. The fix is a few lines in <code>command()</code>.
+<p class="cref">🔴 <a href="https://github.com/NVIDIA-NeMo/RL/pull/5074">review comment C15 — multi_api.py:200</a></p></div>
+
+</div>
+</body>
+</html>
