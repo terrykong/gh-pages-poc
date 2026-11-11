@@ -45,6 +45,7 @@ table{border-collapse:collapse;width:100%;font-size:14px;margin:8px 0}
 th,td{border:1px solid var(--border);padding:6px 9px;text-align:left;vertical-align:top}
 th{background:var(--surface)}
 .scroll{overflow-x:auto}
+.wide{width:min(1480px,calc(100vw - 32px));position:relative;left:50%;transform:translateX(-50%)}
 svg{max-width:100%;height:auto;display:block;margin:14px 0}
 svg .panel{fill:none;stroke:var(--border);stroke-width:1.3;stroke-dasharray:5 4}
 svg .sa{fill:var(--surface);stroke:var(--accent);stroke-width:2.2}
@@ -107,11 +108,63 @@ svg a text{text-decoration:underline;fill:var(--accent);font:10.5px ui-monospace
 <div class="bg"><b>Background.</b> NeMo-Gym sends chat calls. On turn 2+, the earlier turns are swapped for the exact tokens the model made (the <span class="tip" tabindex="0" data-tip="Keep the model's own turn-1 tokens up to its turn end, then the template's tokens after it. Training then sees what the model really generated.">splice</span>), read from <span class="tip" tabindex="0" data-tip="TransferQueue, NeMo RL's data plane. The worker writes each call's tokens, logprobs and routed experts there; training reads them later.">TQ</span>. The <span class="tip" tabindex="0" data-tip="Lower the call's max_tokens so prompt + output fits in max_model_len, or refuse a prompt that leaves no room.">clamp</span> fits the output budget. A <span class="tip" tabindex="0" data-tip="From #4506: a call cut off by a checkpoint saves the tokens it made so far. After the restart, the same call picks up from those tokens instead of starting over.">restore</span> resumes a call a checkpoint cut. Dynamo's <span class="tip" tabindex="0" data-tip="Picks the worker whose cache already holds most of this prompt. It needs the final token ids to do that.">KV router</span> picks a worker by token ids. Dotted words have a short explanation: hover or tap them.</div>
 <p>On native, every step runs in one vLLM worker process (<a href="https://github.com/NVIDIA-NeMo/RL/blob/5c7fa69ef7d5/nemo_rl/models/generation/vllm/vllm_worker_async.py#L320"><code>VllmAsyncGenerationWorkerImpl</code></a>). On Dynamo, the KV router needs the final token ids before it picks a worker, so the frontend (<a href="https://github.com/NVIDIA-NeMo/RL/blob/5c7fa69ef7d5/nemo_rl/models/generation/dynamo/vllm/chat_engine.py#L215"><code>NemoRLChatEngine</code></a>) must plan the call and the worker (<a href="https://github.com/NVIDIA-NeMo/RL/blob/5c7fa69ef7d5/nemo_rl/models/generation/dynamo/vllm/adapter.py#L201"><code>DynamoVllmAdapter</code></a>, wrapping the same class) must run it. A restore must also run on the worker: its check that the saved tokens match the current weights reads the <a href="https://github.com/NVIDIA-NeMo/RL/blob/5c7fa69ef7d5/nemo_rl/models/generation/vllm/vllm_worker_async.py#L894">worker's weight version</a>. So cut the call there, make each side one shared function, and send the plan as JSON.</p>
 
-<h2>Same three boxes in both lanes</h2>
-<div class="scroll"><svg viewBox="0 0 1000 894" role="img" aria-label="Native and Dynamo lanes call the same three shared steps">
+<h2>Today's native code, then the same three boxes in both lanes</h2>
+<div class="scroll wide"><svg viewBox="0 0 1500 894" role="img" aria-label="Today's native code next to the proposed native and Dynamo lanes, which call the same three shared steps">
 <defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="ahf" d="M0,0L10,5L0,10z"/></marker><marker id="ahw" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="ahw" d="M0,0L10,5L0,10z"/></marker></defs>
-<text class="h" x="16" y="22">Native: one worker process</text>
-<text class="h" x="516" y="22">Dynamo: frontend → KV router → worker</text>
+<text class="h" x="16" y="22">Native today (5c7fa69): no shared steps</text>
+<rect class="gym" x="28" y="36" width="444" height="44" rx="6"/>
+<text class="t" x="38" y="53">Gym: POST /v1/chat/completions (turn 2)</text>
+<text class="d" x="38" y="70">max_tokens 20 · ng_capture: token_in, call "c2"</text>
+<path class="arr" d="M250,80 L250,118"/>
+<rect class="panel" x="16" y="92" width="468" height="714" rx="10"/>
+<text class="ph" x="26" y="108">vLLM worker process (Ray actor)</text>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/5c7fa69ef7d5/nemo_rl/models/generation/vllm/chat_server.py#L1055"><text x="472" y="108" text-anchor="end">create_chat_completion · L1055</text></a>
+<rect class="sa" x="28" y="120" width="444" height="98" rx="7"/>
+<text class="t" x="38" y="138">preprocess_chat, part 1</text>
+<text class="ka" x="462" y="138" text-anchor="end">INLINE · becomes A</text>
+<text class="d" x="38" y="156">TQ read → prefix [1,5,6,2]</text>
+<text class="d" x="38" y="170">splice: prefix[:3] + template[2:]</text>
+<text class="d" x="38" y="184">clamp 20 → 10, written twice:</text>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/5c7fa69ef7d5/nemo_rl/models/generation/vllm/chat_server.py#L527-L533"><text x="262" y="184">L527</text></a><text class="d" x="294" y="184">,</text><a href="https://github.com/NVIDIA-NeMo/RL/blob/5c7fa69ef7d5/nemo_rl/models/generation/vllm/chat_server.py#L584-L591"><text x="304" y="184">L584</text></a>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/5c7fa69ef7d5/nemo_rl/models/generation/vllm/chat_server.py#L490-L573"><text x="38" y="204">chat_server.py L490-L573</text></a>
+<path class="arr" d="M250,218 L250,396"/>
+<text class="tg" x="262" y="276">still the same function</text>
+<text class="dg" x="262" y="292">no plan object: the values</text>
+<text class="dg" x="262" y="306">stay in local variables</text>
+<text class="dg" x="262" y="326">render-only and splice</text>
+<text class="dg" x="262" y="340">branches each repeat B</text>
+<rect class="sb" x="28" y="398" width="444" height="104" rx="7"/>
+<text class="t" x="38" y="416">preprocess_chat, part 2</text>
+<text class="kb" x="462" y="416" text-anchor="end">INLINE · becomes B</text>
+<text class="d" x="38" y="434">restore: resolve_restored_call → swap prompt</text>
+<text class="d" x="38" y="448">terminal check → clamp again for a restore</text>
+<text class="d" x="38" y="462">media snapshot → remap images</text>
+<text class="d" x="38" y="476">begin_call(prompt, prefix [1,5,6,2])</text>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/5c7fa69ef7d5/nemo_rl/models/generation/vllm/chat_server.py#L496-L645"><text x="38" y="494">L496-L645 · same order again in adapter.py</text></a>
+<path class="arr" d="M250,502 L250,516"/>
+<rect class="gr" x="28" y="518" width="444" height="48" rx="6"/>
+<text class="tg" x="38" y="536">generate: vLLM's OpenAIServingChat → AsyncLLM</text>
+<text class="dg" x="38" y="552">vLLM's own queue check, SamplingParams, GPU</text>
+<path class="arr" d="M250,566 L250,580"/>
+<rect class="sb" x="28" y="582" width="444" height="80" rx="7"/>
+<text class="t" x="38" y="600">full generator + route</text>
+<text class="kb" x="462" y="600" text-anchor="end">INLINE · becomes B</text>
+<text class="d" x="38" y="618">ok:  stage ids, logprobs, routes → TQ</text>
+<text class="d" x="38" y="632">err: six except blocks, own status per error</text>
+<text class="d" x="38" y="646">     full queue → 500 (Dynamo: 503)</text>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/5c7fa69ef7d5/nemo_rl/models/generation/vllm/chat_server.py#L1077-L1184"><text x="330" y="632">L1077</text></a>
+<path class="arr" d="M250,662 L250,722"/>
+<text class="dg" x="262" y="692">same process</text>
+<rect class="sc" x="28" y="724" width="444" height="66" rx="7"/>
+<text class="t" x="38" y="742">full generator: build the reply</text>
+<text class="kc" x="462" y="742" text-anchor="end">INLINE · becomes C</text>
+<text class="d" x="38" y="760">text, reasoning, tools, usage → OpenAI JSON</text>
+<text class="d" x="38" y="776">restore fixes + top_logprobs check, after generation</text>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/5c7fa69ef7d5/nemo_rl/models/generation/vllm/chat_server.py#L741-L868"><text x="412" y="760">L741</text></a>
+<path class="arr" d="M492,450 L508,450"/>
+<g transform="translate(500,0)">
+<text class="h" x="16" y="22">Native, proposed: one worker process</text>
+<text class="h" x="516" y="22">Dynamo, proposed: frontend → KV router → worker</text>
 <g>
 <rect class="gym" x="28" y="36" width="444" height="44" rx="6"/>
 <text class="t" x="38" y="53">Gym: POST /v1/chat/completions (turn 2)</text>
@@ -234,6 +287,7 @@ svg a text{text-decoration:underline;fill:var(--accent);font:10.5px ui-monospace
 <text class="d" x="38" y="760">text, reasoning, tools, usage → OpenAI JSON</text>
 <text class="d" x="38" y="776">restore fixes once: restore_reply_text, …_usage</text>
 </g>
+</g>
 <rect class="sa" x="16" y="828" width="18" height="12" rx="3"/><text class="n" x="40" y="838">A: plan</text>
 <rect class="sb" x="110" y="828" width="18" height="12" rx="3"/><text class="n" x="134" y="838">B: run on the worker</text>
 <rect class="sc" x="270" y="828" width="18" height="12" rx="3"/><text class="n" x="294" y="838">C: reply (not in the sketch yet)</text>
@@ -241,7 +295,7 @@ svg a text{text-decoration:underline;fill:var(--accent);font:10.5px ui-monospace
 <rect class="panel" x="616" y="828" width="18" height="12" rx="3"/><text class="n" x="640" y="838">one OS process</text>
 <path class="warr" d="M740,834 L770,834"/><text class="n" x="776" y="838">crosses the network</text>
 <text class="n" x="16" y="864">Token ids from the unit test: turn end 2, max_model_len 16. Clamp: 16 − 6 prompt tokens = 10.</text>
-<text class="n" x="16" y="882">Same color and height = the same function. Gray = what each path keeps for itself.</text>
+<text class="n" x="16" y="882">Left lane: today's native code, each part colored by the box it becomes. Right two lanes: same color and height = the same function. Gray = what each path keeps for itself.</text>
 </svg></div>
 <p>Across a row, both boxes are one function with the same input and output. Down the Dynamo lane, the plan crosses to the worker as JSON beside the token ids and is rebuilt with <code>ChatCallPlan.from_wire</code>. The restore sits in B, not A: the frontend's plan carries the normal spliced prompt, and B swaps in the saved prompt when a cut resolves. Gray stays per path: native keeps vLLM's own serving; the adapter keeps its short copy of vLLM's SamplingParams build, since vLLM's serving would render the messages again.</p>
 
