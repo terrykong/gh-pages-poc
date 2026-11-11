@@ -88,8 +88,9 @@ All permalinks pin the PR head <code>d04330b8</code>.</p>
   <dd>Allows it when MTP heads are detached, and divides the MTP gradients by the token count from <em>before</em> filtering, in both trainers.</dd>
   <dt>Status</dt>
   <dd><span class="verdict good">New in this PR. The math is correct in both trainers, and CI is green.</span>
-  <span class="verdict open">Two review asks are open:</span> a test for the <code>train()</code> wiring (C1), and a worker-side check
-  so attached heads that come from the checkpoint cannot slip past the config check (C2). Attached heads are still rejected when the YAML names them.</dd>
+  <span class="verdict open">Open, asked to fix before merge:</span> in-loss mode trains MTP on the rejected sequences too, unlike the separate-pass mode (C3, last section).
+  Also open: a test for the <code>train()</code> wiring (C1), and a worker-side check
+  so attached heads that come from the checkpoint cannot slip past the config check (C2).</dd>
 </dl></div>
 
 <div class="bg"><b>Background.</b> <span class="tip" tabindex="0" data-tip="Multi-token prediction: extra heads that predict tokens 2, 3, … ahead. They are used as a draft model for speculative decoding and train with their own auxiliary loss.">MTP heads</span>
@@ -195,10 +196,28 @@ Each sum must be divided by its own count. Since only MTP weights get the MTP gr
 <p>In the SingleController trainer the pre-filter count rides the same DP all-reduce as the survivor counts, so no new collective is added.
 The draft counts move one slot to the right; draft training is still rejected with in-loss filtering, so that slice is empty here.</p>
 
-<div class="warn"><b>So what.</b> Detached MTP now works with in-loss filtering. The author measured a 19% faster step on an MoE model with 5 MTP heads, and reward and MTP acceptance stayed within one step-to-step standard deviation.
-That run dropped only ~3 of 8192 sequences per step (K/G ≈ 0.9996), so it shows the speedup but cannot tell a right MTP scale from a wrong one; the unit tests check the math.
-Two gaps remain. <b>(1)</b> No test runs the <code>train()</code> line that passes <code>mtp_detached</code>, so it could silently become <code>False</code> (C1).
-<b>(2)</b> The config check reads <code>mtp_num_layers</code> from the YAML only. A checkpoint can turn MTP on with attached heads when the YAML leaves the key out, and then nothing raises (C2).</div>
+<p>Two smaller gaps. <b>(C1)</b> No test runs the <code>train()</code> line that passes <code>mtp_detached</code>, so it could silently become <code>False</code>.
+<b>(C2)</b> The config check reads <code>mtp_num_layers</code> from the YAML only. A checkpoint can turn MTP on with attached heads when the YAML leaves the key out, and then nothing raises.</p>
+
+<h2>The open ask: keep MTP on the same data as before (C3)</h2>
+<p>In-loss filtering exists to skip one forward pass. It should not change what gets trained. For the policy it doesn't: both modes train on the 9 kept tokens ÷ 9.
+For MTP it does:</p>
+<pre class="diff"><span class="hunk">mode                         extra pass?   MTP trains on            divides by</span>
+separate pass (existing)     yes           9 kept tokens            9   (K)
+<span class="del">in-loss, this PR             no            all 15, rejected too     15  (G)</span>
+<span class="add">in-loss + per-token mask     no            9 kept tokens            9   (K)   ← the ask</span></pre>
+<p>The separate-pass mode zeroes <a href="https://github.com/NVIDIA-NeMo/RL/blob/d04330b8ba70198a3a88a09d27b5c0a0ef499511/nemo_rl/algorithms/grpo.py#L3538"><code>sample_mask</code></a> before training,
+so the <a href="https://github.com/NVIDIA-NeMo/RL/blob/d04330b8ba70198a3a88a09d27b5c0a0ef499511/nemo_rl/models/policy/workers/megatron_policy_worker.py#L1497-L1500">MTP loss mask</a> already leaves seq C out.
+In-loss mode only learns that seq C is rejected inside the loss, after MTP's mask was built.
+It still isn't too late: Megatron keeps MTP's loss <a href="https://github.com/NVIDIA/Megatron-LM/blob/3e95097b4a9ab6ea6b2a39eb2b2b24e4a6dfa54a/megatron/core/transformer/multi_token_prediction.py#L1289-L1291">per token</a>
+until the backward, and reads its gradient scale <a href="https://github.com/NVIDIA/Megatron-LM/blob/3e95097b4a9ab6ea6b2a39eb2b2b24e4a6dfa54a/megatron/core/pipeline_parallel/schedules.py#L334-L379">after NeMo-RL's loss function runs</a>.
+Only a <a href="https://github.com/NVIDIA/Megatron-LM/blob/3e95097b4a9ab6ea6b2a39eb2b2b24e4a6dfa54a/megatron/core/pipeline_parallel/schedules.py#L244-L253">single-number check</a> stops that scale from being a per-token mask.
+With the mask, both losses use the same 9 tokens and ÷9, so the extra MTP correction goes away and attached heads work too.</p>
+
+<div class="warn"><b>So what.</b> The PR's math is right for what it does, and the speedup is real: a 19% faster step on an MoE model with 5 MTP heads.
+But it quietly changes MTP's training data compared with the existing mode, and the author's run rejected only ~0.04% of sequences, so it can't show whether that matters.
+The review asks to keep the existing behavior: mask MTP per token (a small Megatron-LM change), and keep rejecting MTP with in-loss filtering until that lands.</div>
+<p class="cref">🔴 <a href="https://github.com/NVIDIA-NeMo/RL/pull/5124#discussion_r4532554585">review comment C3 — docs/guides/grpo.md:695</a></p>
 <p class="cref">🟠 <a href="https://github.com/NVIDIA-NeMo/RL/pull/5124#discussion_r4531996291">review comment C1 — megatron_policy_worker.py:1616</a></p>
 <p class="cref">🟠 <a href="https://github.com/NVIDIA-NeMo/RL/pull/5124#discussion_r4531996298">review comment C2 — grpo.py:627</a></p>
 
