@@ -193,12 +193,16 @@ So the policy gradient is the same, but the stages before and after the policy l
 <tr><th>Stage</th><th>Flag off</th><th>Flag on</th><th>Can it match?</th></tr>
 <tr><td>Advantage normalization</td><td>rows {0, 2, 3}</td><td class="o">rows {0, 1, 2, 3}</td><td>No: it runs before the loss sees row 1</td></tr>
 <tr><td>Critic training</td><td>rows {0, 2, 3}</td><td class="o">rows {0, 1, 2, 3}</td><td>Yes: it runs after the policy step. Asked in C3.</td></tr>
+<tr><td>Critic training, warmup steps</td><td>rows {0, 2, 3}</td><td class="o">rows {0, 1, 2, 3}</td><td>Yes: run the separate pass on those steps. Asked in C3.</td></tr>
 </table>
 <p>The PR documents both in <a href="https://github.com/NVIDIA-NeMo/RL/blob/ef9cc6c2bc93be91928e7ab503cf2d4266ffe548/docs/guides/grpo.md#L695">grpo.md</a>.
 Normalization can't match without the extra pass, so a doc note is enough there. GRPO has the same kind of gap: a rejected row still counts in its group's average reward.
 The critic can match: it trains after the policy step
 (<a href="https://github.com/NVIDIA-NeMo/RL/blob/ef9cc6c2bc93be91928e7ab503cf2d4266ffe548/nemo_rl/algorithms/single_controller.py#L4984-L5010"><code>_value_train_epochs</code></a>),
-when row 1's rejection is already known. A flag that only skips a pass shouldn't change what the critic learns from, so C3 asks the PR to hand the rejection to the critic.</p>
+when row 1's rejection is already known. A flag that only skips a pass shouldn't change what the critic learns from, so C3 asks the PR to hand the rejection to the critic.
+Critic warmup (<code>ppo.policy_training_start_step &gt; 0</code>) needs one more piece: those steps
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/ef9cc6c2bc93be91928e7ab503cf2d4266ffe548/nemo_rl/algorithms/single_controller.py#L2553-L2556">skip policy training</a>,
+so with the flag on nothing ever rejects row 1. With the flag off, the separate pass still runs then. C3 asks to run it on warmup steps too. That costs one forward pass on warmup steps only; policy-training steps keep the speedup.</p>
 <p class="cref">Review comment:
 <a href="https://github.com/NVIDIA-NeMo/RL/pull/5130#discussion_r4532770022">C3 · critic trains on rejected rows — grpo.md:695</a></p>
 
