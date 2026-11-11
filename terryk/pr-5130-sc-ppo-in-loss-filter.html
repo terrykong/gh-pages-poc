@@ -198,10 +198,11 @@ So the policy gradient is the same, but the stages before and after the policy l
 <h2>Why one policy epoch</h2>
 <p>This mode needs <code>force_on_policy_ratio: true</code>: the ratio between the new and old policy is set to 1, so no old logprobs are needed. That is exact only for the first optimizer step on a batch, before the weights move. SingleController already maps one PPO epoch to one optimizer step
 (<a href="https://github.com/NVIDIA-NeMo/RL/blob/ef9cc6c2bc93be91928e7ab503cf2d4266ffe548/nemo_rl/algorithms/single_controller_utils/config.py#L1829-L1836">config.py#L1829</a>), so <code>ppo.ppo_epochs: 1</code> is the whole condition.
-SingleController already refused <code>force_on_policy_ratio</code> with more than one epoch
-(<a href="https://github.com/NVIDIA-NeMo/RL/blob/ef9cc6c2bc93be91928e7ab503cf2d4266ffe548/nemo_rl/algorithms/single_controller_utils/config.py#L1565-L1572">config.py#L1567</a>).</p>
-<p class="cref">Review comments:
-<a href="https://github.com/NVIDIA-NeMo/RL/pull/5130#discussion_r4531941181">C1 · repeated ppo_epochs check — grpo.py:653</a>
+Two checks reject more than one epoch, one for each reason: the existing <code>force_on_policy_ratio</code> rule
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/ef9cc6c2bc93be91928e7ab503cf2d4266ffe548/nemo_rl/algorithms/single_controller_utils/config.py#L1565-L1572">config.py#L1567</a>)
+and the PR's new in-loss check
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/ef9cc6c2bc93be91928e7ab503cf2d4266ffe548/nemo_rl/algorithms/grpo.py#L653-L658">grpo.py#L654</a>).</p>
+<p class="cref">Review comment:
 <a href="https://github.com/NVIDIA-NeMo/RL/pull/5130#discussion_r4531941210">C2 · GRPO-only texts PPO now hits — grpo.py:637</a></p>
 
 <div class="hl"><b>So what.</b> In the PR's run (1.5B dense model, 512 rows per step, one node), skipping the extra pass cut step time from 25.7 s to 22.6 s (−12%). Reward, grad norm, entropy and critic loss stayed within one step-to-step standard deviation, on one seed per arm. Use it when you already run one policy epoch with a forced ratio; expect the critic and normalization to see the few rejected rows.</div>
