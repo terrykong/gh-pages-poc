@@ -98,7 +98,7 @@ svg .sw-r{fill:var(--red)} svg .sw-g{fill:var(--green)} svg .sw-o{fill:var(--ora
   <dt>This PR</dt>
   <dd>Removes that refusal for SingleController PPO with <code>ppo.ppo_epochs: 1</code>. No runtime code changes: setup, loss and workers already handled PPO. The legacy PPO trainer still refuses the flag.</dd>
   <dt>Status</dt>
-  <dd><span class="verdict good">New option added by this PR.</span> The review found no bug. Two small review comments are open: a startup check that repeats an existing one, and two GRPO-only messages that PPO runs can now hit.</dd>
+  <dd><span class="verdict good">New option added by this PR.</span> <span class="verdict open">Open (C3): with the flag on, the critic trains on rows the policy rejected; with it off, it doesn't.</span> Also open (C2): two GRPO-only messages that PPO runs can now hit.</dd>
 </dl>
 </div>
 
@@ -170,7 +170,7 @@ So the policy gradient is the same, but the stages before and after the policy l
 <rect class="box-org" x="465" y="462" width="420" height="72" rx="7"/>
 <text class="d" x="477" y="482">value loss over rows {0, </text><text class="o" x="663" y="482">1</text><text class="d" x="670" y="482">, 2, 3}</text>
 <text class="o" x="477" y="502">critic learns from row 1 too</text>
-<text class="dim" x="477" y="522">the policy loss never touches the critic's mask</text>
+<text class="dim" x="477" y="522">open: C3 asks to drop row 1 here too</text>
 <path class="arr" d="M230,534 L230,550"/><path class="arr" d="M675,534 L675,550"/>
 
 <text class="rowlbl" x="20" y="564">6 · checks at startup</text>
@@ -189,11 +189,17 @@ So the policy gradient is the same, but the stages before and after the policy l
 
 <p>The policy gradient is the same in both lanes: <code>S / 21</code>, the sum over kept tokens divided by the number of kept tokens. Two PPO stages differ, because they run outside the policy loss and read only <code>sample_mask</code>:</p>
 <table>
-<tr><th>Stage</th><th>Flag off</th><th>Flag on</th><th>Why</th></tr>
-<tr><td>Advantage normalization</td><td>rows {0, 2, 3}</td><td class="o">rows {0, 1, 2, 3}</td><td>runs before the loss sees row 1</td></tr>
-<tr><td>Critic training</td><td>rows {0, 2, 3}</td><td class="o">rows {0, 1, 2, 3}</td><td>the critic has its own loss and mask</td></tr>
+<tr><th>Stage</th><th>Flag off</th><th>Flag on</th><th>Can it match?</th></tr>
+<tr><td>Advantage normalization</td><td>rows {0, 2, 3}</td><td class="o">rows {0, 1, 2, 3}</td><td>No: it runs before the loss sees row 1</td></tr>
+<tr><td>Critic training</td><td>rows {0, 2, 3}</td><td class="o">rows {0, 1, 2, 3}</td><td>Yes: it runs after the policy step. Asked in C3.</td></tr>
 </table>
-<p>The PR documents both in <a href="https://github.com/NVIDIA-NeMo/RL/blob/ef9cc6c2bc93be91928e7ab503cf2d4266ffe548/docs/guides/grpo.md#L695">grpo.md</a>. GRPO has the same kind of gap: there, a rejected row still counts in its group's average reward.</p>
+<p>The PR documents both in <a href="https://github.com/NVIDIA-NeMo/RL/blob/ef9cc6c2bc93be91928e7ab503cf2d4266ffe548/docs/guides/grpo.md#L695">grpo.md</a>.
+Normalization can't match without the extra pass, so a doc note is enough there. GRPO has the same kind of gap: a rejected row still counts in its group's average reward.
+The critic can match: it trains after the policy step
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/ef9cc6c2bc93be91928e7ab503cf2d4266ffe548/nemo_rl/algorithms/single_controller.py#L4984-L5010"><code>_value_train_epochs</code></a>),
+when row 1's rejection is already known. A flag that only skips a pass shouldn't change what the critic learns from, so C3 asks the PR to hand the rejection to the critic.</p>
+<p class="cref">Review comment:
+<a href="https://github.com/NVIDIA-NeMo/RL/pull/5130#discussion_r4532770022">C3 · critic trains on rejected rows — grpo.md:695</a></p>
 
 <h2>Why one policy epoch</h2>
 <p>This mode needs <code>force_on_policy_ratio: true</code>: the ratio between the new and old policy is set to 1, so no old logprobs are needed. That is exact only for the first optimizer step on a batch, before the weights move. SingleController already maps one PPO epoch to one optimizer step
@@ -205,7 +211,7 @@ and the PR's new in-loss check
 <p class="cref">Review comment:
 <a href="https://github.com/NVIDIA-NeMo/RL/pull/5130#discussion_r4531941210">C2 · GRPO-only texts PPO now hits — grpo.py:637</a></p>
 
-<div class="hl"><b>So what.</b> In the PR's run (1.5B dense model, 512 rows per step, one node), skipping the extra pass cut step time from 25.7 s to 22.6 s (−12%). Reward, grad norm, entropy and critic loss stayed within one step-to-step standard deviation, on one seed per arm. Use it when you already run one policy epoch with a forced ratio; expect the critic and normalization to see the few rejected rows.</div>
+<div class="hl"><b>So what.</b> In the PR's run (1.5B dense model, 512 rows per step, one node), skipping the extra pass cut step time from 25.7 s to 22.6 s (−12%). Reward, grad norm, entropy and critic loss stayed within one step-to-step standard deviation, on one seed per arm. Use it when you already run one policy epoch with a forced ratio; expect normalization to count the few rejected rows, and the critic to train on them until C3 is fixed.</div>
 
 </div>
 </body>
