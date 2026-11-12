@@ -73,7 +73,7 @@ svg .cut{fill:var(--orange);font:bold 13px -apple-system,sans-serif}
 
 <div class="status"><dl>
   <dt>Before</dt>
-  <dd>The two paths decided "has the model finished thinking?" from different tokens. Native read the full prompt it runs, including the model's old turns. Dynamo read only what the chat template prints. So they gave different answers in both cases below.</dd>
+  <dd>Both paths run the same spliced prompt through the model. They only differed in which tokens they used to compute the <code>reasoning_ended</code> flag. Native computed it from that spliced prompt, which still holds the model's old turns. Dynamo computed it from the chat template's render, before the splice. So they gave different answers in both cases below.</dd>
   <dt>This PR</dt>
   <dd>Commit <a href="https://github.com/NVIDIA-NeMo/RL/commit/7e29dccaab91301853baf1e47ac8458fe9c9fed0"><code>7e29dcc</code></a> adds one helper, <a href="https://github.com/NVIDIA-NeMo/RL/blob/26d9d01bbb39cd000293eec45826cb2b34b5d036/nemo_rl/models/generation/vllm/chat_server.py#L182-L197"><code>reasoning_ended</code></a>. Both paths now run it on the template's tokens only.</dd>
   <dt>Status</dt>
@@ -101,7 +101,7 @@ svg .cut{fill:var(--orange);font:bold 13px -apple-system,sans-serif}
 </ul>
 The function is correct. The whole issue is <b>which token ids it is given</b>.</div>
 
-<p>So the answer depends entirely on <b>which tokens you hand the rule</b>. Qwen3's chat template drops old thinking from history, so the template's tokens hold no <code>&lt;think&gt;</code> from earlier turns. Native runs a <span class="tip" tabindex="0" data-tip="On turn 2 and later, the earlier turns are replaced with the exact tokens the model wrote, thinking included, so training sees what the model really saw.">spliced prompt</span> that keeps them, and before this PR vLLM's serving read the flag from that (<a href="https://github.com/NVIDIA-NeMo/RL/blob/5c7fa69ef7d5715fddf6e2458d31ad6daa383f46/nemo_rl/models/generation/vllm/chat_server.py#L617">old L617</a>, <a href="https://github.com/vllm-project/vllm/blob/v0.29.0/vllm/entrypoints/openai/chat_completion/serving.py#L356-L366">vLLM serving.py</a>). Dynamo read it from the template. The example below is one Qwen3 chat with a weather tool, as two cases.</p>
+<p>So the answer depends entirely on <b>which tokens you hand the rule</b>. Qwen3's chat template drops old thinking from history, so the template's tokens hold no <code>&lt;think&gt;</code> from earlier turns. Both paths run a <span class="tip" tabindex="0" data-tip="On turn 2 and later, the earlier turns are replaced with the exact tokens the model wrote, thinking included, so the token sequence only grows and training sees what the model really saw.">spliced prompt</span> that keeps them; the model sees the same tokens on both. Before this PR, native's vLLM serving computed the flag from that spliced prompt (<a href="https://github.com/NVIDIA-NeMo/RL/blob/5c7fa69ef7d5715fddf6e2458d31ad6daa383f46/nemo_rl/models/generation/vllm/chat_server.py#L617">old L617</a>, <a href="https://github.com/vllm-project/vllm/blob/v0.29.0/vllm/entrypoints/openai/chat_completion/serving.py#L356-L366">vLLM serving.py</a>). Dynamo read it from the template. The example below is one Qwen3 chat with a weather tool, as two cases.</p>
 
 <h2>One chat, two cases: what each path told the engine</h2>
 <p><b>How to read the pills:</b> each pill is the <code>reasoning_ended</code> value the engine got for turn 2. "Should be" is the correct value: True only if turn 2's own thinking is already written. ✓ means the path matched it, ✗ means it did not.</p>
@@ -109,9 +109,9 @@ The function is correct. The whole issue is <b>which token ids it is given</b>.<
 <svg viewBox="0 0 960 470" role="img" aria-label="Two cases of the reasoning_ended flag">
   <!-- legend -->
   <rect class="tpl" x="20" y="10" width="22" height="14" rx="3"/><text class="n" x="48" y="22">in the template's tokens</text>
-  <rect class="old" x="210" y="10" width="22" height="14" rx="3"/><text class="n" x="238" y="22">only in native's spliced prompt</text>
-  <rect class="sav" x="462" y="10" width="22" height="14" rx="3"/><text class="n" x="490" y="22">saved before a checkpoint cut</text>
-  <text class="go" x="710" y="22">✓ matches</text><text class="rd" x="800" y="22">✗ doesn't</text>
+  <rect class="old" x="210" y="10" width="22" height="14" rx="3"/><text class="n" x="238" y="22">in the spliced prompt, not the template</text>
+  <rect class="sav" x="520" y="10" width="22" height="14" rx="3"/><text class="n" x="548" y="22">saved before a checkpoint cut</text>
+  <text class="go" x="760" y="22">✓ matches</text><text class="rd" x="845" y="22">✗ doesn't</text>
 
   <!-- case A -->
   <text class="h" x="20" y="58">A · Turn 2 starts: the model has not thought about turn 2 yet</text>
