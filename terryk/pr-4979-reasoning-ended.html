@@ -69,6 +69,7 @@ svg .cut{fill:var(--orange);font:bold 13px -apple-system,sans-serif}
 <div class="wrap">
 
 <h1>Has the model finished thinking? Which tokens the engine should read to decide, on a new turn and on a resumed call</h1>
+<!-- three cases: A new turn, B resumed right after </think>, C resumed mid-answer -->
 <p class="sub"><a href="https://github.com/NVIDIA-NeMo/RL/pull/4979">PR #4979</a> · review thread C84 · code pinned at <a href="https://github.com/NVIDIA-NeMo/RL/tree/26d9d01bbb39cd000293eec45826cb2b34b5d036"><code>26d9d01</code></a></p>
 
 <div class="status"><dl>
@@ -77,7 +78,7 @@ svg .cut{fill:var(--orange);font:bold 13px -apple-system,sans-serif}
   <dt>This PR</dt>
   <dd>Commit <a href="https://github.com/NVIDIA-NeMo/RL/commit/7e29dccaab91301853baf1e47ac8458fe9c9fed0"><code>7e29dcc</code></a> adds one helper, <a href="https://github.com/NVIDIA-NeMo/RL/blob/26d9d01bbb39cd000293eec45826cb2b34b5d036/nemo_rl/models/generation/vllm/chat_server.py#L182-L197"><code>reasoning_ended</code></a>. Both paths now run it on the template's tokens only.</dd>
   <dt>Status</dt>
-  <dd><span class="verdict good">Case A (a new turn): fixed by this PR.</span> <span class="verdict open">Case B (a resumed call): open.</span> The change made native give Dynamo's wrong answer here. The author wants to fix it in a follow-up PR. The review has not answered yet.</dd>
+  <dd><span class="verdict good">Case A (a new turn): fixed by this PR.</span> <span class="verdict open">Cases B and C (a resumed call): open, follow-up in <a href="https://github.com/NVIDIA-NeMo/RL/issues/5177">#5177</a>.</span> In B, the change made native give Dynamo's wrong answer. In C, no value of the flag is right. No run today reaches either case (see the box at the end), so the review agreed to the follow-up.</dd>
 </dl></div>
 
 <nav class="chain">
@@ -109,11 +110,11 @@ The function is correct. The whole issue is <b>which token ids it is given</b>.<
 <li><b>Main</b>, before #4979. Only native exists.</li>
 <li><b>At review</b>: #4979 at <code>5c7fa69</code>, when C84 was posted. Native is unchanged from main; Dynamo is new.</li>
 <li><b>Now</b>: #4979 after the author's C84 fix, <code>7e29dcc</code> (head <code>26d9d01</code>). Both paths use the template's tokens.</li>
-<li><b>Proposed</b>: the draft reply C91 asks for, which the author would rather do in a follow-up. Not written yet.</li>
+<li><b>Proposed</b>: read the template plus the saved tokens on the worker. Moved to the follow-up issue <a href="https://github.com/NVIDIA-NeMo/RL/issues/5177">#5177</a>; not written yet.</li>
 </ol>
-<p style="font-size:14px">So: <b>case A</b> was wrong on native in ① and ②, and is fixed in ③. <b>Case B</b> was right on native in ① and ②, wrong on Dynamo in ②, and is wrong on both in ③: the fix for A broke B on native. ④ makes both right.</p>
+<p style="font-size:14px">So: <b>case A</b> was wrong on native in ① and ②, and is fixed in ③. <b>Case B</b> was right on native in ① and ②, wrong on Dynamo in ②, and is wrong on both in ③: the fix for A broke B on native. ④ makes B right. <b>Case C</b> is wrong in every state, ④ included: no value of the flag can resume a half-written answer. That is why the fix is one issue, not a one-line change here.</p>
 
-<svg viewBox="0 0 960 470" role="img" aria-label="Two cases of the reasoning_ended flag">
+<svg viewBox="0 0 960 712" role="img" aria-label="Three cases of the reasoning_ended flag">
   <!-- legend -->
   <rect class="tpl" x="20" y="10" width="22" height="14" rx="3"/><text class="n" x="48" y="22">in the template's tokens</text>
   <rect class="old" x="210" y="10" width="22" height="14" rx="3"/><text class="n" x="238" y="22">in the spliced prompt, not the template</text>
@@ -156,7 +157,28 @@ The function is correct. The whole issue is <b>which token ids it is given</b>.<
   <rect class="bad" x="410" y="402" width="130" height="30" rx="15"/><text class="rd" x="424" y="422">False ✗</text>
   <rect class="bad" x="550" y="402" width="160" height="30" rx="15"/><text class="rd" x="564" y="422">False ✗ broke</text>
   <rect class="ok" x="720" y="402" width="160" height="30" rx="15"/><text class="go" x="734" y="422">True ✓</text>
-  <text class="n" x="20" y="452">① main, native only · ② #4979 at 5c7fa69, when C84 was posted · ③ #4979 after 7e29dcc · ④ C91 / follow-up</text>
+
+  <line class="sep" x1="20" y1="450" x2="940" y2="450"/>
+
+  <!-- case C -->
+  <text class="h" x="20" y="482">C · Same as B, but the cut lands partway into the answer (here: inside the tool call)</text>
+  <rect class="tpl" x="20" y="496" width="236" height="32" rx="5"/><text class="tk" x="30" y="517">turn 2 template, as in A</text>
+  <rect class="sav" x="264" y="496" width="310" height="32" rx="5"/><text class="tk" x="274" y="517">&lt;think&gt;…&lt;/think&gt;&lt;tool_call&gt;{"name": "wea</text>
+  <text class="cut" x="582" y="518">✂ cut</text>
+  <rect class="gen" x="630" y="496" width="240" height="32" rx="5"/><text class="tk" x="640" y="517">resumes: ther", …}&lt;/tool_call&gt;</text>
+  <text class="nb" x="20" y="550">The grammar always restarts from its first state, but the answer is already half written. No flag value fixes that.</text>
+  <text class="n" x="20" y="570">True: a JSON grammar would demand a fresh "{" and corrupt it; a tool-call grammar never sees &lt;tool_call&gt; again, so it checks nothing.</text>
+  <text class="n" x="20" y="588">False: the grammar waits for a &lt;/think&gt; that never comes, so it checks nothing either.</text>
+  <text class="lab" x="20" y="616">SHOULD BE</text><text class="lab" x="130" y="616">① MAIN</text><text class="lab" x="270" y="616">② AT REVIEW</text><text class="lab" x="550" y="616">③ NOW (7e29dcc)</text><text class="lab" x="720" y="616">④ PROPOSED</text>
+  <text class="n" x="130" y="630">native</text><text class="n" x="270" y="630">native</text><text class="n" x="410" y="630">Dynamo</text><text class="n" x="550" y="630">both paths</text><text class="n" x="720" y="630">both paths</text>
+  <rect class="bad" x="20" y="636" width="100" height="30" rx="15"/><text class="rd" x="34" y="656">none works</text>
+  <rect class="bad" x="130" y="636" width="130" height="30" rx="15"/><text class="rd" x="144" y="656">True ✗</text>
+  <rect class="bad" x="270" y="636" width="130" height="30" rx="15"/><text class="rd" x="284" y="656">True ✗</text>
+  <rect class="bad" x="410" y="636" width="130" height="30" rx="15"/><text class="rd" x="424" y="656">False ✗</text>
+  <rect class="bad" x="550" y="636" width="160" height="30" rx="15"/><text class="rd" x="564" y="656">False ✗</text>
+  <rect class="bad" x="720" y="636" width="160" height="30" rx="15"/><text class="rd" x="734" y="656">True ✗</text>
+
+  <text class="n" x="20" y="696">① main, native only · ② #4979 at 5c7fa69, when C84 was posted · ③ #4979 after 7e29dcc · ④ C91's first ask, now in #5177</text>
 </svg>
 
 <p><b>What True and False actually do to the reply.</b> The flag only changes anything when the call has a grammar. Without one, the model writes the same reply either way.</p>
@@ -168,14 +190,17 @@ The function is correct. The whole issue is <b>which token ids it is given</b>.<
 <tr><td style="border:1px solid var(--border);padding:6px 9px;vertical-align:top"><b>B</b>: resumed turn 2 with tools and <code>tool_choice: auto</code>. Its <span class="tip" tabindex="0" data-tip="Free text is allowed until the model writes &lt;tool_call&gt;; from there the arguments must match the tool's JSON schema.">structural tag</span> lets the model write anything until <code>&lt;tool_call&gt;</code>; after that, the arguments must match the tool's schema.</td>
 <td style="border:1px solid var(--border);padding:6px 9px;vertical-align:top"><span style="color:var(--red)">✗ now, on both paths.</span> The grammar waits for a <code>&lt;/think&gt;</code> in the new tokens. The model wrote that before the cut, so it never writes another, and the grammar never turns on. The tool call is written with nothing checking it. Usually it is still valid, but nothing guarantees it, and a bad one fails to parse.</td>
 <td style="border:1px solid var(--border);padding:6px 9px;vertical-align:top"><span style="color:var(--green)">✓ old native, and the proposed fix.</span> The grammar is on from the first resumed token. The model writes <code>&lt;tool_call&gt;</code>, and from there its arguments are forced to match the schema.</td></tr>
+<tr><td style="border:1px solid var(--border);padding:6px 9px;vertical-align:top"><b>C</b>: like B, but the cut lands partway into the answer (a half-written JSON, or inside a <code>&lt;tool_call&gt;</code>).</td>
+<td style="border:1px solid var(--border);padding:6px 9px;vertical-align:top"><span style="color:var(--red)">✗</span> The grammar waits for a <code>&lt;/think&gt;</code> that never comes, so nothing checks the rest of the answer.</td>
+<td style="border:1px solid var(--border);padding:6px 9px;vertical-align:top"><span style="color:var(--red)">✗</span> The grammar restarts from its first state. A JSON grammar demands a fresh <code>{</code> after <code>{"city": "To</code> and corrupts the reply; Gym never cuts these calls, so this cannot happen today. A tool-call grammar never sees <code>&lt;tool_call&gt;</code> again and checks nothing.</td></tr>
 </table>
 <p style="font-size:14px;color:var(--dim)">Two notes. (1) In case A with only a structural tag (tools, <code>auto</code>), a wrong True does little harm: the tag allows free text before <code>&lt;tool_call&gt;</code>, <code>&lt;think&gt;</code> included. The harm is with <code>response_format</code> and a forced tool call, whose grammar starts at the first token. (2) After a tool result, still in the same user turn, Qwen3's template keeps the previous step's thinking. There the template's tokens also end in an old <code>&lt;/think&gt;</code>, so the flag is True on both paths. That is how plain vLLM behaves too, and it is outside this PR.</p>
 
 <p><b>What the author did (<a href="https://github.com/NVIDIA-NeMo/RL/commit/7e29dccaab91301853baf1e47ac8458fe9c9fed0"><code>7e29dcc</code></a>).</b> <a href="https://github.com/NVIDIA-NeMo/RL/blob/26d9d01bbb39cd000293eec45826cb2b34b5d036/nemo_rl/models/generation/vllm/chat_server.py#L182-L197"><code>reasoning_ended</code></a> runs once on the template's tokens. <a href="https://github.com/NVIDIA-NeMo/RL/blob/26d9d01bbb39cd000293eec45826cb2b34b5d036/nemo_rl/models/generation/dynamo/vllm/adapter.py#L466">Dynamo</a> passes the result on. Native puts it in <a href="https://github.com/NVIDIA-NeMo/RL/blob/26d9d01bbb39cd000293eec45826cb2b34b5d036/nemo_rl/models/generation/vllm/chat_server.py#L869-L876"><code>extra_args</code></a>. Then <a href="https://github.com/NVIDIA-NeMo/RL/blob/26d9d01bbb39cd000293eec45826cb2b34b5d036/nemo_rl/models/generation/vllm/utils.py#L529"><code>take_reasoning_ended</code></a> hands it to the engine in place of vLLM's own value. The test <a href="https://github.com/NVIDIA-NeMo/RL/blob/26d9d01bbb39cd000293eec45826cb2b34b5d036/tests/unit/models/generation/test_gym_chat_path.py#L950"><code>reasoning_not_ended_by_an_earlier_turn</code></a> is case A: both paths hand the engine False. The review also suggested never cutting constrained calls. The author did not, for two good reasons. Gym already skips cutting a call with <code>response_format</code> or a forced tool. And a rule on the worker would stop every call with tools from being cut, since vLLM turns the structural tag on for all of them. That leaves case B: a call with tools and <code>tool_choice: auto</code>, which Gym still cuts.</p>
 <p class="cref"><a href="https://github.com/NVIDIA-NeMo/RL/pull/4979#discussion_r4530634163">C84 — render_pool.py</a><a href="https://github.com/NVIDIA-NeMo/RL/pull/4979#discussion_r4545714948">author's reply</a></p>
 
-<h2>What would fix case B — proposed, not in the PR</h2>
-<p>Nothing below is implemented. The author's view: computing this "needs the reasoning parser on the worker behind Dynamo", so they would do it in a follow-up. The review's draft answer: the flag only matters when the engine already has a reasoning parser. So the worker has the parser in exactly the cases where this matters, and the fix fits in this PR.</p>
+<h2>What would fix B and C — proposed in #5177, not in the PR</h2>
+<p>Nothing below is implemented. The author asked to do the resumed case in a follow-up, and the review agreed (reply C91): no run today reaches it, and case C means the fix needs a small design, not one line. <a href="https://github.com/NVIDIA-NeMo/RL/issues/5177">#5177</a> tracks it. For case B, the worker already has what it needs: the flag only matters when the engine has a reasoning parser, so the worker has that parser in exactly the cases where it matters.</p>
 <p class="where"><b>Where it would land: RL only.</b> <a href="https://github.com/NVIDIA-NeMo/RL/blob/26d9d01bbb39cd000293eec45826cb2b34b5d036/nemo_rl/models/generation/vllm/prompt_and_capture.py#L404"><code>start_capture</code></a> (runs on the worker on both paths), the Dynamo adapter's <a href="https://github.com/NVIDIA-NeMo/RL/blob/26d9d01bbb39cd000293eec45826cb2b34b5d036/nemo_rl/models/generation/dynamo/vllm/adapter.py#L466"><code>generate</code> call</a>, plus one test. <b>No Gym change:</b> Gym already decides which calls to cut.</p>
 <div class="code"><span class="c"># in start_capture, on the worker, after the restore is resolved — case B values</span>
 template_ids = [ …"user: Tokyo?"…, …"assistant:" ]             <span class="c"># no &lt;think&gt; anywhere</span>
@@ -188,8 +213,8 @@ if call_resumes_a_cut and engine_has_reasoning_parser:
 
 <span class="c"># test: a deepseek_r1 call with tools, cut right after its &lt;/think&gt;;
 # both paths must hand the engine True.</span></div>
-<p>Case A does not change: a new turn has no saved tokens, so it still reads the template alone and gets False.</p>
-<p class="cref"><a href="https://github.com/NVIDIA-NeMo/RL/pull/4979#discussion_r4546053281">draft reply C91 (pending; only its author can open it until published)</a></p>
+<p>Case A does not change: a new turn has no saved tokens, so it still reads the template alone and gets False. <b>Case C</b> needs a choice instead of a value. JSON-grammar calls must stay uncut, as Gym's <a href="https://github.com/NVIDIA-NeMo/Gym/blob/9aac609404809fc00cec07b5bf2c29df7197fa9d/nemo_gym/_checkpoint/model.py#L292-L310"><code>generation_cut_regenerate_reason</code></a> already does. For a structural-tag call, either do not cut it once its <code>&lt;tool_call&gt;</code> has started, or accept that the rest of that call is unchecked. Tests: one parity case per cut point (inside the thinking, right after <code>&lt;/think&gt;</code>, inside a tool call) with an engine reasoning parser and a grammar.</p>
+<p class="cref"><a href="https://github.com/NVIDIA-NeMo/RL/issues/5177">follow-up issue #5177</a><a href="https://github.com/NVIDIA-NeMo/RL/pull/4979#discussion_r4546053281">reply C91 (opens for others once the review is published)</a></p>
 
 <div class="warn"><b>Do today's runs hit any of this? No, none of the four states.</b> vLLM only reads <code>reasoning_ended</code> when the <i>engine</i> has a reasoning parser (<code>structured_outputs_config.reasoning_parser</code>, set from <code>vllm_kwargs.reasoning_parser</code>). Without one, <a href="https://github.com/vllm-project/vllm/blob/v0.29.0/vllm/v1/structured_output/__init__.py#L370-L391"><code>should_fill_bitmask</code></a> returns True and the grammar starts at the first token whatever the flag says. Every recipe here, Nano3 and Super3 included, sets its reasoning parser only under <code>http_server_serving_chat_kwargs</code>. That one splits the reply into thinking and answer after generation, and NeMo RL never passes it to the engine. The Gym structured-outputs data puts the JSON schema in the prompt text, not in <code>response_format</code>, and its tool rows use <code>tool_choice: auto</code>. So this is a bug waiting for the first run that sets an engine reasoning parser and sends a grammar. Case B also needs tools with a parser that uses a structural tag (hermes, <code>qwen3_engine</code>, …), and a checkpoint that cuts the call right after its <code>&lt;/think&gt;</code>. One catch: even True only helps if the cut lands before the tool call starts. Cut in the middle of <code>&lt;tool_call&gt;</code>, and the restarted grammar never sees the tag's start, so it checks nothing on either answer. The real choice is not about a big bug. It is whether this PR should change native's behavior for case B (before: True, now: False) or leave that for a follow-up.</div>
 
