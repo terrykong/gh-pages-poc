@@ -101,7 +101,7 @@ svg .cut{fill:var(--orange);font:bold 13px -apple-system,sans-serif}
 </ul>
 The function is correct. The whole issue is <b>which token ids it is given</b>.</div>
 
-<p>So the answer depends entirely on <b>which tokens you hand the rule</b>. Qwen3's chat template drops old thinking from history, so the template's tokens hold no <code>&lt;think&gt;</code> from earlier turns. Both paths run a <span class="tip" tabindex="0" data-tip="On turn 2 and later, the earlier turns are replaced with the exact tokens the model wrote, thinking included, so the token sequence only grows and training sees what the model really saw.">spliced prompt</span> that keeps them; the model sees the same tokens on both. Before this PR, native's vLLM serving computed the flag from that spliced prompt (<a href="https://github.com/NVIDIA-NeMo/RL/blob/5c7fa69ef7d5715fddf6e2458d31ad6daa383f46/nemo_rl/models/generation/vllm/chat_server.py#L617">old L617</a>, <a href="https://github.com/vllm-project/vllm/blob/v0.29.0/vllm/entrypoints/openai/chat_completion/serving.py#L356-L366">vLLM serving.py</a>). Dynamo read it from the template. The example below is one Qwen3 chat with a weather tool, as two cases.</p>
+<p>So the answer depends entirely on <b>which tokens you hand the rule</b>. Qwen3's chat template drops the thinking of every assistant turn that comes before the latest user message, so on a new user turn the template's tokens hold no <code>&lt;think&gt;</code> from earlier turns. (It keeps the thinking after a tool result, inside one user turn; see the note under the table.) Both paths run a <span class="tip" tabindex="0" data-tip="On turn 2 and later, the earlier turns are replaced with the exact tokens the model wrote, thinking included, so the token sequence only grows and training sees what the model really saw.">spliced prompt</span> that keeps them; the model sees the same tokens on both. Before this PR, native's vLLM serving computed the flag from that spliced prompt (<a href="https://github.com/NVIDIA-NeMo/RL/blob/5c7fa69ef7d5715fddf6e2458d31ad6daa383f46/nemo_rl/models/generation/vllm/chat_server.py#L617">old L617</a>, <a href="https://github.com/vllm-project/vllm/blob/v0.29.0/vllm/entrypoints/openai/chat_completion/serving.py#L356-L366">vLLM serving.py</a>). Dynamo read it from the template. The example below is one Qwen3 chat (thinking on, <code>deepseek_r1</code> parser), as two cases.</p>
 
 <h2>One chat, two cases: what each path told the engine</h2>
 <p><b>How to read the pills:</b> each pill is the <code>reasoning_ended</code> value the engine got for turn 2. "Should be" is the correct value: True only if turn 2's own thinking is already written. ✓ means the path matched it, ✗ means it did not.</p>
@@ -114,13 +114,13 @@ The function is correct. The whole issue is <b>which token ids it is given</b>.<
   <text class="go" x="760" y="22">✓ matches</text><text class="rd" x="845" y="22">✗ doesn't</text>
 
   <!-- case A -->
-  <text class="h" x="20" y="58">A · Turn 2 starts: the model has not thought about turn 2 yet</text>
-  <rect class="tpl" x="20" y="72" width="176" height="32" rx="5"/><text class="tk" x="30" y="93">user: weather Paris?</text>
-  <rect class="old" x="204" y="72" width="206" height="32" rx="5"/><text class="tk" x="214" y="93">&lt;think&gt;need a tool&lt;/think&gt;</text>
-  <rect class="tpl" x="418" y="72" width="236" height="32" rx="5"/><text class="tk" x="428" y="93">&lt;tool_call&gt;weather&lt;/tool_call&gt;</text>
-  <rect class="tpl" x="662" y="72" width="100" height="32" rx="5"/><text class="tk" x="672" y="93">tool: 18°C</text>
-  <rect class="gen" x="770" y="72" width="120" height="32" rx="5"/><text class="tk" x="780" y="93">assistant: ▌</text>
-  <text class="n" x="204" y="122">turn 1's thinking: Qwen3's template drops it; the spliced prompt keeps it</text>
+  <text class="h" x="20" y="58">A · Turn 2 starts (asks for JSON): the model has not thought about turn 2 yet</text>
+  <rect class="tpl" x="20" y="72" width="160" height="32" rx="5"/><text class="tk" x="30" y="93">user: Paris temp?</text>
+  <rect class="old" x="188" y="72" width="200" height="32" rx="5"/><text class="tk" x="198" y="93">&lt;think&gt;check units&lt;/think&gt;</text>
+  <rect class="tpl" x="396" y="72" width="84" height="32" rx="5"/><text class="tk" x="406" y="93">18°C.</text>
+  <rect class="tpl" x="488" y="72" width="176" height="32" rx="5"/><text class="tk" x="498" y="93">user: Tokyo, as JSON</text>
+  <rect class="gen" x="672" y="72" width="120" height="32" rx="5"/><text class="tk" x="682" y="93">assistant: ▌</text>
+  <text class="n" x="188" y="122">turn 1's thinking: Qwen3's template drops it (a new user message came after it); the spliced prompt keeps it</text>
   <text class="nb" x="20" y="146">is_reasoning_end(template's tokens) → False.   is_reasoning_end(spliced prompt) → True: it finds turn 1's &lt;/think&gt;.</text>
   <text class="lab" x="20" y="176">SHOULD BE</text><text class="lab" x="190" y="176">NATIVE, BEFORE</text><text class="lab" x="380" y="176">DYNAMO, BEFORE</text><text class="lab" x="570" y="176">BOTH, AFTER 7e29dcc</text>
   <rect class="ok" x="20" y="184" width="150" height="30" rx="15"/><text class="go" x="36" y="204">False</text>
@@ -131,9 +131,9 @@ The function is correct. The whole issue is <b>which token ids it is given</b>.<
   <line class="sep" x1="20" y1="236" x2="940" y2="236"/>
 
   <!-- case B -->
-  <text class="h" x="20" y="268">B · Turn 2 thought, then a checkpoint cut the call; after restart it resumes</text>
-  <rect class="tpl" x="20" y="282" width="236" height="32" rx="5"/><text class="tk" x="30" y="303">turn 2 template (same as A)</text>
-  <rect class="sav" x="264" y="282" width="226" height="32" rx="5"/><text class="tk" x="274" y="303">&lt;think&gt;check city&lt;/think&gt;</text>
+  <text class="h" x="20" y="268">B · Turn 2 (tools, tool_choice: auto) thought, then a checkpoint cut it; it resumes</text>
+  <rect class="tpl" x="20" y="282" width="236" height="32" rx="5"/><text class="tk" x="30" y="303">turn 2 template, as in A</text>
+  <rect class="sav" x="264" y="282" width="226" height="32" rx="5"/><text class="tk" x="274" y="303">&lt;think&gt;use the tool&lt;/think&gt;</text>
   <text class="cut" x="500" y="304">✂ cut</text>
   <rect class="gen" x="548" y="282" width="300" height="32" rx="5"/><text class="tk" x="558" y="303">resumes: &lt;tool_call&gt;…&lt;/tool_call&gt;</text>
   <text class="n" x="264" y="332">turn 2's own thinking, already written and saved; the resumed prompt ends with it</text>
@@ -147,7 +147,17 @@ The function is correct. The whole issue is <b>which token ids it is given</b>.<
   <text class="n" x="20" y="452">Proposed = read the template plus the saved tokens on the worker. Not in the PR yet (see below).</text>
 </svg>
 
-<p><b>What a wrong value does.</b> In case A, native's True turned on the grammar at the first token of turn 2. The model could not think before its JSON or forced tool call. In case B, False makes the grammar wait for a <code>&lt;/think&gt;</code>. The model already wrote that one before the cut, so it never writes another. The grammar never turns on, and nothing checks the resumed tool call.</p>
+<p><b>What True and False actually do to the reply.</b> The flag only changes anything when the call has a grammar. Without one, the model writes the same reply either way.</p>
+<table style="border-collapse:collapse;width:100%;font-size:14px;margin:8px 0">
+<tr><th style="border:1px solid var(--border);padding:6px 9px;background:var(--surface);text-align:left">Case and its grammar</th><th style="border:1px solid var(--border);padding:6px 9px;background:var(--surface);text-align:left">With <code>False</code></th><th style="border:1px solid var(--border);padding:6px 9px;background:var(--surface);text-align:left">With <code>True</code></th></tr>
+<tr><td style="border:1px solid var(--border);padding:6px 9px;vertical-align:top"><b>A</b>: turn 2 has <code>response_format</code>. The reply must be <code>{"city": …, "temp": …}</code>.</td>
+<td style="border:1px solid var(--border);padding:6px 9px;vertical-align:top"><span style="color:var(--green)">✓ what should happen.</span> The grammar is off while the model writes <code>&lt;think&gt;which units for Tokyo…&lt;/think&gt;</code>. Once it sees <code>&lt;/think&gt;</code>, the grammar turns on and forces the JSON.</td>
+<td style="border:1px solid var(--border);padding:6px 9px;vertical-align:top"><span style="color:var(--red)">✗ old native.</span> The grammar is on from the first token, and the first token must start the JSON. <code>&lt;think&gt;</code> is blocked, so turn 2's reply has no thinking: just <code>{"city": "Tokyo", …}</code>. Training then learns from a reply the model was not allowed to think before.</td></tr>
+<tr><td style="border:1px solid var(--border);padding:6px 9px;vertical-align:top"><b>B</b>: resumed turn 2 with tools and <code>tool_choice: auto</code>. Its <span class="tip" tabindex="0" data-tip="Free text is allowed until the model writes &lt;tool_call&gt;; from there the arguments must match the tool's JSON schema.">structural tag</span> lets the model write anything until <code>&lt;tool_call&gt;</code>; after that, the arguments must match the tool's schema.</td>
+<td style="border:1px solid var(--border);padding:6px 9px;vertical-align:top"><span style="color:var(--red)">✗ now, on both paths.</span> The grammar waits for a <code>&lt;/think&gt;</code> in the new tokens. The model wrote that before the cut, so it never writes another, and the grammar never turns on. The tool call is written with nothing checking it. Usually it is still valid, but nothing guarantees it, and a bad one fails to parse.</td>
+<td style="border:1px solid var(--border);padding:6px 9px;vertical-align:top"><span style="color:var(--green)">✓ old native, and the proposed fix.</span> The grammar is on from the first resumed token. The model writes <code>&lt;tool_call&gt;</code>, and from there its arguments are forced to match the schema.</td></tr>
+</table>
+<p style="font-size:14px;color:var(--dim)">Two notes. (1) In case A with only a structural tag (tools, <code>auto</code>), a wrong True does little harm: the tag allows free text before <code>&lt;tool_call&gt;</code>, <code>&lt;think&gt;</code> included. The harm is with <code>response_format</code> and a forced tool call, whose grammar starts at the first token. (2) After a tool result, still in the same user turn, Qwen3's template keeps the previous step's thinking. There the template's tokens also end in an old <code>&lt;/think&gt;</code>, so the flag is True on both paths. That is how plain vLLM behaves too, and it is outside this PR.</p>
 
 <p><b>What the author did (<a href="https://github.com/NVIDIA-NeMo/RL/commit/7e29dccaab91301853baf1e47ac8458fe9c9fed0"><code>7e29dcc</code></a>).</b> <a href="https://github.com/NVIDIA-NeMo/RL/blob/26d9d01bbb39cd000293eec45826cb2b34b5d036/nemo_rl/models/generation/vllm/chat_server.py#L182-L197"><code>reasoning_ended</code></a> runs once on the template's tokens. <a href="https://github.com/NVIDIA-NeMo/RL/blob/26d9d01bbb39cd000293eec45826cb2b34b5d036/nemo_rl/models/generation/dynamo/vllm/adapter.py#L466">Dynamo</a> passes the result on. Native puts it in <a href="https://github.com/NVIDIA-NeMo/RL/blob/26d9d01bbb39cd000293eec45826cb2b34b5d036/nemo_rl/models/generation/vllm/chat_server.py#L869-L876"><code>extra_args</code></a>. Then <a href="https://github.com/NVIDIA-NeMo/RL/blob/26d9d01bbb39cd000293eec45826cb2b34b5d036/nemo_rl/models/generation/vllm/utils.py#L529"><code>take_reasoning_ended</code></a> hands it to the engine in place of vLLM's own value. The test <a href="https://github.com/NVIDIA-NeMo/RL/blob/26d9d01bbb39cd000293eec45826cb2b34b5d036/tests/unit/models/generation/test_gym_chat_path.py#L950"><code>reasoning_not_ended_by_an_earlier_turn</code></a> is case A: both paths hand the engine False. The review also suggested never cutting constrained calls. The author did not, for two good reasons. Gym already skips cutting a call with <code>response_format</code> or a forced tool. And a rule on the worker would stop every call with tools from being cut, since vLLM turns the structural tag on for all of them. That leaves case B: a call with tools and <code>tool_choice: auto</code>, which Gym still cuts.</p>
 <p class="cref"><a href="https://github.com/NVIDIA-NeMo/RL/pull/4979#discussion_r4530634163">C84 — render_pool.py</a><a href="https://github.com/NVIDIA-NeMo/RL/pull/4979#discussion_r4545714948">author's reply</a></p>
@@ -156,8 +166,8 @@ The function is correct. The whole issue is <b>which token ids it is given</b>.<
 <p>Nothing below is implemented. The author's view: computing this "needs the reasoning parser on the worker behind Dynamo", so they would do it in a follow-up. The review's draft answer: the flag only matters when the engine already has a reasoning parser. So the worker has the parser in exactly the cases where this matters, and the fix fits in this PR.</p>
 <p class="where"><b>Where it would land: RL only.</b> <a href="https://github.com/NVIDIA-NeMo/RL/blob/26d9d01bbb39cd000293eec45826cb2b34b5d036/nemo_rl/models/generation/vllm/prompt_and_capture.py#L404"><code>start_capture</code></a> (runs on the worker on both paths), the Dynamo adapter's <a href="https://github.com/NVIDIA-NeMo/RL/blob/26d9d01bbb39cd000293eec45826cb2b34b5d036/nemo_rl/models/generation/dynamo/vllm/adapter.py#L466"><code>generate</code> call</a>, plus one test. <b>No Gym change:</b> Gym already decides which calls to cut.</p>
 <div class="code"><span class="c"># in start_capture, on the worker, after the restore is resolved — case B values</span>
-template_ids = [ …"user: weather Paris?"…, …"assistant:" ]   <span class="c"># no &lt;think&gt; anywhere</span>
-saved_ids    = [ "&lt;think&gt;", "check", "city", "&lt;/think&gt;" ]       <span class="c"># turn 2's own tokens, before the cut</span>
+template_ids = [ …"user: Tokyo?"…, …"assistant:" ]             <span class="c"># no &lt;think&gt; anywhere</span>
+saved_ids    = [ "&lt;think&gt;", "use", "the", "tool", "&lt;/think&gt;" ]  <span class="c"># turn 2's own tokens, before the cut</span>
 
 if call_resumes_a_cut and engine_has_reasoning_parser:
     ended = parser.is_reasoning_end(template_ids + saved_ids)  <span class="c"># last one is &lt;/think&gt; →</span> <span class="g">True</span>
