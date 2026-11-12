@@ -104,7 +104,14 @@ The function is correct. The whole issue is <b>which token ids it is given</b>.<
 <p>So the answer depends entirely on <b>which tokens you hand the rule</b>. Qwen3's chat template drops the thinking of every assistant turn that comes before the latest user message, so on a new user turn the template's tokens hold no <code>&lt;think&gt;</code> from earlier turns. (It keeps the thinking after a tool result, inside one user turn; see the note under the table.) Both paths run a <span class="tip" tabindex="0" data-tip="On turn 2 and later, the earlier turns are replaced with the exact tokens the model wrote, thinking included, so the token sequence only grows and training sees what the model really saw.">spliced prompt</span> that keeps them; the model sees the same tokens on both. Before this PR, native's vLLM serving computed the flag from that spliced prompt (<a href="https://github.com/NVIDIA-NeMo/RL/blob/5c7fa69ef7d5715fddf6e2458d31ad6daa383f46/nemo_rl/models/generation/vllm/chat_server.py#L617">old L617</a>, <a href="https://github.com/vllm-project/vllm/blob/v0.29.0/vllm/entrypoints/openai/chat_completion/serving.py#L356-L366">vLLM serving.py</a>). Dynamo read it from the template. The example below is one Qwen3 chat (thinking on, <code>deepseek_r1</code> parser), as two cases.</p>
 
 <h2>One chat, two cases: what each path told the engine</h2>
-<p><b>How to read the pills:</b> each pill is the <code>reasoning_ended</code> value the engine got for turn 2. "Should be" is the correct value: True only if turn 2's own thinking is already written. ✓ means the path matched it, ✗ means it did not.</p>
+<p><b>How to read the pills:</b> each pill is the <code>reasoning_ended</code> value the engine gets for turn 2. "Should be" is the correct value: True only if turn 2's own thinking is already written. The other pills are four points in time:</p>
+<ol style="margin:4px 0 8px;font-size:14px">
+<li><b>Main</b>, before #4979. Only native exists.</li>
+<li><b>At review</b>: #4979 at <code>5c7fa69</code>, when C84 was posted. Native is unchanged from main; Dynamo is new.</li>
+<li><b>Now</b>: #4979 after the author's C84 fix, <code>7e29dcc</code> (head <code>26d9d01</code>). Both paths use the template's tokens.</li>
+<li><b>Proposed</b>: the draft reply C91 asks for, which the author would rather do in a follow-up. Not written yet.</li>
+</ol>
+<p style="font-size:14px">So: <b>case A</b> was wrong on native in ① and ②, and is fixed in ③. <b>Case B</b> was right on native in ① and ②, wrong on Dynamo in ②, and is wrong on both in ③: the fix for A broke B on native. ④ makes both right.</p>
 
 <svg viewBox="0 0 960 470" role="img" aria-label="Two cases of the reasoning_ended flag">
   <!-- legend -->
@@ -122,11 +129,14 @@ The function is correct. The whole issue is <b>which token ids it is given</b>.<
   <rect class="gen" x="672" y="72" width="120" height="32" rx="5"/><text class="tk" x="682" y="93">assistant: ▌</text>
   <text class="n" x="188" y="122">turn 1's thinking: Qwen3's template drops it (a new user message came after it); the spliced prompt keeps it</text>
   <text class="nb" x="20" y="146">is_reasoning_end(template's tokens) → False.   is_reasoning_end(spliced prompt) → True: it finds turn 1's &lt;/think&gt;.</text>
-  <text class="lab" x="20" y="176">SHOULD BE</text><text class="lab" x="190" y="176">NATIVE, BEFORE</text><text class="lab" x="380" y="176">DYNAMO, BEFORE</text><text class="lab" x="570" y="176">BOTH, AFTER 7e29dcc</text>
-  <rect class="ok" x="20" y="184" width="150" height="30" rx="15"/><text class="go" x="36" y="204">False</text>
-  <rect class="bad" x="190" y="184" width="170" height="30" rx="15"/><text class="rd" x="206" y="204">True ✗</text>
-  <rect class="ok" x="380" y="184" width="170" height="30" rx="15"/><text class="go" x="396" y="204">False ✓</text>
-  <rect class="ok" x="570" y="184" width="190" height="30" rx="15"/><text class="go" x="586" y="204">False ✓  fixed</text>
+  <text class="lab" x="20" y="172">SHOULD BE</text><text class="lab" x="130" y="172">① MAIN</text><text class="lab" x="270" y="172">② AT REVIEW</text><text class="lab" x="550" y="172">③ NOW (7e29dcc)</text><text class="lab" x="720" y="172">④ PROPOSED</text>
+  <text class="n" x="130" y="186">native</text><text class="n" x="270" y="186">native</text><text class="n" x="410" y="186">Dynamo</text><text class="n" x="550" y="186">both paths</text><text class="n" x="720" y="186">both paths</text>
+  <rect class="ok" x="20" y="192" width="100" height="30" rx="15"/><text class="go" x="34" y="212">False</text>
+  <rect class="bad" x="130" y="192" width="130" height="30" rx="15"/><text class="rd" x="144" y="212">True ✗</text>
+  <rect class="bad" x="270" y="192" width="130" height="30" rx="15"/><text class="rd" x="284" y="212">True ✗</text>
+  <rect class="ok" x="410" y="192" width="130" height="30" rx="15"/><text class="go" x="424" y="212">False ✓</text>
+  <rect class="ok" x="550" y="192" width="160" height="30" rx="15"/><text class="go" x="564" y="212">False ✓ fixed</text>
+  <rect class="ok" x="720" y="192" width="160" height="30" rx="15"/><text class="go" x="734" y="212">False ✓ same</text>
 
   <line class="sep" x1="20" y1="236" x2="940" y2="236"/>
 
@@ -138,13 +148,15 @@ The function is correct. The whole issue is <b>which token ids it is given</b>.<
   <rect class="gen" x="548" y="282" width="300" height="32" rx="5"/><text class="tk" x="558" y="303">resumes: &lt;tool_call&gt;…&lt;/tool_call&gt;</text>
   <text class="n" x="264" y="332">turn 2's own thinking, already written and saved; the resumed prompt ends with it</text>
   <text class="nb" x="20" y="356">is_reasoning_end(template only) → False.   is_reasoning_end(template + saved tokens) → True: it finds turn 2's &lt;/think&gt;.</text>
-  <text class="lab" x="20" y="386">SHOULD BE</text><text class="lab" x="190" y="386">NATIVE, BEFORE</text><text class="lab" x="380" y="386">DYNAMO, BEFORE</text><text class="lab" x="570" y="386">BOTH, AFTER 7e29dcc</text><text class="lab" x="780" y="386">PROPOSED</text>
-  <rect class="ok" x="20" y="394" width="150" height="30" rx="15"/><text class="go" x="36" y="414">True</text>
-  <rect class="ok" x="190" y="394" width="170" height="30" rx="15"/><text class="go" x="206" y="414">True ✓</text>
-  <rect class="bad" x="380" y="394" width="170" height="30" rx="15"/><text class="rd" x="396" y="414">False ✗</text>
-  <rect class="bad" x="570" y="394" width="190" height="30" rx="15"/><text class="rd" x="586" y="414">False ✗  open</text>
-  <rect class="ok" x="780" y="394" width="150" height="30" rx="15"/><text class="go" x="796" y="414">True ✓</text>
-  <text class="n" x="20" y="452">Proposed = read the template plus the saved tokens on the worker. Not in the PR yet (see below).</text>
+  <text class="lab" x="20" y="382">SHOULD BE</text><text class="lab" x="130" y="382">① MAIN</text><text class="lab" x="270" y="382">② AT REVIEW</text><text class="lab" x="550" y="382">③ NOW (7e29dcc)</text><text class="lab" x="720" y="382">④ PROPOSED</text>
+  <text class="n" x="130" y="396">native</text><text class="n" x="270" y="396">native</text><text class="n" x="410" y="396">Dynamo</text><text class="n" x="550" y="396">both paths</text><text class="n" x="720" y="396">both paths</text>
+  <rect class="ok" x="20" y="402" width="100" height="30" rx="15"/><text class="go" x="34" y="422">True</text>
+  <rect class="ok" x="130" y="402" width="130" height="30" rx="15"/><text class="go" x="144" y="422">True ✓</text>
+  <rect class="ok" x="270" y="402" width="130" height="30" rx="15"/><text class="go" x="284" y="422">True ✓</text>
+  <rect class="bad" x="410" y="402" width="130" height="30" rx="15"/><text class="rd" x="424" y="422">False ✗</text>
+  <rect class="bad" x="550" y="402" width="160" height="30" rx="15"/><text class="rd" x="564" y="422">False ✗ broke</text>
+  <rect class="ok" x="720" y="402" width="160" height="30" rx="15"/><text class="go" x="734" y="422">True ✓</text>
+  <text class="n" x="20" y="452">① main, native only · ② #4979 at 5c7fa69, when C84 was posted · ③ #4979 after 7e29dcc · ④ C91 / follow-up</text>
 </svg>
 
 <p><b>What True and False actually do to the reply.</b> The flag only changes anything when the call has a grammar. Without one, the model writes the same reply either way.</p>
@@ -179,7 +191,7 @@ if call_resumes_a_cut and engine_has_reasoning_parser:
 <p>Case A does not change: a new turn has no saved tokens, so it still reads the template alone and gets False.</p>
 <p class="cref"><a href="https://github.com/NVIDIA-NeMo/RL/pull/4979#discussion_r4546053281">draft reply C91 (pending; only its author can open it until published)</a></p>
 
-<div class="warn"><b>How often does case B happen?</b> Rarely. It needs three things at once: the engine runs with a reasoning parser (<code>vllm_kwargs.reasoning_parser</code>, which no shipped recipe sets today), the call has tools with a parser that uses a structural tag (hermes, <code>qwen3_engine</code>, …), and a checkpoint cuts the call right after its <code>&lt;/think&gt;</code>. One catch: even True only helps if the cut lands before the tool call starts. Cut in the middle of <code>&lt;tool_call&gt;</code>, and the restarted grammar never sees the tag's start, so it checks nothing on either answer. The real choice is not about a big bug. It is whether this PR should change native's behavior for case B (before: True, now: False) or leave that for a follow-up.</div>
+<div class="warn"><b>Do today's runs hit any of this? No, none of the four states.</b> vLLM only reads <code>reasoning_ended</code> when the <i>engine</i> has a reasoning parser (<code>structured_outputs_config.reasoning_parser</code>, set from <code>vllm_kwargs.reasoning_parser</code>). Without one, <a href="https://github.com/vllm-project/vllm/blob/v0.29.0/vllm/v1/structured_output/__init__.py#L370-L391"><code>should_fill_bitmask</code></a> returns True and the grammar starts at the first token whatever the flag says. Every recipe here, Nano3 and Super3 included, sets its reasoning parser only under <code>http_server_serving_chat_kwargs</code>. That one splits the reply into thinking and answer after generation, and NeMo RL never passes it to the engine. The Gym structured-outputs data puts the JSON schema in the prompt text, not in <code>response_format</code>, and its tool rows use <code>tool_choice: auto</code>. So this is a bug waiting for the first run that sets an engine reasoning parser and sends a grammar. Case B also needs tools with a parser that uses a structural tag (hermes, <code>qwen3_engine</code>, …), and a checkpoint that cuts the call right after its <code>&lt;/think&gt;</code>. One catch: even True only helps if the cut lands before the tool call starts. Cut in the middle of <code>&lt;tool_call&gt;</code>, and the restarted grammar never sees the tag's start, so it checks nothing on either answer. The real choice is not about a big bug. It is whether this PR should change native's behavior for case B (before: True, now: False) or leave that for a follow-up.</div>
 
 </div>
 </body>
