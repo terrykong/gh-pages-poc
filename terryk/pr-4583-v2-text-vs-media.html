@@ -85,7 +85,7 @@ p.chainnote{color:var(--dim);font-size:12px;margin:0 0 18px}
 <h1>How a model call with an image is saved mid-generation and resumed, next to a text-only call (round 2)</h1>
 <p class="sub"><a href="https://github.com/NVIDIA-NeMo/RL/pull/4583">NVIDIA-NeMo/RL #4583</a>,
 stacked on <a href="https://github.com/NVIDIA-NeMo/RL/pull/4507">#4507</a> (text prefix recovery).
-All permalinks pin the PR head <code>3821aa8</code>.</p>
+All permalinks pin the PR head <code>4253178</code>.</p>
 
 <div class="status">
 <dl>
@@ -111,13 +111,13 @@ This PR makes that work when the prompt has an image or video. Dotted words have
 
 <p>Both kinds of call share the same save and resume code. An image call adds work at four points:
 when the call starts, it hashes each image tensor once, off the event loop
-(<a href="https://github.com/NVIDIA-NeMo/RL/blob/3821aa8c393297870a31eff6b016e34fb22c82f8/nemo_rl/models/generation/vllm/vllm_worker_async.py#L1792-L1797">vllm_worker_async.py:1792-1797</a>);
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/425317889212cb4a5e1252030797d83982ae4fc8/nemo_rl/models/generation/vllm/vllm_worker_async.py#L1219-L1224">vllm_worker_async.py:1219-1224</a>);
 the first cut writes the image's place in the prompt and those hashes into the row
-(<a href="https://github.com/NVIDIA-NeMo/RL/blob/3821aa8c393297870a31eff6b016e34fb22c82f8/nemo_rl/models/generation/vllm/vllm_worker_async.py#L1802-L1824"><code>_generation_cut_record_payload</code></a>);
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/425317889212cb4a5e1252030797d83982ae4fc8/nemo_rl/models/generation/vllm/vllm_worker_async.py#L1229-L1251"><code>_generation_cut_record_payload</code></a>);
 resume reads them back from the same single read text uses
-(<a href="https://github.com/NVIDIA-NeMo/RL/blob/3821aa8c393297870a31eff6b016e34fb22c82f8/nemo_rl/models/generation/vllm/vllm_worker_async.py#L1826-L1843"><code>_restore_generation_cut_media</code></a>);
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/425317889212cb4a5e1252030797d83982ae4fc8/nemo_rl/models/generation/vllm/vllm_worker_async.py#L1253-L1272"><code>_restore_generation_cut_media</code></a>);
 and resume processes the image again and checks it
-(<a href="https://github.com/NVIDIA-NeMo/RL/blob/3821aa8c393297870a31eff6b016e34fb22c82f8/nemo_rl/models/generation/vllm/vllm_worker_async.py#L2493-L2513">vllm_worker_async.py:2493-2513</a>).</p>
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/425317889212cb4a5e1252030797d83982ae4fc8/nemo_rl/models/generation/vllm/vllm_worker_async.py#L1933-L1953">vllm_worker_async.py:1933-1953</a>).</p>
 
 <h2>One call, cut twice, then resumed</h2>
 
@@ -134,7 +134,7 @@ and resume processes the image again and checks it
   <rect class="diffb" x="545" y="56" width="345" height="40" rx="6"/>
   <text class="o" x="555" y="74">prompt [10,18,18,11]  imgs f32[3,2,3]</text>
   <text class="o" x="555" y="89">hash once → {imgs: sha256 "9f…"}</text>
-  <a href="https://github.com/NVIDIA-NeMo/RL/blob/3821aa8c393297870a31eff6b016e34fb22c82f8/nemo_rl/models/generation/vllm/vllm_worker_async.py#L1792-L1797"><text x="555" y="110">vllm_worker_async.py:1792</text></a>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/425317889212cb4a5e1252030797d83982ae4fc8/nemo_rl/models/generation/vllm/vllm_worker_async.py#L1219-L1224"><text x="555" y="110">vllm_worker_async.py:1219</text></a>
 
   <text class="step" x="12" y="146">1 · cut #1</text>
   <text class="stepn" x="12" y="162">writes row 0</text>
@@ -144,7 +144,7 @@ and resume processes the image again and checks it
   <rect class="diffb" x="545" y="128" width="345" height="50" rx="6"/>
   <text class="d" x="555" y="148">tokens [10,18,18,11, 41,42]</text>
   <text class="o" x="555" y="166">+ media_spans + hashes (no pixels)</text>
-  <a href="https://github.com/NVIDIA-NeMo/RL/blob/3821aa8c393297870a31eff6b016e34fb22c82f8/nemo_rl/models/generation/generation_cut_capture.py#L850-L857"><text x="555" y="192">generation_cut_capture.py:850</text></a>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/425317889212cb4a5e1252030797d83982ae4fc8/nemo_rl/models/generation/prefix_recovery/recovery.py#L526-L532"><text x="555" y="192">recovery.py:531</text></a>
 
   <text class="step" x="12" y="228">2 · cut #2</text>
   <text class="stepn" x="12" y="244">writes row 1</text>
@@ -161,8 +161,8 @@ and resume processes the image again and checks it
   <rect class="diffb" x="545" y="276" width="345" height="50" rx="6"/>
   <text class="d" x="555" y="296">rows 0,1 → tokens + row 0 extras</text>
   <text class="o" x="555" y="314">parse spans + hashes from row 0</text>
-  <a href="https://github.com/NVIDIA-NeMo/RL/blob/3821aa8c393297870a31eff6b016e34fb22c82f8/nemo_rl/models/generation/generation_cut_capture.py#L527-L537"><text x="200" y="340">generation_cut_capture.py:527-537</text></a>
-  <a href="https://github.com/NVIDIA-NeMo/RL/blob/3821aa8c393297870a31eff6b016e34fb22c82f8/nemo_rl/models/generation/vllm/vllm_worker_async.py#L1826-L1843"><text x="555" y="340">vllm_worker_async.py:1826</text></a>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/425317889212cb4a5e1252030797d83982ae4fc8/nemo_rl/models/generation/prefix_recovery/recovery.py#L817-L832"><text x="200" y="340">recovery.py:817-832</text></a>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/425317889212cb4a5e1252030797d83982ae4fc8/nemo_rl/models/generation/vllm/vllm_worker_async.py#L1253-L1272"><text x="555" y="340">vllm_worker_async.py:1253</text></a>
 
   <text class="step" x="12" y="380">4 · check</text>
   <text class="stepn" x="12" y="396">before continuing</text>
@@ -173,11 +173,11 @@ and resume processes the image again and checks it
   <text class="o" x="555" y="380">process image again → [10,18,18,11]</text>
   <text class="o" x="555" y="396">prompt must equal saved prompt tokens</text>
   <text class="o" x="555" y="412">spans + hashes must equal row 0's</text>
-  <a href="https://github.com/NVIDIA-NeMo/RL/blob/3821aa8c393297870a31eff6b016e34fb22c82f8/nemo_rl/models/generation/vllm/vllm_worker_async.py#L2493-L2513"><text x="555" y="438">vllm_worker_async.py:2493-2513</text></a>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/425317889212cb4a5e1252030797d83982ae4fc8/nemo_rl/models/generation/vllm/vllm_worker_async.py#L1933-L1953"><text x="555" y="438">vllm_worker_async.py:1933-1953</text></a>
 
   <path class="merge" d="M190 456 H890"/>
   <text class="g" x="190" y="474">both lanes meet here: engine prompt = saved tokens</text>
-  <a href="https://github.com/NVIDIA-NeMo/RL/blob/3821aa8c393297870a31eff6b016e34fb22c82f8/nemo_rl/models/generation/vllm/vllm_worker_async.py#L2435-L2438"><text x="545" y="474">vllm_worker_async.py:2438</text></a>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/425317889212cb4a5e1252030797d83982ae4fc8/nemo_rl/models/generation/vllm/vllm_worker_async.py#L1871-L1874"><text x="545" y="474">vllm_worker_async.py:1874</text></a>
 
   <text class="step" x="12" y="506">5 · decode</text>
   <text class="stepn" x="12" y="522">the rest</text>
@@ -196,21 +196,21 @@ and resume processes the image again and checks it
 </svg>
 
 <p style="font-size:13px;color:var(--dim)"><code>imgs f32[3,2,3]</code> = the image's processed tensor, named <code>imgs</code>: 18 made-up 32-bit floats in a 3×2×3 block, which is what the unit tests use in place of real processor output. Token ids and the tensor come from
-<a href="https://github.com/NVIDIA-NeMo/RL/blob/3821aa8c393297870a31eff6b016e34fb22c82f8/tests/unit/data/test_captured_media.py#L253-L256"><code>test_captured_media.py:253-256</code></a>; the generated ids 41–45 and the hash are illustrative.
-The final row's pixels are written at <a href="https://github.com/NVIDIA-NeMo/RL/blob/3821aa8c393297870a31eff6b016e34fb22c82f8/nemo_rl/models/generation/vllm/vllm_worker_async.py#L1987-L2015">vllm_worker_async.py:1987-2015</a>.</p>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/425317889212cb4a5e1252030797d83982ae4fc8/tests/unit/data/test_captured_media.py#L255-L258"><code>test_captured_media.py:255-258</code></a>; the generated ids 41–45 and the hash are illustrative.
+The final row's pixels are written at <a href="https://github.com/NVIDIA-NeMo/RL/blob/425317889212cb4a5e1252030797d83982ae4fc8/nemo_rl/models/generation/vllm/vllm_worker_async.py#L1419-L1450">vllm_worker_async.py:1419-1450</a>.</p>
 
 <h2>Where the two paths meet, and what still differs</h2>
-<p>They share the hard part. <a href="https://github.com/NVIDIA-NeMo/RL/blob/3821aa8c393297870a31eff6b016e34fb22c82f8/nemo_rl/models/generation/generation_cut_capture.py#L392"><code>_resolve_generation_cut</code></a>
+<p>They share the hard part. <a href="https://github.com/NVIDIA-NeMo/RL/blob/425317889212cb4a5e1252030797d83982ae4fc8/nemo_rl/models/generation/prefix_recovery/recovery.py#L691"><code>_rebuild_prefix</code></a>
 joins the rows for both, and its digest now also covers row 0's extras
-(<a href="https://github.com/NVIDIA-NeMo/RL/blob/3821aa8c393297870a31eff6b016e34fb22c82f8/nemo_rl/models/generation/generation_cut_capture.py#L474-L475">:474-475</a>), so a changed span or hash fails the same check that guards the tokens.
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/425317889212cb4a5e1252030797d83982ae4fc8/nemo_rl/models/generation/prefix_recovery/recovery.py#L772-L773">:772-773</a>), so a changed span or hash fails the same check that guards the tokens.
 After step 4, both use the saved tokens as the engine prompt.
 What still differs: vLLM needs the original image again to prefill, because a hash cannot be turned back into pixels; and the final row carries the pixels, once.</p>
 
 <div class="hl"><b>So what.</b> This round fixed the main cost of the first design: a checkpoint no longer writes pixels, only a few dozen bytes of hash per image, and the final row is the only pixel write.
 The shape is right. What is left is size: the restore reads the row-0 extras <i>before</i> the digest check that already covers them (step 3), so it carries its own set of shape checks, and the step-4 check is spread over two functions. The second page shows what can go.
-<p class="cref"><a href="https://github.com/NVIDIA-NeMo/RL/pull/4583#discussion_r4477413781">C11 — generation_cut_capture.py:527</a>
-<a href="https://github.com/NVIDIA-NeMo/RL/pull/4583#discussion_r4477413788">C12 — vllm_worker_async.py:2502</a>
-<a href="https://github.com/NVIDIA-NeMo/RL/pull/4583#discussion_r4477413800">C14 — test_captured_media.py:1755</a></p></div>
+<p class="cref"><a href="https://github.com/NVIDIA-NeMo/RL/pull/4583#discussion_r4557678167">C11 — recovery.py:819</a>
+<a href="https://github.com/NVIDIA-NeMo/RL/pull/4583#discussion_r4557678448">C12 — vllm_worker_async.py:1942</a>
+<a href="https://github.com/NVIDIA-NeMo/RL/pull/4583#discussion_r4557679014">C14 — test_captured_media.py:1786</a></p></div>
 
 </div>
 </body>
