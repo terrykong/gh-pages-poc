@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NVIDIA-NeMo/RL #5001 — what the four startup switches move earlier</title>
+<style>
+:root{--bg:#0d1117;--surface:#161b22;--surface2:#1c2128;--border:#30363d;--text:#e6edf3;--dim:#8b949e;
+  --accent:#58a6ff;--green:#3fb950;--red:#f85149;--orange:#d29922}
+:root[data-theme="light"]{--bg:#ffffff;--surface:#f6f8fa;--surface2:#eaeef2;--border:#d0d7de;--text:#1f2328;
+  --dim:#59636e;--accent:#0969da;--green:#1a7f37;--red:#cf222e;--orange:#9a6700}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:28px 20px 70px}
+h1{font-size:22px;margin:0 0 8px;line-height:1.3}
+h2{font-size:18px;margin:30px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
+.sub{color:var(--dim);font-size:13.5px;margin:0 0 14px}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);
+  border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;
+  font:13px/1 ui-monospace,monospace;cursor:pointer}
+.status{border:1px solid var(--border);border-radius:10px;background:var(--surface);padding:2px 16px 10px;margin:0 0 16px}
+.status dl{display:grid;grid-template-columns:max-content 1fr;gap:4px 14px;margin:12px 0 0}
+.status dt{color:var(--dim);font-size:12px;text-transform:uppercase;letter-spacing:.04em;white-space:nowrap;padding-top:2px}
+.status dd{margin:0;font-size:14px}
+.verdict{font-weight:700}.verdict.open{color:var(--orange)}
+nav.chain{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 6px;padding:0}
+nav.chain a,nav.chain span{display:inline-block;padding:5px 11px;border:1px solid var(--border);
+  border-radius:20px;background:var(--surface);text-decoration:none;color:var(--accent);
+  font-size:12.5px;line-height:1.3;white-space:nowrap}
+nav.chain a:hover{background:var(--surface2)}
+nav.chain span.here{background:var(--accent);color:var(--bg);border-color:var(--accent);font-weight:600}
+p.chainnote{color:var(--dim);font-size:12px;margin:0 0 18px}
+.bg{border-left:4px solid var(--accent);background:var(--surface);padding:8px 14px;margin:0 0 14px;font-size:14px}
+table.grid{border-collapse:collapse;font-size:13.5px;margin:8px 0 14px;width:100%}
+table.grid th,table.grid td{border:1px solid var(--border);padding:5px 9px;text-align:left;vertical-align:top}
+table.grid th{background:var(--surface2);font-weight:600}
+.mono{font:12.5px/1.55 ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--surface);
+  border:1px solid var(--border);border-radius:8px;padding:12px;overflow-x:auto;white-space:pre;margin:8px 0}
+.mono .c{color:var(--dim)}
+.hl{border-left:3px solid var(--orange);background:var(--surface);padding:12px 16px;margin:18px 0;border-radius:0 8px 8px 0}
+.tip{border-bottom:1px dotted var(--dim);cursor:help;position:relative;outline:none}
+.tip:hover::after,.tip:focus::after{content:attr(data-tip);position:absolute;left:0;top:1.7em;z-index:60;
+  width:max-content;max-width:min(340px,80vw);white-space:normal;background:var(--surface2);color:var(--text);
+  border:1px solid var(--border);border-radius:6px;padding:7px 10px;font:13px/1.45 -apple-system,sans-serif;
+  font-weight:400;box-shadow:0 4px 14px rgba(0,0,0,.3)}
+.cref{margin:6px 0 0;font-size:13px}
+.cref a{display:inline-block;padding:4px 10px;border:1px solid var(--border);border-radius:16px;
+  background:var(--surface);font:12.5px ui-monospace,Menlo,monospace}
+ol li{margin:4px 0}
+svg{max-width:100%;height:auto;display:block;margin:14px 0}
+svg .panel{fill:none;stroke:var(--border);stroke-width:1}
+svg .hdr{fill:var(--accent);font:bold 13px -apple-system,sans-serif}
+svg .lane{fill:var(--dim);font:12px -apple-system,sans-serif}
+svg .same{fill:var(--surface2);stroke:var(--border);stroke-width:1.2}
+svg .moved{fill:var(--green);fill-opacity:.22;stroke:var(--green);stroke-width:1.6}
+svg .slow{fill:var(--orange);fill-opacity:.2;stroke:var(--orange);stroke-width:1.4}
+svg .bt{fill:var(--text);font:11.5px -apple-system,sans-serif}
+svg .note{fill:var(--dim);font:11.5px -apple-system,sans-serif}
+svg .end{stroke:var(--red);stroke-width:1.6;stroke-dasharray:4 3}
+svg .endt{fill:var(--red);font:bold 11.5px -apple-system,sans-serif}
+svg a text{text-decoration:underline;fill:var(--accent)}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+  document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head>
+<body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+  function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+  function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
+    b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
+      else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+  document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+<div class="wrap">
+
+<h1>What the four startup switches in #5001 move earlier, and what still runs in order</h1>
+<p class="sub"><a href="https://github.com/NVIDIA-NeMo/RL/pull/5001">NVIDIA-NeMo/RL #5001</a>
+(builds on the Megatron compile cache from <a href="https://github.com/NVIDIA-NeMo/RL/pull/4715">#4715</a>).
+All permalinks pin the PR head <code>5223071</code>.</p>
+
+<div class="status"><dl>
+  <dt>Before</dt>
+  <dd>Single-controller setup reserves the vLLM workers first, then builds vLLM, NeMo-Gym and the trainer side by side. It checks the dataset's Gym routes only after Gym is up. Every job's first training step pays for torch.compile and Triton autotuning from scratch.</dd>
+  <dt>This PR</dt>
+  <dd>Four switches, all off by default, set as environment variables: start the trainer earlier, scan routes earlier, keep compile results between jobs, and run a fake first step ahead of time.</dd>
+  <dt>Status</dt>
+  <dd><span class="verdict open">New and opt-in. The review is still pending.</span> It asks for the switches to become config keys (C2), and it found a crash in the warm-up switch when CUDA graphs are on (<a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-5001-warmup-cuda-graph-crash.html">page 2</a>).</dd>
+</dl></div>
+
+<nav class="chain">
+  <span class="here">1 · what the switches change</span>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-5001-warmup-cuda-graph-crash.html">2 · warm-up crash with CUDA graphs</a>
+</nav>
+<p class="chainnote">Two pages on this PR. This one shows the feature. The next one shows the crash the review found in it.</p>
+
+<div class="bg"><b>Where this sits.</b> Only the <b>v2 single-controller</b> path reads these switches. The v1 driver loops (<code>grpo_train</code>, <code>async_grpo_train</code>, PPO, distillation) do not. The early trainer build and the early route scan need <span class="tip" tabindex="0" data-tip="The environment service that scores rollouts. Each dataset row names a route (an agent or environment server) that must exist in the running Gym stack.">NeMo-Gym</span> with vLLM on separate GPUs. The warm-up needs a Megatron trainer. Dotted words have a short explanation: hover or tap them.</div>
+
+<table class="grid">
+<tr><th></th><th>main</th><th>this PR</th><th>after the review's fixes (proposed)</th></tr>
+<tr><td>v1 (driver loops)</td><td>no switches</td><td>unchanged</td><td>unchanged</td></tr>
+<tr><td>v2 (single controller)</td><td>no switches</td><td>4 switches as <code>NRL_*</code> env vars, off by default</td><td>the 4 become <code>async_rl</code> config keys (C2). The warm-up skips CUDA-graph runs and restores RNG state in place (C1).</td></tr>
+</table>
+
+<div class="mono"><span class="c"># how you turn them on in this PR: driver environment, passed to every Ray actor</span>
+export NRL_EARLY_TRAINER_SUBMIT=1                 <span class="c"># ① build the trainer earlier</span>
+export NRL_OVERLAP_ROUTE_SCAN=1                   <span class="c"># ② scan the dataset's Gym routes earlier</span>
+export NRL_MEGATRON_TRITON_CACHE_AUTOTUNING=1     <span class="c"># ③ keep Triton autotune results ...</span>
+export NRL_MEGATRON_TORCH_COMPILE_JOB_ID=my-run   <span class="c"># ③ ... and torch.compile shape profiles</span>
+export NRL_TRAINER_WARMUP=1                       <span class="c"># ④ fake first step while setup or rollouts run</span>
+
+<span class="c"># proposed in review comment C2, not in the PR: the same switches as config</span>
+async_rl:
+  early_trainer_submit: true
+  overlap_route_scan: true
+  trainer_warmup: {enabled: true, seqlens: null}</div>
+
+<h2>Startup, before and after</h2>
+
+<svg viewBox="0 0 960 540" role="img" aria-label="Two timelines of single-controller startup. With the switches, the trainer starts building earlier, routes are scanned during the dataset load, a warm-up runs right after the trainer is built, and step 1 ends sooner because compile results are reused.">
+  <text class="hdr" x="14" y="22">main: switches off</text>
+  <text class="note" x="560" y="22">bar lengths are not to scale; the PR gives no timings</text>
+  <rect class="panel" x="8" y="32" width="944" height="222" rx="8"/>
+  <text class="lane" x="18" y="62">setup thread</text>
+  <text class="lane" x="18" y="94">vLLM</text>
+  <text class="lane" x="18" y="126">NeMo-Gym</text>
+  <text class="lane" x="18" y="158">dataset</text>
+  <text class="lane" x="18" y="190">trainer</text>
+  <text class="lane" x="18" y="222">controller</text>
+  <rect class="same" x="160" y="46" width="60" height="24" rx="4"/><text class="bt" x="166" y="62">reserve</text>
+  <rect class="same" x="460" y="46" width="96" height="24" rx="4"/><text class="bt" x="466" y="62">routes + sync</text>
+  <rect class="same" x="220" y="78" width="240" height="24" rx="4"/><text class="bt" x="228" y="94">load weights, start servers</text>
+  <rect class="same" x="220" y="110" width="240" height="24" rx="4"/><text class="bt" x="228" y="126">spin up servers</text>
+  <rect class="same" x="220" y="142" width="120" height="24" rx="4"/><text class="bt" x="228" y="158">load dataset</text>
+  <rect class="same" x="220" y="174" width="232" height="24" rx="4"/><text class="bt" x="228" y="190">build Megatron trainer</text>
+  <rect class="same" x="556" y="206" width="144" height="24" rx="4"/><text class="bt" x="564" y="222">first rollouts</text>
+  <rect class="slow" x="700" y="206" width="210" height="24" rx="4"/><text class="bt" x="708" y="222">step 1: autotune + compile</text>
+  <line class="end" x1="910" y1="40" x2="910" y2="248"/>
+  <text class="endt" x="842" y="246">step 1 ends</text>
+
+  <text class="hdr" x="14" y="284">this PR: all four switches on</text>
+  <rect class="panel" x="8" y="294" width="944" height="222" rx="8"/>
+  <text class="lane" x="18" y="324">setup thread</text>
+  <text class="lane" x="18" y="356">vLLM</text>
+  <text class="lane" x="18" y="388">NeMo-Gym</text>
+  <text class="lane" x="18" y="420">dataset</text>
+  <text class="lane" x="18" y="452">trainer</text>
+  <text class="lane" x="18" y="484">controller</text>
+  <rect class="same" x="160" y="308" width="60" height="24" rx="4"/><text class="bt" x="166" y="324">reserve</text>
+  <rect class="moved" x="340" y="308" width="54" height="24" rx="4"/>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/52230711dede84bf040212f2d43b1acd36a0d067/nemo_rl/algorithms/single_controller_utils/setup.py#L2228-L2231"><text class="bt" x="346" y="324">② scan</text></a>
+  <rect class="same" x="460" y="308" width="72" height="24" rx="4"/><text class="bt" x="466" y="324">check+sync</text>
+  <rect class="same" x="220" y="340" width="240" height="24" rx="4"/><text class="bt" x="228" y="356">load weights, start servers</text>
+  <rect class="same" x="220" y="372" width="240" height="24" rx="4"/><text class="bt" x="228" y="388">spin up servers</text>
+  <rect class="same" x="220" y="404" width="120" height="24" rx="4"/><text class="bt" x="228" y="420">load dataset</text>
+  <rect class="moved" x="160" y="436" width="232" height="24" rx="4"/>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/52230711dede84bf040212f2d43b1acd36a0d067/nemo_rl/algorithms/single_controller_utils/setup.py#L2030-L2036"><text class="bt" x="168" y="452">① build trainer, earlier</text></a>
+  <rect class="moved" x="392" y="436" width="68" height="24" rx="4"/>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/52230711dede84bf040212f2d43b1acd36a0d067/nemo_rl/models/policy/workers/megatron_policy_worker.py#L2711-L2791"><text class="bt" x="398" y="452">④ warm-up</text></a>
+  <rect class="same" x="532" y="468" width="144" height="24" rx="4"/><text class="bt" x="540" y="484">first rollouts</text>
+  <rect class="moved" x="676" y="468" width="120" height="24" rx="4"/>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/52230711dede84bf040212f2d43b1acd36a0d067/nemo_rl/utils/compile_cache.py#L45-L53"><text class="bt" x="684" y="484">③ step 1, cached</text></a>
+  <line class="end" x1="796" y1="302" x2="796" y2="510"/>
+  <text class="endt" x="806" y="500">step 1 ends sooner</text>
+
+  <rect class="moved" x="160" y="524" width="14" height="12" rx="2"/><text class="note" x="180" y="534">moved earlier or made cheaper by a switch</text>
+  <rect class="same" x="470" y="524" width="14" height="12" rx="2"/><text class="note" x="490" y="534">unchanged</text>
+  <rect class="slow" x="600" y="524" width="14" height="12" rx="2"/><text class="note" x="620" y="534">the cost the switches attack</text>
+</svg>
+
+<h2>What each switch does, step by step</h2>
+<ol>
+<li><b>① Early trainer build.</b> Setup <a href="https://github.com/NVIDIA-NeMo/RL/blob/52230711dede84bf040212f2d43b1acd36a0d067/nemo_rl/algorithms/single_controller_utils/setup.py#L2030-L2036">starts building the trainer on its own thread</a> before it reserves the vLLM workers, instead of in the task pool afterwards. It only applies to runs that already <a href="https://github.com/NVIDIA-NeMo/RL/blob/52230711dede84bf040212f2d43b1acd36a0d067/nemo_rl/algorithms/single_controller_utils/setup.py#L1785-L1792">load the dataset alongside the other builds</a> (NeMo-Gym, vLLM on separate GPUs, no resume) and set <code>cluster.segment_size</code>. In any other run it <a href="https://github.com/NVIDIA-NeMo/RL/blob/52230711dede84bf040212f2d43b1acd36a0d067/nemo_rl/algorithms/single_controller_utils/setup.py#L2021-L2027">prints a warning and is ignored</a>. Cost: Ray creates the trainer and vLLM actors at the same time, which adds load on its control service.</li>
+<li><b>② Early route scan.</b> Each dataset row names the Gym <span class="tip" tabindex="0" data-tip="An agent or environment server. Setup fails if a row names one the running Gym stack does not host.">route</span> it needs. The PR <a href="https://github.com/NVIDIA-NeMo/RL/blob/52230711dede84bf040212f2d43b1acd36a0d067/nemo_rl/environments/nemo_gym.py#L3878-L3889">collects those names</a> as soon as the dataset loads, e.g. <code>{"train": {"alpha", "beta"}}</code> in the PR's <a href="https://github.com/NVIDIA-NeMo/RL/blob/52230711dede84bf040212f2d43b1acd36a0d067/tests/unit/environments/test_nemo_gym_utils.py#L2272-L2277">test</a>. Once Gym is up, the <a href="https://github.com/NVIDIA-NeMo/RL/blob/52230711dede84bf040212f2d43b1acd36a0d067/nemo_rl/algorithms/single_controller_utils/setup.py#L2267-L2273">coverage check</a> only compares sets. A split whose routes only the running Gym knows (taskset rows) is still scanned at check time.</li>
+<li><b>③ Compile results kept between jobs.</b> The two variables are <a href="https://github.com/NVIDIA-NeMo/RL/blob/52230711dede84bf040212f2d43b1acd36a0d067/nemo_rl/utils/compile_cache.py#L84-L87">passed to the Megatron workers</a> as Triton's and torch's own <code>TRITON_CACHE_AUTOTUNING</code> and <code>TORCH_COMPILE_JOB_ID</code>. The <a href="https://github.com/NVIDIA-NeMo/RL/blob/52230711dede84bf040212f2d43b1acd36a0d067/nemo_rl/utils/cache_sync.sh#L85-L111">cache sync script</a> then also publishes torch's per-rank <span class="tip" tabindex="0" data-tip="Files (code_state_*.pkl) where torch.compile records which tensor sizes changed between calls, so the next job compiles those as variable-size from the start.">shape profiles</span>. They only do anything when the persistent compile cache from #4715 is on. Kernels whose autotune configs have a <code>pre_hook</code> are still benchmarked in every job.</li>
+<li><b>④ Trainer warm-up.</b> Each Megatron rank runs one logprob pass and one forward/backward on a fake batch. For the 1B math example the default lengths are <code>[512, 512, 512, 512]</code> tokens (max length 512, packing budget 4 × 512). Then it <a href="https://github.com/NVIDIA-NeMo/RL/blob/52230711dede84bf040212f2d43b1acd36a0d067/nemo_rl/models/policy/workers/megatron_policy_worker.py#L2777-L2789">undoes what a real step would read</a>: no optimizer step, gradients dropped, metric trackers and RNG reset. If the trainer is ready before vLLM, setup <a href="https://github.com/NVIDIA-NeMo/RL/blob/52230711dede84bf040212f2d43b1acd36a0d067/nemo_rl/algorithms/single_controller_utils/setup.py#L2218-L2227">runs it right away</a>. Otherwise the controller <a href="https://github.com/NVIDIA-NeMo/RL/blob/52230711dede84bf040212f2d43b1acd36a0d067/nemo_rl/algorithms/single_controller.py#L1051-L1071">runs it alongside the first rollouts</a>, and the train pump <a href="https://github.com/NVIDIA-NeMo/RL/blob/52230711dede84bf040212f2d43b1acd36a0d067/nemo_rl/algorithms/single_controller.py#L2900-L2901">waits for it before step 1</a>.</li>
+</ol>
+<p class="cref">🟡 <a href="https://github.com/NVIDIA-NeMo/RL/pull/5001#discussion_r4558240747">review comment C2 — setup.py:2020</a> &nbsp; 🟡 <a href="https://github.com/NVIDIA-NeMo/RL/pull/5001#discussion_r4558240753">review comment C3 — megatron_policy_worker.py:2711</a></p>
+
+<div class="hl"><b>So what.</b> Nothing changes unless you set a switch. Switches ① and ② only move work earlier. ③ and ④ make step 1 cheaper, but they can also stop a run before step 1:
+<ul style="margin:6px 0 0">
+<li>④ with CUDA graphs on fails at startup. The fix is on <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-5001-warmup-cuda-graph-crash.html">page 2</a>.</li>
+<li>④ can also run out of memory, since it uses full-size microbatches.</li>
+<li>③ can hang the first step if the ranks load shape profiles saved at different points of an earlier run.</li>
+</ul>
+<p style="margin:6px 0 0">The PR gives no before/after timings yet. The review asks for time to the end of step 1, with each switch on and off.</p></div>
+<p class="note" style="color:var(--dim);font-size:12.5px">The review comments linked above are part of a pending review, so they open only for its author until the review is published.</p>
+
+</div>
+</body>
+</html>

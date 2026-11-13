@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NVIDIA-NeMo/RL #5001 — why the trainer warm-up crashes when CUDA graphs are on</title>
+<style>
+:root{--bg:#0d1117;--surface:#161b22;--surface2:#1c2128;--border:#30363d;--text:#e6edf3;--dim:#8b949e;
+  --accent:#58a6ff;--green:#3fb950;--red:#f85149;--orange:#d29922}
+:root[data-theme="light"]{--bg:#ffffff;--surface:#f6f8fa;--surface2:#eaeef2;--border:#d0d7de;--text:#1f2328;
+  --dim:#59636e;--accent:#0969da;--green:#1a7f37;--red:#cf222e;--orange:#9a6700}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:28px 20px 70px}
+h1{font-size:22px;margin:0 0 8px;line-height:1.3}
+h2{font-size:18px;margin:30px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
+.sub{color:var(--dim);font-size:13.5px;margin:0 0 14px}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);
+  border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;
+  font:13px/1 ui-monospace,monospace;cursor:pointer}
+.status{border:1px solid var(--border);border-radius:10px;background:var(--surface);padding:2px 16px 10px;margin:0 0 16px}
+.status dl{display:grid;grid-template-columns:max-content 1fr;gap:4px 14px;margin:12px 0 0}
+.status dt{color:var(--dim);font-size:12px;text-transform:uppercase;letter-spacing:.04em;white-space:nowrap;padding-top:2px}
+.status dd{margin:0;font-size:14px}
+.verdict{font-weight:700}.verdict.open{color:var(--red)}
+nav.chain{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 6px;padding:0}
+nav.chain a,nav.chain span{display:inline-block;padding:5px 11px;border:1px solid var(--border);
+  border-radius:20px;background:var(--surface);text-decoration:none;color:var(--accent);
+  font-size:12.5px;line-height:1.3;white-space:nowrap}
+nav.chain a:hover{background:var(--surface2)}
+nav.chain span.here{background:var(--accent);color:var(--bg);border-color:var(--accent);font-weight:600}
+p.chainnote{color:var(--dim);font-size:12px;margin:0 0 18px}
+.bg{border-left:4px solid var(--accent);background:var(--surface);padding:8px 14px;margin:0 0 14px;font-size:14px}
+table.grid{border-collapse:collapse;font-size:13.5px;margin:8px 0 14px;width:100%}
+table.grid th,table.grid td{border:1px solid var(--border);padding:5px 9px;text-align:left;vertical-align:top}
+table.grid th{background:var(--surface2);font-weight:600}
+.diff{font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--surface);
+  border:1px solid var(--border);border-radius:8px;padding:12px;overflow-x:auto;white-space:pre;margin:10px 0}
+.diff .add{color:var(--green)}.diff .del{color:var(--red)}.diff .hunk{color:var(--accent)}
+.where{border-left:4px solid var(--accent);background:var(--surface);padding:6px 12px;margin:6px 0 10px}
+.warn{border-left:3px solid var(--red);background:var(--surface);padding:12px 16px;margin:18px 0;border-radius:0 8px 8px 0}
+.tip{border-bottom:1px dotted var(--dim);cursor:help;position:relative;outline:none}
+.tip:hover::after,.tip:focus::after{content:attr(data-tip);position:absolute;left:0;top:1.7em;z-index:60;
+  width:max-content;max-width:min(340px,80vw);white-space:normal;background:var(--surface2);color:var(--text);
+  border:1px solid var(--border);border-radius:6px;padding:7px 10px;font:13px/1.45 -apple-system,sans-serif;
+  font-weight:400;box-shadow:0 4px 14px rgba(0,0,0,.3)}
+.cref{margin:6px 0 0;font-size:13px}
+.cref a{display:inline-block;padding:4px 10px;border:1px solid var(--border);border-radius:16px;
+  background:var(--surface);font:12.5px ui-monospace,Menlo,monospace}
+ol li{margin:4px 0}
+svg{max-width:100%;height:auto;display:block;margin:14px 0}
+svg .box{fill:var(--surface);stroke:var(--border);stroke-width:1.3}
+svg .bad{fill:var(--red);fill-opacity:.14;stroke:var(--red);stroke-width:1.8}
+svg .good{fill:var(--green);fill-opacity:.14;stroke:var(--green);stroke-width:1.6}
+svg .lbl{fill:var(--text);font:12px ui-monospace,Menlo,monospace}
+svg .lbl-b{fill:var(--text);font:bold 12.5px -apple-system,sans-serif}
+svg .note{fill:var(--dim);font:11.5px -apple-system,sans-serif}
+svg .hdr{fill:var(--accent);font:bold 13px -apple-system,sans-serif}
+svg .err{fill:var(--red);font:bold 12px ui-monospace,Menlo,monospace}
+svg .ok{fill:var(--green);font:bold 12px ui-monospace,Menlo,monospace}
+svg .arr{stroke:var(--dim);stroke-width:1.5;fill:none;marker-end:url(#ah)}
+svg a text{text-decoration:underline;fill:var(--accent);font:11.5px ui-monospace,Menlo,monospace}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+  document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head>
+<body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+  function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+  function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
+    b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
+      else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+  document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+<div class="wrap">
+
+<h1>Why the trainer warm-up crashes at startup when CUDA graphs are on</h1>
+<p class="sub"><a href="https://github.com/NVIDIA-NeMo/RL/pull/5001">NVIDIA-NeMo/RL #5001</a>.
+Permalinks pin the PR head <code>5223071</code>, Megatron-LM <code>3e95097</code> (the copy pinned inside Megatron-Bridge),
+and Transformer Engine 2.18 <code>27486e0</code>.</p>
+
+<div class="status"><dl>
+  <dt>Before</dt>
+  <dd>There was no warm-up. Step 1 was the first time the trainer ran.</dd>
+  <dt>This PR</dt>
+  <dd>Adds <code>NRL_TRAINER_WARMUP=1</code>. The warm-up saves the trainer's random-number state, runs a fake step, then puts the state back. It saves that state with <code>.clone()</code> unless the tracker has a <code>use_cudagraphable_rng</code> flag.</dd>
+  <dt>Status</dt>
+  <dd><span class="verdict open">Open: not fixed in this PR.</span> It only hits runs with the warm-up on and Megatron CUDA graphs on. The fix below is proposed in review comment C1 (pending), not implemented.</dd>
+</dl></div>
+
+<nav class="chain">
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-5001-startup-switches.html">1 · what the switches change</a>
+  <span class="here">2 · warm-up crash with CUDA graphs</span>
+</nav>
+<p class="chainnote">Two pages on this PR. Read page 1 first for what the warm-up is.</p>
+
+<div class="bg"><b>Background.</b> Megatron keeps a few named random-number streams, one per kind of parallel group, in an <span class="tip" tabindex="0" data-tip="A small object that holds named random-number states and switches between them around dropout and similar draws.">RNG tracker</span>. There are two kinds of tracker. Megatron's own stores each state as a tensor. Transformer Engine's (TE's) stores each state as a <code>torch.Generator</code> object, so that <span class="tip" tabindex="0" data-tip="A recorded sequence of GPU kernels that is replayed as one unit. Random draws inside it must read from a generator the graph registered.">CUDA graphs</span> can read it. NeMo RL <a href="https://github.com/NVIDIA-NeMo/RL/blob/52230711dede84bf040212f2d43b1acd36a0d067/nemo_rl/models/megatron/setup.py#L2003-L2006">switches to TE's tracker</a> whenever <code>cuda_graph_impl</code> is not <code>"none"</code>. Dotted words have a short explanation: hover or tap them.</div>
+
+<table class="grid">
+<tr><th></th><th>main</th><th>this PR</th><th>after the review's fix (proposed in C1)</th></tr>
+<tr><td>v1 (driver loops)</td><td>no warm-up</td><td>no warm-up</td><td>no warm-up</td></tr>
+<tr><td>v2 (single controller)</td><td>no warm-up</td><td>warm-up + CUDA graphs → <code>AttributeError</code> before step 1</td><td>warm-up skips CUDA-graph runs. Every tracker kind is saved and restored in place.</td></tr>
+</table>
+
+<h2>The crash, one config line to the error</h2>
+
+<svg viewBox="0 0 960 420" role="img" aria-label="Flow from cuda_graph_impl: local to an AttributeError. The PR's check reads a flag TE's tracker does not have, so it takes the clone branch on torch.Generator objects. Megatron's own check would have said the tracker is graph-safe.">
+  <defs><marker id="ah" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" style="fill:var(--dim)"/></marker></defs>
+  <text class="hdr" x="14" y="22">With NRL_TRAINER_WARMUP=1, on every Megatron rank</text>
+
+  <rect class="box" x="14" y="36" width="300" height="52" rx="7"/>
+  <text class="lbl" x="26" y="58">policy.megatron_cfg:</text>
+  <text class="lbl" x="26" y="76">  cuda_graph_impl: local</text>
+
+  <rect class="box" x="360" y="36" width="270" height="52" rx="7"/>
+  <text class="lbl" x="372" y="58">use_te_rng_tracker = True</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/52230711dede84bf040212f2d43b1acd36a0d067/nemo_rl/models/megatron/setup.py#L2003-L2006"><text x="372" y="78">NeMo RL forces it: setup.py</text></a>
+  <path class="arr" d="M314 62 L356 62"/>
+
+  <rect class="box" x="676" y="36" width="270" height="52" rx="7"/>
+  <text class="lbl" x="688" y="58">TECudaRNGStatesTracker</text>
+  <a href="https://github.com/NVIDIA/Megatron-LM/blob/3e95097b4a9ab6ea6b2a39eb2b2b24e4a6dfa54a/megatron/core/tensor_parallel/random.py#L379-L387"><text x="688" y="78">Megatron picks TE's class</text></a>
+  <path class="arr" d="M630 62 L672 62"/>
+
+  <rect class="box" x="200" y="118" width="560" height="56" rx="7"/>
+  <text class="lbl" x="212" y="140">rng_tracker.get_states() →</text>
+  <text class="lbl" x="212" y="160">{"model-parallel-rng": &lt;torch.Generator&gt;, ...}</text>
+  <a href="https://github.com/NVIDIA/TransformerEngine/blob/27486e03cfc1fa41f6932dcecdc47c71c47eac3e/transformer_engine/pytorch/distributed.py#L883-L888"><text x="582" y="140">TE stores Generators</text></a>
+  <path class="arr" d="M810 88 L700 116"/>
+
+  <text class="lbl-b" x="14" y="206">this PR asks:</text>
+  <rect class="bad" x="14" y="214" width="452" height="76" rx="7"/>
+  <text class="lbl" x="26" y="236">getattr(tracker, "use_cudagraphable_rng", False)</text>
+  <text class="err" x="26" y="258">→ False   (TE's class has no such flag)</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/52230711dede84bf040212f2d43b1acd36a0d067/nemo_rl/models/policy/workers/megatron_policy_worker.py#L2744-L2748"><text x="26" y="280">megatron_policy_worker.py L2744-L2748</text></a>
+  <path class="arr" d="M360 174 L260 210"/>
+
+  <text class="lbl-b" x="494" y="206">Megatron's own check says:</text>
+  <rect class="good" x="494" y="214" width="452" height="76" rx="7"/>
+  <text class="lbl" x="506" y="236">is_graph_safe_cuda_rng_tracker(tracker)</text>
+  <text class="ok" x="506" y="258">→ True    (isinstance TE tracker)</text>
+  <a href="https://github.com/NVIDIA/Megatron-LM/blob/3e95097b4a9ab6ea6b2a39eb2b2b24e4a6dfa54a/megatron/core/tensor_parallel/random.py#L604-L612"><text x="506" y="280">random.py L604-L612 (not used)</text></a>
+  <path class="arr" d="M600 174 L700 210"/>
+
+  <rect class="bad" x="14" y="320" width="452" height="80" rx="7"/>
+  <text class="lbl" x="26" y="342">{n: s.clone() for n, s in ...}</text>
+  <text class="err" x="26" y="364">AttributeError: 'torch._C.Generator'</text>
+  <text class="err" x="26" y="382">object has no attribute 'clone'</text>
+  <path class="arr" d="M240 290 L240 316"/>
+  <text class="note" x="494" y="340">This runs before the try: block, so nothing</text>
+  <text class="note" x="494" y="358">catches it. The warm-up fails, and the run</text>
+  <text class="note" x="494" y="376">stops before step 1. The error itself was</text>
+  <text class="note" x="494" y="394">reproduced on CPU with torch 2.13; no GPU run.</text>
+</svg>
+
+<ol>
+<li>A run sets <code>cuda_graph_impl: local</code> (or any value other than <code>"none"</code>), or sets <code>use_te_rng_tracker: true</code> in <code>model_overrides</code>. The shipped example configs use <code>"none"</code>, so they do not hit this.</li>
+<li>Megatron builds TE's tracker. In TE 2.18 each saved state is a <a href="https://github.com/NVIDIA/TransformerEngine/blob/27486e03cfc1fa41f6932dcecdc47c71c47eac3e/transformer_engine/pytorch/distributed.py#L113-L119"><code>torch.Generator</code> from <code>clone_state()</code></a>.</li>
+<li>The PR's check looks for a flag that only <a href="https://github.com/NVIDIA/Megatron-LM/blob/3e95097b4a9ab6ea6b2a39eb2b2b24e4a6dfa54a/megatron/core/tensor_parallel/random.py#L243-L245">Megatron's own tracker</a> has, so it takes the <code>.clone()</code> branch. <code>torch.Generator</code> has <code>get_state</code>/<code>set_state</code> but no <code>clone</code>.</li>
+<li>One more problem waits behind the crash. With <code>cuda_graph_impl: local</code>, the warm-up's forward/backward is the call that <a href="https://github.com/NVIDIA/Megatron-LM/blob/3e95097b4a9ab6ea6b2a39eb2b2b24e4a6dfa54a/megatron/core/transformer/cuda_graphs.py#L2141-L2146">captures Megatron's CUDA graphs</a>, so they are captured on the fake batch's shapes. A real batch that matches none of them hits <a href="https://github.com/NVIDIA/Megatron-LM/blob/3e95097b4a9ab6ea6b2a39eb2b2b24e4a6dfa54a/megatron/core/transformer/cuda_graphs.py#L2017-L2023"><code>"no matching cudagraph runners were found"</code></a>.</li>
+</ol>
+
+<h2>The fix: proposed in C1, not in the PR</h2>
+<p class="where"><b>Where the fix lands: RL only, one file,</b> <a href="https://github.com/NVIDIA-NeMo/RL/blob/52230711dede84bf040212f2d43b1acd36a0d067/nemo_rl/models/policy/workers/megatron_policy_worker.py#L2685-L2791"><code>megatron_policy_worker.py</code></a>, plus one row in the docs table. <b>No Megatron or TE change:</b> both already expose <code>get_state</code>/<code>set_state</code> on each generator.</p>
+<p>Nothing below is implemented or run. The <code>-</code> lines exist at the PR head.</p>
+<pre class="diff"><span class="hunk">@@ megatron_policy_worker.py L2693-L2695 · _trainer_warmup_skip_reason</span>
+         if self.optimizer is None:
+             return "no optimizer"
+<span class="add">+        # The warm-up's fwd/bwd would capture CUDA graphs on the synthetic batch's shapes.
++        if get_model_config(self.model).cuda_graph_impl != "none":
++            return "CUDA graphs would be captured on the synthetic batch"
+</span>         if self._router_replay_enabled:
+<span class="hunk">@@ megatron_policy_worker.py L2741-L2749 · warmup_first_pass, save</span>
+         rng_tracker = get_cuda_rng_tracker()
+<span class="del">-        # Graph-safe trackers hold generators that CUDA graphs may have registered;
+-        # replacing them with copies would detach those graphs.
+-        tracker_states = (
+-            None
+-            if getattr(rng_tracker, "use_cudagraphable_rng", False)
+-            else {name: s.clone() for name, s in rng_tracker.get_states().items()}
+-        )
+</span><span class="add">+        # TE's tracker and graph-safe trackers hold torch.Generator objects (no .clone()).
++        tracker_states = {
++            n: s.get_state() if isinstance(s, torch.Generator) else s.clone()
++            for n, s in rng_tracker.get_states().items()
++        }
+</span>         cpu_rng_state = torch.get_rng_state()
+<span class="hunk">@@ megatron_policy_worker.py L2784-L2787 · warmup_first_pass, finally</span>
+             torch.cuda.set_rng_state(cuda_rng_state)
+<span class="del">-            if tracker_states is not None:
+-                rng_tracker.set_states(tracker_states)
+</span><span class="add">+            live = rng_tracker.get_states()  # a new dict holding the same state objects
++            for n, s in live.items():
++                if isinstance(s, torch.Generator):
++                    s.set_state(tracker_states[n])  # in place: graphs keep their generator
++                else:
++                    live[n] = tracker_states[n]
++            rng_tracker.set_states(live)
+</span>             self.timer = step_timer</pre>
+<ol>
+<li>The first hunk skips the warm-up when CUDA graphs are on, so graphs are never captured on fake shapes. It reads the value Megatron actually runs with (<a href="https://github.com/NVIDIA/Megatron-LM/blob/3e95097b4a9ab6ea6b2a39eb2b2b24e4a6dfa54a/megatron/core/transformer/transformer_config.py#L1236"><code>TransformerConfig.cuda_graph_impl</code></a>).</li>
+<li>The second saves every state, whatever the tracker kind: a generator's seed and offset, or a tensor copy. This still matters with graphs off, because a run can turn on TE's tracker by hand.</li>
+<li>The third writes generator states back into the same objects. <a href="https://github.com/NVIDIA/Megatron-LM/blob/3e95097b4a9ab6ea6b2a39eb2b2b24e4a6dfa54a/megatron/core/tensor_parallel/random.py#L276-L288"><code>get_states()</code></a> returns a new dict, so <code>set_states</code> is still called for tensor states. This also restores the graph-safe states that the PR currently skips, which an earlier review thread on the same line pointed out.</li>
+</ol>
+<p class="cref">🔴 <a href="https://github.com/NVIDIA-NeMo/RL/pull/5001#discussion_r4558240730">review comment C1 — megatron_policy_worker.py:2742</a> &nbsp; 🟡 <a href="https://github.com/NVIDIA-NeMo/RL/pull/5001#discussion_r4558240753">C3 — the missing worker test that would catch it</a></p>
+
+<div class="warn"><b>So what.</b> If you turn on the warm-up in a Megatron run with CUDA graphs, it dies before step 1 with an <code>AttributeError</code>, on every rank. Leave the warm-up off for CUDA-graph runs until C1 lands. The review also asks for a unit test with a fake tracker that stores <code>torch.Generator</code> states: it fails today and would have caught this.</div>
+<p style="color:var(--dim);font-size:12.5px">The review comments linked above are part of a pending review, so they open only for its author until the review is published.</p>
+
+</div>
+</body>
+</html>
