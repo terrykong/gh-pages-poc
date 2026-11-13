@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NVIDIA-NeMo/RL #4160 — which rows count toward the GRPO baseline: include vs exclude</title>
+<style>
+:root{
+  --bg:#0d1117; --surface:#161b22; --surface2:#1c2128; --border:#30363d;
+  --text:#e6edf3; --dim:#8b949e; --accent:#58a6ff; --green:#3fb950;
+  --orange:#d29922; --red:#f85149;
+}
+:root[data-theme="light"]{
+  --bg:#ffffff; --surface:#f6f8fa; --surface2:#eaeef2; --border:#d0d7de;
+  --text:#1f2328; --dim:#59636e; --accent:#0969da; --green:#1a7f37;
+  --orange:#9a6700; --red:#cf222e;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:28px 20px 70px}
+h1{font-size:22px;margin:0 0 8px;line-height:1.3}
+h2{font-size:18px;margin:32px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;
+  font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
+.sub{color:var(--dim);font-size:13.5px;margin:0 0 16px}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);
+  border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;
+  font:13px/1 ui-monospace,Menlo,monospace;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.18)}
+.status{border:1px solid var(--border);border-radius:10px;background:var(--surface);
+  padding:2px 16px 10px;margin:0 0 20px}
+.status dl{display:grid;grid-template-columns:max-content 1fr;gap:4px 14px;margin:12px 0 0}
+.status dt{color:var(--dim);font-size:12px;text-transform:uppercase;letter-spacing:.04em;
+  white-space:nowrap;padding-top:2px}
+.status dd{margin:0;font-size:14px}
+.verdict{font-weight:700}
+.verdict.good{color:var(--green)}
+.bg{border-left:3px solid var(--accent);background:var(--surface);padding:10px 14px;
+  margin:0 0 16px;border-radius:0 8px 8px 0;font-size:14px}
+.hl{border-left:3px solid var(--orange);background:var(--surface);
+  padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0}
+.tip{border-bottom:1px dotted var(--dim);cursor:help;position:relative;outline:none}
+.tip:hover::after,.tip:focus::after{content:attr(data-tip);position:absolute;left:0;top:1.7em;z-index:60;
+  width:max-content;max-width:min(340px,80vw);white-space:normal;background:var(--surface2);color:var(--text);
+  border:1px solid var(--border);border-radius:6px;padding:7px 10px;font:13px/1.45 -apple-system,sans-serif;
+  font-weight:400;box-shadow:0 4px 14px rgba(0,0,0,.3)}
+.cref{margin:6px 0 0;font-size:13px}
+.cref a{display:inline-block;padding:4px 10px;border:1px solid var(--border);
+  border-radius:16px;background:var(--surface);font:12.5px ui-monospace,Menlo,monospace}
+table{border-collapse:collapse;width:100%;font-size:14px;margin:10px 0}
+th,td{border:1px solid var(--border);padding:6px 10px;text-align:left;vertical-align:top}
+th{background:var(--surface);font-weight:600}
+.tw{overflow-x:auto}
+svg{max-width:100%;height:auto;display:block;margin:16px 0}
+svg .box{fill:var(--surface);stroke:var(--border);stroke-width:1.2}
+svg .lbl{fill:var(--text);font:12.5px ui-monospace,Menlo,monospace}
+svg .lbl-b{fill:var(--text);font:bold 13px -apple-system,sans-serif}
+svg .note{fill:var(--dim);font:11.5px -apple-system,sans-serif}
+svg .hdr{fill:var(--accent);font:bold 13px -apple-system,sans-serif}
+svg .big{fill:var(--text);font:bold 15px ui-monospace,Menlo,monospace}
+svg .vote{fill:var(--green);opacity:.85}
+svg .novote{fill:none;stroke:var(--dim);stroke-width:1.6;stroke-dasharray:3 2}
+svg .trn{fill:var(--accent);opacity:.8}
+svg .notrn{fill:none;stroke:var(--dim);stroke-width:1.6}
+svg .flag{fill:var(--orange);font:12px -apple-system,sans-serif}
+svg .sep{stroke:var(--border);stroke-width:1}
+svg a text{text-decoration:underline;fill:var(--accent);font:11.5px ui-monospace,Menlo,monospace}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+  document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head>
+<body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+  function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+  function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
+    b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
+      else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+  document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+<div class="wrap">
+
+<h1>Which rows count toward the GRPO baseline: <code>include</code> vs <code>exclude</code></h1>
+<p class="sub"><a href="https://github.com/NVIDIA-NeMo/RL/pull/4160">NVIDIA-NeMo/RL #4160</a> · follow-up <a href="https://github.com/NVIDIA-NeMo/RL/pull/4968">#4968</a> · permalinks pinned to head <code>1429122e</code></p>
+
+<div class="status">
+<dl>
+  <dt>Before</dt>
+  <dd>There was no switch. Each trainer chose on its own which rows count toward the advantage statistics. The legacy and TransferQueue loops counted every row; SingleController counted only rows that train.</dd>
+  <dt>This PR</dt>
+  <dd>Adds <code>grpo.masked_reward_policy</code>: <code>include</code> (default) or <code>exclude</code>. All four trainers apply it the same way.</dd>
+  <dt>Status</dt>
+  <dd><span class="verdict good">Merged (2026-10-27). The review found no bugs.</span> Two items are still open: <a href="https://github.com/NVIDIA-NeMo/RL/pull/4968">#4968</a> handles the default for rows the environment flags (it adds an opt-in <code>exclude_infra</code>), and the include-vs-exclude training comparison was never posted.</dd>
+</dl>
+</div>
+
+<div class="bg"><b>Background.</b> GRPO trains on groups of answers to the same prompt. Each answer's <i>advantage</i> is its reward minus the group's average reward (the <i>baseline</i>). Some rows are kept out of the loss, for example an answer cut off at the length limit, or one the environment marked as bad data. The question this PR answers: <b>should those rows still count toward the average their siblings are compared against?</b> Dotted words have a short explanation: hover or tap them.</div>
+
+<p>The loss mask never changes; a masked row never trains. The new key decides only which rows <i>vote</i>, meaning which rows count toward the group baseline, the standard deviation, <span class="tip" tabindex="0" data-tip="GDPO and Reinforce++ normalize over the whole batch, not per group. Their batch mean and spread use the same voting rows.">batch normalization</span> and <span class="tip" tabindex="0" data-tip="Dynamic sampling drops a prompt group when all its rewards are the same, because then every advantage is 0.">dynamic-sampling</span> admission. Under <code>include</code>, every row with a nonzero dataset weight votes (<a href="https://github.com/NVIDIA-NeMo/RL/blob/1429122e9ec881fc9bf9e097bd4b187a73c2ea92/nemo_rl/algorithms/grpo.py#L2777">_include_valid_mask</a>). Under <code>exclude</code>, only rows with a nonzero loss weight vote. Voting is yes or no: a row with loss weight 0.5 still gets one full vote (<a href="https://github.com/NVIDIA-NeMo/RL/blob/1429122e9ec881fc9bf9e097bd4b187a73c2ea92/nemo_rl/algorithms/grpo.py#L2765">_binary_participation</a>).</p>
+
+<svg viewBox="0 0 900 400" role="img" aria-label="One prompt group of five rows: which rows train and which vote under include and exclude">
+  <text class="hdr" x="16" y="24">One prompt group, 5 answers. Std scaling and leave-one-out off, to keep the numbers simple.</text>
+  <!-- column headers -->
+  <text class="lbl-b" x="16" y="58">answer</text>
+  <text class="lbl-b" x="110" y="58">reward</text>
+  <text class="lbl-b" x="190" y="58">flag</text>
+  <text class="lbl-b" x="392" y="58">trains?</text>
+  <text class="lbl-b" x="532" y="58">votes: include</text>
+  <text class="lbl-b" x="712" y="58">votes: exclude</text>
+  <line class="sep" x1="16" y1="68" x2="884" y2="68"/>
+  <!-- rows -->
+  <g>
+    <text class="lbl" x="16" y="96">r1</text><text class="lbl" x="122" y="96">1</text><text class="note" x="190" y="96">normal</text>
+    <rect class="trn" x="404" y="84" width="16" height="16" rx="3"/>
+    <circle class="vote" cx="580" cy="92" r="9"/><circle class="vote" cx="760" cy="92" r="9"/>
+  </g>
+  <g>
+    <text class="lbl" x="16" y="130">r2</text><text class="lbl" x="122" y="130">1</text><text class="note" x="190" y="130">normal</text>
+    <rect class="trn" x="404" y="118" width="16" height="16" rx="3"/>
+    <circle class="vote" cx="580" cy="126" r="9"/><circle class="vote" cx="760" cy="126" r="9"/>
+  </g>
+  <g>
+    <text class="lbl" x="16" y="164">r3</text><text class="lbl" x="122" y="164">0</text><text class="note" x="190" y="164">normal</text>
+    <rect class="trn" x="404" y="152" width="16" height="16" rx="3"/>
+    <circle class="vote" cx="580" cy="160" r="9"/><circle class="vote" cx="760" cy="160" r="9"/>
+  </g>
+  <g>
+    <text class="lbl" x="16" y="198">r4</text><text class="lbl" x="122" y="198">0</text><text class="flag" x="190" y="198">cut off at length limit</text>
+    <rect class="notrn" x="404" y="186" width="16" height="16" rx="3"/>
+    <circle class="vote" cx="580" cy="194" r="9"/><circle class="novote" cx="760" cy="194" r="9"/>
+  </g>
+  <g>
+    <text class="lbl" x="16" y="232">r5</text><text class="lbl" x="122" y="232">0</text><text class="flag" x="190" y="232">env flagged mask_sample</text>
+    <rect class="notrn" x="404" y="220" width="16" height="16" rx="3"/>
+    <circle class="vote" cx="580" cy="228" r="9"/><circle class="novote" cx="760" cy="228" r="9"/>
+  </g>
+  <line class="sep" x1="16" y1="250" x2="884" y2="250"/>
+  <!-- results -->
+  <text class="lbl-b" x="16" y="280">baseline</text>
+  <text class="big" x="532" y="280">2/5 = 0.40</text>
+  <text class="big" x="712" y="280">2/3 ≈ 0.67</text>
+  <text class="lbl-b" x="16" y="310">advantage of r1 (reward 1)</text>
+  <text class="big" x="532" y="310">+0.60</text>
+  <text class="big" x="712" y="310">+0.33</text>
+  <text class="lbl-b" x="16" y="340">advantage of r3 (reward 0)</text>
+  <text class="big" x="532" y="340">−0.40</text>
+  <text class="big" x="712" y="340">−0.67</text>
+  <!-- legend -->
+  <rect class="trn" x="16" y="364" width="12" height="12" rx="2"/><text class="note" x="34" y="374">trains (loss weight 1)</text>
+  <rect class="notrn" x="176" y="364" width="12" height="12" rx="2"/><text class="note" x="194" y="374">no loss</text>
+  <circle class="vote" cx="282" cy="370" r="6"/><text class="note" x="294" y="374">votes in baseline</text>
+  <circle class="novote" cx="420" cy="370" r="6"/><text class="note" x="432" y="374">does not vote</text>
+  <a href="https://github.com/NVIDIA-NeMo/RL/blob/1429122e9ec881fc9bf9e097bd4b187a73c2ea92/nemo_rl/algorithms/grpo.py#L2805"><text x="560" y="374">_advantage_valid_mask picks the column</text></a>
+</svg>
+
+<p>The same three rows train in both columns. Only the baseline moves. Under <code>include</code> the two masked zeros pull the average down, so the correct answers r1 and r2 get a bigger push (+0.60 instead of +0.33). That is the trade-off. A row that was cut off really did fail, so counting it is fair. A row the environment flagged because <i>its own grader broke</i> is not a real measurement, yet under <code>include</code> it still moves its siblings. <a href="https://github.com/NVIDIA-NeMo/RL/pull/4968">#4968</a> is the follow-up for that case.</p>
+
+<h2>Where each trainer decides, and where they meet</h2>
+<p>The three loop trainers call one shared helper, <a href="https://github.com/NVIDIA-NeMo/RL/blob/1429122e9ec881fc9bf9e097bd4b187a73c2ea92/nemo_rl/algorithms/grpo.py#L2805">_advantage_valid_mask</a>. SingleController makes the same two-way choice in its own six lines, because that stage also runs PPO. Every path then passes the result to the estimator as <code>valid_mask</code>. That is where they become one: GRPO, GDPO and Reinforce++ all read it (<a href="https://github.com/NVIDIA-NeMo/RL/blob/1429122e9ec881fc9bf9e097bd4b187a73c2ea92/nemo_rl/algorithms/advantage_estimator.py#L130">GRPO</a>, <a href="https://github.com/NVIDIA-NeMo/RL/blob/1429122e9ec881fc9bf9e097bd4b187a73c2ea92/nemo_rl/algorithms/advantage_estimator.py#L205">GDPO</a>, <a href="https://github.com/NVIDIA-NeMo/RL/blob/1429122e9ec881fc9bf9e097bd4b187a73c2ea92/nemo_rl/algorithms/advantage_estimator.py#L308">Reinforce++</a>).</p>
+<div class="tw"><table>
+<tr><th>Trainer</th><th>Picks the voters at</th><th>What the default (<code>include</code>) changed</th></tr>
+<tr><td>Legacy sync GRPO</td><td><a href="https://github.com/NVIDIA-NeMo/RL/blob/1429122e9ec881fc9bf9e097bd4b187a73c2ea92/nemo_rl/algorithms/grpo.py#L4150">grpo.py L4150</a></td><td>GRPO/GDPO group averages: nothing. Reinforce++ batch normalization now counts masked rewards.</td></tr>
+<tr><td>Async GRPO</td><td><a href="https://github.com/NVIDIA-NeMo/RL/blob/1429122e9ec881fc9bf9e097bd4b187a73c2ea92/nemo_rl/algorithms/grpo.py#L5994">grpo.py L5994</a></td><td>Same as legacy.</td></tr>
+<tr><td>TransferQueue</td><td><a href="https://github.com/NVIDIA-NeMo/RL/blob/1429122e9ec881fc9bf9e097bd4b187a73c2ea92/nemo_rl/algorithms/grpo_sync.py#L1058">grpo_sync.py L1058</a></td><td>Same as legacy, and rows flagged with <code>mask_sample</code> no longer train (they used to train at full weight).</td></tr>
+<tr><td>SingleController</td><td><a href="https://github.com/NVIDIA-NeMo/RL/blob/1429122e9ec881fc9bf9e097bd4b187a73c2ea92/nemo_rl/algorithms/single_controller_utils/advantage_stage.py#L424-L430">advantage_stage.py L424</a></td><td>Masked, cut-off and <span class="tip" tabindex="0" data-tip="Rows whose generation-time and training-time log probabilities differ by more than seq_logprob_error_threshold. They are dropped from the loss.">sequence-error</span> rows now vote. Before, only rows that train voted.</td></tr>
+</table></div>
+<p>Two kinds of rows never vote, on any trainer, under either setting: prompts too long to fit the sequence limit (the dataset gives them <code>loss_multiplier = 0</code> before any rollout), and SingleController's empty <span class="tip" tabindex="0" data-tip="Rows SingleController adds to the data plane while it captures tokens. They hold no usable answer.">placeholder rows</span>.</p>
+<p><b>Why PPO is left out.</b> In <a href="https://github.com/NVIDIA-NeMo/RL/blob/1429122e9ec881fc9bf9e097bd4b187a73c2ea92/nemo_rl/algorithms/single_controller_utils/advantage_stage.py#L424-L430">advantage_stage.py</a>, the check <code>not cfg.is_ppo</code> only avoids reading a field PPO's config does not have. PPO's GAE estimator has no group baseline. It whitens advantages over the tokens that train (<a href="https://github.com/NVIDIA-NeMo/RL/blob/1429122e9ec881fc9bf9e097bd4b187a73c2ea92/nemo_rl/algorithms/advantage_estimator.py#L575">L575</a>) and never reads <code>valid_mask</code>. So the setting has nothing to change for PPO.</p>
+
+<div class="hl"><b>So what.</b> Pick <code>exclude</code> when your environment flags rows because its own grader or tooling failed. Those rewards are noise, and under <code>include</code> they shift every sibling's advantage. Keep <code>include</code> (the default) when masked rows are real failures, such as answers cut off at the length limit. No controlled training run comparing the two has been published yet. To run one, use the paired <a href="https://github.com/NVIDIA-NeMo/RL/blob/1429122e9ec881fc9bf9e097bd4b187a73c2ea92/examples/configs/experiments/grpo-qwen2.5-1.5b-1n1g-dtensor2tp1-masked-reward-include.yaml">include</a> / <a href="https://github.com/NVIDIA-NeMo/RL/blob/1429122e9ec881fc9bf9e097bd4b187a73c2ea92/examples/configs/experiments/grpo-qwen2.5-1.5b-1n1g-dtensor2tp1-masked-reward-exclude.yaml">exclude</a> configs.</div>
+
+</div>
+</body>
+</html>
