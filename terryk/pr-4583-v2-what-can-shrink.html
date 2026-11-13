@@ -128,7 +128,7 @@ and shape checks on saved image data that run before the prefix digest check, wh
 
   <a href="https://github.com/NVIDIA-NeMo/RL/blob/425317889212cb4a5e1252030797d83982ae4fc8/nemo_rl/models/generation/vllm/vllm_worker_async.py#L144-L197"><text class="lbl" x="12" y="128">vllm_worker_async.py</text></a>
   <rect class="keep" x="300" y="116" width="116" height="16"/><rect class="cut" x="416" y="116" width="53" height="16"/>
-  <text class="num" x="477" y="128">169</text><text class="ct" x="516" y="128">−53 C11 C12 C13</text>
+  <text class="num" x="477" y="128">169</text><text class="ct" x="516" y="128">−53 C11 C12</text>
 
   <text class="lbl" x="12" y="152">docs + setup.py</text>
   <rect class="keep" x="300" y="140" width="17" height="16"/>
@@ -138,8 +138,8 @@ and shape checks on saved image data that run before the prefix digest check, wh
   <text class="hdr" x="12" y="190">tests</text>
 
   <a href="https://github.com/NVIDIA-NeMo/RL/blob/425317889212cb4a5e1252030797d83982ae4fc8/tests/unit/models/generation/test_vllm_token_capture_hosting.py#L1890-L2180"><text class="lbl" x="12" y="212">test_vllm_token_capture_hosting</text></a>
-  <rect class="keep" x="300" y="200" width="318" height="16"/><rect class="cut" x="618" y="200" width="77" height="16"/><rect class="add" x="695" y="200" width="20" height="16"/>
-  <text class="num" x="721" y="212">395</text><text class="ct" x="756" y="212">−77</text><text class="gt" x="789" y="212">+20</text>
+  <rect class="keep" x="300" y="200" width="327" height="16"/><rect class="cut" x="627" y="200" width="68" height="16"/><rect class="add" x="695" y="200" width="20" height="16"/>
+  <text class="num" x="721" y="212">395</text><text class="ct" x="756" y="212">−68</text><text class="gt" x="789" y="212">+20</text>
 
   <a href="https://github.com/NVIDIA-NeMo/RL/blob/425317889212cb4a5e1252030797d83982ae4fc8/tests/functional/nemotron_omni_clevr_vllm_prefix_recovery_single_controller_1n2g.sh#L165-L251"><text class="lbl" x="12" y="236">omni prefix-recovery .sh (new)</text></a>
   <rect class="keep" x="300" y="224" width="313" height="16"/><rect class="cut" x="613" y="224" width="37" height="16"/>
@@ -158,17 +158,17 @@ and shape checks on saved image data that run before the prefix digest check, wh
   <text class="num" x="653" y="308">345</text>
 
   <line class="sep" x1="12" y1="326" x2="888" y2="326"/>
-  <text class="note" x="12" y="346">hosting test: −17 C13 (unreachable error's test), −60 C16 (copied helpers and tests), +20 C15 (resume-then-cut case)</text>
+  <text class="note" x="12" y="346">hosting test: −60 C16 (copied helpers and tests), −8 C11 (media-row case), +20 C15 (resume-then-cut case)</text>
   <text class="note" x="12" y="364">captured_media test: −25 C10, −30 C11 (corrupt-row cases), −17 C12, +25 C14 (handler branch case)</text>
   <text class="note" x="12" y="382">C17 moves ~35 settings into a test-only YAML; the sibling Omni script drops the same lines.</text>
-  <text class="note" x="12" y="406">Total: about −110 source, −210 tests, +45 for the two test gaps. "Other" = parity 94 + 86, snapshot 70, phases 58, text .sh 33, two small 4.</text>
+  <text class="note" x="12" y="406">Total: about −110 source, −200 tests, +45 for the two test gaps. "Other" = parity 94 + 86, snapshot 70, phases 58, text .sh 33, two small 4.</text>
 </svg>
 
 <h2>The biggest source cut: read the image data after the check that covers it (C11)</h2>
 <p class="where"><b>Where the fix lands: RL only.</b>
 <a href="https://github.com/NVIDIA-NeMo/RL/blob/425317889212cb4a5e1252030797d83982ae4fc8/nemo_rl/models/generation/prefix_recovery/recovery.py#L802-L843"><code>resolve_restore</code></a>,
 <a href="https://github.com/NVIDIA-NeMo/RL/blob/425317889212cb4a5e1252030797d83982ae4fc8/nemo_rl/models/generation/prefix_recovery/recovery.py#L691"><code>_rebuild_prefix</code></a>, the
-<a href="https://github.com/NVIDIA-NeMo/RL/blob/425317889212cb4a5e1252030797d83982ae4fc8/nemo_rl/models/generation/prefix_recovery/parts.py#L58-L60"><code>restore_media</code></a> hook type, and the vLLM hook
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/425317889212cb4a5e1252030797d83982ae4fc8/nemo_rl/models/generation/prefix_recovery/parts.py#L58-L60"><code>restore_media</code></a> hook (deleted), and the vLLM worker's
 <a href="https://github.com/NVIDIA-NeMo/RL/blob/425317889212cb4a5e1252030797d83982ae4fc8/nemo_rl/models/generation/vllm/vllm_worker_async.py#L1253-L1272"><code>_restore_generation_cut_media</code></a>.
 <b>No Gym change:</b> Gym's prefix digest already includes the row's extras
 (<a href="https://github.com/NVIDIA-NeMo/Gym/blob/5911d628c744d0bf43fe1d9ddf3bda72d59b0f9a/nemo_gym/token_id_capture/staging/digest.py#L203-L221"><code>compute_staging_digest</code></a>).</p>
@@ -183,17 +183,17 @@ and shape checks on saved image data that run before the prefix digest check, wh
 </span>             if snapshot.digest != continuation.prefix_digest:
                  raise RuntimeError("rebuilt prefix digest does not match the admission")
              ...
-<span class="add">+            # Row 0's extras are now verified: the digest above covers them.
-+            media = self._parts.restore_media(snapshot)
-</span>             return admission, _ResolvedGenerationCut(snapshot=snapshot, media=media)
-<span class="hunk">@@ vllm_worker_async.py L1253-L1272 · _restore_generation_cut_media</span>
+<span class="del">-            return admission, _ResolvedGenerationCut(snapshot=snapshot, media=media)
+</span><span class="add">+            # As on main: the worker reads the media from the verified snapshot.
++            return admission, snapshot
+</span><span class="hunk">@@ vllm_worker_async.py L1253-L1272 · _restore_generation_cut_media</span>
 <span class="del">-    def _restore_generation_cut_media(
 -        self, chunks: Sequence[Any]
 -    ) -> CapturedMedia | None:
-</span><span class="add">+    def _restore_generation_cut_media(self, snapshot: Any) -> CapturedMedia | None:
-</span>         if not self._capture_media:
-             return None
-<span class="del">-        first = chunks[0]
+-        if not self._capture_media:
+-            return None
+</span><span class="add">+    def _restore_generation_cut_media(self, snapshot: Any) -> CapturedMedia:
+</span><span class="del">-        first = chunks[0]
 -        items = _media_items_from_extras(first.extras, first.snapshot, missing_message=...)
 -        digests = first.extras.get(MEDIA_TENSOR_DIGESTS_FIELD)
 -        if not isinstance(digests, dict):
@@ -201,15 +201,24 @@ and shape checks on saved image data that run before the prefix digest check, wh
 -        if bool(items) != bool(digests):
 -            raise MediaCaptureRejected("Generation-prefix media metadata and digests disagree")
 -        return CapturedMedia(items=items, tensors=None, tensor_digests=digests)
-</span><span class="add">+        # Index directly: a missing key raises inside the caller's try,
-+        # so the call regenerates from its turn boundary.
+</span><span class="add">+        # The prefix digest covers these extras, so index them directly.
 +        items = _media_items_from_extras(snapshot.extras, snapshot, missing_message=...)
 +        return CapturedMedia(
 +            items=items, tensors=None,
 +            tensor_digests=snapshot.extras[MEDIA_TENSOR_DIGESTS_FIELD],
++        )
++
++    def _capture_restored_media(self, engine_prompt, *, admission, splice, snapshot):
++        """Reprocess a restored call's media and check it against the saved digests."""
++        if not self._capture_media:
++            return None
++        return self._capture_request_media(
++            engine_prompt, admission=admission, splice=splice,
++            restored=self._restore_generation_cut_media(snapshot),
 +        )</span></pre>
 <p style="font-size:13.5px">Also deleted: <a href="https://github.com/NVIDIA-NeMo/RL/blob/425317889212cb4a5e1252030797d83982ae4fc8/nemo_rl/models/generation/prefix_recovery/recovery.py#L678-L689"><code>_fetch_chunks</code></a> and <code>_rebuild_prefix</code>'s optional <code>chunks</code> argument, whose "fetch when omitted" branch never runs today; the <code>fetch_for_finalization</code> read moves inside <code>_rebuild_prefix</code>.
-A bad row still regenerates the call, the same as today: every error is raised inside the same <code>try</code>. Six of the seven corrupt-row test cases go, because a changed row now fails the digest check first.</p>
+<code>_ResolvedGenerationCut</code> and the <code>restore_media</code> hook go too. Six of the seven corrupt-row test cases go, because a changed row now fails the digest check first. One behavior change: a row that passes the digest check but cannot be parsed fails the call (400) instead of regenerating it; only a bug in our own writer can produce one.
+Keeping <code>resolve_restore</code>'s return type, and the one <code>_capture_restored_media</code> method, also make this PR easy to combine with <a href="https://github.com/NVIDIA-NeMo/RL/pull/4979">#4979</a> (Gym through Dynamo). The plan is for this PR to merge first; #4979's rebase then makes one call to that method in its shared <code>start_capture</code>, so Dynamo gets image restore with no extra code (<a href="https://github.com/NVIDIA-NeMo/RL/pull/4979#discussion_r4558162570">#4979 C92</a>).</p>
 <p class="cref"><a href="https://github.com/NVIDIA-NeMo/RL/pull/4583#discussion_r4557678167">C11 — recovery.py:819</a></p>
 
 <div class="hl"><b>So what.</b> The design is right and nothing here is a bug. But PR 7 of a stack past 20k lines should be close to its minimum size, and this one is about 300 lines over it.
@@ -218,7 +227,6 @@ Before merge, the PR also needs CI on this head and one GB200 run of the new 2-G
 <p class="cref"><a href="https://github.com/NVIDIA-NeMo/RL/pull/4583#discussion_r4557677947">C10 — captured_media.py:176</a>
 <a href="https://github.com/NVIDIA-NeMo/RL/pull/4583#discussion_r4557678167">C11 — recovery.py:819</a>
 <a href="https://github.com/NVIDIA-NeMo/RL/pull/4583#discussion_r4557678448">C12 — vllm_worker_async.py:1942</a>
-<a href="https://github.com/NVIDIA-NeMo/RL/pull/4583#discussion_r4557678670">C13 — vllm_worker_async.py:1241</a>
 <a href="https://github.com/NVIDIA-NeMo/RL/pull/4583#discussion_r4557679014">C14 — test_captured_media.py:1786</a>
 <a href="https://github.com/NVIDIA-NeMo/RL/pull/4583#discussion_r4557679279">C15 — hosting test:2010</a>
 <a href="https://github.com/NVIDIA-NeMo/RL/pull/4583#discussion_r4557679611">C16 — hosting test:1986</a>
