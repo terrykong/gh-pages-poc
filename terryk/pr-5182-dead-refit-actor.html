@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NVIDIA-NeMo/RL #5182 — what happens when the refit actor dies mid-refit</title>
+<style>
+:root{--bg:#0d1117;--surface:#161b22;--surface2:#1c2128;--border:#30363d;--text:#e6edf3;--dim:#8b949e;
+  --accent:#58a6ff;--green:#3fb950;--red:#f85149;--orange:#d29922}
+:root[data-theme="light"]{--bg:#ffffff;--surface:#f6f8fa;--surface2:#eaeef2;--border:#d0d7de;--text:#1f2328;
+  --dim:#59636e;--accent:#0969da;--green:#1a7f37;--red:#cf222e;--orange:#9a6700}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:28px 20px 70px}
+h1{font-size:22px;margin:0 0 8px;line-height:1.3}
+h2{font-size:18px;margin:30px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
+.sub{color:var(--dim);font-size:13.5px;margin:0 0 14px}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);
+  border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;
+  font:13px/1 ui-monospace,monospace;cursor:pointer}
+.status{border:1px solid var(--border);border-radius:10px;background:var(--surface);padding:2px 16px 10px;margin:0 0 16px}
+.status dl{display:grid;grid-template-columns:max-content 1fr;gap:4px 14px;margin:12px 0 0}
+.status dt{color:var(--dim);font-size:12px;text-transform:uppercase;letter-spacing:.04em;white-space:nowrap;padding-top:2px}
+.status dd{margin:0;font-size:14px}
+.verdict{font-weight:700}.verdict.open{color:var(--red)}
+nav.chain{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 6px;padding:0}
+nav.chain a,nav.chain span{display:inline-block;padding:5px 11px;border:1px solid var(--border);
+  border-radius:20px;background:var(--surface);text-decoration:none;color:var(--accent);
+  font-size:12.5px;line-height:1.3;white-space:nowrap}
+nav.chain a:hover{background:var(--surface2)}
+nav.chain span.here{background:var(--accent);color:var(--bg);border-color:var(--accent);font-weight:600}
+p.chainnote{color:var(--dim);font-size:12px;margin:0 0 18px}
+.bg{border-left:4px solid var(--dim);background:var(--surface);padding:8px 14px;margin:0 0 14px;font-size:14px}
+.tip{border-bottom:1px dotted var(--dim);cursor:help;position:relative;outline:none}
+.tip:hover::after,.tip:focus::after{content:attr(data-tip);position:absolute;left:0;top:1.7em;z-index:60;
+  width:max-content;max-width:min(340px,80vw);white-space:normal;background:var(--surface2);color:var(--text);
+  border:1px solid var(--border);border-radius:6px;padding:7px 10px;font:13px/1.45 -apple-system,sans-serif;
+  font-weight:400;box-shadow:0 4px 14px rgba(0,0,0,.3)}
+.diff{font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--surface);
+  border:1px solid var(--border);border-radius:8px;padding:12px;overflow-x:auto;white-space:pre;margin:10px 0}
+.diff .add{color:var(--green)}.diff .del{color:var(--red)}.diff .hunk{color:var(--accent)}
+.where{border-left:4px solid var(--accent);background:var(--surface);padding:6px 12px;margin:6px 0 10px;font-size:14px}
+.warn{border-left:3px solid var(--red);background:var(--surface);padding:12px 16px;margin:18px 0;border-radius:0 8px 8px 0}
+.cref{margin:6px 0 0;font-size:13px}
+.cref a{display:inline-block;padding:4px 10px;border:1px solid var(--border);border-radius:16px;background:var(--surface);
+  font:12.5px ui-monospace,Menlo,monospace}
+svg{max-width:100%;height:auto;display:block;margin:14px 0}
+svg .box{fill:var(--surface);stroke:var(--border);stroke-width:1.4}
+svg .bad{fill:var(--surface);stroke:var(--red);stroke-width:2}
+svg .ok{fill:var(--green);opacity:.5;stroke:var(--green)}
+svg .dead{fill:var(--red);opacity:.5;stroke:var(--red)}
+svg .lbl{fill:var(--text);font:12px ui-monospace,Menlo,monospace}
+svg .lbl-b{fill:var(--text);font:bold 13px -apple-system,sans-serif}
+svg .note{fill:var(--dim);font:11.5px -apple-system,sans-serif}
+svg .hdr{fill:var(--accent);font:bold 13px -apple-system,sans-serif}
+svg .red{fill:var(--red);font:bold 12px -apple-system,sans-serif}
+svg .num{fill:var(--text);font:bold 12px -apple-system,sans-serif}
+svg .arr{stroke:var(--dim);stroke-width:1.6;fill:none;marker-end:url(#ah)}
+svg .ah{fill:var(--dim)}
+svg a text{text-decoration:underline;fill:var(--accent);font:11.5px ui-monospace,Menlo,monospace}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+  document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head>
+<body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+  function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+  function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
+    b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
+      else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+  document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+<div class="wrap">
+
+<h1>What happens when the refit actor dies in the middle of a refit</h1>
+<p class="sub"><a href="https://github.com/NVIDIA-NeMo/RL/pull/5182">NVIDIA-NeMo/RL #5182</a>
+· all permalinks pin the PR head <code>9d350e7f</code>.</p>
+
+<div class="status"><dl>
+<dt>Before</dt><dd>There is no refit actor. The refit runs inside the controller, so there is no separate process to lose.</dd>
+<dt>This PR</dt><dd>If the refit actor is gone, the stand-in starts a new one and hands control to the existing refit recovery.</dd>
+<dt>Status</dt><dd><span class="verdict open">Open — not fixed in this PR.</span> Raised in review comment C1. The fix below is proposed, not implemented.</dd>
+</dl></div>
+
+<nav class="chain">
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-5182-where-refit-runs.html">1 · where the refit runs</a>
+  <span class="here">2 · when the refit actor dies</span>
+</nav>
+<p class="chainnote">Two pages on this PR — this one: what a dead refit actor does to the run.</p>
+
+<div class="bg"><b>Background.</b> When a refit fails, the controller runs a
+<span class="tip" tabindex="0" data-tip="_recover_from_failed_refit: find which generation shards are gone, rebuild the NCCL group without them, retry the refit once.">refit recovery</span>.
+It only knows one cause: a <span class="tip" tabindex="0" data-tip="A group of vLLM workers that serve as one engine. The refit sends weights to every shard.">generation shard</span>
+went away. So it asks which shards are absent and rebuilds the NCCL group without them. It refuses to rebuild when
+nothing is absent, on purpose: rebuilding over the same shards would hang on the same silent one again. The recovery
+needs <span class="tip" tabindex="0" data-tip="async_rl.generation_fleet_health.enabled — off by default. Without it the controller has no idea which shards are gone and just re-raises.">fleet health</span> on.
+Dotted words have a short explanation: hover or tap them.</div>
+
+<h2>The recovery looks for a dead shard, not a dead actor</h2>
+
+<svg viewBox="0 0 940 470" role="img" aria-label="The refit actor dies with three healthy generation shards. The recovery finds no absent shard, the rebuild check returns False, and the run ends with a misleading error or condemns a healthy suspect shard.">
+<defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="ah" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<text class="hdr" x="16" y="22">Fleet health on, 3 generation shards, all healthy — the refit actor dies (OOM) mid-refit</text>
+
+<rect class="dead" x="16" y="40" width="130" height="34" rx="6"/>
+<text class="lbl-b" x="28" y="62">refit actor ✕</text>
+<rect class="ok" x="170" y="40" width="60" height="34" rx="6"/><text class="num" x="182" y="62">shard 0</text>
+<rect class="ok" x="240" y="40" width="60" height="34" rx="6"/><text class="num" x="252" y="62">shard 1</text>
+<rect class="ok" x="310" y="40" width="60" height="34" rx="6"/><text class="num" x="322" y="62">shard 2</text>
+<rect class="dead" x="400" y="46" width="14" height="10"/><text class="note" x="420" y="55">gone</text>
+<rect class="ok" x="470" y="46" width="14" height="10"/><text class="note" x="490" y="55">alive and healthy</text>
+
+<rect class="box" x="16" y="94" width="908" height="46" rx="7"/>
+<text class="num" x="28" y="114">1</text>
+<text class="lbl" x="48" y="114">RayActorError → the refit recovery</text>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/9d350e7fe24704746d5bc9b3e461b4bb4412f41f/nemo_rl/algorithms/single_controller.py#L4934"><text x="400" y="114">except (RefitAborted, RayActorError)</text></a>
+<text class="note" x="48" y="131">The recovery reads this error as "a generation shard died".</text>
+
+<rect class="box" x="16" y="150" width="908" height="46" rx="7"/>
+<text class="num" x="28" y="170">2</text>
+<text class="lbl" x="48" y="170">probe the shards → absent_shards = []</text>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/9d350e7fe24704746d5bc9b3e461b4bb4412f41f/nemo_rl/algorithms/single_controller.py#L4084"><text x="400" y="170">_probe_generation_fleet</text></a>
+<text class="note" x="48" y="187">All three shards answer. Nothing is absent.</text>
+
+<rect class="box" x="16" y="206" width="908" height="46" rx="7"/>
+<text class="num" x="28" y="226">3</text>
+<text class="lbl" x="48" y="226">new refit actor, membership unknown → read as {0, 1, 2}</text>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/9d350e7fe24704746d5bc9b3e461b4bb4412f41f/nemo_rl/weight_sync/refit_actor.py#L256"><text x="530" y="226">_replace_dead_actor</text></a>
+<text class="note" x="48" y="243">The stand-in starts a fresh actor. "Unknown" counts as the full fleet, which is what the shards want anyway.</text>
+
+<rect class="bad" x="16" y="262" width="908" height="46" rx="7"/>
+<text class="num" x="28" y="282">4</text>
+<text class="lbl" x="48" y="282">should_rebuild(want={0,1,2}, built={0,1,2}, absent=[], force=True) → False</text>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/9d350e7fe24704746d5bc9b3e461b4bb4412f41f/nemo_rl/weight_sync/membership.py#L102-L118"><text x="680" y="299">docstring says so</text></a>
+<text class="note" x="48" y="299">"force" only counts when something is absent. Nothing is, so no rebuild.</text>
+
+<path class="arr" d="M240 312 L180 340"/>
+<path class="arr" d="M700 312 L760 340"/>
+<rect class="bad" x="16" y="344" width="440" height="104" rx="8"/>
+<text class="lbl-b" x="28" y="366">no shard was already suspect</text>
+<text class="red" x="28" y="388">RuntimeError: refit failed and no generation</text>
+<text class="red" x="28" y="404">shard could be identified as absent …</text>
+<text class="note" x="28" y="424">The run stops. The message blames a silent shard;</text>
+<text class="note" x="28" y="440">the real cause, the dead actor, is never named.</text>
+<rect class="bad" x="472" y="344" width="452" height="104" rx="8"/>
+<text class="lbl-b" x="484" y="366">exactly one shard was already suspect (say shard 1)</text>
+<text class="red" x="484" y="388">shard 1 is condemned and taken out</text>
+<text class="note" x="484" y="408">It was healthy. The run goes on one shard smaller,</text>
+<text class="note" x="484" y="424">blaming the wrong thing.</text>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/9d350e7fe24704746d5bc9b3e461b4bb4412f41f/nemo_rl/algorithms/single_controller.py#L4103-L4139"><text x="484" y="440">both branches: single_controller.py</text></a>
+</svg>
+
+<p>With fleet health off (the default) the recovery
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/9d350e7fe24704746d5bc9b3e461b4bb4412f41f/nemo_rl/algorithms/single_controller.py#L4078-L4081">re-raises at once</a>,
+so the new-actor code never runs for a death mid-refit either. The unit tests miss this because the
+test's fake synchronizer
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/9d350e7fe24704746d5bc9b3e461b4bb4412f41f/tests/unit/weight_sync/test_refit_actor.py#L70-L76">always reports a rebuild</a>,
+so step 4 never says no.</p>
+
+<h2>What would fix it — proposed, not in the PR</h2>
+<p class="where"><b>Where the fix lands: RL only, two files.</b>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/9d350e7fe24704746d5bc9b3e461b4bb4412f41f/nemo_rl/weight_sync/refit_actor.py#L250-L267"><code>refit_actor.py</code></a>
+gets one check that names a dead actor, and
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/9d350e7fe24704746d5bc9b3e461b4bb4412f41f/nemo_rl/algorithms/single_controller.py#L4815-L4821"><code>single_controller.py</code></a>
+calls it while waiting for the refit.</p>
+<p>Nothing below is implemented. Idea: when a call fails with <code>RayActorError</code>, ping the actor. If the ping
+fails too, the actor is the one that died, so raise a plain <code>RuntimeError</code>. That is not a type the recovery
+catches, so the run stops and says why. A dead generation worker still answers "actor alive" to the ping and takes the
+existing recovery, unchanged.</p>
+
+<pre class="diff"><span class="hunk">@@ refit_actor.py L250-L267 · RemoteWeightSynchronizer, replace the two helpers</span>
+<span class="del">-    def _actor_alive(self) -> bool:
+-        try:
+-            return ray.get(self._actor.ping.remote(), timeout=_CONTROL_CALL_TIMEOUT_S)
+-        except (RayActorError, GetTimeoutError):
+-            return False
+-
+-    def _replace_dead_actor(self) -> None:
+-        """Start a new RefitActor if the current one is gone. No-op while it answers.
+-
+-        The replacement starts from the controller-side synchronizer, whose recorded
+-        membership may predate the failure; the refit recovery path forces a rebuild
+-        right after, which brings the communicators and plan back in line.
+-        """
+-        if self._actor_alive():
+-            return
+-        print("  refit actor: RefitActor is gone; starting a replacement", flush=True)
+-        self._actor = self._start_actor()
+-        self._sent_workers = self._worker_identity()
+</span><span class="add">+    def raise_if_actor_died(self, error: BaseException) -> None:
++        """Raise RuntimeError if the RefitActor is gone; a worker's death passes through."""
++        try:
++            ray.get(self._actor.ping.remote(), timeout=_CONTROL_CALL_TIMEOUT_S)
++        except (RayActorError, GetTimeoutError):
++            # Not a RayActorError, so the shard recovery does not run on it.
++            raise RuntimeError(
++                "the RefitActor died, so this refit cannot be recovered; "
++                "check the controller node for an OOM or node loss."
++            ) from error
++
++    def _get(
++        self, ref: ray.ObjectRef, timeout: Optional[float] = _CONTROL_CALL_TIMEOUT_S
++    ) -> Any:
++        try:
++            return ray.get(ref, timeout=timeout)
++        except RayActorError as error:
++            self.raise_if_actor_died(error)
++            raise</span>
+
+<span class="hunk">@@ refit_actor.py L328-L339 · reconcile_communicator (same swap in the other ray.get calls)</span>
+     def reconcile_communicator(
+         self, absent_shards: Sequence[int], force: bool = False
+     ) -> Optional[bool]:
+<span class="del">-        # Recovery calls this with force=True after a failed refit, which may have been
+-        # the RefitActor itself dying; replace it first so the rebuild has somewhere to run.
+-        self._replace_dead_actor()
+</span>         self._send_generation_if_changed()
+<span class="del">-        rebuilt, built = ray.get(
+-            self._actor.reconcile_communicator.remote(list(absent_shards), force)
+-        )
+</span><span class="add">+        rebuilt, built = self._get(
++            self._actor.reconcile_communicator.remote(list(absent_shards), force),
++            timeout=None,
++        )</span>
+
+<span class="hunk">@@ single_controller.py L4815-L4821 · _sync_weights_in_refit_actor</span>
+         refit_result = asyncio.wrap_future(refit_ref.future())
+<span class="del">-        if budget_s is None:
+-            await refit_result
+-            return
+</span>         try:
+<span class="add">+            # budget_s=None waits with no deadline, as before.
+</span>             await asyncio.wait_for(refit_result, budget_s)
+<span class="add">+        except RayActorError as error:
++            # A dead RefitActor ends the run; a dead worker still goes to the recovery.
++            await asyncio.to_thread(
++                self._weight_synchronizer.raise_if_actor_died, error
++            )
++            raise
+</span>         except asyncio.TimeoutError:</pre>
+
+<p>Then the code that only served the new-actor path goes:
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/9d350e7fe24704746d5bc9b3e461b4bb4412f41f/nemo_rl/weight_sync/refit_actor.py#L200-L201">the saved template and factory</a>,
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/9d350e7fe24704746d5bc9b3e461b4bb4412f41f/nemo_rl/algorithms/single_controller.py#L4780"><code>_build_refit_synchronizer</code></a>
+(a third copy of the setup call that builds a synchronizer), and the three tests that check a new actor gets started.</p>
+<p class="cref">🔴 <a href="https://github.com/NVIDIA-NeMo/RL/pull/5182#discussion_r4558431042">review comment C1 — refit_actor.py:256</a></p>
+
+<div class="warn"><b>So what.</b> Today, with fleet health on, a dead refit actor ends the run with an error that
+points at a shard that is fine, or quietly takes a healthy shard out. With the fix, the run ends with
+"the RefitActor died", which names the real cause. The cost is one narrow case that works today: fleet health on, and the
+actor dies <em>between</em> refits, when a fresh actor would have been enough. A refit actor only dies on an OOM or node
+loss on the controller's own node, where the controller is at risk too, so a clear stop is the safer trade.</div>
+
+</div>
+</body>
+</html>

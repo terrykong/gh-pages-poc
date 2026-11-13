@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NVIDIA-NeMo/RL #5182 — what changes when the refit runs in its own Ray actor</title>
+<style>
+:root{--bg:#0d1117;--surface:#161b22;--surface2:#1c2128;--border:#30363d;--text:#e6edf3;--dim:#8b949e;
+  --accent:#58a6ff;--green:#3fb950;--red:#f85149;--orange:#d29922}
+:root[data-theme="light"]{--bg:#ffffff;--surface:#f6f8fa;--surface2:#eaeef2;--border:#d0d7de;--text:#1f2328;
+  --dim:#59636e;--accent:#0969da;--green:#1a7f37;--red:#cf222e;--orange:#9a6700}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:28px 20px 70px}
+h1{font-size:22px;margin:0 0 8px;line-height:1.3}
+h2{font-size:18px;margin:30px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
+.sub{color:var(--dim);font-size:13.5px;margin:0 0 14px}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);
+  border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;
+  font:13px/1 ui-monospace,monospace;cursor:pointer}
+.status{border:1px solid var(--border);border-radius:10px;background:var(--surface);padding:2px 16px 10px;margin:0 0 16px}
+.status dl{display:grid;grid-template-columns:max-content 1fr;gap:4px 14px;margin:12px 0 0}
+.status dt{color:var(--dim);font-size:12px;text-transform:uppercase;letter-spacing:.04em;white-space:nowrap;padding-top:2px}
+.status dd{margin:0;font-size:14px}
+.verdict{font-weight:700}.verdict.open{color:var(--orange)}
+nav.chain{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 6px;padding:0}
+nav.chain a,nav.chain span{display:inline-block;padding:5px 11px;border:1px solid var(--border);
+  border-radius:20px;background:var(--surface);text-decoration:none;color:var(--accent);
+  font-size:12.5px;line-height:1.3;white-space:nowrap}
+nav.chain a:hover{background:var(--surface2)}
+nav.chain span.here{background:var(--accent);color:var(--bg);border-color:var(--accent);font-weight:600}
+p.chainnote{color:var(--dim);font-size:12px;margin:0 0 18px}
+.bg{border-left:4px solid var(--dim);background:var(--surface);padding:8px 14px;margin:0 0 14px;font-size:14px}
+.tip{border-bottom:1px dotted var(--dim);cursor:help;position:relative;outline:none}
+.tip:hover::after,.tip:focus::after{content:attr(data-tip);position:absolute;left:0;top:1.7em;z-index:60;
+  width:max-content;max-width:min(340px,80vw);white-space:normal;background:var(--surface2);color:var(--text);
+  border:1px solid var(--border);border-radius:6px;padding:7px 10px;font:13px/1.45 -apple-system,sans-serif;
+  font-weight:400;box-shadow:0 4px 14px rgba(0,0,0,.3)}
+.mono{font:12.5px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--surface);
+  border:1px solid var(--border);border-radius:8px;padding:12px;overflow-x:auto;white-space:pre;margin:10px 0}
+table{border-collapse:collapse;font-size:14px;margin:10px 0}
+th,td{border:1px solid var(--border);padding:5px 10px;text-align:left;vertical-align:top}
+th{background:var(--surface2)}
+.hl{border-left:3px solid var(--accent);background:var(--surface);padding:12px 16px;margin:18px 0;border-radius:0 8px 8px 0}
+svg{max-width:100%;height:auto;display:block;margin:14px 0}
+svg .box{fill:var(--surface);stroke:var(--border);stroke-width:1.4}
+svg .ctl{fill:var(--surface);stroke:var(--accent);stroke-width:2}
+svg .new{fill:var(--surface);stroke:var(--orange);stroke-width:2}
+svg .same{fill:var(--surface);stroke:var(--green);stroke-width:2.2}
+svg .lbl{fill:var(--text);font:12px ui-monospace,Menlo,monospace}
+svg .lbl-b{fill:var(--text);font:bold 13px -apple-system,sans-serif}
+svg .note{fill:var(--dim);font:11.5px -apple-system,sans-serif}
+svg .hdr{fill:var(--accent);font:bold 13px -apple-system,sans-serif}
+svg .lane{fill:var(--text);font:bold 12.5px -apple-system,sans-serif}
+svg .arr{stroke:var(--dim);stroke-width:1.6;fill:none;marker-end:url(#ah)}
+svg .ah{fill:var(--dim)}
+svg .k-ctl{fill:var(--accent)}svg .k-new{fill:var(--orange)}svg .k-same{fill:var(--green)}
+svg a text{text-decoration:underline;fill:var(--accent);font:11.5px ui-monospace,Menlo,monospace}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+  document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head>
+<body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+  function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+  function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
+    b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
+      else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+  document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+<div class="wrap">
+
+<h1>What changes when the refit runs in its own Ray actor</h1>
+<p class="sub"><a href="https://github.com/NVIDIA-NeMo/RL/pull/5182">NVIDIA-NeMo/RL #5182</a>
+· adds <code>async_rl.refit_actor.enabled</code> · all permalinks pin the PR head <code>9d350e7f</code>.</p>
+
+<div class="status"><dl>
+<dt>Before</dt><dd>The single controller runs the whole refit itself: a thread in its process calls every train worker and every generation leader, then waits for all of them.</dd>
+<dt>This PR</dt><dd>With the flag on, the same refit code runs in a separate 1-CPU Ray actor. The controller keeps a stand-in that forwards each call and only waits for the answer.</dd>
+<dt>After review</dt><dd>Proposed in the pending review, not done yet: a dead refit actor stops the run with a clear error (C1, page 2); the actor uses public members instead of the transports' private fields (C2); tests for the new wait path, and shorter docstrings (C3–C5).</dd>
+<dt>Status</dt><dd><span class="verdict open">New, off by default, under review.</span> One open bug in it is on the next page.</dd>
+</dl></div>
+
+<nav class="chain">
+  <span class="here">1 · where the refit runs</span>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-5182-dead-refit-actor.html">2 · when the refit actor dies</a>
+</nav>
+<p class="chainnote">Two pages on this PR — this one: what the new path is and where it joins the old one.</p>
+
+<div class="bg"><b>Background.</b> A <span class="tip" tabindex="0" data-tip="Copying the trainer's new weights into the inference engines (vLLM) so the next rollouts use them.">refit</span>
+copies new weights from the trainer to the vLLM engines after each step. In the
+<span class="tip" tabindex="0" data-tip="NeMo-RL's v2 training loop: one Ray actor drives rollouts, training and refits as async tasks on one event loop.">single controller</span>,
+one process also dispatches rollouts, finishes groups and computes advantages. The PR's motivation: on big runs a busy
+controller slowed the refit, and a slow refit tied up a controller thread. Dotted words have a short explanation: hover or tap them.</div>
+
+<h2>Two paths, one transfer</h2>
+
+<svg viewBox="0 0 940 500" role="img" aria-label="Two lanes: today the controller's own thread runs sync_weights; with the flag, a proxy forwards to a RefitActor that runs the same sync_weights. Both end in the same NCCL transfer code.">
+<defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="ah" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<text class="hdr" x="16" y="22">One refit, flag off vs flag on — the transfer itself is the same code</text>
+
+<text class="lane" x="16" y="56">flag off (today)</text>
+<rect class="ctl" x="16" y="64" width="214" height="78" rx="7"/>
+<text class="lbl-b" x="28" y="85">controller event loop</text>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/9d350e7fe24704746d5bc9b3e461b4bb4412f41f/nemo_rl/algorithms/single_controller.py#L4713"><text x="28" y="104">_sync_weights_within</text></a>
+<text class="note" x="28" y="122">starts a thread, waits</text>
+<text class="note" x="28" y="136">on it under the deadline</text>
+<path class="arr" d="M232 103 L262 103"/>
+<rect class="ctl" x="266" y="64" width="420" height="78" rx="7"/>
+<text class="lbl-b" x="278" y="85">a thread inside the controller process</text>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/9d350e7fe24704746d5bc9b3e461b4bb4412f41f/nemo_rl/algorithms/single_controller.py#L4762"><text x="278" y="104">sync_weights(kv_scales=…)</text></a>
+<text class="note" x="278" y="122">calls every train worker and generation leader,</text>
+<text class="note" x="278" y="136">then blocks until all of them answer</text>
+<path class="arr" d="M688 103 L716 103"/>
+
+<text class="lane" x="16" y="182">flag on (this PR)</text>
+<rect class="ctl" x="16" y="190" width="214" height="92" rx="7"/>
+<text class="lbl-b" x="28" y="211">controller event loop</text>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/9d350e7fe24704746d5bc9b3e461b4bb4412f41f/nemo_rl/algorithms/single_controller.py#L4798"><text x="28" y="230">_sync_weights_in_refit_actor</text></a>
+<text class="note" x="28" y="248">awaits the actor's answer</text>
+<text class="note" x="28" y="262">on the loop, same deadline;</text>
+<text class="note" x="28" y="276">no thread is parked</text>
+<path class="arr" d="M232 236 L262 236"/>
+<rect class="new" x="266" y="190" width="200" height="92" rx="7"/>
+<text class="lbl-b" x="278" y="211">stand-in in the controller</text>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/9d350e7fe24704746d5bc9b3e461b4bb4412f41f/nemo_rl/weight_sync/refit_actor.py#L300"><text x="278" y="230">submit_sync_weights</text></a>
+<text class="note" x="278" y="248">sends the call; resends the</text>
+<text class="note" x="278" y="262">generation object first if a</text>
+<text class="note" x="278" y="276">worker was restarted</text>
+<path class="arr" d="M468 236 L482 236"/>
+<rect class="new" x="486" y="190" width="200" height="92" rx="7"/>
+<text class="lbl-b" x="498" y="211">RefitActor (own process)</text>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/9d350e7fe24704746d5bc9b3e461b4bb4412f41f/nemo_rl/weight_sync/refit_actor.py#L165"><text x="498" y="230">sync_weights(kv_scales)</text></a>
+<text class="note" x="498" y="248">1 CPU, same node as the</text>
+<text class="note" x="498" y="262">driver; runs up to 4 calls</text>
+<text class="note" x="498" y="276">at once</text>
+<path class="arr" d="M688 236 L716 236"/>
+
+<rect class="same" x="720" y="64" width="204" height="218" rx="8"/>
+<text class="lbl-b" x="732" y="88">same code from here</text>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/9d350e7fe24704746d5bc9b3e461b4bb4412f41f/nemo_rl/weight_sync/collective_weight_synchronizer.py#L121"><text x="732" y="110">Collective…Synchronizer</text></a>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/9d350e7fe24704746d5bc9b3e461b4bb4412f41f/nemo_rl/weight_sync/nccl_reshard_weight_synchronizer.py#L138"><text x="732" y="128">NcclReshard…Synchronizer</text></a>
+<text class="note" x="732" y="152">train workers broadcast the</text>
+<text class="note" x="732" y="166">weights over NCCL; vLLM</text>
+<text class="note" x="732" y="180">workers receive them</text>
+<text class="note" x="732" y="210">author's test run:</text>
+<text class="lbl" x="732" y="228">16 train GPUs →</text>
+<text class="lbl" x="732" y="246">12 vLLM GPUs</text>
+<text class="note" x="732" y="270">only these two transports</text>
+
+<rect class="k-ctl" x="16" y="300" width="14" height="10"/><text class="note" x="36" y="309">controller process</text>
+<rect class="k-new" x="166" y="300" width="14" height="10"/><text class="note" x="186" y="309">new in this PR</text>
+<rect class="k-same" x="296" y="300" width="14" height="10"/><text class="note" x="316" y="309">unchanged transfer code, shared by both lanes</text>
+
+<rect class="box" x="16" y="330" width="440" height="152" rx="8"/>
+<text class="lbl-b" x="28" y="352">Stays in the controller (both lanes)</text>
+<text class="note" x="28" y="374">• when to refit: the rollout gate, pausing and resuming generation</text>
+<text class="note" x="28" y="392">• which generation shards take part (the refit membership)</text>
+<text class="note" x="28" y="410">• the refit deadline, and the recovery when a refit fails</text>
+<text class="note" x="28" y="428">• KV-cache clearing and stamping the new weight version</text>
+<text class="note" x="28" y="458">Only the transfer and its wait move out.</text>
+
+<rect class="new" x="472" y="330" width="452" height="152" rx="8"/>
+<text class="lbl-b" x="484" y="352">Now two copies of the generation object — kept in step</text>
+<text class="lbl" x="484" y="376">worker handles</text>
+<text class="note" x="484" y="394">a restarted worker gets a new handle; the stand-in</text>
+<text class="note" x="484" y="408">resends the generation object before the next call</text>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/9d350e7fe24704746d5bc9b3e461b4bb4412f41f/nemo_rl/weight_sync/refit_actor.py#L284"><text x="712" y="376">_send_generation_if_changed</text></a>
+<text class="lbl" x="484" y="434">refit membership</text>
+<text class="note" x="484" y="452">each actor call returns it; the stand-in applies it to</text>
+<text class="note" x="484" y="466">the controller's copy, which pause and resume use</text>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/9d350e7fe24704746d5bc9b3e461b4bb4412f41f/nemo_rl/weight_sync/refit_actor.py#L294"><text x="712" y="434">_mirror_membership</text></a>
+</svg>
+
+<p>Both lanes end in the same <code>sync_weights</code> of the same two NCCL transports. What differs is the
+process it runs in and how the controller waits: today a controller thread blocks on the workers; with the flag, the
+controller awaits one answer from the actor on its event loop. The stand-in class is
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/9d350e7fe24704746d5bc9b3e461b4bb4412f41f/nemo_rl/weight_sync/refit_actor.py#L186"><code>RemoteWeightSynchronizer</code></a>;
+it is built at setup, right after the first refit
+(<a href="https://github.com/NVIDIA-NeMo/RL/blob/9d350e7fe24704746d5bc9b3e461b4bb4412f41f/nemo_rl/algorithms/single_controller_utils/setup.py#L2470-L2473">setup.py</a>),
+so setup itself is unchanged.</p>
+
+<h2>Where it applies</h2>
+<div class="mono">async_rl:
+  refit_actor:
+    enabled: true          # default false
+policy:
+  generation:
+    colocated:
+      enabled: false       # required: a colocated refit is the engine waking itself up</div>
+<table>
+<tr><th>Run</th><th>Uses it?</th></tr>
+<tr><td>v1 loops (<code>grpo.py</code>, <code>ppo.py</code>, distillation)</td><td>No. They build their own synchronizer and never read <code>async_rl</code>.</td></tr>
+<tr><td>v2 single controller, non-colocated, NCCL transport (<code>collective</code> or <code>nccl_reshard</code>)</td><td>Yes, when the flag is on.</td></tr>
+<tr><td>v2, colocated</td><td>Rejected when the config is checked (<a href="https://github.com/NVIDIA-NeMo/RL/blob/9d350e7fe24704746d5bc9b3e461b4bb4412f41f/nemo_rl/algorithms/single_controller_utils/config.py#L1709-L1717">config.py</a>).</td></tr>
+<tr><td>v2, any other refit transport</td><td>Rejected at setup, after the workers are up (<a href="https://github.com/NVIDIA-NeMo/RL/blob/9d350e7fe24704746d5bc9b3e461b4bb4412f41f/nemo_rl/algorithms/single_controller_utils/setup.py#L1132-L1140">setup.py</a>).</td></tr>
+</table>
+
+<div class="hl"><b>So what.</b> In the author's one-run-each test (16 train + 12 vLLM GPUs, 7 refits), total refit time
+went from 18.5 s to 13.1 s (1.41×), and every refit was faster. At that size refit is under 1% of step time, so the flag is meant for
+large runs where the controller is busy. It is off by default, so today's runs do not change. The one thing to check before
+turning it on is what happens if the actor itself dies — see <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-5182-dead-refit-actor.html">page 2</a>.</div>
+
+</div>
+</body>
+</html>
