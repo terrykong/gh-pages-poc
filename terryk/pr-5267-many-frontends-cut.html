@@ -100,12 +100,12 @@ th{background:var(--surface)}
 </dl>
 </div>
 
-<div class="bg"><b>Background.</b> During an RL checkpoint, Gym asks each vLLM worker to save the tokens generated so far for every call still running. This is a <span class="tip" tabindex="0" data-tip="Gym sends a list of calls (the inventory). The worker saves each call's tokens so far to TQ and answers with one receipt: one ack per call, either 'saved, here are the keys' or 'failed, regenerate it'.">generation cut</span>. After a restore, a saved call resumes from those tokens instead of starting over. One worker can run several <span class="tip" tabindex="0" data-tip="Separate HTTP server processes (vllm_cfg.http_api_server_count) that share one listening socket and one inference engine. They split the CPU work of HTTP, chat templates and tokenizing.">HTTP frontends</span> that share one listening socket. A call's tokens live only in the frontend that took its request. Dotted words have a short explanation: hover or tap them.</div>
+<div class="bg"><b>Background.</b> During an RL checkpoint, Gym asks each vLLM worker to save the tokens generated so far for every call still running. This is a <span class="tip" tabindex="0" data-tip="Gym sends a list of calls (the inventory). The worker saves each call's tokens so far to TQ and answers with one receipt: one ack per call, either 'saved, here are the keys' or 'failed, regenerate it'.">generation cut</span>. After a restore, a saved call resumes from those tokens instead of starting over. One worker can run several <span class="tip" tabindex="0" data-tip="Separate HTTP server processes (vllm_cfg.http_api_server_count) that share one listening socket and one inference engine. They split the CPU work of HTTP, chat templates and tokenizing.">HTTP frontends</span> that share one listening socket. Each frontend is an OpenAI-style HTTP server plus its own vLLM <code>AsyncLLM</code> client; the engine that schedules and runs the GPU is one separate process they all share. The tokens a call has decoded so far are kept in the frontend's own copy of vLLM's request state, so a cut <a href="https://github.com/NVIDIA-NeMo/RL/blob/67c4c0c0b47ecef2c2ae1220274d8ba0f5904f14/nemo_rl/models/generation/vllm/progress_reader.py#L52-L60">reads them there</a> without asking the engine. That is why a call's tokens live only in the frontend that took its request. Dotted words have a short explanation: hover or tap them.</div>
 
 <div class="fast"><b>Why it should be faster.</b> All frontends cut at the same time, and each saves only the calls it holds, so the cut's wall time is about the slowest frontend's share, not the sum. What does not shrink: each frontend still walks Gym's whole list and builds a failure ack for every call it does not hold, and Gym's own prepare/commit and the TQ save stay the same. <b>The timing tables in the PR description were measured on an earlier design</b>, where a frontend skipped calls it did not hold, so they do not measure this code. It is slower when a frontend stalls: the cut then waits up to <code>token_capture.control_timeout_s</code> for it.</div>
 
 <h2>Same 3 calls, one frontend vs two</h2>
-<p>Gym's list names 3 calls: <b>c1</b> is running on frontend A, <b>c2</b> is running on frontend B, and <b>c3</b> has not reached the worker yet. Gym's request lands on B, because the kernel picks a frontend on the shared socket.</p>
+<p>Gym's list names 3 calls: <b>c1</b> is running on frontend A, <b>c2</b> is running on frontend B, and <b>c3</b> has not reached the worker yet. Gym's request lands on B. Nobody chooses this: all frontends wait on one shared socket, and the operating system hands each new connection to whichever frontend accepts it first.</p>
 
 <svg viewBox="0 0 960 560" role="img" aria-label="Cut with one frontend vs two frontends">
   <text x="12" y="17" class="d">legend:</text>
@@ -146,7 +146,7 @@ th{background:var(--surface)}
   <text x="332" y="48" class="tb">This PR: 2 frontends, one engine</text>
   <rect x="332" y="58" width="616" height="44" rx="6" class="gym"/>
   <text x="342" y="76" class="tb">Gym policy server</text>
-  <text x="342" y="93" class="m">POST /generation-cut [c1,c2,c3]  → shared socket, kernel picks B</text>
+  <text x="342" y="93" class="m">POST /generation-cut [c1,c2,c3]  → shared socket, B happens to accept it</text>
   <line x1="800" y1="102" x2="800" y2="146" class="arr" marker-end="url(#ah)"/>
   <rect x="332" y="122" width="616" height="364" rx="8" class="proc"/>
   <text x="342" y="138" class="d">vLLM worker (Ray actor, GPU): 2 frontend processes, one shared socket, one engine</text>
