@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NVIDIA-NeMo/RL #5405 — why a warm start crashed engines on GPUs 2-3, and the per-GPU cache folder</title>
+<style>
+:root{--bg:#0d1117;--surface:#161b22;--surface2:#1c2128;--border:#30363d;--text:#e6edf3;--dim:#8b949e;
+  --accent:#58a6ff;--green:#3fb950;--red:#f85149;--orange:#d29922}
+:root[data-theme="light"]{--bg:#ffffff;--surface:#f6f8fa;--surface2:#eaeef2;--border:#d0d7de;--text:#1f2328;
+  --dim:#59636e;--accent:#0969da;--green:#1a7f37;--red:#cf222e;--orange:#9a6700}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:28px 16px 70px}
+h1{font-size:22px;margin:0 0 8px;line-height:1.3}
+h2{font-size:18px;margin:32px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
+.sub{color:var(--dim);font-size:13.5px;margin:0 0 16px}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);
+  border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;
+  font:13px/1 ui-monospace,Menlo,monospace;cursor:pointer}
+.status{border:1px solid var(--border);border-radius:10px;background:var(--surface);padding:2px 16px 10px;margin:0 0 20px}
+.status dl{display:grid;grid-template-columns:max-content 1fr;gap:4px 14px;margin:12px 0 0}
+.status dt{color:var(--dim);font-size:12px;text-transform:uppercase;letter-spacing:.04em;white-space:nowrap;padding-top:2px}
+.status dd{margin:0;font-size:14px}
+.verdict{font-weight:700}
+.verdict.good{color:var(--green)}
+.bg{border-left:3px solid var(--accent);background:var(--surface);padding:10px 14px;margin:0 0 16px;border-radius:0 8px 8px 0;font-size:14px}
+.hl{border-left:3px solid var(--green);background:var(--surface);padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0}
+.tip{border-bottom:1px dotted var(--dim);cursor:help;position:relative;outline:none}
+.tip:hover::after,.tip:focus::after{content:attr(data-tip);position:absolute;left:0;top:1.7em;z-index:60;
+  width:max-content;max-width:min(340px,80vw);white-space:normal;background:var(--surface2);color:var(--text);
+  border:1px solid var(--border);border-radius:6px;padding:7px 10px;font:13px/1.45 -apple-system,sans-serif;
+  font-weight:400;box-shadow:0 4px 14px rgba(0,0,0,.3)}
+svg{max-width:100%;height:auto;display:block;margin:16px 0}
+svg .box{fill:var(--surface);stroke:var(--border);stroke-width:1.4}
+svg .ttl{fill:var(--text);font:bold 12.5px -apple-system,sans-serif}
+svg .hdr{fill:var(--accent);font:bold 14px -apple-system,sans-serif}
+svg .note{fill:var(--dim);font:11.5px -apple-system,sans-serif}
+svg .ok{fill:var(--green);font:12px ui-monospace,Menlo,monospace}
+svg .bad{fill:var(--red);font:12px ui-monospace,Menlo,monospace}
+svg .bad-b{fill:var(--red);font:bold 12px ui-monospace,Menlo,monospace}
+svg .skip{fill:var(--dim);font:12px ui-monospace,Menlo,monospace;text-decoration:line-through}
+svg .arr{stroke:var(--dim);stroke-width:1.6;fill:none;marker-end:url(#ah)}
+svg .ahd{fill:var(--dim)}
+svg .sep{stroke:var(--border);stroke-dasharray:4 4}
+svg .lg-ok{fill:var(--green)} svg .lg-bad{fill:var(--red)} svg .lg-skip{fill:var(--dim)}
+svg a text{text-decoration:underline;fill:var(--accent);font:11.5px ui-monospace,Menlo,monospace}
+.pc{font:12.5px/1.55 ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--surface);
+  border:1px solid var(--border);border-radius:8px;padding:10px 12px;overflow-x:auto;white-space:pre;margin:6px 0 4px}
+.pc .add{color:var(--green);font-weight:600}
+.pc .del{color:var(--red);text-decoration:line-through}
+.pc .cm{color:var(--dim)}
+.pc .who{color:var(--orange)}
+.pc a{color:inherit;text-decoration:underline;text-decoration-style:dotted;text-underline-offset:2px}
+.pclbl{font-size:12px;color:var(--dim);text-transform:uppercase;letter-spacing:.04em;margin:8px 0 0}
+.pcref{font-size:12.5px;color:var(--dim);margin:2px 0 10px}
+.where{border-left:4px solid var(--accent);background:var(--surface);padding:6px 12px;margin:6px 0 10px}
+.cref{margin:6px 0 0;font-size:13px}
+.cref a{display:inline-block;padding:4px 10px;border:1px solid var(--border);border-radius:16px;background:var(--surface);font:12.5px ui-monospace,Menlo,monospace}
+.cref a:hover{background:var(--surface2);text-decoration:none}
+ul.asks{padding-left:20px} ul.asks li{margin:0 0 10px}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+  document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head>
+<body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+  function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+  function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
+    b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
+      else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+  document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+<div class="wrap">
+
+<h1>Why a warm start crashed the vLLM engines on GPUs 2-3, and how one compile folder per GPU fixes it</h1>
+<p class="sub"><a href="https://github.com/NVIDIA-NeMo/RL/pull/5405">NVIDIA-NeMo/RL #5405</a> · permalinks pinned to head <code>def85037</code> · vLLM 0.33.0 (<code>4ba787ec</code>)</p>
+
+<div class="status">
+<dl>
+  <dt>Before</dt>
+  <dd>With persistent compile caches on, the second job crashed every vLLM engine that was not on the first GPUs of its node.</dd>
+  <dt>This PR</dt>
+  <dd>Adds the GPU index to vLLM's compile cache folder names, so each GPU keeps its own compiled code.</dd>
+  <dt>Status</dt>
+  <dd><span class="verdict good">Fixed by this PR.</span> The review found no bug in the fix. It asks for tests that fail if the fix is undone, and two PR description edits.</dd>
+</dl>
+</div>
+
+<div class="bg"><b>Background.</b> NeMo RL can keep compiled model code between jobs (<a href="https://github.com/NVIDIA-NeMo/RL/blob/def85037ab2b8cfc7543d86aca0765def6411c87/docs/guides/persistent-jit-caches.md">persistent compile caches</a>). Each vLLM engine compiles into its own folder. A background script then merges all engine folders into one <span class="tip" tabindex="0" data-tip="<local>/vllm/vllm on each node. The next job copies it into every engine's own folder before vLLM starts.">node copy</span>, and the next job starts every engine from that copy, which skips about 11 s of compiling per engine. Dotted words have a short explanation: hover or tap them.</div>
+
+<p>Two engines with <span class="tip" tabindex="0" data-tip="Tensor parallel size 2: one engine spreads the model over 2 GPUs, one worker process per GPU, called rank 0 and rank 1.">TP=2</span> share a 4-GPU node: engine A on GPUs 0-1, engine B on GPUs 2-3. Both have a rank 0 and a rank 1. vLLM names each rank's compile folder <code>rank_{rank}_{dp_rank}</code> (<a href="https://github.com/vllm-project/vllm/blob/4ba787ec9959e566d3b587a796dff07673324da5/vllm/compilation/backends.py#L1105">backends.py#L1105</a>, <a href="https://github.com/vllm-project/vllm/blob/4ba787ec9959e566d3b587a796dff07673324da5/vllm/compilation/decorators.py#L593">decorators.py#L593</a>), with no GPU in the name. But the compiled code has the GPU index written into it (<code>torch.cuda._DeviceGuard(2)</code>). Since vLLM 0.33 the folder above it no longer depends on GPU placement either (<a href="https://github.com/vllm-project/vllm/blob/v0.33.0/vllm/envs.py#L2384">envs.py#L2384</a>), so A's and B's rank 0 land in the same path.</p>
+
+<h2>What goes wrong on the second job</h2>
+
+<svg viewBox="0 0 940 600" role="img" aria-label="Before: engine B on GPU 2 loads code compiled for GPU 0 and crashes. After: each GPU has its own folder.">
+<defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="ahd" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+
+<!-- legend -->
+<rect x="20" y="8" width="12" height="12" class="lg-ok"/><text x="38" y="19" class="note">code matches the GPU that runs it</text>
+<rect x="250" y="8" width="12" height="12" class="lg-bad"/><text x="268" y="19" class="note">code compiled for a different GPU</text>
+<rect x="480" y="8" width="12" height="12" class="lg-skip"/><text x="498" y="19" class="note">skipped by the merge (a file with that name is already there)</text>
+
+<!-- BEFORE -->
+<text x="20" y="50" class="hdr">Without the patch (vLLM 0.33)</text>
+<text x="20" y="72" class="ttl">Job 1 · cold start: each engine compiles</text>
+<text x="330" y="72" class="ttl">Merge into the node copy</text>
+<text x="640" y="72" class="ttl">Job 2 · warm start: load, don't compile</text>
+
+<rect x="20" y="82" width="270" height="74" rx="6" class="box"/>
+<text x="32" y="102" class="ttl">Engine A · GPUs 0-1</text>
+<text x="32" y="124" class="ok">rank_0_0/  code: cuda:0</text>
+<text x="32" y="144" class="ok">rank_1_0/  code: cuda:1</text>
+<rect x="20" y="166" width="270" height="74" rx="6" class="box"/>
+<text x="32" y="186" class="ttl">Engine B · GPUs 2-3</text>
+<text x="32" y="208" class="ok">rank_0_0/  code: cuda:2</text>
+<text x="32" y="228" class="ok">rank_1_0/  code: cuda:3</text>
+<path d="M295,161 L324,161" class="arr"/>
+
+<rect x="330" y="82" width="275" height="158" rx="6" class="box"/>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/def85037ab2b8cfc7543d86aca0765def6411c87/nemo_rl/utils/cache_sync.sh#L152-L164"><text x="342" y="102">merge_vllm_engines: first copy wins</text></a>
+<text x="342" y="126" class="ok">rank_0_0/  cuda:0   (A)</text>
+<text x="342" y="146" class="ok">rank_1_0/  cuda:1   (A)</text>
+<text x="342" y="174" class="skip">rank_0_0/  cuda:2   (B)</text>
+<text x="342" y="194" class="skip">rank_1_0/  cuda:3   (B)</text>
+<text x="342" y="222" class="note">same name, so B's files are dropped</text>
+<path d="M610,161 L634,161" class="arr"/>
+
+<rect x="640" y="82" width="280" height="158" rx="6" class="box"/>
+<text x="652" y="104" class="ok">A · GPU 0 → rank_0_0 (cuda:0) ✓</text>
+<text x="652" y="124" class="ok">A · GPU 1 → rank_1_0 (cuda:1) ✓</text>
+<text x="652" y="148" class="bad">B · GPU 2 → rank_0_0 (cuda:0) ✗</text>
+<text x="652" y="168" class="bad">B · GPU 3 → rank_1_0 (cuda:1) ✗</text>
+<text x="652" y="196" class="bad-b">CUDA driver error:</text>
+<text x="652" y="214" class="bad-b">invalid argument</text>
+<text x="652" y="232" class="note">on B's first Triton kernel launch</text>
+
+<line x1="20" y1="268" x2="920" y2="268" class="sep"/>
+
+<!-- AFTER -->
+<text x="20" y="298" class="hdr">With this PR: the GPU index is in the folder name</text>
+<text x="20" y="320" class="ttl">Job 1 · cold start: each engine compiles</text>
+<text x="330" y="320" class="ttl">Merge into the node copy</text>
+<text x="640" y="320" class="ttl">Job 2 · warm start: load, don't compile</text>
+
+<rect x="20" y="330" width="270" height="74" rx="6" class="box"/>
+<text x="32" y="350" class="ttl">Engine A · GPUs 0-1</text>
+<text x="32" y="372" class="ok">rank_0_0_dev0/  cuda:0</text>
+<text x="32" y="392" class="ok">rank_1_0_dev1/  cuda:1</text>
+<rect x="20" y="414" width="270" height="74" rx="6" class="box"/>
+<text x="32" y="434" class="ttl">Engine B · GPUs 2-3</text>
+<text x="32" y="456" class="ok">rank_0_0_dev2/  cuda:2</text>
+<text x="32" y="476" class="ok">rank_1_0_dev3/  cuda:3</text>
+<path d="M295,409 L324,409" class="arr"/>
+
+<rect x="330" y="330" width="275" height="158" rx="6" class="box"/>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/def85037ab2b8cfc7543d86aca0765def6411c87/nemo_rl/utils/cache_sync.sh#L152-L164"><text x="342" y="350">merge_vllm_engines: first copy wins</text></a>
+<text x="342" y="374" class="ok">rank_0_0_dev0/  cuda:0   (A)</text>
+<text x="342" y="394" class="ok">rank_1_0_dev1/  cuda:1   (A)</text>
+<text x="342" y="414" class="ok">rank_0_0_dev2/  cuda:2   (B)</text>
+<text x="342" y="434" class="ok">rank_1_0_dev3/  cuda:3   (B)</text>
+<text x="342" y="462" class="note">names differ, so all four are kept</text>
+<path d="M610,409 L634,409" class="arr"/>
+
+<rect x="640" y="330" width="280" height="158" rx="6" class="box"/>
+<text x="652" y="352" class="ok">A · GPU 0 → rank_0_0_dev0 ✓</text>
+<text x="652" y="372" class="ok">A · GPU 1 → rank_1_0_dev1 ✓</text>
+<text x="652" y="396" class="ok">B · GPU 2 → rank_0_0_dev2 ✓</text>
+<text x="652" y="416" class="ok">B · GPU 3 → rank_1_0_dev3 ✓</text>
+<text x="652" y="444" class="note">all 8 engines in the 8-node run</text>
+<text x="652" y="462" class="note">loaded their compiled model</text>
+
+<text x="20" y="522" class="note">The folders sit under &lt;VLLM_CACHE_ROOT&gt;/torch_compile_cache/&lt;hash&gt;/. Before vLLM 0.33 the &lt;hash&gt; included the engine's</text>
+<text x="20" y="540" class="note">Ray bundle indices, so engines A and B never shared a path. vllm#61211 took them out of the hash.</text>
+<text x="20" y="568" class="note">Cost: one extra compiled copy per GPU of the node, about 33 MB net per GPU. Gain: about 11 s of compiling skipped per engine start.</text>
+</svg>
+
+<h2>The fix, as pseudocode</h2>
+<p class="where"><b>Where the fix lands: NeMo RL only, two files.</b>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/def85037ab2b8cfc7543d86aca0765def6411c87/nemo_rl/models/generation/vllm/patches.py#L103-L134"><code>patches.py</code></a> adds the patch; <a href="https://github.com/NVIDIA-NeMo/RL/blob/def85037ab2b8cfc7543d86aca0765def6411c87/nemo_rl/utils/compile_cache.py#L129-L146"><code>compile_cache.py</code></a> runs it on every node of the engine. <b>No vLLM change</b>: the patch rewrites two lines of the installed vLLM on disk, until vLLM puts the GPU index in the name or the hash itself.</p>
+
+<p class="pclbl">In vLLM, before</p>
+<pre class="pc"><span class="who"># GPU worker process (one per GPU), while compiling the model</span>
+hash   = sha256(env, config, code, compiler)[:10]           <span class="cm"># no GPU placement since vllm#61211</span>
+folder = f"{root}/torch_compile_cache/{hash}/<a href="https://github.com/vllm-project/vllm/blob/4ba787ec9959e566d3b587a796dff07673324da5/vllm/compilation/backends.py#L1105">rank_{rank}_{dp_rank}</a>"  <span class="cm"># same path on GPU 0 and GPU 2</span>
+load_or_compile(folder)                                     <span class="cm"># warm start: may load code for cuda:0</span></pre>
+
+<p class="pclbl">In vLLM, after the patch (both files)</p>
+<pre class="pc"><span class="who"># GPU worker process; the worker already set its GPU in init_device</span>
+hash   = sha256(env, config, code, compiler)[:10]
+<span class="del">folder = f"{root}/torch_compile_cache/{hash}/rank_{rank}_{dp_rank}"</span>
+<span class="add">folder = f"{root}/torch_compile_cache/{hash}/rank_{rank}_{dp_rank}_dev{torch.cuda.current_device()}"</span>
+load_or_compile(folder)                                     <span class="cm"># the code always matches this GPU</span></pre>
+<p class="pcref">Real code: <a href="https://github.com/vllm-project/vllm/blob/4ba787ec9959e566d3b587a796dff07673324da5/vllm/compilation/backends.py#L1105">backends.py#L1105</a> (torch.compile cache), <a href="https://github.com/vllm-project/vllm/blob/4ba787ec9959e566d3b587a796dff07673324da5/vllm/compilation/decorators.py#L593">decorators.py#L593</a> (AOT compile cache), <a href="https://github.com/vllm-project/vllm/blob/4ba787ec9959e566d3b587a796dff07673324da5/vllm/v1/worker/gpu_worker.py#L491-L495">gpu_worker.py init_device</a> (sets the GPU first).</p>
+
+<p class="pclbl">In NeMo RL, where the patch is applied</p>
+<pre class="pc"><span class="who"># vLLM engine actor, just before it builds the engine</span>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/def85037ab2b8cfc7543d86aca0765def6411c87/nemo_rl/utils/compile_cache.py#L149-L176">prepare_vllm_engine</a>(bundle_indices)         <span class="cm"># one Ray task per node of the engine; waits for all (ray.get)</span>
+<a href="https://github.com/NVIDIA-NeMo/RL/blob/def85037ab2b8cfc7543d86aca0765def6411c87/nemo_rl/models/generation/vllm/vllm_worker.py#L826">create_engine</a>(...)                         <span class="cm"># only now do vLLM's GPU workers start and import vLLM</span>
+
+<span class="who"># Ray task, once per node</span>
+def <a href="https://github.com/NVIDIA-NeMo/RL/blob/def85037ab2b8cfc7543d86aca0765def6411c87/nemo_rl/utils/compile_cache.py#L137-L146">_prepare_vllm_engine_on_this_node</a>(engine_dir):
+<span class="add">    <a href="https://github.com/NVIDIA-NeMo/RL/blob/def85037ab2b8cfc7543d86aca0765def6411c87/nemo_rl/models/generation/vllm/patches.py#L103-L134">patch_compile_cache_per_device</a>()</span>        <span class="cm"># under a file lock; skip if done; raise if vLLM changed</span>
+    seed("vllm")                                  <span class="cm"># copy the shared cache onto this node once</span>
+    copy node copy → engine_dir                   <span class="cm"># this engine's own folder</span></pre>
+<p class="pcref">Real code: <a href="https://github.com/NVIDIA-NeMo/RL/blob/def85037ab2b8cfc7543d86aca0765def6411c87/nemo_rl/models/generation/vllm/patches.py#L103-L134"><code>_patch_vllm_compile_cache_per_device</code></a>, <a href="https://github.com/NVIDIA-NeMo/RL/blob/def85037ab2b8cfc7543d86aca0765def6411c87/nemo_rl/utils/compile_cache.py#L129-L134"><code>_vllm_patches</code></a> (loads patches.py by path, so the per-node task does not import NeMo RL's generation code).</p>
+
+<h2>What the review asks (open)</h2>
+<p>The review checked the fix against vLLM 0.33.0 and found no bug: each anchor matches once, the GPU is set before the folder is named, and the patch finishes on every node before vLLM's workers start. What is missing is tests that fail if the fix is undone.</p>
+<ul class="asks">
+<li><b>C3 · Two CPU tests.</b> Today no test fails if <code>backends.py</code> is dropped from the patch (the torch.compile cache would be shared again), or if the "vLLM changed" raise is removed. Both proposed tests pass on head and fail on each of those changes.
+<p class="cref">🔴 <a href="https://github.com/NVIDIA-NeMo/RL/pull/5405">review comment — test_vllm_patches.py:410</a></p></li>
+<li><b>C4 · Check the patch actually runs.</b> Deleting the call in <code>_prepare_vllm_engine_on_this_node</code> keeps CI green; the test stubs it and never checks the stub ran.
+<p class="cref">🔴 <a href="https://github.com/NVIDIA-NeMo/RL/pull/5405">review comment — test_compile_cache.py:164</a></p></li>
+<li><b>C5 · PR description.</b> It still says the bug starts in vLLM 0.32 (it is 0.33), and the cost sentence should say about 33 MB per GPU.
+<p class="cref">🔴 <a href="https://github.com/NVIDIA-NeMo/RL/pull/5405">review comment — patches.py:108</a></p></li>
+</ul>
+
+<div class="hl"><b>So what.</b> With persistent compile caches on, a node can now run several TP engines and every one of them gets a warm start. The price is one extra compiled copy per GPU of the node. The asks above only make sure CI notices if someone later undoes the fix.</div>
+
+</div>
+</body>
+</html>
