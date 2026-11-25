@@ -1,0 +1,315 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NVIDIA-NeMo/RL #5340 — Gym server roles and classes</title>
+<style>
+:root{--bg:#0d1117;--surface:#161b22;--surface2:#1c2128;--border:#30363d;--text:#e6edf3;--dim:#8b949e;
+  --accent:#58a6ff;--green:#3fb950;--red:#f85149;--orange:#d29922}
+:root[data-theme="light"]{--bg:#ffffff;--surface:#f6f8fa;--surface2:#eaeef2;--border:#d0d7de;--text:#1f2328;
+  --dim:#59636e;--accent:#0969da;--green:#1a7f37;--red:#cf222e;--orange:#9a6700}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:28px 16px 70px}
+h1{font-size:22px;margin:0 0 8px;line-height:1.3}
+h2{font-size:18px;margin:30px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
+.sub{color:var(--dim);font-size:13.5px;margin:0 0 14px}
+#theme-toggle{position:fixed;top:14px;right:16px;z-index:200;background:var(--surface);
+  border:1px solid var(--border);color:var(--text);border-radius:20px;padding:6px 12px;
+  font:13px/1 ui-monospace,Menlo,monospace;cursor:pointer}
+.status{border:1px solid var(--border);border-radius:10px;background:var(--surface);padding:2px 16px 10px;margin:0 0 14px}
+.status dl{display:grid;grid-template-columns:max-content 1fr;gap:4px 14px;margin:12px 0 0}
+.status dt{color:var(--dim);font-size:12px;text-transform:uppercase;letter-spacing:.04em;white-space:nowrap;padding-top:2px}
+.status dd{margin:0;font-size:14px}
+.verdict{font-weight:700}.verdict.good{color:var(--green)}.verdict.open{color:var(--red)}
+nav.chain{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 6px;padding:0}
+nav.chain a,nav.chain span{display:inline-block;padding:5px 11px;border:1px solid var(--border);
+  border-radius:20px;background:var(--surface);text-decoration:none;color:var(--accent);
+  font-size:12.5px;line-height:1.3;white-space:nowrap}
+nav.chain a:hover{background:var(--surface2)}
+nav.chain span.here{background:var(--accent);color:var(--bg);border-color:var(--accent);font-weight:600}
+p.chainnote{color:var(--dim);font-size:12px;margin:0 0 18px}
+.bg{border:1px solid var(--border);border-radius:8px;background:var(--surface);padding:8px 14px;margin:0 0 14px;font-size:14px}
+.bg ul{margin:4px 0;padding-left:20px}
+.hl{border-left:4px solid var(--accent);background:var(--surface);padding:10px 16px;margin:18px 0;border-radius:0 8px 8px 0}
+.cref{margin:6px 0 0;font-size:13px}
+.cref a{display:inline-block;padding:4px 10px;border:1px solid var(--border);border-radius:16px;background:var(--surface);font:12.5px ui-monospace,Menlo,monospace}
+.tip{border-bottom:1px dotted var(--dim);cursor:help;position:relative;outline:none}
+.tip:hover::after,.tip:focus::after{content:attr(data-tip);position:absolute;left:0;top:1.7em;z-index:60;
+  width:max-content;max-width:min(340px,80vw);white-space:normal;background:var(--surface2);color:var(--text);
+  border:1px solid var(--border);border-radius:6px;padding:7px 10px;font:13px/1.45 -apple-system,sans-serif;
+  font-weight:400;box-shadow:0 4px 14px rgba(0,0,0,.3)}
+svg{max-width:100%;height:auto;display:block;margin:14px 0}
+svg .box{fill:var(--surface);stroke:var(--border);stroke-width:1.4}
+svg .bad{fill:var(--surface);stroke:var(--red);stroke-width:2}
+svg .ok{fill:var(--surface);stroke:var(--green);stroke-width:2}
+svg .gray{fill:var(--surface);stroke:var(--dim);stroke-width:1.4;stroke-dasharray:5 4}
+svg .lane{fill:var(--accent);font:bold 13px -apple-system,sans-serif}
+svg .sec{fill:var(--text);font:bold 14px -apple-system,sans-serif}
+svg .lbl{fill:var(--text);font:bold 12.5px -apple-system,sans-serif}
+svg .val{fill:var(--text);font:11.5px ui-monospace,Menlo,monospace}
+svg .note{fill:var(--dim);font:11.5px -apple-system,sans-serif}
+svg .red{fill:var(--red);font:bold 11.5px ui-monospace,Menlo,monospace}
+svg .grn{fill:var(--green);font:bold 11.5px ui-monospace,Menlo,monospace}
+svg .arr{stroke:var(--dim);stroke-width:1.5;fill:none;marker-end:url(#ah)}
+svg .arrR{stroke:var(--red);stroke-width:1.8;fill:none;marker-end:url(#ahr)}
+svg .arrG{stroke:var(--green);stroke-width:1.8;fill:none;marker-end:url(#ahg)}
+svg .ahd{fill:var(--dim)} svg .ahr{fill:var(--red)} svg .ahg{fill:var(--green)}
+svg a text{text-decoration:underline;fill:var(--accent);font:11px ui-monospace,Menlo,monospace}
+.pc{font:12.5px/1.55 ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--surface);
+  border:1px solid var(--border);border-radius:8px;padding:10px 12px;overflow-x:auto;white-space:pre;margin:6px 0 4px}
+.pc .add{color:var(--green);font-weight:600}
+.pc .del{color:var(--red);text-decoration:line-through}
+.pc .cm{color:var(--dim)}
+.pc .who{color:var(--orange)}
+.pc a{color:inherit;text-decoration:underline;text-decoration-style:dotted;text-underline-offset:2px}
+.pclbl{font-size:12px;color:var(--dim);text-transform:uppercase;letter-spacing:.04em;margin:10px 0 0}
+.pcref{font-size:12.5px;color:var(--dim);margin:2px 0 10px}
+
+table.mm{border-collapse:collapse;width:100%;margin:10px 0 14px;font-size:14px}
+table.mm th,table.mm td{border:1px solid var(--border);padding:6px 10px;text-align:left;vertical-align:top}
+table.mm th{background:var(--surface2);font-size:12.5px;color:var(--dim)}
+td.yes{border-left:3px solid var(--green)!important} td.no{border-left:3px solid var(--orange)!important}
+.new{display:inline-block;font-size:11px;padding:0 6px;border-radius:9px;background:var(--orange);color:var(--bg);font-weight:700}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+@media (max-width:760px){.two{grid-template-columns:1fr}}
+svg .abs{fill:var(--surface);stroke:var(--dim);stroke-width:1.3;stroke-dasharray:4 3}
+svg .conc{fill:var(--surface);stroke:var(--accent);stroke-width:1.8}
+svg .envb{fill:var(--surface);stroke:var(--orange);stroke-width:1.6;stroke-dasharray:4 3}
+svg .envc{fill:var(--surface);stroke:var(--orange);stroke-width:2}
+svg .isa{stroke:var(--dim);stroke-width:1.4;fill:none;marker-end:url(#tri)}
+svg .tri{fill:var(--bg);stroke:var(--dim);stroke-width:1.2}
+</style>
+<script>(function(){try{if(localStorage.getItem('gh-pages-theme')==='light')
+  document.documentElement.setAttribute('data-theme','light');}catch(e){}})();</script>
+</head>
+<body>
+<button id="theme-toggle" aria-label="Toggle light/dark theme">🌙 dark</button>
+<script>(function(){var r=document.documentElement,K='gh-pages-theme';
+  function lbl(){var b=document.getElementById('theme-toggle');if(b)b.textContent=r.getAttribute('data-theme')==='light'?'☀ light':'🌙 dark';}
+  function wire(){var b=document.getElementById('theme-toggle');if(!b)return;
+    b.onclick=function(){if(r.getAttribute('data-theme')==='light'){r.removeAttribute('data-theme');try{localStorage.setItem(K,'dark')}catch(e){}}
+      else{r.setAttribute('data-theme','light');try{localStorage.setItem(K,'light')}catch(e){}}lbl();};lbl();}
+  document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoaded',wire);})();</script>
+<div class="wrap">
+
+<h1>How Gym's four server kinds fit together, and what the new environment server adds</h1>
+<p class="sub">Background for <a href="https://github.com/NVIDIA-NeMo/RL/pull/5340">NVIDIA-NeMo/RL #5340</a>. All Gym links pin <code>9e2e5d0a</code>, the Gym version RL pins. Read from the code, not run.</p>
+
+<div class="status"><dl>
+<dt>Before</dt><dd>Gym had three server kinds: model, agent, resources. An agent's <code>/run</code> owned the whole episode: set up the task, loop the model and tools, ask for the reward.</dd>
+<dt>Now</dt><dd>A fourth kind, the <b>environment server</b> (added to Gym in late September 2026), owns the episode instead. The agent only runs the model-and-tool loop.</dd>
+<dt>Status</dt><dd><span class="verdict good">Background only, no change.</span> PR #5340 lets turn recovery run through these environment servers. The other two pages cover that change.</dd>
+</dl></div>
+
+<nav class="chain">
+  <span class="here">Gym server roles</span>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-5340-typed-servers-resume.html">how resume works now</a>
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-5340-queued-rows-stall.html">capped servers stall snapshots</a>
+</nav>
+<p class="chainnote">Three pages on this PR, one question each. This one: what each Gym server does and how the classes relate.</p>
+
+<table class="mm">
+<tr><th>Server kind</th><th>Common picture</th><th>What the code says</th></tr>
+<tr><td><b>Model</b></td><td>a proxy to vLLM</td><td class="yes">Right. <a href="https://github.com/NVIDIA-NeMo/Gym/blob/9e2e5d0ad0d1723acef1b63beb28292da16f7c5b/responses_api_models/vllm_model/app.py#L537-L538"><code>VLLMModel</code></a> serves <code>/v1/responses</code> and forwards each call to vLLM's <code>base_url</code>. The policy is one model server; a judge LLM is another.</td></tr>
+<tr><td><b>Agent</b></td><td>like Claude Code</td><td class="yes">Right. It is the harness that talks to the model. <a href="https://github.com/NVIDIA-NeMo/Gym/blob/9e2e5d0ad0d1723acef1b63beb28292da16f7c5b/responses_api_agents/claude_code_agent/app.py#L177"><code>ClaudeCodeAgent</code></a> is literally one; <a href="https://github.com/NVIDIA-NeMo/Gym/blob/9e2e5d0ad0d1723acef1b63beb28292da16f7c5b/responses_api_agents/simple_agent/app.py#L344"><code>SimpleAgent</code></a> is a plain model + tool loop.</td></tr>
+<tr><td><b>Resources</b></td><td>a judge model</td><td class="no">Not quite. It holds the task's <b>tools</b> and the <b>grader</b>: <code>/verify</code> returns the reward. A judge is one kind of grader: e.g. <a href="https://github.com/NVIDIA-NeMo/Gym/blob/9e2e5d0ad0d1723acef1b63beb28292da16f7c5b/resources_servers/equivalence_llm_judge/app.py#L191">equivalence_llm_judge</a> calls a <i>model server</i> as the judge (<a href="https://github.com/NVIDIA-NeMo/Gym/blob/9e2e5d0ad0d1723acef1b63beb28292da16f7c5b/resources_servers/equivalence_llm_judge/app.py#L673">here</a>). Others grade with code, like <a href="https://github.com/NVIDIA-NeMo/Gym/blob/9e2e5d0ad0d1723acef1b63beb28292da16f7c5b/resources_servers/string_match/app.py#L353">string_match</a>.</td></tr>
+<tr><td><b>Environment</b> <span class="new">new</span></td><td>—</td><td>Owns one <b>episode</b>: sets up the resources and agent sessions, starts the agent, asks for the reward, cleans up. It also enforces per-episode limits (timeout, <code>max_concurrent_episodes</code>) and saves the episode at a checkpoint.</td></tr>
+</table>
+
+<h2>One episode: who calls whom, before and now</h2>
+
+<svg viewBox="0 0 940 470" role="img" aria-label="Left: RL sends a row through the legacy_agent relay to SimpleAgent.run, which seeds, loops, and verifies. Right: RL sends a row to the single_agent_turn_legacy environment server, which seeds, starts the agent, and verifies; the agent only loops on the model and tools.">
+<defs>
+<marker id="ah" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path class="ahd" d="M0,0 L8,4 L0,8 z"/></marker>
+</defs>
+<text class="lane" x="14" y="18">before: the agent owns the episode</text>
+<text class="lane" x="486" y="18">now: the environment server owns it</text>
+
+<rect class="box" x="14" y="28" width="440" height="34" rx="8"/>
+<text class="lbl" x="28" y="50">NeMo-RL rollout manager: POST /run with one row</text>
+<rect class="box" x="486" y="28" width="440" height="34" rx="8"/>
+<text class="lbl" x="500" y="50">NeMo-RL rollout manager: POST /run with one row</text>
+<path class="arr" d="M234 62 L234 84"/><path class="arr" d="M706 62 L706 84"/>
+
+<rect class="gray" x="14" y="88" width="440" height="46" rx="8"/>
+<a href="https://github.com/NVIDIA-NeMo/Gym/blob/9e2e5d0ad0d1723acef1b63beb28292da16f7c5b/environment_servers/legacy_agent/app.py#L115-L135"><text x="28" y="106">LegacyAgentEnvironmentServer.run_legacy</text></a>
+<text class="note" x="28" y="124">environment server that only forwards /run, unchanged</text>
+<path class="arr" d="M234 134 L234 154"/>
+
+<rect class="ok" x="14" y="158" width="440" height="130" rx="8"/>
+<a href="https://github.com/NVIDIA-NeMo/Gym/blob/9e2e5d0ad0d1723acef1b63beb28292da16f7c5b/responses_api_agents/simple_agent/app.py#L1058"><text x="28" y="178">SimpleAgent.run  (agent server)</text></a>
+<text class="val" x="28" y="198">① resources  POST /seed_session</text>
+<text class="val" x="28" y="216">② loop: model POST /v1/responses</text>
+<text class="val" x="28" y="234">        resources POST /&lt;tool&gt;</text>
+<text class="val" x="28" y="252">③ resources  POST /verify  → reward</text>
+<text class="val" x="28" y="270">④ resources  POST /close_session</text>
+
+<rect class="ok" x="486" y="88" width="440" height="128" rx="8"/>
+<a href="https://github.com/NVIDIA-NeMo/Gym/blob/9e2e5d0ad0d1723acef1b63beb28292da16f7c5b/environment_servers/single_agent_turn/app.py#L225-L232"><text x="500" y="106">SingleAgentTurnLegacyEnvironmentServer.run</text></a>
+<text class="val" x="500" y="126">① resources  POST /seed_session</text>
+<text class="val" x="500" y="144">② agent      POST /v1/agent_sessions</text>
+<text class="val" x="500" y="162">③ agent      POST /ng-rollout/&lt;id&gt;/v1/responses</text>
+<text class="val" x="500" y="180">④ agent      POST /v1/agent_sessions/close</text>
+<text class="val" x="500" y="198">⑤ resources  POST /verify  → reward</text>
+<path class="arr" d="M600 216 L600 240"/>
+<text class="note" x="608" y="232">③</text>
+
+<rect class="box" x="486" y="244" width="300" height="56" rx="8"/>
+<a href="https://github.com/NVIDIA-NeMo/Gym/blob/9e2e5d0ad0d1723acef1b63beb28292da16f7c5b/responses_api_agents/simple_agent/app.py#L839"><text x="500" y="264">SimpleAgent.responses  (agent)</text></a>
+<text class="val" x="500" y="286">loop only: model + tools</text>
+
+<path class="arr" d="M120 288 L120 334"/><text class="note" x="128" y="316">②</text>
+<path class="arr" d="M350 288 L350 334"/><text class="note" x="358" y="316">① ② ③ ④</text>
+<path class="arr" d="M590 300 L590 334"/>
+<path class="arr" d="M760 300 L760 334"/><text class="note" x="700" y="322">tools</text>
+<path class="arr" d="M890 216 L890 334"/><text class="note" x="836" y="290">① ⑤</text>
+
+<rect class="box" x="14" y="338" width="210" height="62" rx="8"/>
+<a href="https://github.com/NVIDIA-NeMo/Gym/blob/9e2e5d0ad0d1723acef1b63beb28292da16f7c5b/responses_api_models/vllm_model/app.py#L878"><text x="28" y="358">VLLMModel (model)</text></a>
+<text class="note" x="28" y="376">proxy to vLLM base_url</text>
+<text class="note" x="28" y="392">= the policy being trained</text>
+<rect class="box" x="244" y="338" width="210" height="62" rx="8"/>
+<a href="https://github.com/NVIDIA-NeMo/Gym/blob/9e2e5d0ad0d1723acef1b63beb28292da16f7c5b/resources_servers/string_match/app.py#L353"><text x="258" y="358">StringMatch… (resources)</text></a>
+<text class="note" x="258" y="376">tools + /verify (grader)</text>
+<text class="note" x="258" y="392">a judge calls a model here</text>
+
+<rect class="box" x="486" y="338" width="210" height="62" rx="8"/>
+<a href="https://github.com/NVIDIA-NeMo/Gym/blob/9e2e5d0ad0d1723acef1b63beb28292da16f7c5b/responses_api_models/vllm_model/app.py#L878"><text x="500" y="358">VLLMModel (model)</text></a>
+<text class="note" x="500" y="376">proxy to vLLM base_url</text>
+<text class="note" x="500" y="392">= the policy being trained</text>
+<rect class="box" x="716" y="338" width="210" height="62" rx="8"/>
+<a href="https://github.com/NVIDIA-NeMo/Gym/blob/9e2e5d0ad0d1723acef1b63beb28292da16f7c5b/resources_servers/string_match/app.py#L353"><text x="730" y="358">StringMatch… (resources)</text></a>
+<text class="note" x="730" y="376">tools + /verify (grader)</text>
+<text class="note" x="730" y="392">a judge calls a model here</text>
+
+<rect class="ok" x="14" y="420" width="14" height="12"/><text class="note" x="34" y="430">owns the episode (and saves it at a checkpoint)</text>
+<rect class="gray" x="330" y="420" width="14" height="12"/><text class="note" x="350" y="430">pass-through, saves nothing</text>
+<text class="note" x="14" y="454">Same string_match task, same agent and model in both columns. Only who drives the steps moves.</text>
+</svg>
+
+<p>The right column is what <code>string_match</code> now runs in #5340's functional test. Its config names both the agent and the resources server, and the environment server wires them together (<a href="https://github.com/NVIDIA-NeMo/Gym/blob/9e2e5d0ad0d1723acef1b63beb28292da16f7c5b/resources_servers/string_match/configs/string_match.yaml#L24-L35">string_match.yaml</a>). Each step is in <a href="https://github.com/NVIDIA-NeMo/Gym/blob/9e2e5d0ad0d1723acef1b63beb28292da16f7c5b/environment_servers/single_agent_turn/app.py#L480-L487"><code>_seed_resources</code></a>, <a href="https://github.com/NVIDIA-NeMo/Gym/blob/9e2e5d0ad0d1723acef1b63beb28292da16f7c5b/environment_servers/single_agent_turn/app.py#L570-L610"><code>_seed_agent</code></a>, <a href="https://github.com/NVIDIA-NeMo/Gym/blob/9e2e5d0ad0d1723acef1b63beb28292da16f7c5b/environment_servers/single_agent_turn/app.py#L643-L655"><code>_invoke_agent</code></a> and <a href="https://github.com/NVIDIA-NeMo/Gym/blob/9e2e5d0ad0d1723acef1b63beb28292da16f7c5b/environment_servers/single_agent_turn/app.py#L726-L738"><code>_verify</code></a>. Because the environment server drives the steps, it can save "next step = verify" at a checkpoint and pick up there after a restore (<a href="https://github.com/NVIDIA-NeMo/Gym/blob/9e2e5d0ad0d1723acef1b63beb28292da16f7c5b/environment_servers/single_agent_turn/app.py#L230-L235">run() comment</a>).</p>
+
+<h2>The class hierarchy</h2>
+
+<svg viewBox="0 0 940 360" role="img" aria-label="Class tree: BaseServer and SimpleServer at the top; four base classes, one per server kind; Simple* classes; concrete servers at the bottom.">
+<defs>
+<marker id="tri" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto"><path class="tri" d="M0,0 L10,6 L0,12 z"/></marker>
+</defs>
+<rect class="abs" x="250" y="12" width="200" height="44" rx="6"/>
+<a href="https://github.com/NVIDIA-NeMo/Gym/blob/9e2e5d0ad0d1723acef1b63beb28292da16f7c5b/nemo_gym/server_runtime/base_server.py#L140-L143"><text x="264" y="32">BaseServer</text></a>
+<text class="note" x="264" y="48">reachable through ServerClient</text>
+<rect class="abs" x="560" y="12" width="200" height="44" rx="6"/>
+<a href="https://github.com/NVIDIA-NeMo/Gym/blob/9e2e5d0ad0d1723acef1b63beb28292da16f7c5b/nemo_gym/server_runtime/base_server.py#L269"><text x="574" y="32">SimpleServer</text></a>
+<text class="note" x="574" y="48">runs the FastAPI app</text>
+<path class="isa" d="M560 34 L450 34"/>
+
+<text class="lane" x="14" y="86">model</text><text class="lane" x="224" y="86">agent</text><text class="lane" x="434" y="86">resources</text><text class="lane" x="654" y="86">environment (new)</text>
+
+<rect class="abs" x="14" y="94" width="200" height="40" rx="6"/>
+<a href="https://github.com/NVIDIA-NeMo/Gym/blob/9e2e5d0ad0d1723acef1b63beb28292da16f7c5b/nemo_gym/models/base_responses_api_model.py#L346"><text x="24" y="119">BaseResponsesAPIModel</text></a>
+<rect class="abs" x="224" y="94" width="200" height="40" rx="6"/>
+<a href="https://github.com/NVIDIA-NeMo/Gym/blob/9e2e5d0ad0d1723acef1b63beb28292da16f7c5b/nemo_gym/agents/base_responses_api_agent.py#L376"><text x="234" y="119">BaseResponsesAPIAgent</text></a>
+<rect class="abs" x="434" y="94" width="210" height="40" rx="6"/>
+<a href="https://github.com/NVIDIA-NeMo/Gym/blob/9e2e5d0ad0d1723acef1b63beb28292da16f7c5b/nemo_gym/server_runtime/base_resources_server.py#L169"><text x="444" y="119">BaseResourcesServer</text></a>
+<rect class="envb" x="654" y="94" width="272" height="40" rx="6"/>
+<a href="https://github.com/NVIDIA-NeMo/Gym/blob/9e2e5d0ad0d1723acef1b63beb28292da16f7c5b/nemo_gym/server_runtime/base_environment_server.py#L248-L249"><text x="664" y="119">BaseEnvironmentServer[Req, Resp]</text></a>
+<path class="isa" d="M114 94 L114 76 L300 76 L300 56"/>
+<path class="isa" d="M324 94 L324 56"/>
+<path class="isa" d="M539 94 L539 76 L400 76 L400 56"/>
+<path class="isa" d="M790 94 L790 76 L700 76 L700 56"/>
+
+<rect class="abs" x="14" y="160" width="200" height="44" rx="6"/>
+<a href="https://github.com/NVIDIA-NeMo/Gym/blob/9e2e5d0ad0d1723acef1b63beb28292da16f7c5b/nemo_gym/models/base_responses_api_model.py#L350"><text x="24" y="180">SimpleResponsesAPIModel</text></a>
+<text class="note" x="24" y="196">+ SimpleServer</text>
+<rect class="abs" x="224" y="160" width="200" height="44" rx="6"/>
+<a href="https://github.com/NVIDIA-NeMo/Gym/blob/9e2e5d0ad0d1723acef1b63beb28292da16f7c5b/nemo_gym/agents/base_responses_api_agent.py#L567"><text x="234" y="180">SimpleResponsesAPIAgent</text></a>
+<text class="note" x="234" y="196">+ SimpleServer</text>
+<rect class="abs" x="434" y="160" width="210" height="44" rx="6"/>
+<a href="https://github.com/NVIDIA-NeMo/Gym/blob/9e2e5d0ad0d1723acef1b63beb28292da16f7c5b/nemo_gym/server_runtime/base_resources_server.py#L582"><text x="444" y="180">SimpleResourcesServer</text></a>
+<text class="note" x="444" y="196">+ SimpleServer</text>
+<rect class="envc" x="654" y="160" width="272" height="44" rx="6"/>
+<a href="https://github.com/NVIDIA-NeMo/Gym/blob/9e2e5d0ad0d1723acef1b63beb28292da16f7c5b/environment_servers/single_agent_turn/app.py#L149"><text x="664" y="180">SingleAgentTurnEnvironmentServer</text></a>
+<text class="note" x="664" y="196">typed: takes an episode request</text>
+<path class="isa" d="M114 160 L114 134"/><path class="isa" d="M324 160 L324 134"/><path class="isa" d="M539 160 L539 134"/><path class="isa" d="M760 160 L760 134"/>
+
+<rect class="conc" x="14" y="230" width="200" height="44" rx="6"/>
+<a href="https://github.com/NVIDIA-NeMo/Gym/blob/9e2e5d0ad0d1723acef1b63beb28292da16f7c5b/responses_api_models/vllm_model/app.py#L878"><text x="24" y="250">VLLMModel</text></a>
+<text class="note" x="24" y="266">policy, or a judge LLM</text>
+<rect class="conc" x="224" y="230" width="200" height="44" rx="6"/>
+<a href="https://github.com/NVIDIA-NeMo/Gym/blob/9e2e5d0ad0d1723acef1b63beb28292da16f7c5b/responses_api_agents/simple_agent/app.py#L344"><text x="234" y="250">SimpleAgent</text></a>
+<a href="https://github.com/NVIDIA-NeMo/Gym/blob/9e2e5d0ad0d1723acef1b63beb28292da16f7c5b/responses_api_agents/claude_code_agent/app.py#L177"><text x="234" y="266">ClaudeCodeAgent</text></a>
+<rect class="conc" x="434" y="230" width="210" height="44" rx="6"/>
+<a href="https://github.com/NVIDIA-NeMo/Gym/blob/9e2e5d0ad0d1723acef1b63beb28292da16f7c5b/resources_servers/string_match/app.py#L353"><text x="444" y="250">StringMatchResourcesServer</text></a>
+<a href="https://github.com/NVIDIA-NeMo/Gym/blob/9e2e5d0ad0d1723acef1b63beb28292da16f7c5b/resources_servers/equivalence_llm_judge/app.py#L450"><text x="444" y="266">LLMJudgeResourcesServer</text></a>
+<rect class="envc" x="654" y="230" width="272" height="44" rx="6"/>
+<a href="https://github.com/NVIDIA-NeMo/Gym/blob/9e2e5d0ad0d1723acef1b63beb28292da16f7c5b/environment_servers/single_agent_turn_legacy/app.py#L50-L51"><text x="664" y="250">SingleAgentTurnLegacyEnvironmentServer</text></a>
+<text class="note" x="664" y="266">same server, also takes a flat row</text>
+<path class="isa" d="M114 230 L114 204"/><path class="isa" d="M324 230 L324 204"/><path class="isa" d="M539 230 L539 204"/><path class="isa" d="M760 230 L760 204"/>
+
+<rect class="envc" x="654" y="296" width="272" height="44" rx="6"/>
+<a href="https://github.com/NVIDIA-NeMo/Gym/blob/9e2e5d0ad0d1723acef1b63beb28292da16f7c5b/environment_servers/legacy_agent/app.py#L88-L89"><text x="664" y="316">LegacyAgentEnvironmentServer</text></a>
+<text class="note" x="664" y="332">pass-through to an agent's /run</text>
+<path class="isa" d="M926 318 L934 318 L934 114 L926 114"/>
+
+<rect class="abs" x="14" y="300" width="14" height="12"/><text class="note" x="34" y="310">base class</text>
+<rect class="conc" x="110" y="300" width="14" height="12"/><text class="note" x="130" y="310">concrete server (examples)</text>
+<rect class="envc" x="290" y="300" width="14" height="12"/><text class="note" x="310" y="310">environment server</text>
+<text class="note" x="14" y="334">Arrow with a hollow head = "is a subclass of".</text>
+<text class="note" x="14" y="350">Other typed servers: harbor, swe_together, nemo_user_sim, misalignment_monitored.</text>
+</svg>
+
+<p>Every server is a <code>BaseServer</code>, a pydantic object other servers reach by name through Gym's HTTP client. The three older kinds each have a <code>Base…</code> class (what the server is) and a <code>Simple…</code> class that adds <code>SimpleServer</code> (the web app). <code>BaseEnvironmentServer</code> extends <code>SimpleServer</code> directly. It is generic over its request and response types: that is what "typed" means. Each kind serves different routes. Model: <code>/v1/responses</code>. Agent: <code>/run</code> plus the newer <code>/v1/agent_sessions</code>. Resources: <code>/seed_session</code>, tools, <code>/verify</code>. Environment: <code>/run</code> with an episode request.</p>
+
+<h2>Legacy vs typed: the input is what differs</h2>
+<p>"Legacy" in <code>single_agent_turn_legacy</code> is about the <b>request shape</b>, not the server. It is the same typed server, plus <a href="https://github.com/NVIDIA-NeMo/Gym/blob/9e2e5d0ad0d1723acef1b63beb28292da16f7c5b/environment_servers/single_agent_turn_legacy/app.py#L63-L80"><code>run_legacy</code></a>, which accepts the old flat dataset row and converts it into an episode request (<a href="https://github.com/NVIDIA-NeMo/Gym/blob/9e2e5d0ad0d1723acef1b63beb28292da16f7c5b/environment_servers/single_agent_turn_legacy/app.py#L82-L110"><code>_episode_request_from_row</code></a>). Then it runs the exact same <code>run()</code>. NeMo-RL sends flat rows today, so that is the server RL talks to.</p>
+
+<div class="two">
+<div><p class="pclbl">Flat row (what RL sends; legacy)</p>
+<pre class="pc">{
+  "responses_create_params": {"input": [
+     {"role": "user", "content": "What is the capital
+      of France? Put your final answer in \\boxed{}."}]},
+  "expected_answer": "Paris",
+  "extraction_mode": "boxed",
+  <span class="who">"_ng_task_index": 7,</span>      <span class="cm"># RL adds the _ng_ keys</span>
+  <span class="who">"_ng_rollout_index": 0,</span>
+  <span class="who">"_ng_rollout_id": "r7",</span>
+  <span class="who">"_ng_model_sampling": {…}</span>
+}</pre></div>
+<div><p class="pclbl">Episode request (typed)</p>
+<pre class="pc">{
+  "episode_id": {"rollout_id": "r7", "attempt": 0},
+  "task": {
+    "task_id": {"taskset": "string_match",
+                "task_id": <span class="who">"7"</span>},   <span class="cm"># from _ng_task_index</span>
+    "task_input": {
+      "responses_create_params": {…},
+      "task_data": {"expected_answer": "Paris",
+                    "extraction_mode": "boxed"}
+    }
+  },
+  "model_sampling": {…}
+}</pre></div>
+</div>
+
+<table class="mm">
+<tr><th>Typed field</th><th>Filled from the flat row by</th></tr>
+<tr><td><code>episode_id</code></td><td><code>_ng_rollout_id</code> (a restored attempt arrives as <code>r7-a1</code> and is split into id + attempt), else <code>"&lt;task_index&gt;-&lt;rollout_index&gt;"</code>. <a href="https://github.com/NVIDIA-NeMo/Gym/blob/9e2e5d0ad0d1723acef1b63beb28292da16f7c5b/environment_servers/single_agent_turn_legacy/app.py#L102-L106">L102</a></td></tr>
+<tr><td><code>task.task_id</code></td><td>the row's <code>task_id</code> / <code>problem_id</code> / <code>instance_id</code>, else <b><code>str(_ng_task_index)</code></b>. string_match rows have none of these, so the number RL sends <i>is</i> the task ID. This is why #5340 must re-send the same number. <a href="https://github.com/NVIDIA-NeMo/Gym/blob/9e2e5d0ad0d1723acef1b63beb28292da16f7c5b/nemo_gym/data/task_materialization.py#L35-L43">materialize_task</a></td></tr>
+<tr><td><code>task.task_input</code></td><td>every key not starting with <code>_ng_</code>. Extra fields go into <code>task_data</code>, which the resources server's <code>/verify</code> reads. <a href="https://github.com/NVIDIA-NeMo/Gym/blob/9e2e5d0ad0d1723acef1b63beb28292da16f7c5b/nemo_gym/server_runtime/single_agent_turn_types.py#L39-L58">SingleAgentTurnTaskInput</a></td></tr>
+<tr><td><code>model_sampling</code></td><td><code>_ng_model_sampling</code>: RL's temperature, top-p and so on, put into the agent's model URL.</td></tr>
+</table>
+<p>The reply is shaped to match: a flat row gets a flat result dict back (<a href="https://github.com/NVIDIA-NeMo/Gym/blob/9e2e5d0ad0d1723acef1b63beb28292da16f7c5b/environment_servers/single_agent_turn_legacy/app.py#L112-L135"><code>_legacy_result</code></a>), and an episode request gets a typed <code>{episode_id, task_id, result | failure}</code>.</p>
+<p>The other "legacy" server, <code>legacy_agent</code>, converts nothing. It forwards the flat row to an agent that still runs the whole episode itself, the left column above (<a href="https://github.com/NVIDIA-NeMo/Gym/blob/9e2e5d0ad0d1723acef1b63beb28292da16f7c5b/environment_servers/legacy_agent/app.py#L4-L8">its docstring</a>).</p>
+
+<div class="hl"><b>So what for #5340.</b> Turn recovery used to work only with the left column: the agent owned the episode, and <code>legacy_agent</code> saved nothing. The PR lets it run through the right column. There the environment server owns and saves the episode, and it checks that a resumed episode has the same <code>task_id</code>. Because string_match's <code>task_id</code> comes from <code>_ng_task_index</code>, RL must re-send the same number. The environment server is also where <code>max_concurrent_episodes</code> lives, which is the open problem on the third page.</div>
+
+</div>
+</body>
+</html>
