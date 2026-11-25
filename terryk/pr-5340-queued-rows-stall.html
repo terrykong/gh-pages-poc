@@ -95,10 +95,11 @@ NeMo-RL links pin the PR head <code>d421014e</code>; Gym links pin <code>9e2e5d0
 </dl></div>
 
 <nav class="chain">
+  <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-5340-gym-server-roles.html">Gym server roles</a>
   <a href="https://terrykong.github.io/gh-pages-poc/terryk/pr-5340-typed-servers-resume.html">how resume works now</a>
   <span class="here">capped servers stall snapshots</span>
 </nav>
-<p class="chainnote">Two pages on this PR, one question each. This one: why a capped server stalls snapshots, and the proposed guard.</p>
+<p class="chainnote">Three pages on this PR, one question each. This one: why a capped server stalls snapshots, and the proposed guard.</p>
 
 <p>A typed Gym server with <code>max_concurrent_episodes</code> lets that many episodes run; the rest wait for a free slot (<a href="https://github.com/NVIDIA-NeMo/Gym/blob/9e2e5d0ad0d1723acef1b63beb28292da16f7c5b/nemo_gym/server_runtime/base_environment_server.py#L337-L352">the wait</a>). A waiting row is not yet known to Gym's checkpoint: it registers only later, in <a href="https://github.com/NVIDIA-NeMo/Gym/blob/9e2e5d0ad0d1723acef1b63beb28292da16f7c5b/nemo_gym/server_runtime/base_environment_server.py#L375-L382"><code>claim</code>/<code>begin</code></a>. So at a snapshot Gym saves the running episodes and pauses them, still holding their slots, and says nothing about the waiting row. RL sent that row, so it waits for its answer (<a href="https://github.com/NVIDIA-NeMo/RL/blob/d421014edd26c3de5063b09737a4f0e89c2fe54b/nemo_rl/environments/checkpointing/nemo_gym.py#L466-L479"><code>_drain_non_exported_candidates</code></a>) for <code>token_capture.control_timeout_s</code>, 60 s by default (<a href="https://github.com/NVIDIA-NeMo/RL/blob/d421014edd26c3de5063b09737a4f0e89c2fe54b/nemo_rl/algorithms/single_controller_utils/config.py#L756">config.py:756</a>). The row cannot start until a paused episode frees its slot, which only happens after the snapshot.</p>
 
