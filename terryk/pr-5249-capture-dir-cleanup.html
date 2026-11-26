@@ -45,6 +45,8 @@ code{background:var(--surface2);padding:1.5px 5px;border-radius:5px;font:13px ui
 .pclbl{font-size:12px;color:var(--dim);text-transform:uppercase;letter-spacing:.04em;margin:10px 0 0}
 .pcref{font-size:12.5px;color:var(--dim);margin:2px 0 10px}
 .where{border-left:4px solid var(--accent);background:var(--surface);padding:6px 12px;margin:6px 0 10px;font-size:14px}
+.cref{margin:8px 0 0;font-size:13px}
+.cref a{display:inline-block;padding:4px 10px;border:1px solid var(--border);border-radius:16px;background:var(--surface2);font:12.5px ui-monospace,Menlo,monospace}
 table.walk{border-collapse:collapse;font-size:13.5px;width:100%;margin:8px 0}
 table.walk td,table.walk th{border:1px solid var(--border);padding:5px 8px;text-align:left;vertical-align:top}
 table.walk th{background:var(--surface2);font-weight:600}
@@ -89,7 +91,7 @@ svg .sep{stroke:var(--border);stroke-width:1}
 <div class="status"><dl>
 <dt>Before</dt><dd>With <code>token_capture.capture_dir</code> unset, every Gym actor wrote its capture files under the run's log dir, which is usually on a shared filesystem. Nothing ever deleted them.</dd>
 <dt>This PR</dt><dd>The default moves to a fresh per-run folder on each Gym node's local <code>/tmp</code>, and each Gym actor deletes its own folder when it shuts down.</dd>
-<dt>Status</dt><dd><span class="verdict good">Fixed by this PR.</span> The team review found no blocking issue. A folder you set yourself is never deleted.</dd>
+<dt>Status</dt><dd><span class="verdict good">Fixed by this PR.</span> No bug found. One design ask is open (C1): replace the hidden <code>capture_dir_derived</code> flag with a user setting, <code>capture_dir_cleanup: bool = True</code>, so cleanup no longer depends on who picked the folder. As the PR stands, a folder you set yourself is never deleted.</dd>
 </dl></div>
 
 <div class="bg"><b>Background.</b> With token capture on, NeMo-Gym records the token ids of every model call in small per-rollout files, called <span class="tip" tabindex="0" data-tip="Per-rollout files (.tokens.jsonl plus a .lock file) that Gym's model server appends to on every model call. NeMo-RL reads them through Gym's control routes, never from disk.">ledgers</span>, so NeMo-RL can train on the exact tokens. Each <span class="tip" tabindex="0" data-tip="A Ray actor (class NemoGym) that starts a whole Gym deployment, all of its servers, as local subprocesses on its own node.">Gym actor</span> runs all its servers on one node, and those servers are the only ones that open the ledger files. A checkpoint copies the ledger rows it needs into the checkpoint folder (<a href="https://github.com/NVIDIA-NeMo/Gym/blob/9e2e5d0ad0d1723acef1b63beb28292da16f7c5b/nemo_gym/models/_checkpoint.py#L615-L657"><code>export_model_records</code></a>), so resume never reads the live folder. Dotted words have a short explanation: hover or tap them.</div>
@@ -217,7 +219,8 @@ def <a href="https://github.com/NVIDIA-NeMo/RL/blob/89a0f59559e1648f9433dd57fd79
 </table>
 <p>Node 1 has one actor, so <code>math/replica-0</code> removes everything up to <code>4242-9f3a1c0e/</code> on its own. <code>/tmp/nemo_rl-alice/token_capture/</code> stays, ready for the next run.</p>
 
-<div class="warn"><b>What changes for you.</b> If you looked in <code>&lt;log_dir&gt;/gym_token_capture</code> after a run to debug, those files are gone now. Set <code>token_capture.capture_dir</code> yourself to keep them; a folder you set is never deleted. Known limits, from the PR: an actor that dies without shutting down leaves its folder behind, and deleting a long run's files has to fit in the 10-second <a href="https://github.com/NVIDIA-NeMo/RL/blob/89a0f59559e1648f9433dd57fd790664406b441c/nemo_rl/environments/utils.py#L26">shutdown budget</a>. If <code>/tmp</code> lives in RAM on your nodes, the files use memory until the run ends.</div>
+<div class="warn"><b>What changes for you.</b> If you looked in <code>&lt;log_dir&gt;/gym_token_capture</code> after a run to debug, those files are gone now. Set <code>token_capture.capture_dir</code> yourself to keep them; a folder you set is never deleted. Known limits, from the PR: an actor that dies without shutting down leaves its folder behind, and deleting a long run's files has to fit in the 10-second <a href="https://github.com/NVIDIA-NeMo/RL/blob/89a0f59559e1648f9433dd57fd790664406b441c/nemo_rl/environments/utils.py#L26">shutdown budget</a>. If <code>/tmp</code> lives in RAM on your nodes, the files use memory until the run ends.
+<p class="cref">🟠 <a href="https://github.com/NVIDIA-NeMo/RL/pull/5249#discussion_r4702928351">review comment C1 — config.py:743</a></p></div>
 </div>
 </body>
 </html>
