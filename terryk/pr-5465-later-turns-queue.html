@@ -73,7 +73,7 @@ document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoad
 <div class="status"><dl>
 <dt>Before</dt><dd>vLLM runs waiting model calls first come, first served. The next turn of an almost-finished rollout waits behind the first turns of rollouts that just started.</dd>
 <dt>This PR</dt><dd>Adds an opt-in switch, <code>policy.generation.vllm_cfg.prioritize_later_turns</code>. When on, vLLM picks by priority, and Gym tags each call with minus its earlier replies, so later turns go first.</dd>
-<dt>Status</dt><dd><span class="verdict open">Open: off by default, not merged.</span> The review asks for 2 changes (C3, C4, below). Merging also waits until the Gym submodule points at a Gym main commit with Gym#6853.</dd>
+<dt>Status</dt><dd><span class="verdict open">Open: off by default, not merged.</span> The review asks for 3 changes (C3–C5, below). Merging also waits until the Gym submodule points at a Gym main commit with Gym#6853.</dd>
 </dl></div>
 
 <div class="bg"><b>Background.</b> In multi-turn RL, one rollout is a chat: model reply, tool result, model reply, and so on. Each model reply is one <i>model call</i> to the vLLM engine. A training step waits for whole rollouts, so a rollout stuck on its last call holds the step up. <a href="https://github.com/NVIDIA-NeMo/Gym/blob/83df0dededaf8d63e223e5fa701102f254c80726/responses_api_models/vllm_model/app.py#L270-L276">Gym's <code>turn_priority</code></a> gives each call <b>minus the number of assistant replies already in its history</b>: the first call gets 0, the next −1, and so on. vLLM runs the <b>smaller</b> number first. Dotted words have a short explanation: hover or tap them.</div>
@@ -158,7 +158,7 @@ document.readyState!=='loading'?wire():document.addEventListener('DOMContentLoad
 </div>
 <p class="pcref">Real code: native — <a href="https://github.com/NVIDIA-NeMo/RL/blob/ed2b7e4ee56eb4ef3544455aafacd608806c087e/nemo_rl/models/generation/vllm/chat_server.py#L904"><code>create_chat_completion</code></a> hands the request to vLLM, whose serving layer passes <code>request.priority</code> on. Dynamo — <a href="https://github.com/NVIDIA-NeMo/RL/blob/ed2b7e4ee56eb4ef3544455aafacd608806c087e/nemo_rl/models/generation/gym_call.py#L62"><code>GymCallExtras.priority</code></a> reads it out of the annotation. Both roads end at the same call, with the same number. The PR's <code>test_gym_chat_path</code> checks that.</p>
 
-<h2>3 · How setup turns it on, and the two review asks</h2>
+<h2>3 · How setup turns it on, and the review asks</h2>
 <p class="pclbl">Setup, after this PR (new lines green)</p>
 <pre class="pc"><span class="who"># driver, before any worker starts</span>
 def <a href="https://github.com/NVIDIA-NeMo/RL/blob/ed2b7e4ee56eb4ef3544455aafacd608806c087e/nemo_rl/environments/nemo_gym.py#L3040-L3046">setup_nemo_gym_config</a>(config):        <span class="cm"># only Gym entry points call this</span>
@@ -182,12 +182,13 @@ def <a href="https://github.com/NVIDIA-NeMo/RL/blob/ed2b7e4ee56eb4ef3544455aafac
 <table>
 <tr><th>Ask</th><th>What happens today</th><th>Fix asked for</th></tr>
 <tr><td><b>C3</b> · the "needs Gym" check never looks at Gym</td><td>A run without Gym that sets both <code>prioritize_later_turns: true</code> and <code>vllm_kwargs.scheduling_policy: priority</code> passes. Nothing sends priorities, so the switch quietly does nothing. The <a href="https://github.com/NVIDIA-NeMo/RL/blob/ed2b7e4ee56eb4ef3544455aafacd608806c087e/docs/design-docs/nemo-gym-integration.md#L100-L102">new docs</a> say this case is refused.</td><td>Check <code>should_use_nemo_gym</code> in the algorithm's config check, next to the <a href="https://github.com/NVIDIA-NeMo/RL/blob/ed2b7e4ee56eb4ef3544455aafacd608806c087e/nemo_rl/algorithms/grpo.py#L914-L923">disaggregation check that already does this</a>. Add a test.</td></tr>
+<tr><td><b>C5</b> · Dynamo path never runs for real with the switch on</td><td>Each Dynamo hop (annotation → frontend → chat engine → adapter) has a unit test with stand-ins, and the Dynamo L1 suite passes, but only with the switch off.</td><td>Add <code>++policy.generation.vllm_cfg.prioritize_later_turns=true</code> to the existing Gym-default-mode run in <a href="https://github.com/NVIDIA-NeMo/RL/blob/ed2b7e4ee56eb4ef3544455aafacd608806c087e/tests/functional/L1_Functional_Tests_Dynamo.sh#L41"><code>L1_Functional_Tests_Dynamo.sh</code></a>. No new run.</td></tr>
 <tr><td><b>C4</b> · test misses one level of copying</td><td>The "user config is not changed" test checks only the innermost dict. Drop the <code>responses_api_models</code> copy in <code>_apply_turn_priority</code> and <code>priority_by_turn</code> leaks into the user's config, with every test still green.</td><td>Compare the whole <code>env["nemo_gym"]["policy_model"]</code> (one-line suggestion).</td></tr>
 </table>
 
-<p class="cref">🔴 <a href="https://github.com/NVIDIA-NeMo/RL/pull/5465#discussion_r4725786354">C3 review comment — vllm/config.py:402</a> &nbsp; 🟡 <a href="https://github.com/NVIDIA-NeMo/RL/pull/5465#discussion_r4725786367">C4 review comment — test_nemo_gym_utils.py:1489</a></p>
+<p class="cref">🔴 <a href="https://github.com/NVIDIA-NeMo/RL/pull/5465#discussion_r4725786354">C3 review comment — vllm/config.py:402</a> &nbsp; 🟡 <a href="https://github.com/NVIDIA-NeMo/RL/pull/5465#discussion_r4725786367">C4 review comment — test_nemo_gym_utils.py:1489</a> &nbsp; 🟡 <a href="https://github.com/NVIDIA-NeMo/RL/pull/5465#discussion_r4725820966">C5 review comment — chat_engine.py:382</a></p>
 
-<div class="hl"><b>So what.</b> The switch is small and cleanly built: one key sets both ends, conflicting settings are refused rather than overwritten, and with it off nothing changes. Expect it to help most when the engine is saturated and rollouts are long and multi-turn, at the cost of new rollouts starting later. Before a recipe turns it on, fix C3 and C4, re-pin Gym to main, and show one real multi-turn RL run.</div>
+<div class="hl"><b>So what.</b> The switch is small and cleanly built: one key sets both ends, conflicting settings are refused rather than overwritten, and with it off nothing changes. Expect it to help most when the engine is saturated and rollouts are long and multi-turn, at the cost of new rollouts starting later. Before a recipe turns it on, fix C3–C5, re-pin Gym to main, and show one real multi-turn RL run.</div>
 
 </div>
 </body>
